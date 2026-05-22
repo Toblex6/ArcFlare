@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "@rainbow-me/rainbowkit/styles.css";
+
+/* Base fallback configurations */
+:root {
+  --background: #1A120B;
+  --foreground: #FFF8EA;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+/* Explicitly set body rules that won't fight with Tailwind utilities */
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  margin: 0;
+  padding: 0;
+}
