@@ -1,19 +1,9 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/client"
+  // Remove or comment out any 'output = ...' line here
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "sqlite" // or postgresql depending on your database setup
   url      = env("DATABASE_URL")
-}
-
-model Payment {
-  id           String   @id @default(cuid())
-  reference    String   @unique
-  amount       Float
-  email        String
-  merchantName String
-  status       String
-  createdAt    DateTime @default(now())
 }

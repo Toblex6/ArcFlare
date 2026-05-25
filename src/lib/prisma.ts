@@ -1,12 +1,8 @@
-// Look at the custom directory specified in your schema.prisma
-import { PrismaClient } from "../generated/client";
+// Import from your custom generated path instead of standard node_modules
+import { PrismaClient } from "../generated/client"; 
 
-const globalForPrisma = global as unknown as {
-  prisma: PrismaClient;
-};
+const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
-export const prisma = globalForPrisma.prisma || new PrismaClient();
+export const db = globalForPrisma.prisma || new PrismaClient();
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db;

@@ -1,30 +1,34 @@
 import axios from "axios";
 
-// Points to your local server running alongside your active Cloudflare tunnel
+// Target endpoint on your live Render backend gateway
 const TARGET_URL = "https://arcflare-gateway.onrender.com/api/agent-data";
 
 async function simulateAgent() {
   console.log("🤖 [Agent]: Attempting to query protected data stream...");
 
   try {
-    // 1. First attempt: Call the endpoint without any payment headers
+    // 1. First attempt: Call the endpoint cleanly without any payment tokens
     const initialResponse = await axios.get(TARGET_URL);
     console.log("Initial response:", initialResponse.data);
+    
   } catch (error: any) {
-    // Check if the server responded with an actual HTTP error code
+    // Check if the server responded with an expected HTTP roadblock code
     if (error.response) {
       if (error.response.status === 402) {
         const paymentChallenge = error.response.data;
+        
         console.log(`\n⚠️ [Paywall Hit]: HTTP 402 Payment Required!`);
         console.log(`💸 [Cost]: ${paymentChallenge.amount} ${paymentChallenge.currency} on ${paymentChallenge.settlementChain}`);
+        console.log(`🏦 [Vault Address]: ${paymentChallenge.paymentAddress}`);
+        console.log(`💬 [Challenge]: "${paymentChallenge.message}"`);
         
-        // 2. Autonomous Decision: Simulate signing a transaction or generating a reference proof
-        console.log("⚙️ [Agent]: Generating payment authorization and signing payload...");
+        // 2. Autonomous Settlement: Simulate generating an on-chain transaction reference hash
+        console.log("\n⚙️ [Agent]: Signer triggered. Generating payment authorization and signing payload...");
         const mockTxReference = "arc_tx_" + Math.random().toString(36).substring(2, 15);
         
-        console.log(`🚀 [Agent]: Retrying request with reference: ${mockTxReference}\n`);
+        console.log(`🚀 [Agent]: Retrying data query with reference header: ${mockTxReference}\n`);
 
-        // 3. Second attempt: Re-query the endpoint with the mandatory headers attached
+        // 3. Second attempt: Re-query the endpoint with the mandatory settlement headers attached
         try {
           const paidResponse = await axios.get(TARGET_URL, {
             headers: {
@@ -34,8 +38,9 @@ async function simulateAgent() {
             }
           });
 
-          console.log("✅ [Success] Data unlocked by Agent:");
+          console.log("✅ [Success] Data unlocked seamlessly by Agent:");
           console.dir(paidResponse.data, { depth: null });
+          
         } catch (retryError: any) {
           console.error("❌ Retry failed:", retryError.response?.data || retryError.message);
         }
@@ -44,11 +49,10 @@ async function simulateAgent() {
         console.error("Data:", error.response.data);
       }
     } else {
-      // The server wasn't reached at all (e.g., Network Error / Server Offline)
-      console.error("\n❌ Connection Details:");
+      // The server wasn't reached at all (e.g., Network Error or Server Offline)
+      console.error("\n❌ Connection Details Failed:");
       console.error(`   Message: ${error.message}`);
       console.error(`   Code:    ${error.code || "N/A"}`);
-      console.error("💡 Tip: Make sure 'npm run dev' is running in another terminal window!");
     }
   }
 }
