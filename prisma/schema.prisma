@@ -11,7 +11,7 @@ model PaymentLog {
   id           String   @id @default(uuid())
   reference    String   @unique
   amount       Float
-  currency     Stringgivr
+  currency     String
   chain        String
   senderEmail  String
   merchant     String
