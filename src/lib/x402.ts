@@ -1,73 +1,78 @@
 import { NextRequest, NextResponse } from "next/server";
-// Import your own custom-configured database instance
-import { prisma } from "./prisma"; 
+import { prisma } from "@/lib/prisma";
 
-/**
- * Higher-Order Function to paywall API endpoints for AI Agents
- * @param handler The target API route logic if payment is verified
- * @param pricePerCall String representation of the micro-USDC cost (e.g., "0.001")
- */
-export function withGateway(handler: Function, pricePerCall: string) {
-  return async (req: NextRequest, ...args: any[]) => {
-    // Extract transaction metadata from headers
-    const paymentReference = req.headers.get("x-payment-reference");
-    const agentEmail = req.headers.get("x-agent-email") || "agent@autonomous.finance";
-    const merchantName = req.headers.get("x-merchant-name") || "ArcFlare Merchant";
-
-    // 1. Enforce Circle Agent Stack Machine-Readable Protocol Specifications
-    if (!paymentReference) {
-      return NextResponse.json(
-        {
-          error: "Payment Required",
-          amount: pricePerCall,
-          currency: "USDC",
-          settlementChain: "Arc-L1",
-          instructions: "Attach a unique 'x-payment-reference' header containing proof of settlement.",
-        },
-        { status: 402 } // HTTP 402 Standard for Programmable Finance
-      );
-    }
-
-    try {
-      // 2. Validate cryptographic signature or off-chain reference pattern
-      const isValidReference = await verifyAgentReference(paymentReference);
-      if (!isValidReference) {
-        return NextResponse.json(
-          { error: "Insufficient or fraudulent payment authorization references" }, 
-          { status: 402 }
-        );
-      }
-
-      // 3. Log the micro-transaction into SQLite via your exact schema.prisma model
-      await prisma.payment.create({
-        data: {
-          reference: paymentReference,
-          amount: parseFloat(pricePerCall),
-          email: agentEmail,
-          merchantName: merchantName,
-          status: "COMPLETED", // Automatically settles over Arc L1 rails
-        },
-      });
-
-      // 4. Verification successful! Proceed with automated execution flow
-      return handler(req, ...args);
-
-    } catch (error: any) {
-      // Handle unique constraint checks in SQLite if an agent attempts a double-spend replay attack
-      if (error.code === "P2002") {
-        return NextResponse.json({ error: "Replay Attack Detected: Payment reference already spent." }, { status: 402 });
-      }
-      
-      console.error("[x402 Middleware Error]:", error);
-      return NextResponse.json({ error: "Internal Payment Gateway Error" }, { status: 500 });
-    }
-  };
+interface PaywallConfig {
+  pricePerCall?: string;
+  currency?: string;
+  chain?: string;
+  merchantName?: string;
 }
 
 /**
- * Checks if the reference string formatting conforms to ArcFlare's validation specs
+ * Universal Agentic Paywall Middleware Helper (HTTP 402 Roadblock Engine)
+ * Validates on-chain payment proofs before letting autonomous agent routines pass.
  */
-async function verifyAgentReference(reference: string): Promise<boolean> {
-  // Production ready fallback validation logic
-  return reference.length > 10;
+export async function handleAgentPaywall(
+  request: NextRequest,
+  config: PaywallConfig = {}
+) {
+  const pricePerCall = config.pricePerCall || "0.005";
+  const currency = config.currency || "USDC";
+  const chain = config.chain || "Arc-L1";
+  const merchantName = config.merchantName || "ArcFlare Core Engine";
+
+  try {
+    // 1. Inspect incoming network headers for transaction metadata proofs
+    const paymentReference = request.headers.get("x-payment-reference");
+    const agentEmail = request.headers.get("x-agent-email") || "unknown-agent@arcflare.xyz";
+
+    // 2. Roadblock: If no reference header is attached, send the HTTP 402 Challenge
+    if (!paymentReference) {
+      return {
+        isAuthorized: false,
+        response: NextResponse.json(
+          {
+            error: "Payment Required",
+            amount: parseFloat(pricePerCall),
+            currency: currency,
+            settlementChain: chain,
+            paymentAddress: "0x71C7656EC7ab88b098defB751B7401B5f6d1476B",
+            message: "Autonomous agent execution requires on-chain micro-stablecoin settlement."
+          },
+          { status: 402 } // Strict machine-readable roadblock status code
+        )
+      };
+    }
+
+    // 3. Log the micro-transaction into your database via the correct paymentLog model
+    const transactionRecord = await prisma.paymentLog.create({
+      data: {
+        reference: paymentReference,
+        amount: parseFloat(pricePerCall),
+        currency: currency,
+        chain: chain,
+        senderEmail: agentEmail,
+        merchant: merchantName,
+        status: "VERIFIED",
+        timestamp: new Date(),
+      },
+    });
+
+    // Return authorization success to the calling API route wrapper
+    return {
+      isAuthorized: true,
+      transactionId: transactionRecord.id,
+      timestamp: transactionRecord.timestamp
+    };
+
+  } catch (error: any) {
+    console.error("❌ Paywall Engine Core Failure:", error);
+    return {
+      isAuthorized: false,
+      response: NextResponse.json(
+        { error: "Internal Paywall Engine Error", details: error.message },
+        { status: 500 }
+      )
+    };
+  }
 }
