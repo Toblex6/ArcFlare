@@ -1,9 +1,20 @@
 generator client {
   provider = "prisma-client-js"
-  // Remove or comment out any 'output = ...' line here
 }
 
 datasource db {
-  provider = "sqlite" // or postgresql depending on your database setup
+  provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+model PaymentLog {
+  id           String   @id @default(uuid())
+  reference    String   @unique
+  amount       Float
+  currency     Stringgivr
+  chain        String
+  senderEmail  String
+  merchant     String
+  status       String
+  timestamp    DateTime @default(now())
 }
