@@ -1,59 +1,65 @@
 import { NextResponse } from "next/server";
-
 import { prisma } from "@/lib/prisma";
 
+/**
+ * GET Handler for Payment Verification (Paystack-style architectural verification)
+ * Endpoint: /api/payments/verify/[reference]
+ */
 export async function GET(
   request: Request,
-  context: {
-    params: Promise<{
-      reference: string;
-    }>;
-  }
+  { params }: { params: Promise<{ reference: string }> }
 ) {
   try {
-    const params =
-      await context.params;
+    // Resolve parameters natively for Next.js App Router context
+    const { reference } = await params;
 
-    const reference =
-      params.reference;
-
-    const payment =
-      await prisma.payment.findUnique({
-        where: {
-          reference,
-        },
-      });
-
-    if (!payment) {
+    if (!reference) {
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Payment not found",
-        },
-        {
-          status: 404,
-        }
+        { status: false, message: "Transaction reference token is missing." },
+        { status: 400 }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-
-      data: payment,
+    // Fix: Query the paymentLog table instead of the non-existent 'payment' table
+    const payment = await prisma.paymentLog.findUnique({
+      where: {
+        reference: reference,
+      },
     });
-  } catch (error) {
-    console.log(error);
 
+    if (!payment) {
+      return NextResponse.json(
+        { status: false, message: "Transaction reference not found." },
+        { status: 404 }
+      );
+    }
+
+    // Return the ledger payload back to the automated caller
     return NextResponse.json(
       {
-        success: false,
-        error:
-          "Internal server error",
+        status: true,
+        message: "Verification successful",
+        data: {
+          id: payment.id,
+          reference: payment.reference,
+          amount: payment.amount,
+          currency: payment.currency,
+          chain: payment.chain,
+          gateway_response: "Successful",
+          status: payment.status,
+          sender_email: payment.senderEmail,
+          merchant: payment.merchant,
+          paid_at: payment.timestamp,
+        },
       },
-      {
-        status: 500,
-      }
+      { status: 200 }
+    );
+
+  } catch (error: any) {
+    console.error("❌ Verification Layer Failure:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error", details: error.message },
+      { status: 500 }
     );
   }
 }
