@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/db"; // Default database client import
+import { db } from "@/lib/db"; // Fixed named import based on Turbopack trace
 
 /**
  * GET Handler for ArcFlare's Agentic Paywall Endpoint
@@ -27,8 +27,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 3. Log the successful payment authorization into your ledger database using Prisma
-    const transactionRecord = await prisma.paymentLog.create({
+    // 3. Log the successful payment authorization into your ledger database using the named db client
+    const transactionRecord = await db.paymentLog.create({
       data: {
         reference: paymentReference,
         amount: 0.005,
