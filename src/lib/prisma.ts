@@ -1,8 +1,11 @@
-// Import from your custom generated path instead of standard node_modules
-import { PrismaClient } from "../generated/client"; 
+import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 
-export const db = globalForPrisma.prisma || new PrismaClient();
+// Instantiate the client safely to prevent multiple connections in development
+export const prisma = globalForPrisma.prisma || new PrismaClient();
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db;
+// Secondary alias export so files utilizing 'db' imports function perfectly
+export const db = prisma;
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
