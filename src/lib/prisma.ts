@@ -1,3 +1,4 @@
+// Look at the custom directory specified in your schema.prisma
 import { PrismaClient } from "../generated/client";
 
 const globalForPrisma = global as unknown as {
