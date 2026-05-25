@@ -1,9 +1,5 @@
-// Cache breaker: v1.0.1 - Forcing Next.js router regeneration on Render
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
-
-// Initialize the Prisma database client
-const prisma = new PrismaClient();
+import prisma from "@/lib/db"; // Default database client import
 
 /**
  * GET Handler for ArcFlare's Agentic Paywall Endpoint
@@ -11,7 +7,7 @@ const prisma = new PrismaClient();
  */
 export async function GET(request: NextRequest) {
   try {
-    // 1. Inspect incoming headers for the transaction proof
+    // 1. Inspect incoming network headers for transaction metadata proofs
     const paymentReference = request.headers.get("x-payment-reference");
     const agentEmail = request.headers.get("x-agent-email") || "unknown-agent@arcflare.xyz";
     const merchantName = request.headers.get("x-merchant-name") || "ArcFlare Core Engine";
@@ -27,11 +23,11 @@ export async function GET(request: NextRequest) {
           paymentAddress: "0x71C7656EC7ab88b098defB751B7401B5f6d1476B", 
           message: "Autonomous agent execution requires on-chain micro-stablecoin settlement."
         },
-        { status: 402 } // Strict machine-readable roadblock
+        { status: 402 } // Strict machine-readable roadblock status code
       );
     }
 
-    // 3. Log the successful processing into your ledger using Prisma
+    // 3. Log the successful payment authorization into your ledger database using Prisma
     const transactionRecord = await prisma.paymentLog.create({
       data: {
         reference: paymentReference,
@@ -45,7 +41,7 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // 4. Success: Return the payment verification metadata along with the payload
+    // 4. Success: Return the payment confirmation alongside the premium requested payload data
     return NextResponse.json(
       {
         status: "SUCCESS",
