@@ -1,5 +1,7 @@
 import "@/app/globals.css";
 import Providers from "./providers";
+// ── 1. Import the new widget safely ──────────────────────────────────
+import FlowFiFeedback from "@/components/FlowFiFeedback"; 
 
 export const metadata = {
   title: "ArcFlare",
@@ -16,6 +18,9 @@ export default function RootLayout({
       <body>
         <Providers>
           {children}
+          
+          {/* ── 2. Add the component right here inside your providers ── */}
+          <FlowFiFeedback />
         </Providers>
       </body>
     </html>
