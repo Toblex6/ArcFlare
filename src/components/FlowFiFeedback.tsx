@@ -29,7 +29,7 @@ export default function FlowFiFeedback() {
     setSending(true);
 
     try {
-      // ── Wire up to ArcFlare API Endpoint if needed ────────────────────────
+      // ── Optional: Wire up to ArcFlare API Endpoint if needed ──────────────
       // await fetch("/api/feedback", {
       //   method: "POST",
       //   headers: { "Content-Type": "application/json" },
@@ -219,7 +219,7 @@ const styles: Record<string, CSSProperties> = {
     position: "fixed",
     bottom: 24,
     right: 24,
-    zIndex: 1000,
+    zIndex: 999999, // Unbreakable z-index layer so it floats above everything
     width: 52,
     height: 52,
     borderRadius: "50%",
@@ -236,7 +236,7 @@ const styles: Record<string, CSSProperties> = {
   backdrop: {
     position: "fixed",
     inset: 0,
-    zIndex: 1100,
+    zIndex: 1000000, // Sits exactly on top of the button layer when active
     background: "rgba(0,0,0,0.65)",
     display: "flex",
     alignItems: "center",
