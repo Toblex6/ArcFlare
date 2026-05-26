@@ -1,3 +1,4 @@
+"use client"; //
 import React, { useState, CSSProperties } from "react";
 
 interface Category {
