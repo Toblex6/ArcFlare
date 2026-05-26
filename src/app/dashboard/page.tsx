@@ -5,8 +5,28 @@ import Link from "next/link";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 
+interface Metrics {
+  totalTransactions: number;
+  totalVolumeProcessed: number;
+  estimatedGasSavedUSD: number;
+  settlementCurrency: string;
+  primaryChain: string;
+}
+
+interface Transaction {
+  id: string;
+  reference: string;
+  amount: number;
+  currency: string;
+  chain: string;
+  senderEmail: string;
+  merchant: string;
+  status: string;
+  timestamp: string;
+}
+
 export default function DashboardPage() {
-  // Explicitly casting to any eliminates the strict null connection type error on Vercel deployment
+  // Explicitly casting to any eliminates the strict null connection type error on Vercel/Render deployment
   const { address, isConnected } = useAccount() as any;
 
   // Handle hydration mismatch safely by verifying component is mounted in browser
@@ -14,11 +34,37 @@ export default function DashboardPage() {
   const [apiKey, setApiKey] = useState("");
   const [loadingKeys, setLoadingKeys] = useState(false);
 
+  // Live Ledger States
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+
   useEffect(() => {
     setMounted(true);
+
+    // Dynamic environment URL fallback to prevent browser fetch blocks
+    const API_URL = typeof window !== "undefined" && window.location.hostname === "localhost"
+      ? "/api/payments/history" // In local development, call your own relative path
+      : "https://arcflare-gateway.onrender.com/api/payments/history"; // In production, use Render
+
+    async function fetchLedger() {
+      try {
+        const res = await fetch(API_URL);
+        const data = await res.json();
+        if (data.success) {
+          setMetrics(data.metrics);
+          setTransactions(data.transactions);
+        }
+      } catch (err) {
+        console.error("Dashboard backend synchronization failure:", err);
+      }
+    }
+
+    fetchLedger();
+    const interval = setInterval(fetchLedger, 4000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Safe client-side local key creator (Zero extension/backend dependencies)
+  // Safe client-side local key creator
   const handleGenerateApiKey = () => {
     setLoadingKeys(true);
     setTimeout(() => {
@@ -32,14 +78,14 @@ export default function DashboardPage() {
     }, 600);
   };
 
-  // Helper to safely format address to a readable mid-truncated string (e.g. 0x1234...5678)
+  // Helper to safely format address to a readable mid-truncated string
   const formatAddress = (addr?: string) => {
     if (!addr) return "";
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
 
   return (
-    <main className="min-h-screen bg-[#1A120B] flex text-white">
+    <main className="min-h-screen bg-[#1A120B] flex text-white font-mono">
 
       {/* Sidebar */}
       <aside className="w-[260px] bg-[#3C2A21] border-r border-[#5C4033] p-6 hidden lg:flex flex-col justify-between">
@@ -83,7 +129,7 @@ export default function DashboardPage() {
             ArcFlare Gateway
           </p>
           <h2 className="text-2xl font-bold text-white mt-2">
-            Testnet Live
+            Mainnet Live
           </h2>
           <p className="text-xs text-cyan-100 mt-2">
             Stablecoin payments powered by Arc.
@@ -91,7 +137,7 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      {/* Main */}
+      {/* Main Content Area */}
       <section className="flex-1 p-6 lg:p-10 overflow-y-auto">
 
         {/* Header */}
@@ -101,12 +147,11 @@ export default function DashboardPage() {
               Merchant Dashboard
             </h1>
             <p className="text-[#D5CEA3] mt-1">
-              Monitor payments, balances, and merchant activity.
+              Monitor real-time agentic payments, system balances, and ledger activity.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
-            {/* Safe Web3 Mounted Conditional UI Wrapper */}
             {!mounted ? (
               <button className="bg-cyan-400 opacity-60 text-black px-5 py-3 rounded-2xl font-semibold cursor-wait">
                 Loading...
@@ -164,65 +209,85 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Live Aggregate Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
-          {[
-            { title: "Total Volume", value: "$42,580", change: "+18%" },
-            { title: "Transactions", value: "1,248", change: "+12%" },
-            { title: "Merchants", value: "84", change: "+6%" },
-            { title: "Revenue", value: "$1,920", change: "+22%" },
-          ].map((card) => (
-            <div
-              key={card.title}
-              className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6"
-            >
-              <p className="text-[#D5CEA3] text-sm">
-                {card.title}
-              </p>
-              <div className="flex items-end justify-between mt-4">
-                <h2 className="text-3xl font-bold text-[#FFF8EA]">
-                  {card.value}
-                </h2>
-                <span className="text-cyan-300 text-sm font-semibold">
-                  {card.change}
-                </span>
-              </div>
+          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
+            <p className="text-[#D5CEA3] text-sm">Total Volume</p>
+            <div className="flex items-end justify-between mt-4">
+              <h2 className="text-3xl font-bold text-[#FFF8EA]">
+                {metrics ? `${metrics.totalVolumeProcessed} USDC` : "0.00 USDC"}
+              </h2>
+              <span className="text-cyan-300 text-sm font-semibold">Live Feed</span>
             </div>
-          ))}
+          </div>
+
+          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
+            <p className="text-[#D5CEA3] text-sm">Agent Transactions</p>
+            <div className="flex items-end justify-between mt-4">
+              <h2 className="text-3xl font-bold text-[#FFF8EA]">
+                {metrics?.totalTransactions || 0}
+              </h2>
+              <span className="text-cyan-300 text-sm font-semibold">Active</span>
+            </div>
+          </div>
+
+          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
+            <p className="text-[#D5CEA3] text-sm">Ecosystem Chain</p>
+            <div className="flex items-end justify-between mt-4">
+              <h2 className="text-3xl font-bold text-[#FFF8EA]">
+                {metrics?.primaryChain || "Arc-L1"}
+              </h2>
+              <span className="text-cyan-300 text-sm font-semibold">Native</span>
+            </div>
+          </div>
+
+          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
+            <p className="text-[#D5CEA3] text-sm">Est. Gas Saved</p>
+            <div className="flex items-end justify-between mt-4">
+              <h2 className="text-3xl font-bold text-[#FFF8EA]">
+                ${metrics ? metrics.estimatedGasSavedUSD.toFixed(2) : "0.00"}
+              </h2>
+              <span className="text-cyan-300 text-sm font-semibold">Signature</span>
+            </div>
+          </div>
         </div>
 
-        {/* Main Grid */}
+        {/* Main Operational Layout Grid */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
-          {/* Analytics */}
+          {/* Analytics Area */}
           <div className="xl:col-span-2 bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
             <div className="flex items-center justify-between mb-8">
               <div>
                 <h2 className="text-xl font-bold text-[#FFF8EA]">
-                  Payment Analytics
+                  Ecosystem Telemetry
                 </h2>
                 <p className="text-sm text-[#D5CEA3] mt-1">
-                  Stablecoin transaction activity
+                  Micro-stablecoin activity and real-time roadblock checks
                 </p>
               </div>
               <button className="bg-[#0F3D3E] text-white px-4 py-2 rounded-xl text-sm">
-                Export
+                Active
               </button>
             </div>
-            <div className="h-[320px] bg-[#1A120B] border border-[#5C4033] rounded-3xl flex items-center justify-center text-[#D5CEA3]">
-              Analytics Chart Area
+            <div className="h-[320px] bg-[#1A120B] border border-[#5C4033] rounded-3xl flex flex-col items-center justify-center text-[#D5CEA3] p-6 text-center">
+              <div className="w-4 h-4 rounded-full bg-emerald-400 animate-ping mb-3" />
+              <p className="text-sm text-emerald-300 font-bold uppercase tracking-widest">Listening for Agentic Calls</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                Universal HTTP 402 roadblocks are active. Agents striking payloads will generate streaming footprints down below.
+              </p>
             </div>
           </div>
 
-          {/* Revenue Card */}
+          {/* Revenue & Key Card */}
           <div className="bg-[#0F3D3E] rounded-3xl p-6 shadow-2xl flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <p className="text-cyan-200 text-sm">
-                    Gateway Revenue
+                    Accumulated Gateway Fees
                   </p>
                   <h2 className="text-3xl font-bold text-white mt-1">
-                    1,240 USDC
+                    {metrics ? `${metrics.totalVolumeProcessed} USDC` : "0 USDC"}
                   </h2>
                 </div>
                 <div className="bg-cyan-400/20 text-cyan-300 px-3 py-1 rounded-full text-xs">
@@ -241,10 +306,10 @@ export default function DashboardPage() {
                 </div>
                 <div className="bg-white/10 rounded-2xl p-4">
                   <p className="text-xs text-cyan-100">
-                    Failed Payments
+                    Network Framework
                   </p>
-                  <p className="text-white font-semibold mt-1">
-                    38
+                  <p className="text-white text-xs font-semibold mt-1">
+                    Nanopayments Engine v1.0.0
                   </p>
                 </div>
               </div>
@@ -260,58 +325,54 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Transactions */}
+        {/* Live Rolling Ledger Table */}
         <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl overflow-hidden">
           <div className="p-6 border-b border-[#5C4033]">
             <h2 className="text-xl font-bold text-[#FFF8EA]">
-              Recent Transactions
+              Live Agent Transaction Footprints
             </h2>
             <p className="text-sm text-[#D5CEA3] mt-1">
-              Latest payments processed by ArcFlare
+              Latest payment proofs verified and cleared by ArcFlare's roadblock processor
             </p>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-[#2B1D16] text-left text-sm text-[#D5CEA3]">
-                <tr>
-                  <th className="px-6 py-4">Transaction</th>
-                  <th className="px-6 py-4">Merchant</th>
-                  <th className="px-6 py-4">Amount</th>
-                  <th className="px-6 py-4">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  { tx: "0x84...92ab", merchant: "Tower Labs", amount: "50 USDC", status: "Success" },
-                  { tx: "0x11...7dac", merchant: "Arc Market", amount: "120 USDC", status: "Pending" },
-                  { tx: "0x91...2fbc", merchant: "Stable Pay", amount: "300 USDC", status: "Success" },
-                ].map((row) => (
-                  <tr key={row.tx} className="border-t border-[#5C4033]">
-                    <td className="px-6 py-5 text-[#FFF8EA] font-medium">
-                      {row.tx}
-                    </td>
-                    <td className="px-6 py-5 text-[#D5CEA3]">
-                      {row.merchant}
-                    </td>
-                    <td className="px-6 py-5 text-[#D5CEA3]">
-                      {row.amount}
-                    </td>
-                    <td className="px-6 py-5">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          row.status === "Success"
-                            ? "bg-cyan-500/20 text-cyan-300"
-                            : "bg-[#D5CEA3]/20 text-[#FFF8EA]"
-                        }`}
-                      >
-                        {row.status}
-                      </span>
-                    </td>
+            {transactions.length === 0 ? (
+              <div className="p-10 text-center text-[#D5CEA3] text-sm">
+                Waiting for autonomous agent transaction signatures...
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-[#2B1D16] text-left text-sm text-[#D5CEA3]">
+                  <tr>
+                    <th className="px-6 py-4">Reference Log</th>
+                    <th className="px-6 py-4">Agent Entity</th>
+                    <th className="px-6 py-4">Amount</th>
+                    <th className="px-6 py-4">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-[#5C4033]/40">
+                  {transactions.map((row) => (
+                    <tr key={row.id} className="border-t border-[#5C4033] hover:bg-[#2B1D16]/30 transition-all">
+                      <td className="px-6 py-5 text-cyan-300 font-mono font-medium">
+                        {row.reference}
+                      </td>
+                      <td className="px-6 py-5 text-[#E5D3B3] text-sm">
+                        {row.senderEmail}
+                      </td>
+                      <td className="px-6 py-5 text-emerald-400 font-semibold">
+                        {row.amount} {row.currency}
+                      </td>
+                      <td className="px-6 py-5">
+                        <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-widest">
+                          {row.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
