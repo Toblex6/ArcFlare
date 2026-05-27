@@ -44,7 +44,7 @@ export default function HomePage() {
             </Link>
 
             <Link
-              href="/checkout/test123"
+              href="/checkout"
               className="text-sm text-gray-300 hover:text-white"
             >
               Checkout
@@ -96,7 +96,7 @@ export default function HomePage() {
             </Link>
 
             <Link
-              href="/checkout/test123"
+              href="/checkout"
               className="border border-[#3a2a22] px-8 py-4 rounded-2xl hover:bg-[#1d1410] transition"
             >
               View Checkout
