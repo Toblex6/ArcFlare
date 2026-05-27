@@ -14,7 +14,7 @@ export default function CheckoutHubPage() {
     setError(null);
 
     try {
-      // 1. Send the standard initialization payload to your backend router
+      // 1. Send the initialization payload with fields aligned to backend expectations
       const res = await fetch("/api/payments/initialize", {
         method: "POST",
         headers: {
@@ -23,24 +23,22 @@ export default function CheckoutHubPage() {
         body: JSON.stringify({
           amount: 0.1,
           currency: "USDC",
-          sender_email: "public-tester-agent@autonomous.bot.network",
+          email: "public-tester-agent@autonomous.bot.network", // Aligned name
           merchant: "Dispatch Marketplace",
         }),
       });
 
       const result = await res.json();
       
-      // 🚀 ARCFLARE TELEMETRY DEBUG LOGGER
       console.log("=== ARCFLARE DEBUG DATA ===", result);
 
-      // 2. Multi-tier property extractor to handle varying backend schema variations
+      // 2. Extract reference token variations
       const reference = result.reference || result.data?.reference || result.token || result.data?.token;
 
       if (reference) {
-        // 3. Slide the test runner directly into the active payment window
+        // 3. Forward into your dynamic checkout matrix
         router.push(`/checkout/${reference}`);
       } else {
-        // Expose exact failure properties sent over the line by your DB / ORM layers
         setError(result.message || result.error || "Ledger rejected context token generation.");
       }
     } catch (err) {
