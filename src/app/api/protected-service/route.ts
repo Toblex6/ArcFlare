@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 
 /**
  * POST /api/protected-service
- * A mock autonomous endpoint protected by the ArcFlare HTTP 402 Gateway Rails
+ * Fully automated environment resolution for ArcFlare Gateway Rails
  */
 export async function POST(request: Request) {
   try {
     const headerToken = request.headers.get("X-ArcFlare-Reference");
     
-    // 1. If no tracking reference header is attached, issue the native HTTP 402 challenge
+    // 1. Dynamically extract the origin (handles localhost or Render automatically)
+    const { origin } = new URL(request.url);
+
+    // If no tracking reference header is attached, issue the challenge
     if (!headerToken) {
       return NextResponse.json(
         {
@@ -17,20 +20,25 @@ export async function POST(request: Request) {
           message: "This resource is protected by ArcFlare Agentic Paywalls.",
           payment_instructions: {
             currency: "USDC",
-            amount: 0.10, // Example nanopayment / micropayment price
+            amount: 0.10,
             chain: "Arc-L1",
-            initialization_endpoint: "https://arcflare-gateway.onrender.com/api/payments/initialize"
+            // 👇 Dynamically uses localhost on your machine, or Render when live!
+            initialization_endpoint: `${origin}/api/payments/initialize`
           }
         },
         { 
-          status: 402, // 👈 The magic machine-readable response code
+          status: 402,
           headers: { "WWW-Authenticate": "ArcFlare-USDC-Micropayment" }
         }
       );
     }
 
-    // 2. Query your live validation engine to ensure the reference token state is 'SUCCESS'
-    const verificationUrl = `https://arcflare-gateway.onrender.com/api/payments/verify/${headerToken}`;
+    // 2. Dynamically look up the verification route on the current running host
+    const verificationUrl = `${origin}/api/payments/verify/${headerToken}`;
+    
+    console.log(`📡 [Gatekeeper]: Verifying reference via: ${verificationUrl}`);
+    
+    // 3. Query the internal validation route
     const verifyCheck = await fetch(verificationUrl);
     const verifyResult = await verifyCheck.json();
 
@@ -46,7 +54,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Payment is checked out and verified successfully! Release the resource to the AI Agent
+    // 4. Access Granted!
     return NextResponse.json(
       {
         status: true,
