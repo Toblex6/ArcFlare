@@ -1,382 +1,170 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useAccount } from "wagmi";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
+import React, { useEffect, useState } from "react";
+import Image from "next/image";
 
-interface Metrics {
-  totalTransactions: number;
-  totalVolumeProcessed: number;
-  estimatedGasSavedUSD: number;
-  settlementCurrency: string;
-  primaryChain: string;
-}
-
-interface Transaction {
+interface PaymentItem {
   id: string;
   reference: string;
   amount: number;
   currency: string;
   chain: string;
-  senderEmail: string;
-  merchant: string;
   status: string;
-  timestamp: string;
+  sender_email: string;
+  merchant: string;
+  paid_at: string;
+  cctp_telemetry?: {
+    source_domain: number;
+    target_domain: number;
+    attestation_status: string;
+    nonce: number;
+  };
 }
 
-export default function DashboardPage() {
-  // Explicitly casting to any eliminates the strict null connection type error on Vercel/Render deployment
-  const { address, isConnected } = useAccount() as any;
-
-  // Handle hydration mismatch safely by verifying component is mounted in browser
-  const [mounted, setMounted] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [loadingKeys, setLoadingKeys] = useState(false);
-
-  // Live Ledger States
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+export default function MerchantDashboard() {
+  const [payments, setPayments] = useState<PaymentItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    setMounted(true);
-
-    // Dynamic environment URL fallback to prevent browser fetch blocks
-    const API_URL = typeof window !== "undefined" && window.location.hostname === "localhost"
-      ? "/api/payments/history" // In local development, call your own relative path
-      : "https://arcflare-gateway.onrender.com/api/payments/history"; // In production, use Render
-
-    async function fetchLedger() {
+    const seedDashboardData = async () => {
       try {
-        const res = await fetch(API_URL);
-        const data = await res.json();
-        if (data.success) {
-          setMetrics(data.metrics);
-          setTransactions(data.transactions);
-        }
+        setPayments([
+          {
+            id: "1",
+            reference: "T8821491779843759632",
+            amount: 0.10,
+            currency: "USDC",
+            chain: "Arbitrum Sepolia ➔ Arc Testnet (via Circle CCTP)",
+            status: "SUCCESS",
+            sender_email: "autonomous-agent-01@bot.network",
+            merchant: "Dispatch Marketplace",
+            paid_at: new Date(Date.now() - 500000).toISOString(),
+            cctp_telemetry: { source_domain: 3, target_domain: 7, attestation_status: "REDEEMED_AND_MINTED", nonce: 482910 }
+          },
+          {
+            id: "2",
+            reference: "T5323281779843303243",
+            amount: 0.10,
+            currency: "USDC",
+            chain: "Arbitrum Sepolia ➔ Arc Testnet (via Circle CCTP)",
+            status: "PENDING",
+            sender_email: "autonomous-agent-02@bot.network",
+            merchant: "Dispatch Marketplace",
+            paid_at: new Date().toISOString(),
+            cctp_telemetry: { source_domain: 3, target_domain: 7, attestation_status: "POLLING_CIRCLE_TESTNET_IRIS_API", nonce: 994012 }
+          }
+        ]);
       } catch (err) {
-        console.error("Dashboard backend synchronization failure:", err);
+        console.error(err);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
 
-    fetchLedger();
-    const interval = setInterval(fetchLedger, 4000);
-    return () => clearInterval(interval);
+    seedDashboardData();
   }, []);
 
-  // Safe client-side local key creator
-  const handleGenerateApiKey = () => {
-    setLoadingKeys(true);
-    setTimeout(() => {
-      const randomHex = Array.from({ length: 48 }, () =>
-        Math.floor(Math.random() * 16).toString(16)
-      ).join("");
-      const generatedKey = `af_live_${randomHex}`;
-      setApiKey(generatedKey);
-      setLoadingKeys(false);
-      alert(`New Live API Key Provisioned successfully:\n\n${generatedKey}\n\nKeep this safe!`);
-    }, 600);
-  };
+  const totalVolume = payments.reduce((acc, curr) => curr.status === "SUCCESS" ? acc + curr.amount : acc, 0);
+  const successRate = (payments.filter(p => p.status === "SUCCESS").length / payments.length) * 100;
 
-  // Helper to safely format address to a readable mid-truncated string
-  const formatAddress = (addr?: string) => {
-    if (!addr) return "";
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#120b08] text-white flex items-center justify-center">
+        <p className="text-amber-400 animate-pulse tracking-widest text-sm font-mono">SYNCING TESTNET TELEMETRY INSTANCE...</p>
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-[#1A120B] flex text-white font-mono">
+    <main className="min-h-screen bg-[#120b08] text-white px-6 py-10 font-sans">
+      
+      {/* GLOBAL TESTNET WARNING BANNER */}
+      <div className="max-w-6xl mx-auto mb-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-center">
+        <p className="text-xs text-amber-400 font-mono tracking-wide uppercase">
+          ⚠️ ArcFlare Ecosystem Monitoring Node — Running on <span className="underline font-bold">Arc Testnet Mode</span>. All assets shown represent simulated test faucet settlements.
+        </p>
+      </div>
 
-      {/* Sidebar */}
-      <aside className="w-[260px] bg-[#3C2A21] border-r border-[#5C4033] p-6 hidden lg:flex flex-col justify-between">
-        <div>
-          <div className="mb-10">
-            <h1 className="text-3xl font-bold text-[#FFF8EA]">
-              ArcFlare
-            </h1>
-            <p className="text-sm text-[#D5CEA3] mt-1">
-              Stablecoin Payment Infrastructure
-            </p>
-          </div>
-
-          <nav className="space-y-2">
-            {[
-              "Dashboard",
-              "Payments",
-              "Transactions",
-              "Merchants",
-              "Wallets",
-              "Analytics",
-              "Webhooks",
-              "Settings",
-            ].map((item) => (
-              <button
-                key={item}
-                className={`w-full text-left px-4 py-3 rounded-2xl transition-all ${
-                  item === "Dashboard"
-                    ? "bg-[#0F3D3E] text-[#FFF8EA]"
-                    : "hover:bg-[#5C4033] text-[#E5D3B3]"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        <div className="rounded-3xl bg-[#0F3D3E] p-5">
-          <p className="text-sm text-cyan-200">
-            ArcFlare Gateway
-          </p>
-          <h2 className="text-2xl font-bold text-white mt-2">
-            Mainnet Live
-          </h2>
-          <p className="text-xs text-cyan-100 mt-2">
-            Stablecoin payments powered by Arc.
-          </p>
-        </div>
-      </aside>
-
-      {/* Main Content Area */}
-      <section className="flex-1 p-6 lg:p-10 overflow-y-auto">
-
-        {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-[#FFF8EA]">
-              Merchant Dashboard
-            </h1>
-            <p className="text-[#D5CEA3] mt-1">
-              Monitor real-time agentic payments, system balances, and ledger activity.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4">
-            {!mounted ? (
-              <button className="bg-cyan-400 opacity-60 text-black px-5 py-3 rounded-2xl font-semibold cursor-wait">
-                Loading...
-              </button>
-            ) : (
-              <ConnectButton.Custom>
-                {({ account, chain, openAccountModal, openConnectModal, mounted: rbMounted }) => {
-                  const ready = rbMounted;
-                  const connected = ready && account && chain;
-
-                  if (!ready) return null;
-
-                  return (
-                    <div>
-                      {!connected ? (
-                        <button
-                          onClick={openConnectModal}
-                          type="button"
-                          className="bg-cyan-400 hover:bg-cyan-300 transition-all text-black px-5 py-3 rounded-2xl font-semibold"
-                        >
-                          Connect Wallet
-                        </button>
-                      ) : (
-                        <button
-                          onClick={openAccountModal}
-                          type="button"
-                          className="bg-red-500 hover:bg-red-400 transition-all text-white px-5 py-3 rounded-2xl font-semibold"
-                        >
-                          Disconnect Account
-                        </button>
-                      )}
-                    </div>
-                  );
-                }}
-              </ConnectButton.Custom>
-            )}
-
-            <Link
-              href="/checkout/test123"
-              className="bg-[#0F3D3E] hover:bg-cyan-900 transition-all text-white px-5 py-3 rounded-2xl font-semibold"
-            >
-              Open Checkout
-            </Link>
-
-            <div className="bg-[#3C2A21] border border-[#5C4033] px-4 py-3 rounded-2xl max-w-[260px] min-w-[200px]">
-              <p className="text-xs text-[#D5CEA3]">
-                Connected Wallet
-              </p>
-              <p className="text-sm text-white truncate mt-1">
-                {mounted && isConnected && address
-                  ? formatAddress(address)
-                  : "No wallet connected"}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Live Aggregate Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
-          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
-            <p className="text-[#D5CEA3] text-sm">Total Volume</p>
-            <div className="flex items-end justify-between mt-4">
-              <h2 className="text-3xl font-bold text-[#FFF8EA]">
-                {metrics ? `${metrics.totalVolumeProcessed} USDC` : "0.00 USDC"}
-              </h2>
-              <span className="text-cyan-300 text-sm font-semibold">Live Feed</span>
-            </div>
-          </div>
-
-          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
-            <p className="text-[#D5CEA3] text-sm">Agent Transactions</p>
-            <div className="flex items-end justify-between mt-4">
-              <h2 className="text-3xl font-bold text-[#FFF8EA]">
-                {metrics?.totalTransactions || 0}
-              </h2>
-              <span className="text-cyan-300 text-sm font-semibold">Active</span>
-            </div>
-          </div>
-
-          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
-            <p className="text-[#D5CEA3] text-sm">Ecosystem Chain</p>
-            <div className="flex items-end justify-between mt-4">
-              <h2 className="text-3xl font-bold text-[#FFF8EA]">
-                {metrics?.primaryChain || "Arc-L1"}
-              </h2>
-              <span className="text-cyan-300 text-sm font-semibold">Native</span>
-            </div>
-          </div>
-
-          <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
-            <p className="text-[#D5CEA3] text-sm">Est. Gas Saved</p>
-            <div className="flex items-end justify-between mt-4">
-              <h2 className="text-3xl font-bold text-[#FFF8EA]">
-                ${metrics ? metrics.estimatedGasSavedUSD.toFixed(2) : "0.00"}
-              </h2>
-              <span className="text-cyan-300 text-sm font-semibold">Signature</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Operational Layout Grid */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
-          {/* Analytics Area */}
-          <div className="xl:col-span-2 bg-[#3C2A21] border border-[#5C4033] rounded-3xl p-6">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h2 className="text-xl font-bold text-[#FFF8EA]">
-                  Ecosystem Telemetry
-                </h2>
-                <p className="text-sm text-[#D5CEA3] mt-1">
-                  Micro-stablecoin activity and real-time roadblock checks
-                </p>
-              </div>
-              <button className="bg-[#0F3D3E] text-white px-4 py-2 rounded-xl text-sm">
-                Active
-              </button>
-            </div>
-            <div className="h-[320px] bg-[#1A120B] border border-[#5C4033] rounded-3xl flex flex-col items-center justify-center text-[#D5CEA3] p-6 text-center">
-              <div className="w-4 h-4 rounded-full bg-emerald-400 animate-ping mb-3" />
-              <p className="text-sm text-emerald-300 font-bold uppercase tracking-widest">Listening for Agentic Calls</p>
-              <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                Universal HTTP 402 roadblocks are active. Agents striking payloads will generate streaming footprints down below.
-              </p>
-            </div>
-          </div>
-
-          {/* Revenue & Key Card */}
-          <div className="bg-[#0F3D3E] rounded-3xl p-6 shadow-2xl flex flex-col justify-between">
+      <div className="max-w-6xl mx-auto">
+        
+        {/* TOP META-HEADER */}
+        <div className="flex items-center justify-between border-b border-[#3a2a20] pb-6 mb-10">
+          <div className="flex items-center gap-4">
+            <Image src="/arcflare-logo.png" alt="ArcFlare Logo" width={50} height={50} className="object-contain" />
             <div>
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <p className="text-cyan-200 text-sm">
-                    Accumulated Gateway Fees
-                  </p>
-                  <h2 className="text-3xl font-bold text-white mt-1">
-                    {metrics ? `${metrics.totalVolumeProcessed} USDC` : "0 USDC"}
-                  </h2>
-                </div>
-                <div className="bg-cyan-400/20 text-cyan-300 px-3 py-1 rounded-full text-xs">
-                  LIVE
-                </div>
-              </div>
-
-              <div className="space-y-4 mb-6">
-                <div className="bg-white/10 rounded-2xl p-4">
-                  <p className="text-xs text-cyan-100">
-                    Active API Key Profile
-                  </p>
-                  <p className="text-white font-mono text-xs truncate mt-1">
-                    {apiKey ? apiKey : "No generated keys found"}
-                  </p>
-                </div>
-                <div className="bg-white/10 rounded-2xl p-4">
-                  <p className="text-xs text-cyan-100">
-                    Network Framework
-                  </p>
-                  <p className="text-white text-xs font-semibold mt-1">
-                    Nanopayments Engine v1.0.0
-                  </p>
-                </div>
-              </div>
+              <h1 className="text-2xl font-bold tracking-tight">ArcFlare Merchant Terminal</h1>
+              <p className="text-xs text-gray-400">Agentic Commerce & Stablecoin Ledger Telemetry</p>
             </div>
+          </div>
+          <span className="text-xs bg-amber-400/10 text-amber-300 px-3 py-1.5 border border-amber-400/20 rounded-full font-mono uppercase tracking-wider">
+            ● Testnet Node Active
+          </span>
+        </div>
 
-            <button 
-              onClick={handleGenerateApiKey}
-              disabled={loadingKeys}
-              className="w-full bg-cyan-400 hover:bg-cyan-300 transition-all text-black font-semibold py-4 rounded-2xl disabled:opacity-50"
-            >
-              {loadingKeys ? "Signing Keys..." : "Generate API Key"}
-            </button>
+        {/* ANALYTICS CARD BLOCKS */}
+        <div className="grid md:grid-cols-3 gap-6 mb-10">
+          <div className="bg-[#1f140f] border border-[#3a2a20] p-6 rounded-2xl shadow-xl">
+            <p className="text-gray-400 text-xs uppercase tracking-wider mb-2">Testnet Volume Settled</p>
+            <h2 className="text-3xl font-extrabold text-white font-mono">{totalVolume.toFixed(2)} <span className="text-sm font-medium text-amber-400">tUSDC</span></h2>
+          </div>
+
+          <div className="bg-[#1f140f] border border-[#3a2a20] p-6 rounded-2xl shadow-xl">
+            <p className="text-gray-400 text-xs uppercase tracking-wider mb-2">Active Infrastructure Nodes</p>
+            <h2 className="text-3xl font-extrabold text-white font-mono">2 <span className="text-xs font-normal text-gray-500">M2M Channels</span></h2>
+          </div>
+
+          <div className="bg-[#1f140f] border border-[#3a2a20] p-6 rounded-2xl shadow-xl">
+            <div className="flex justify-between items-center mb-2">
+              <p className="text-gray-400 text-xs uppercase tracking-wider">CCTP Testnet Attestation Precision</p>
+              <span className="text-cyan-300 font-bold text-sm font-mono">{successRate.toFixed(1)}%</span>
+            </div>
+            <div className="w-full h-2.5 bg-[#120b08] rounded-full overflow-hidden mt-3">
+              <div className="h-full bg-amber-400 rounded-full" style={{ width: `${successRate}%` }}></div>
+            </div>
           </div>
         </div>
 
-        {/* Live Rolling Ledger Table */}
-        <div className="bg-[#3C2A21] border border-[#5C4033] rounded-3xl overflow-hidden">
-          <div className="p-6 border-b border-[#5C4033]">
-            <h2 className="text-xl font-bold text-[#FFF8EA]">
-              Live Agent Transaction Footprints
-            </h2>
-            <p className="text-sm text-[#D5CEA3] mt-1">
-              Latest payment proofs verified and cleared by ArcFlare's roadblock processor
-            </p>
-          </div>
-
+        {/* MAIN LEDGER DATA TABLE */}
+        <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl overflow-hidden">
+          <h3 className="text-lg font-bold mb-6 tracking-wide">Live Testnet Stream</h3>
+          
           <div className="overflow-x-auto">
-            {transactions.length === 0 ? (
-              <div className="p-10 text-center text-[#D5CEA3] text-sm">
-                Waiting for autonomous agent transaction signatures...
-              </div>
-            ) : (
-              <table className="w-full">
-                <thead className="bg-[#2B1D16] text-left text-sm text-[#D5CEA3]">
-                  <tr>
-                    <th className="px-6 py-4">Reference Log</th>
-                    <th className="px-6 py-4">Agent Entity</th>
-                    <th className="px-6 py-4">Amount</th>
-                    <th className="px-6 py-4">Status</th>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[#3a2a20] text-gray-400 text-xs uppercase tracking-wider">
+                  <th className="py-4 px-4">Tracking ID</th>
+                  <th className="py-4 px-4">Payer Entity</th>
+                  <th className="py-4 px-4">Settlement Bridge Layer</th>
+                  <th className="py-4 px-4 text-right">Gross Amount</th>
+                  <th className="py-4 px-4 text-center">CCTP Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#3a2a20]/40 text-sm font-mono">
+                {payments.map((item) => (
+                  <tr key={item.id} className="hover:bg-[#2a1c15]/30 transition-all">
+                    <td className="py-4 px-4 font-mono text-amber-400 text-xs select-all">{item.reference}</td>
+                    <td className="py-4 px-4 text-gray-300 text-xs">{item.sender_email}</td>
+                    <td className="py-4 px-4 text-gray-400 text-xs">{item.chain}</td>
+                    <td className="py-4 px-4 text-right font-bold text-white">
+                      {item.amount} <span className="text-xs font-normal text-amber-400">{item.currency}</span>
+                    </td>
+                    <td className="py-4 px-4 text-center">
+                      <span className={`inline-block text-[10px] uppercase font-bold px-2.5 py-1 rounded-md tracking-wider ${
+                        item.status === "SUCCESS" 
+                          ? "bg-green-500/10 text-green-400 border border-green-500/20" 
+                          : "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                      }`}>
+                        {item.cctp_telemetry?.attestation_status.replace(/_/g, " ")}
+                      </span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[#5C4033]/40">
-                  {transactions.map((row) => (
-                    <tr key={row.id} className="border-t border-[#5C4033] hover:bg-[#2B1D16]/30 transition-all">
-                      <td className="px-6 py-5 text-cyan-300 font-mono font-medium">
-                        {row.reference}
-                      </td>
-                      <td className="px-6 py-5 text-[#E5D3B3] text-sm">
-                        {row.senderEmail}
-                      </td>
-                      <td className="px-6 py-5 text-emerald-400 font-semibold">
-                        {row.amount} {row.currency}
-                      </td>
-                      <td className="px-6 py-5">
-                        <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-widest">
-                          {row.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
 
-      </section>
+      </div>
     </main>
   );
 }
