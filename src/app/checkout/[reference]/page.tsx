@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, use } from "react";
+import React, { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import Image from "next/image";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useSendTransaction, useChainId } from "wagmi";
@@ -18,20 +19,26 @@ interface PaymentLogData {
   paid_at: string | null;
 }
 
-export default function CheckoutPage({ params }: { params: Promise<{ reference: string }> }) {
-  const resolvedParams = use(params);
-  const reference = resolvedParams.reference;
+export default function CheckoutPage() {
+  // 1. Automatically read the dynamic reference segment safely using useParams
+  const params = useParams<{ reference: string }>();
+  const reference = params?.reference;
 
+  // 2. Local Wallet Integration Hooks
   const { isConnected, address } = useAccount();
   const currentChainId = useChainId();
   const { sendTransaction, isPending: isTxPending } = useSendTransaction();
 
+  // 3. Reactive State Management
   const [payment, setPayment] = useState<PaymentLogData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
 
+  // 4. Fetch the real tracking parameters from your backend ledger
   const fetchLedgerStatus = async (hash?: string) => {
+    if (!reference) return;
+
     try {
       let url = `/api/payments/verify/${reference}`;
       if (hash) url += `?txHash=${hash}`;
@@ -39,8 +46,9 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
       const res = await fetch(url);
       const result = await res.json();
 
-      if (result.status && result.data) {
+      if (result.status === true && result.data) {
         setPayment(result.data);
+        setError(null); // Clear previous errors on successful load
       } else {
         setError(result.message || "Failed to resolve reference ledger entry.");
       }
@@ -57,18 +65,22 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
     }
   }, [reference]);
 
+  // 5. Payment Handler linking Web3 transactions directly into the backend ledger
   const handlePayment = async () => {
     try {
       console.log("🚀 Starting ArcFlare Payment Pipeline for Reference:", reference);
 
+      // Execute on-chain burn/transfer strategy via Wagmi
       sendTransaction(
         {
           to: "0x000000000000000000000000000000000000dead",
-          value: parseEther("0.001"), 
+          value: parseEther("0.001"), // Can map to payment.amount dynamically later
         },
         {
           onSuccess: async (txHash) => {
+            console.log("⛓️ Transaction submitted successfully! Hash:", txHash);
             setIsVerifying(true);
+            // Pass the resulting hash into your verify route to mark the ledger SUCCESS
             await fetchLedgerStatus(txHash);
             setIsVerifying(false);
           },
@@ -85,7 +97,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
   if (loading) {
     return (
       <main className="min-h-screen bg-[#120b08] text-white flex items-center justify-center">
-        <p className="text-cyan-300 tracking-widest animate-pulse uppercase text-sm font-mono">
+        <p className="text-cyan-300 tracking-widest animate-pulse uppercase text-sm">
           Syncing ArcFlare Ledger Parameters...
         </p>
       </main>
@@ -108,9 +120,17 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
   return (
     <main className="min-h-screen bg-[#120b08] text-white px-6 py-10">
       
+      {/* HEADER */}
       <div className="max-w-6xl mx-auto flex items-center justify-between mb-12">
         <div className="flex items-center gap-4">
-          <Image src="/arcflare-logo.png" alt="ArcFlare Logo" width={55} height={55} priority className="object-contain" />
+          <Image
+            src="/arcflare-logo.png"
+            alt="ArcFlare Logo"
+            width={55}
+            height={55}
+            priority
+            className="object-contain"
+          />
           <div>
             <h1 className="text-3xl font-bold tracking-wide">ArcFlare</h1>
             <p className="text-cyan-300 text-sm">Stablecoin Payment Infrastructure</p>
@@ -119,7 +139,10 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
         <ConnectButton />
       </div>
 
+      {/* MAIN SECTION */}
       <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-10">
+        
+        {/* LEFT PANEL - DYNAMIC CHECKOUT METRICS */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-8 shadow-2xl">
           <div className="mb-8">
             <p className="text-cyan-300 uppercase text-sm tracking-widest mb-2">Hosted Checkout</p>
@@ -127,13 +150,15 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
           </div>
 
           <div className="space-y-5">
+            {/* MERCHANT */}
             <div className="bg-[#2a1c15] rounded-2xl p-5 border border-[#493328]">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Merchant</span>
-                <span className="font-semibold">{payment.merchant || "ArcFlare Demo"}</span>
+                <span className="font-semibold">{payment.merchant || "ArcFlare Merchant"}</span>
               </div>
             </div>
 
+            {/* REFERENCE TOKEN */}
             <div className="bg-[#2a1c15] rounded-2xl p-5 border border-[#493328]">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Payment Reference</span>
@@ -143,6 +168,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
               </div>
             </div>
 
+            {/* AMOUNT */}
             <div className="bg-[#2a1c15] rounded-2xl p-5 border border-[#493328]">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Amount Due</span>
@@ -152,6 +178,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
               </div>
             </div>
 
+            {/* SETTLEMENT NETWORK */}
             <div className="bg-[#2a1c15] rounded-2xl p-5 border border-[#493328]">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Target Settlement Layer</span>
@@ -159,6 +186,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
               </div>
             </div>
 
+            {/* SOURCE CHAIN ID */}
             <div className="bg-[#2a1c15] rounded-2xl p-5 border border-[#493328]">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Connected Chain ID</span>
@@ -166,14 +194,18 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
               </div>
             </div>
 
+            {/* WALLET */}
             <div className="bg-[#2a1c15] rounded-2xl p-5 border border-[#493328]">
               <div className="flex flex-col gap-3">
                 <span className="text-gray-400">Connected Wallet Address</span>
-                <span className="font-semibold break-all text-sm font-mono text-gray-300">{address ? address : "No wallet linked"}</span>
+                <span className="font-semibold break-all text-sm font-mono text-gray-300">
+                  {address ? address : "No wallet linked"}
+                </span>
               </div>
             </div>
           </div>
 
+          {/* PAYMENT TRANSACTION BUTTON */}
           <div className="mt-10">
             {isConnected ? (
               <button
@@ -185,7 +217,12 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
                     : "bg-cyan-400 hover:bg-cyan-300 text-black shadow-lg shadow-cyan-400/10 active:scale-[0.99]"
                 }`}
               >
-                {isConfirmed ? "✓ Ledger Settlement Confirmed" : isTxPending || isVerifying ? "Processing Block..." : `Pay ${payment.amount} ${payment.currency}`}
+                {isConfirmed 
+                  ? "✓ Ledger Settlement Confirmed" 
+                  : isTxPending || isVerifying 
+                    ? "Processing Block..." 
+                    : `Pay ${payment.amount} ${payment.currency}`
+                }
               </button>
             ) : (
               <div className="bg-[#2a1c15] border border-[#493328] rounded-2xl p-6 text-center">
@@ -198,10 +235,12 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
           </div>
         </div>
 
-        {/* RIGHT PANEL - METRIC STREAMS */}
+        {/* RIGHT PANEL - REAL-TIME PAYMENT ANALYTICS */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-8 shadow-2xl flex flex-col justify-between">
           <div>
             <h3 className="text-2xl font-bold mb-8">Payment Gateway Tracking</h3>
+
+            {/* METRICS BLOCKS */}
             <div className="grid grid-cols-2 gap-5 mb-8">
               <div className="bg-[#2a1c15] p-6 rounded-2xl border border-[#493328]">
                 <p className="text-gray-400 text-sm mb-2">Network Status</p>
@@ -215,6 +254,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
               </div>
             </div>
 
+            {/* SUCCESS RATE METRIC */}
             <div className="bg-[#2a1c15] rounded-2xl p-6 border border-[#493328] mb-6">
               <div className="flex justify-between mb-4">
                 <span className="text-gray-400">Gateway Infrastructure Success Rate</span>
@@ -225,6 +265,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
               </div>
             </div>
 
+            {/* TRANSACTION RECORD LEDGER */}
             <div className="bg-[#2a1c15] rounded-2xl p-6 border border-[#493328]">
               <h4 className="text-lg font-semibold mb-5">Current Ledger Instance</h4>
               <div className="space-y-4">
@@ -234,7 +275,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-400">Payer Entity</span>
-                  <span className="text-gray-300 text-xs truncate max-w-[180px]">{payment.sender_email}</span>
+                  <span className="text-gray-300">{payment.sender_email}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-400">Settled Block Time</span>
@@ -246,17 +287,23 @@ export default function CheckoutPage({ params }: { params: Promise<{ reference: 
             </div>
           </div>
 
+          {/* BRAND FOOTER STATEMENT */}
           <div className="mt-8 bg-[#120b08] rounded-2xl p-5 border border-cyan-400/20">
             <div className="flex justify-between items-center mb-3">
               <p className="text-gray-400 font-medium">ArcFlare Engine</p>
-              <p className="text-cyan-300 text-sm tracking-wide bg-cyan-400/5 px-2.5 py-0.5 border border-cyan-400/20 rounded-full">Active Rails</p>
+              <p className="text-cyan-300 text-sm tracking-wide bg-cyan-400/5 px-2.5 py-0.5 border border-cyan-400/20 rounded-full">
+                Active Rails
+              </p>
             </div>
             <p className="text-sm text-gray-400 leading-relaxed">
-              ArcFlare is building programmable stablecoin settlement infrastructure on Arc with native support for Circle CCTP cross-chain machine execution protocols.
+              ArcFlare is building programmable stablecoin settlement infrastructure on Arc with native support for 
+              Circle CCTP cross-chain machine execution protocols.
             </p>
           </div>
+
         </div>
       </div>
+
     </main>
   );
 }
