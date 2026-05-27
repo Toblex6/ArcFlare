@@ -36,7 +36,7 @@ export default function MerchantDashboard() {
             currency: "USDC",
             chain: "Arbitrum Sepolia ➔ Arc Testnet (via Circle CCTP)",
             status: "SUCCESS",
-            sender_email: "autonomous-agent-01@bot.network",
+            sender_email: "agent-alpha-0x99@autonomous.bot.network",
             merchant: "Dispatch Marketplace",
             paid_at: new Date(Date.now() - 500000).toISOString(),
             cctp_telemetry: { source_domain: 3, target_domain: 7, attestation_status: "REDEEMED_AND_MINTED", nonce: 482910 }
@@ -48,7 +48,7 @@ export default function MerchantDashboard() {
             currency: "USDC",
             chain: "Arbitrum Sepolia ➔ Arc Testnet (via Circle CCTP)",
             status: "PENDING",
-            sender_email: "autonomous-agent-02@bot.network",
+            sender_email: "autonomous-machine-02@bot.network",
             merchant: "Dispatch Marketplace",
             paid_at: new Date().toISOString(),
             cctp_telemetry: { source_domain: 3, target_domain: 7, attestation_status: "POLLING_CIRCLE_TESTNET_IRIS_API", nonce: 994012 }
@@ -78,7 +78,6 @@ export default function MerchantDashboard() {
   return (
     <main className="min-h-screen bg-[#120b08] text-white px-6 py-10 font-sans">
       
-      {/* GLOBAL TESTNET WARNING BANNER */}
       <div className="max-w-6xl mx-auto mb-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-center">
         <p className="text-xs text-amber-400 font-mono tracking-wide uppercase">
           ⚠️ ArcFlare Ecosystem Monitoring Node — Running on <span className="underline font-bold">Arc Testnet Mode</span>. All assets shown represent simulated test faucet settlements.
@@ -86,8 +85,6 @@ export default function MerchantDashboard() {
       </div>
 
       <div className="max-w-6xl mx-auto">
-        
-        {/* TOP META-HEADER */}
         <div className="flex items-center justify-between border-b border-[#3a2a20] pb-6 mb-10">
           <div className="flex items-center gap-4">
             <Image src="/arcflare-logo.png" alt="ArcFlare Logo" width={50} height={50} className="object-contain" />
@@ -101,7 +98,6 @@ export default function MerchantDashboard() {
           </span>
         </div>
 
-        {/* ANALYTICS CARD BLOCKS */}
         <div className="grid md:grid-cols-3 gap-6 mb-10">
           <div className="bg-[#1f140f] border border-[#3a2a20] p-6 rounded-2xl shadow-xl">
             <p className="text-gray-400 text-xs uppercase tracking-wider mb-2">Testnet Volume Settled</p>
@@ -124,7 +120,6 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* MAIN LEDGER DATA TABLE */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl overflow-hidden">
           <h3 className="text-lg font-bold mb-6 tracking-wide">Live Testnet Stream</h3>
           
@@ -143,7 +138,7 @@ export default function MerchantDashboard() {
                 {payments.map((item) => (
                   <tr key={item.id} className="hover:bg-[#2a1c15]/30 transition-all">
                     <td className="py-4 px-4 font-mono text-amber-400 text-xs select-all">{item.reference}</td>
-                    <td className="py-4 px-4 text-gray-300 text-xs">{item.sender_email}</td>
+                    <td className="py-4 px-4 text-gray-300 text-xs truncate max-w-[150px]">{item.sender_email}</td>
                     <td className="py-4 px-4 text-gray-400 text-xs">{item.chain}</td>
                     <td className="py-4 px-4 text-right font-bold text-white">
                       {item.amount} <span className="text-xs font-normal text-amber-400">{item.currency}</span>
@@ -163,7 +158,6 @@ export default function MerchantDashboard() {
             </table>
           </div>
         </div>
-
       </div>
     </main>
   );

@@ -1,78 +1,84 @@
 /**
- * ArcFlare AI Agent Simulation Loop - Production Ready & Flexible
+ * ArcFlare Autonomous Agent Simulation Loop
+ * Target Environment: Arc Testnet (USDC as Native Gas Layer)
  */
-async function runAgentTask() {
-  // 👇 CHANGE THIS line to true for local testing, or false to test your live Render link!
-  const IS_LOCAL_TESTING = true; 
 
-  const BASE_URL = IS_LOCAL_TESTING 
-    ? "http://localhost:3000" 
-    : "https://arcflare-gateway.onrender.com";
+import fs from 'fs';
+import path from 'path';
 
-  const PROTECTED_RESOURCE = `${BASE_URL}/api/protected-service`;
-  const INITIALIZE_API = `${BASE_URL}/api/payments/initialize`;
-  
-  console.log(`🤖 [Agent]: Targeting environment: ${BASE_URL}`);
+// 1. CONFIGURATION SYSTEM
+const IS_LOCAL_TESTING = false; // Toggle to false to route traffic over live cloud production rails
+const GATEWAY_URL = IS_LOCAL_TESTING 
+  ? "http://localhost:3000" 
+  : "https://arcflare-gateway.onrender.com"; // Your live Render URL
+
+const AGENT_IDENTITY = {
+  email: "agent-alpha-0x99@autonomous.bot.network",
+  amount: 0.10,
+  metadata: {
+    currency: "USDC",
+    chain: "Arbitrum", // Matches CCTP_DOMAINS mapping in your backend
+    merchantName: "Dispatch Marketplace"
+  }
+};
+
+async function executeAgentPaymentPipeline() {
+  console.log("=================================================================");
+  console.log(`🤖 INITIALIZING AUTONOMOUS AGENT CONTEXT: ${AGENT_IDENTITY.email}`);
+  console.log(`🌐 TARGET ENVIRONMENT GATEWAY: ${GATEWAY_URL}`);
+  console.log("=================================================================");
 
   try {
-    let response = await fetch(PROTECTED_RESOURCE, { method: "POST" });
-    
-    if (response.status === 402) {
-      const paywallData = await response.json();
-      console.log(`⚠️  [Agent]: Hit a 402 Paywall! Instructions parsed:`, paywallData.payment_instructions);
+    // STEP 1: REQUEST TRANSACTING INTENT REFERENCE FROM THE GATEWAY
+    console.log("\n[Step 1] Initializing payment intent with ArcFlare Ledger API...");
+    const initResponse = await fetch(`${GATEWAY_URL}/api/payments/initialize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: AGENT_IDENTITY.amount,
+        email: AGENT_IDENTITY.email,
+        metadata: AGENT_IDENTITY.metadata
+      })
+    });
 
-      const invoiceAmount = paywallData.payment_instructions.amount;
-      console.log(`💸 [Agent]: Auto-authorizing execution for ${invoiceAmount} USDC...`);
+    const initResult = await initResponse.json();
 
-      console.log("📨 [Agent]: Initializing transaction tracking id...");
-      const initResponse = await fetch(INITIALIZE_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: invoiceAmount,
-          email: "autonomous-agent-01@bot.network",
-          metadata: {
-            merchantName: "Dispatch Marketplace",
-            currency: "USDC",
-            chain: "Arbitrum"
-          }
-        })
-      });
-
-      const initResult = await initResponse.json();
-      const uniqueReference = initResult.data.reference;
-      console.log(`📌 [Agent]: Ledger reference generated: ${uniqueReference}`);
-      console.log(`🔗 [Agent]: CCTP Routing Strategy Ready:`, initResult.data.cctp_routing);
-
-      const mockTxHash = "0xSUCCESS";
-      console.log(`⛓️  [Agent]: Submitting payment verification with txHash: ${mockTxHash}`);
-
-      const verifyUrl = `${BASE_URL}/api/payments/verify/${uniqueReference}?txHash=${mockTxHash}`;
-      const verifyResponse = await fetch(verifyUrl);
-      const verifyResult = await verifyResponse.json();
-
-      console.log(`🏁 [Agent]: Verification Response Status -> ${verifyResult.message}`);
-
-      console.log("🔑 [Agent]: Re-requesting asset using payment reference authentication...");
-      const finalResponse = await fetch(PROTECTED_RESOURCE, {
-        method: "POST",
-        headers: { "X-ArcFlare-Reference": uniqueReference }
-      });
-
-      const cleanPayload = await finalResponse.json();
-
-      if (finalResponse.status === 200) {
-        console.log("🔓 [Agent]: Access Granted! Unlocked Payload:", cleanPayload.data.secretPayload);
-      } else {
-        console.log(`❌ [Agent]: Access Denied! Gateway responded with error code (${finalResponse.status}):`, cleanPayload.message || cleanPayload.error);
-      }
-
-    } else {
-      console.log("❌ Unexpected status code received:", response.status);
+    // Align validation checks with backend JSON properties
+    if (!initResponse.ok || !initResult.status) {
+      throw new Error(`Intent initialization rejected: ${initResult.error || initResult.message || 'Unknown backend error'}`);
     }
+
+    const { reference, authorization_url } = initResult.data;
+    console.log(`📡 Intent Accepted! Reference Token Generated: ${reference}`);
+    console.log(`🔗 Hosted Checkout Matrix URL: ${authorization_url}`);
+
+    // STEP 2: SIMULATE THE ON-CHAIN TRANSACTION ON THE ARC TESTNET
+    console.log("\n[Step 2] Emulating cryptographic block broadcast on Arc Testnet...");
+    console.log("⚡ Note: Transaction costs are paid directly out of the tUSDC balance layer.");
+    
+    const mockTxHash = "0xSUCCESS"; 
+    console.log(`⛓️ Broadcast Complete. Simulated Tx Hash: ${mockTxHash}`);
+
+    // STEP 3: SUBMIT THE BLOCK HASH TO THE VERIFICATION CONTROLLER FOR SETTLEMENT
+    console.log("\n[Step 3] Submitting proof-of-payment to verification API...");
+    const verifyResponse = await fetch(`${GATEWAY_URL}/api/payments/verify/${reference}?txHash=${mockTxHash}`);
+    const verifyResult = await verifyResponse.json();
+
+    if (verifyResult.status && verifyResult.data.status === "SUCCESS") {
+      console.log("\n=================================================================");
+      console.log("✅ TRANSACTION SUCCESS: ArcFlare Ledger Has Settled.");
+      console.log(`📦 Settled Reference: ${verifyResult.data.reference}`);
+      console.log(`🎯 CCTP Attestation Engine Status: ${verifyResult.data.cctp_telemetry.attestation_status}`);
+      console.log(`💾 Simulated Gas Strategy: Paid using native network dollar rails.`);
+      console.log("=================================================================");
+    } else {
+      console.log(`❌ Verification Pending: ${verifyResult.message || 'Awaiting block processing'}`);
+    }
+
   } catch (error) {
-    console.error("❌ Execution Error: Could not reach the server.", error.message);
+    console.error(`\n❌ Operational Pipeline Exception: ${error.message}`);
   }
 }
 
-runAgentTask();
+// Execute the run context
+executeAgentPaymentPipeline();
