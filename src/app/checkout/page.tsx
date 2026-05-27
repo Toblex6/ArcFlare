@@ -14,7 +14,7 @@ export default function CheckoutHubPage() {
     setError(null);
 
     try {
-      // 1. Hit your backend initialization API just like simulateAgent.js does
+      // 1. Send the standard initialization payload to your backend router
       const res = await fetch("/api/payments/initialize", {
         method: "POST",
         headers: {
@@ -29,17 +29,22 @@ export default function CheckoutHubPage() {
       });
 
       const result = await res.json();
+      
+      // 🚀 ARCFLARE TELEMETRY DEBUG LOGGER
+      console.log("=== ARCFLARE DEBUG DATA ===", result);
 
-      // 2. Extract the reference token depending on your backend payload structure
-      const reference = result.reference || result.data?.reference;
+      // 2. Multi-tier property extractor to handle varying backend schema variations
+      const reference = result.reference || result.data?.reference || result.token || result.data?.token;
 
       if (reference) {
-        // 3. Programmatically route the tester straight into your dynamic checkout matrix
+        // 3. Slide the test runner directly into the active payment window
         router.push(`/checkout/${reference}`);
       } else {
-        setError("Ledger rejected context token generation.");
+        // Expose exact failure properties sent over the line by your DB / ORM layers
+        setError(result.message || result.error || "Ledger rejected context token generation.");
       }
     } catch (err) {
+      console.error("API Connection Error:", err);
       setError("Unable to initialize connection with ArcFlare Gateway.");
     } finally {
       setIsInitializing(false);
