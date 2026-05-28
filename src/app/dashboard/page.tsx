@@ -33,6 +33,11 @@ export default function MerchantDashboard() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  // --- Agent Deployment Interface States ---
+  const [isDeploying, setIsDeploying] = useState<boolean>(false);
+  const [deployedAgent, setDeployedAgent] = useState<any>(null);
+  const [deploymentError, setDeploymentError] = useState<string | null>(null);
+
   const fetchLiveDatabaseState = async (isSilentUpdate = false) => {
     try {
       const res = await fetch("/api/payments/all");
@@ -53,11 +58,38 @@ export default function MerchantDashboard() {
     }
   };
 
+  // --- Interactive Trigger for API Route Handler ---
+  const triggerAgentLifecycle = async () => {
+    setIsDeploying(true);
+    setDeploymentError(null);
+    try {
+      const res = await fetch("/api/agent/deploy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentName: "DeFi Arbitrage Agent v1.0",
+          metadataUri: "ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei"
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "On-chain lifecycle execution failed.");
+      }
+
+      setDeployedAgent(data);
+    } catch (err: any) {
+      console.error("Deployment Routine Error:", err);
+      setDeploymentError(err.message || "Failed to finalize agent configuration framework.");
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
   useEffect(() => {
-    // Initial loading execution sequence
     fetchLiveDatabaseState();
 
-    // Configure a 5-second automatic data polling background routine
     const interval = setInterval(() => {
       fetchLiveDatabaseState(true);
     }, 5000);
@@ -82,6 +114,7 @@ export default function MerchantDashboard() {
       </div>
 
       <div className="max-w-6xl mx-auto">
+        {/* Header Segment */}
         <div className="flex items-center justify-between border-b border-[#3a2a20] pb-6 mb-10">
           <div className="flex items-center gap-4">
             <Image src="/arcflare-logo.png" alt="ArcFlare Logo" width={50} height={50} className="object-contain" />
@@ -101,7 +134,8 @@ export default function MerchantDashboard() {
           </div>
         )}
 
-        <div className="grid md:grid-cols-3 gap-6 mb-10">
+        {/* Core Metrics Grid */}
+        <div className="grid md:grid-cols-3 gap-6 mb-8">
           <div className="bg-[#1f140f] border border-[#3a2a20] p-6 rounded-2xl shadow-xl">
             <p className="text-gray-400 text-xs uppercase tracking-wider mb-2">Testnet Volume Settled</p>
             <h2 className="text-3xl font-extrabold text-white font-mono">
@@ -127,49 +161,47 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl overflow-hidden">
-          <h3 className="text-lg font-bold mb-6 tracking-wide">Live Database Transaction Stream</h3>
-          
-          {payments.length === 0 ? (
-            <p className="text-gray-500 text-center py-8 font-mono text-sm">No transaction events captured on the current database slice yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-[#3a2a20] text-gray-400 text-xs uppercase tracking-wider">
-                    <th className="py-4 px-4">Tracking ID</th>
-                    <th className="py-4 px-4">Payer Entity</th>
-                    <th className="py-4 px-4">Settlement Bridge Layer</th>
-                    <th className="py-4 px-4 text-right">Gross Amount</th>
-                    <th className="py-4 px-4 text-center">CCTP Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#3a2a20]/40 text-sm font-mono">
-                  {payments.map((item) => (
-                    <tr key={item.id} className="hover:bg-[#2a1c15]/30 transition-all">
-                      <td className="py-4 px-4 font-mono text-amber-400 text-xs select-all">{item.reference}</td>
-                      <td className="py-4 px-4 text-gray-300 text-xs truncate max-w-[150px]">{item.sender_email}</td>
-                      <td className="py-4 px-4 text-gray-400 text-xs">{item.chain}</td>
-                      <td className="py-4 px-4 text-right font-bold text-white">
-                        {item.amount} <span className="text-xs font-normal text-amber-400">{item.currency}</span>
-                      </td>
-                      <td className="py-4 px-4 text-center">
-                        <span className={`inline-block text-[10px] uppercase font-bold px-2.5 py-1 rounded-md tracking-wider ${
-                          item.status === "SUCCESS" 
-                            ? "bg-green-500/10 text-green-400 border border-green-500/20" 
-                            : "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
-                        }`}>
-                          {item.cctp_telemetry?.attestation_status.replace(/_/g, " ")}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* NEW: ERC-8004 Agent Integration Pipeline Interface */}
+        <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl mb-8 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#3a2a20]/60 pb-4">
+            <div>
+              <h3 className="text-base font-bold tracking-wide">ERC-8004 Agent Provisioning Pipeline</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Programmatically instantiate sandboxed SCA nodes with multi-layer registry tracking</p>
+            </div>
+            <button
+              onClick={triggerAgentLifecycle}
+              disabled={isDeploying}
+              className={`font-mono text-xs uppercase tracking-wider px-5 py-3 rounded-xl font-bold border transition-all ${
+                isDeploying
+                  ? "bg-amber-500/5 text-amber-400/40 border-amber-500/10 cursor-not-allowed animate-pulse"
+                  : "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20 active:scale-[0.98]"
+              }`}
+            >
+              {isDeploying ? "COMPILING & POLLING BLOCKS..." : "⚡ LAUNCH AGENT LIFECYCLE"}
+            </button>
+          </div>
+
+          {/* Deployment Error Alert */}
+          {deploymentError && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 text-xs font-mono text-red-400">
+              ❌ Operational Exception: {deploymentError}
             </div>
           )}
-        </div>
-      </div>
-    </main>
-  );
-}
+
+          {/* Live Dynamic Agent Metadata Footprint Display */}
+          {deployedAgent && (
+            <div className="bg-[#120b08]/60 border border-[#3a2a20]/40 rounded-2xl p-4 space-y-4 font-mono text-xs">
+              <div className="flex items-center justify-between border-b border-[#3a2a20]/30 pb-2">
+                <span className="text-green-400 font-bold tracking-wide flex items-center gap-1.5 uppercase">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-ping" /> Live Agent Registry Footprint Bound
+                </span>
+                <span className="text-gray-400">Agent Token ID: <span className="text-amber-400 font-bold">#{deployedAgent.agentId}</span></span>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <span className="text-gray-500 text-[11px] uppercase tracking-wider">Owner SCA Node Address</span>
+                  <div className="p-2.5 bg-[#1f140f] border border-[#3a2a20]/60 text-gray-300 rounded-lg select-all truncate">
+                    {deployedAgent.wallets?.owner}
+                  </div>
+                </div>
