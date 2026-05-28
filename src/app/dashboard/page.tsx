@@ -205,3 +205,11 @@ export default function MerchantDashboard() {
                     {deployedAgent.wallets?.owner}
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}

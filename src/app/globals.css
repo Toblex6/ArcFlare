@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "@rainbow-me/rainbowkit/styles.css";
+/*@import "~@rainbow-me/rainbowkit/styles.css";*/
 
 /* Base fallback configurations */
 :root {
