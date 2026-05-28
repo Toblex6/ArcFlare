@@ -1,60 +1,71 @@
 import axios from "axios";
+import { withWallet } from "@walletconnect/cli-sdk";
+import { ethers } from "ethers";
 
-// Target endpoint on your live Render backend gateway
-const TARGET_URL = "https://arcflare-gateway.onrender.com/api/agent-data";
+const TARGET_API = "http://localhost:3000/api/v1/agent-service";
 
-async function simulateAgent() {
-  console.log("🤖 [Agent]: Attempting to query protected data stream...");
+async function runAutonomousLifecycle() {
+  console.log("🤖 [Agent] Attempting to access premium data pipeline...");
 
   try {
-    // 1. First attempt: Call the endpoint cleanly without any payment tokens
-    const initialResponse = await axios.get(TARGET_URL);
-    console.log("Initial response:", initialResponse.data);
+    // FIRST ATTEMPT: Try to grab the asset for free
+    const response = await axios.post(TARGET_API, { query: "fetch_market_signals" });
+    console.log("Response:", response.data);
     
   } catch (error: any) {
-    // Check if the server responded with an expected HTTP roadblock code
-    if (error.response) {
-      if (error.response.status === 402) {
-        const paymentChallenge = error.response.data;
-        
-        console.log(`\n⚠️ [Paywall Hit]: HTTP 402 Payment Required!`);
-        console.log(`💸 [Cost]: ${paymentChallenge.amount} ${paymentChallenge.currency} on ${paymentChallenge.settlementChain}`);
-        console.log(`🏦 [Vault Address]: ${paymentChallenge.paymentAddress}`);
-        console.log(`💬 [Challenge]: "${paymentChallenge.message}"`);
-        
-        // 2. Autonomous Settlement: Simulate generating an on-chain transaction reference hash
-        console.log("\n⚙️ [Agent]: Signer triggered. Generating payment authorization and signing payload...");
-        const mockTxReference = "arc_tx_" + Math.random().toString(36).substring(2, 15);
-        
-        console.log(`🚀 [Agent]: Retrying data query with reference header: ${mockTxReference}\n`);
+    // Check if the server caught us and threw an intentional 402 roadblock
+    if (error.response && error.response.status === 402) {
+      const roadblockParams = error.response.data;
+      console.log(`🛑 [Agent] Hit HTTP 402 Roadblock! Cost detected: ${roadblockParams.amount_due} ${roadblockParams.currency}`);
+      
+      console.log("✍️ [Agent] Spinning up WalletConnect session to execute secure on-chain payment...");
 
-        // 3. Second attempt: Re-query the endpoint with the mandatory settlement headers attached
-        try {
-          const paidResponse = await axios.get(TARGET_URL, {
-            headers: {
-              "x-payment-reference": mockTxReference,
-              "x-agent-email": "siggy-bot@arcflare.xyz",
-              "x-merchant-name": "ArcFlare Main Engine"
+      // Replaces the old random text simulation with an actual Arc Testnet payment contract action!
+      await withWallet(
+        {
+          projectId: "your_walletconnect_project_id", // From cloud.walletconnect.com
+          metadata: {
+            name: "ArcFlare Autonomous Buyer",
+            description: "AgentFi Settlement Engine",
+            url: "https://arcflare-gateway.onrender.com"
+          }
+        },
+        async (wallet, { accounts }) => {
+          const agentWalletAddress = accounts[0].split(":").pop();
+          console.log(`📡 Paired Agent Address: ${agentWalletAddress}`);
+
+          // Request an actual cryptographic transaction broadcast from the paired wallet
+          const realTxHash = await wallet.request({
+            chainId: "eip155:49111", // Arc Testnet L1 Chain ID
+            request: {
+              method: "eth_sendTransaction",
+              params: [{
+                from: agentWalletAddress,
+                to: roadblockParams.payment_gateway_address, // Dynamic extraction straight from the 402 data!
+                value: ethers.utils.parseUnits(roadblockParams.amount_due.toString(), 6).toHexString() // Parse 0.01 USDC
+              }]
             }
           });
 
-          console.log("✅ [Success] Data unlocked seamlessly by Agent:");
-          console.dir(paidResponse.data, { depth: null });
+          console.log(`⛽ [Agent] Real transaction broadcasted to Arc L1! Tx Hash: ${realTxHash}`);
+
+          console.log("🔄 [Agent] Re-submitting data request with cryptographic payment proof in headers...");
           
-        } catch (retryError: any) {
-          console.error("❌ Retry failed:", retryError.response?.data || retryError.message);
+          // SECOND ATTEMPT: Try again, sending the valid realTxHash in the headers
+          const secondAttempt = await axios.post(
+            TARGET_API, 
+            { query: "fetch_market_signals" },
+            { headers: { "x-arcflare-tx-hash": realTxHash } }
+          );
+
+          console.log("✅ [Agent] Resource unlocked successfully!");
+          console.log("📦 Ingested Payload Data:", secondAttempt.data.data);
         }
-      } else {
-        console.error(`❌ Server Responded with Status: ${error.response.status}`);
-        console.error("Data:", error.response.data);
-      }
+      );
     } else {
-      // The server wasn't reached at all (e.g., Network Error or Server Offline)
-      console.error("\n❌ Connection Details Failed:");
-      console.error(`   Message: ${error.message}`);
-      console.error(`   Code:    ${error.code || "N/A"}`);
+      console.error("Fatal Agent Loop Interruption:", error.message);
     }
   }
 }
 
-simulateAgent();
+runAutonomousLifecycle();
