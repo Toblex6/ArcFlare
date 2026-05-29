@@ -1,3 +1,4 @@
+// schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -16,5 +17,6 @@ model PaymentLog {
   senderEmail  String
   merchant     String
   status       String
+  arcTxHash    String?  // 1. ← Add this optional field for on-chain verification tracking
   timestamp    DateTime @default(now())
 }

@@ -1,4 +1,6 @@
-import { NextRequest, NextResponse } from "next";
+// src/app/api/v1/agent-service/route.ts
+// ✅ FIXED: Imported from "next/server" instead of "next" to satisfy Next.js App Router type rules
+import { NextRequest, NextResponse } from "next/server";
 
 // This is the "vending machine" endpoint that software interacts with
 export async function POST(req: NextRequest) {

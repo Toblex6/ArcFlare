@@ -1,3 +1,4 @@
+// src/services/agentPayService.ts
 import { withWallet } from "@walletconnect/cli-sdk";
 import { ethers } from "ethers";
 import * as dotenv from "dotenv";
@@ -21,8 +22,10 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
     throw new Error("Missing WALLETCONNECT_PROJECT_ID in environment variables.");
   }
 
-  // Convert human-readable USDC to standard 6-decimal format
-  const parsedAmount = ethers.utils.parseUnits(intent.amountInUSDC, 6).toHexString();
+  // ✅ FIXED: Ethers v6 flattens parseUnits directly on the base package namespace and outputs a BigInt
+  // We use .toString() combined with ethers.toBeHex() to get a clean hexadecimal value string for the RPC
+  const parsedBigIntAmount = ethers.parseUnits(intent.amountInUSDC, 6);
+  const parsedAmountHex = ethers.toBeHex(parsedBigIntAmount);
 
   console.log(`🤖 AI Agent: Initiating transaction for reference ${intent.paymentReference}...`);
 
@@ -55,7 +58,7 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
                 from: agentAssociatedAddress,
                 to: intent.merchantAddress,
                 data: "0x", // If interacting with an absolute stablecoin contract, pass ERC20 transfer abi hex here
-                value: parsedAmount, 
+                value: parsedAmountHex, 
               },
             ],
           },
@@ -64,8 +67,8 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
         console.log(`🟢 ArcFlare Agent Payment Dispatched Successfully!`);
         console.log(`🔗 Arc Testnet Tx Hash: ${txHash}`);
 
-        // Automatically hand off the txHash to your existing verification endpoint
-        await triggerArcFlareVerification(intent.paymentReference, txHash);
+        // ✅ FIXED: Force-cast txHash as string to pass safety rules for unknown object structures
+        await triggerArcFlareVerification(intent.paymentReference, txHash as string);
 
       } catch (error) {
         console.error("🔴 Agent transaction failed or was rejected by supervisor:", error);

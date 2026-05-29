@@ -85,7 +85,11 @@ export async function POST(request: Request) {
     });
 
     const latestBlock = await publicClient.getBlockNumber();
-    const fromBlock = latestBlock > 500n ? latestBlock - 500n : 0n; // Narrow search window for speed
+    
+    // ✅ FIXED: Using explicit BigInt() constructor wrapper instead of native literals (500n, 0n)
+    // This allows compilation under lower ES targets without throwing compilation blocks
+    const searchWindow = BigInt(500);
+    const fromBlock = latestBlock > searchWindow ? latestBlock - searchWindow : BigInt(0);
 
     const transferLogs = await publicClient.getLogs({
       address: IDENTITY_REGISTRY,
