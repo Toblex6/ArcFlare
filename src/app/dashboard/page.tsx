@@ -106,7 +106,8 @@ export default function MerchantDashboard() {
   }
 
   return (
-    <main className="min-h-screen bg-[#120b08] text-white px-6 py-10 font-sans">
+    <main className="min-h-screen bg-[#120b08] text-white px-6 py-10 font-sans selection:bg-amber-400 selection:text-black">
+      {/* Network Alert Banner */}
       <div className="max-w-6xl mx-auto mb-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-center">
         <p className="text-xs text-amber-400 font-mono tracking-wide uppercase">
           ⚠️ ArcFlare Ecosystem Monitoring Node — Running on <span className="underline font-bold">Arc Testnet Mode</span>. Connected to Live Cloud Ledger.
@@ -161,7 +162,7 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* NEW: ERC-8004 Agent Integration Pipeline Interface */}
+        {/* ERC-8004 Agent Integration Pipeline Interface */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl mb-8 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#3a2a20]/60 pb-4">
             <div>
@@ -209,6 +210,115 @@ export default function MerchantDashboard() {
             </div>
           )}
         </div>
+
+        {/* New: Inbound Agent Settlement Streams Visualizer Matrix */}
+        <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl shadow-2xl overflow-hidden">
+          <div className="p-5 border-b border-[#3a2a20]/60 bg-[#1a100b]/40 flex justify-between items-center">
+            <h3 className="text-sm font-mono tracking-wider font-bold text-gray-300 uppercase">
+              Inbound Agent Settlement Streams
+            </h3>
+            <span className="text-[10px] px-2.5 py-1 rounded-full bg-[#120b08] text-gray-400 border border-[#3a2a20] font-mono">
+              Prisma Database Synchronization
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[#3a2a20]/40 bg-[#120b08]/30 text-gray-500 text-xs font-mono uppercase tracking-wider">
+                  <th className="p-4 font-semibold">Reference / Timestamp</th>
+                  <th className="p-4 font-semibold">Entity M2M Graph</th>
+                  <th className="p-4 font-semibold">Execution Domain</th>
+                  <th className="p-4 font-semibold text-right">Payload Value</th>
+                  <th className="p-4 font-semibold text-center">Status</th>
+                  <th className="p-4 font-semibold">Circle CCTP Attestation Trace</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#3a2a20]/30 font-sans text-sm text-gray-300">
+                {payments.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-10 text-center font-mono text-xs text-gray-500 uppercase tracking-wider">
+                      No computational payment assets found inside live ledger matrix.
+                    </td>
+                  </tr>
+                ) : (
+                  payments.map((tx) => (
+                    <tr key={tx.id} className="hover:bg-[#1a100b]/20 transition-all group">
+                      {/* Reference & Clock */}
+                      <td className="p-4">
+                        <div className="font-mono text-xs font-bold text-gray-200 group-hover:text-amber-400 transition-colors">
+                          {tx.reference}
+                        </div>
+                        <div className="text-[11px] text-gray-500 font-mono mt-1">
+                          {new Date(tx.paid_at).toLocaleString()}
+                        </div>
+                      </td>
+
+                      {/* Bot Matrix Graph Emails */}
+                      <td className="p-4">
+                        <div className="text-xs font-medium text-gray-300 max-w-[220px] truncate" title={tx.sender_email}>
+                          {tx.sender_email}
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-1">
+                          <span>➔ Merchant:</span>
+                          <span className="text-gray-400 font-medium">{tx.merchant}</span>
+                        </div>
+                      </td>
+
+                      {/* Block Chain Infrastructure String */}
+                      <td className="p-4">
+                        <span className="text-xs px-2.5 py-0.5 rounded bg-[#120b08] border border-[#3a2a20] text-gray-400 font-mono">
+                          {tx.chain}
+                        </span>
+                      </td>
+
+                      {/* Token Value Display */}
+                      <td className="p-4 text-right font-mono font-bold text-gray-200">
+                        {tx.amount.toFixed(2)}{" "}
+                        <span className="text-xs text-amber-400 font-normal">{tx.currency}</span>
+                      </td>
+
+                      {/* Consensus Status Flag */}
+                      <td className="p-4 text-center">
+                        <span
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase border ${
+                            tx.status === "SUCCESS"
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              : "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
+                          }`}
+                        >
+                          {tx.status}
+                        </span>
+                      </td>
+
+                      {/* Bridge Interoperability Verification */}
+                      <td className="p-4">
+                        <div className="flex flex-col gap-1 max-w-[280px]">
+                          <div className="flex items-center justify-between text-[11px] font-mono">
+                            <span className="text-gray-500">Attestation:</span>
+                            <span
+                              className={`font-semibold text-right truncate pl-2 max-w-[170px] ${
+                                tx.status === "SUCCESS" ? "text-emerald-400" : "text-amber-400"
+                              }`}
+                              title={tx.cctp_telemetry.attestation_status}
+                            >
+                              {tx.cctp_telemetry.attestation_status}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] font-mono border-t border-[#3a2a20]/30 pt-1">
+                            <span className="text-gray-500">Cross-Domain Nonce:</span>
+                            <span className="text-gray-400 font-bold">{tx.cctp_telemetry.nonce}</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </main>
   );

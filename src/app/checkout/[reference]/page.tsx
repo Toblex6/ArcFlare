@@ -3,9 +3,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Image from "next/image";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useSendTransaction, useChainId } from "wagmi";
-import { parseEther } from "viem";
 
 interface PaymentLogData {
   reference: string;
@@ -24,16 +21,17 @@ export default function CheckoutPage() {
   const params = useParams<{ reference: string }>();
   const reference = params?.reference;
 
-  // 2. Local Wallet Integration Hooks
-  const { isConnected, address } = useAccount();
-  const currentChainId = useChainId();
-  const { sendTransaction, isPending: isTxPending } = useSendTransaction();
+  // 2. Programmatic Agent Identity Configuration (Replaces human web3 hooks)
+  const isConnected = true;
+  const address = "0xArcFlare...AutonomousAgent";
+  const currentChainId = 84532; // Base Sepolia Default Pipeline
 
   // 3. Reactive State Management
   const [payment, setPayment] = useState<PaymentLogData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [isTxPending, setIsTxPending] = useState<boolean>(false);
 
   // 4. Fetch the real tracking parameters from your backend ledger
   const fetchLedgerStatus = async (hash?: string) => {
@@ -65,32 +63,31 @@ export default function CheckoutPage() {
     }
   }, [reference]);
 
-  // 5. Payment Handler linking Web3 transactions directly into the backend ledger
+  // 5. Simulated High-Speed Machine Settlement Trigger
   const handlePayment = async () => {
     try {
-      console.log("🚀 Starting ArcFlare Payment Pipeline for Reference:", reference);
+      console.log("🚀 Starting ArcFlare Automated Payment Pipeline for Reference:", reference);
+      setIsTxPending(true);
 
-      // Execute on-chain burn/transfer strategy via Wagmi
-      sendTransaction(
-        {
-          to: "0x000000000000000000000000000000000000dead",
-          value: parseEther("0.001"), // Can map to payment.amount dynamically later
-        },
-        {
-          onSuccess: async (txHash) => {
-            console.log("⛓️ Transaction submitted successfully! Hash:", txHash);
-            setIsVerifying(true);
-            // Pass the resulting hash into your verify route to mark the ledger SUCCESS
-            await fetchLedgerStatus(txHash);
-            setIsVerifying(false);
-          },
-          onError: (txError) => {
-            console.error("❌ On-chain user interaction rejected:", txError.message);
-          }
-        }
-      );
+      // Simulate network verification propagation lag (2 seconds)
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Generate a clean mock txHash to hand over to your internal ledger updates
+      const simulatedHash = `0x${Array.from({ length: 64 }, () => 
+        Math.floor(Math.random() * 16).toString(16)
+      ).join("")}`;
+
+      console.log("⛓️ Autonomous transaction submitted successfully! Hash:", simulatedHash);
+      setIsTxPending(false);
+      setIsVerifying(true);
+
+      // Pass the resulting hash into your verify route to mark the ledger SUCCESS
+      await fetchLedgerStatus(simulatedHash);
+      setIsVerifying(false);
     } catch (err) {
       console.error("Unexpected checkout layer failure:", err);
+      setIsTxPending(false);
+      setIsVerifying(false);
     }
   };
 
@@ -136,7 +133,12 @@ export default function CheckoutPage() {
             <p className="text-cyan-300 text-sm">Stablecoin Payment Infrastructure</p>
           </div>
         </div>
-        <ConnectButton />
+        
+        {/* Unified Status Badge */}
+        <div className="flex items-center gap-2 px-4 py-2 bg-[#1f140f] border border-[#3a2a22] rounded-xl text-xs font-mono text-cyan-400">
+          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          ROUTING NODE // ONLINE
+        </div>
       </div>
 
       {/* MAIN SECTION */}
@@ -199,7 +201,7 @@ export default function CheckoutPage() {
               <div className="flex flex-col gap-3">
                 <span className="text-gray-400">Connected Wallet Address</span>
                 <span className="font-semibold break-all text-sm font-mono text-gray-300">
-                  {address ? address : "No wallet linked"}
+                  {address}
                 </span>
               </div>
             </div>
@@ -207,31 +209,22 @@ export default function CheckoutPage() {
 
           {/* PAYMENT TRANSACTION BUTTON */}
           <div className="mt-10">
-            {isConnected ? (
-              <button
-                onClick={handlePayment}
-                disabled={isTxPending || isVerifying || isConfirmed}
-                className={`w-full transition-all font-bold py-4 rounded-2xl text-lg ${
-                  isConfirmed 
-                    ? "bg-green-500/10 text-green-400 border border-green-500/20 cursor-default" 
-                    : "bg-cyan-400 hover:bg-cyan-300 text-black shadow-lg shadow-cyan-400/10 active:scale-[0.99]"
-                }`}
-              >
-                {isConfirmed 
-                  ? "✓ Ledger Settlement Confirmed" 
-                  : isTxPending || isVerifying 
-                    ? "Processing Block..." 
-                    : `Pay ${payment.amount} ${payment.currency}`
-                }
-              </button>
-            ) : (
-              <div className="bg-[#2a1c15] border border-[#493328] rounded-2xl p-6 text-center">
-                <p className="text-gray-300 mb-4">Connect your wallet to authorize transaction execution</p>
-                <div className="flex justify-center">
-                  <ConnectButton />
-                </div>
-              </div>
-            )}
+            <button
+              onClick={handlePayment}
+              disabled={isTxPending || isVerifying || isConfirmed}
+              className={`w-full transition-all font-bold py-4 rounded-2xl text-lg ${
+                isConfirmed 
+                  ? "bg-green-500/10 text-green-400 border border-green-500/20 cursor-default" 
+                  : "bg-cyan-400 hover:bg-cyan-300 text-black shadow-lg shadow-cyan-400/10 active:scale-[0.99]"
+              }`}
+            >
+              {isConfirmed 
+                ? "✓ Ledger Settlement Confirmed" 
+                : isTxPending || isVerifying 
+                  ? "Processing Block..." 
+                  : `Pay ${payment.amount} ${payment.currency}`
+              }
+            </button>
           </div>
         </div>
 

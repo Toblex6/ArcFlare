@@ -1,11 +1,10 @@
-import "@/app/globals.css";
+import type { Metadata } from "next";
+import "./globals.css";
 import Providers from "./providers";
-// ── 1. Import the new widget safely ──────────────────────────────────
-import FlowFiFeedback from "@/components/FlowFiFeedback"; 
 
-export const metadata = {
-  title: "ArcFlare",
-  description: "Stablecoin Payment Gateway",
+export const metadata: Metadata = {
+  title: "ArcFlare | Agentic Stablecoin Infrastructure",
+  description: "Stablecoin payment infrastructure and agentic finance layer on Arc.",
 };
 
 export default function RootLayout({
@@ -14,13 +13,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" className="bg-[#120b08]">
+      <body className="font-sans antialiased m-0 p-0">
         <Providers>
           {children}
-          
-          {/* ── 2. Add the component right here inside your providers ── */}
-          <FlowFiFeedback />
         </Providers>
       </body>
     </html>

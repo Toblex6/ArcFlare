@@ -12,10 +12,12 @@ export async function GET() {
       },
     });
 
-    // 2. Compute dynamic aggregate pipeline analytics
-    const totalVolume = paymentLogs
+    // 2. Compute dynamic aggregate pipeline analytics with safe float precision
+    const rawVolume = paymentLogs
       .filter((log) => log.status === "SUCCESS")
       .reduce((accum, current) => accum + current.amount, 0);
+    
+    const totalVolume = Number(rawVolume.toFixed(4)); // Safe float precision limiter (removes trailing .0000000000000004)
 
     const successfulCount = paymentLogs.filter((log) => log.status === "SUCCESS").length;
     const successRate = paymentLogs.length > 0 ? (successfulCount / paymentLogs.length) * 100 : 100;
