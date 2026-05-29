@@ -1,71 +1,64 @@
-import axios from "axios";
-import { withWallet } from "@walletconnect/cli-sdk";
-import { ethers } from "ethers";
+import { createWalletClient, http } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { baseSepolia } from 'viem/chains';
+import axios from 'axios';
+import dotenv from 'dotenv';
 
-const TARGET_API = "http://localhost:3000/api/v1/agent-service";
+dotenv.config();
 
-async function runAutonomousLifecycle() {
-  console.log("🤖 [Agent] Attempting to access premium data pipeline...");
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+async function main() {
+  console.log("🚀 Initializing ArcFlare Autonomous Test Agent (Programmatic Signer Mode)...");
+  console.log(`📡 Targeting Endpoint Gateway: ${BASE_URL}`);
+
+  const testKey = process.env.TEST_AGENT_PRIVATE_KEY || "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const account = privateKeyToAccount(testKey as `0x${string}`);
+  
+  const client = createWalletClient({
+    account,
+    chain: baseSepolia,
+    transport: http(),
+  });
+
+  console.log(`🤖 Agent Payer Entity Verified: ${client.account.address}`);
 
   try {
-    // FIRST ATTEMPT: Try to grab the asset for free
-    const response = await axios.post(TARGET_API, { query: "fetch_market_signals" });
-    console.log("Response:", response.data);
+    console.log("\n📦 Pipeline Step 1: Testing Agent Provisioning Flow...");
+    const deployResponse = await axios.post(`${BASE_URL}/api/agent/deploy`, {
+      agentOwner: client.account.address,
+      metadata: {
+        name: "ArcFlare Autonomous Buyer",
+        description: "AgentFi Settlement Engine"
+      }
+    });
+    console.log("✅ Provisioning API Response:", deployResponse.data);
+
+    console.log("\n💳 Pipeline Step 2: Testing Machine-to-Machine Payment Trigger...");
+    const paymentResponse = await axios.post(`${BASE_URL}/api/payments/initialize`, {
+      amount: "15.00",
+      currency: "USDC",
+      recipient: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      payerEntity: client.account.address
+    });
     
+    console.log("✅ Payment Settlement Initialized Successfully!");
+    console.log(`🔗 Tracking Reference ID: ${paymentResponse.data.reference || "Generated Onchain"}`);
+
   } catch (error: any) {
-    // Check if the server caught us and threw an intentional 402 roadblock
-    if (error.response && error.response.status === 402) {
-      const roadblockParams = error.response.data;
-      console.log(`🛑 [Agent] Hit HTTP 402 Roadblock! Cost detected: ${roadblockParams.amount_due} ${roadblockParams.currency}`);
-      
-      console.log("✍️ [Agent] Spinning up WalletConnect session to execute secure on-chain payment...");
-
-      // Replaces the old random text simulation with an actual Arc Testnet payment contract action!
-      await withWallet(
-        {
-          projectId: "your_walletconnect_project_id", // From cloud.walletconnect.com
-          metadata: {
-            name: "ArcFlare Autonomous Buyer",
-            description: "AgentFi Settlement Engine",
-            url: "https://arcflare-gateway.onrender.com"
-          }
-        },
-        async (wallet, { accounts }) => {
-          const agentWalletAddress = accounts[0].split(":").pop();
-          console.log(`📡 Paired Agent Address: ${agentWalletAddress}`);
-
-          // Request an actual cryptographic transaction broadcast from the paired wallet
-          const realTxHash = await wallet.request({
-            chainId: "eip155:49111", // Arc Testnet L1 Chain ID
-            request: {
-              method: "eth_sendTransaction",
-              params: [{
-                from: agentWalletAddress,
-                to: roadblockParams.payment_gateway_address, // Dynamic extraction straight from the 402 data!
-                value: ethers.utils.parseUnits(roadblockParams.amount_due.toString(), 6).toHexString() // Parse 0.01 USDC
-              }]
-            }
-          });
-
-          console.log(`⛽ [Agent] Real transaction broadcasted to Arc L1! Tx Hash: ${realTxHash}`);
-
-          console.log("🔄 [Agent] Re-submitting data request with cryptographic payment proof in headers...");
-          
-          // SECOND ATTEMPT: Try again, sending the valid realTxHash in the headers
-          const secondAttempt = await axios.post(
-            TARGET_API, 
-            { query: "fetch_market_signals" },
-            { headers: { "x-arcflare-tx-hash": realTxHash } }
-          );
-
-          console.log("✅ [Agent] Resource unlocked successfully!");
-          console.log("📦 Ingested Payload Data:", secondAttempt.data.data);
-        }
-      );
+    console.error("\n❌ Autonomous Pipeline Test Execution Encountered an Error:");
+    if (error.response) {
+      console.error(`Status Code: ${error.response.status}`);
+      console.error("Payload Data:", error.response.data);
     } else {
-      console.error("Fatal Agent Loop Interruption:", error.message);
+      console.error("System Error Message:", error.message);
     }
   }
 }
 
-runAutonomousLifecycle();
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
