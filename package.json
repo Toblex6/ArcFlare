@@ -12,8 +12,11 @@
     "@circle-fin/developer-controlled-wallets": "^10.5.5",
     "@prisma/client": "^6.13.0",
     "@rainbow-me/rainbowkit": "^2.2.11",
+    "@tailwindcss/postcss": "^4.3.0",
     "@tanstack/react-query": "^5.100.14",
     "@types/axios": "^0.9.36",
+    "@types/node": "^25.9.1",
+    "@types/react": "19.2.15",
     "@walletconnect/cli-sdk": "^0.8.5",
     "axios": "^1.16.1",
     "dotenv": "^17.4.2",
@@ -22,13 +25,9 @@
     "prisma": "^6.13.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "typescript": "^6.0.3",
     "viem": "^2.51.3",
     "wagmi": "^2.19.5"
   },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.0",
-    "@types/node": "^25.9.1",
-    "@types/react": "19.2.15",
-    "typescript": "^6.0.3"
-  }
+  "devDependencies": {}
 }
