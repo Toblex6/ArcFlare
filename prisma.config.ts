@@ -1,4 +1,5 @@
 // @ts-nocheck
+import "dotenv/config"; // 💡 THE REAL FIX: Loads your local .env variables into process.env before Prisma executes
 import { defineConfig } from "prisma/config";
 
 // 💡 THE SOLUTION: 
@@ -7,6 +8,6 @@ import { defineConfig } from "prisma/config";
 export default defineConfig({
   schema: "prisma/schema.prisma",
   datasource: {
-    url: process.env.DATABASE_URL || "file:./dev.db",
+    url: process.env.DATABASE_URL,
   },
 });
