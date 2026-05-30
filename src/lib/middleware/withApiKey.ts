@@ -8,6 +8,11 @@ import { prisma } from "@/lib/prisma";
 export function withApiKey(handler: any) {
   return async (req: Request, context?: any) => {
     try {
+      // 💡 THE FIX: If it's just loading the interface (GET), bypass the key check!
+      if (req.method === "GET") {
+        return await handler(req, context);
+      }
+
       const nextUrl = new URL(req.url);
       const apiKey =
         req.headers.get("x-api-key") ??
