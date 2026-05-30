@@ -1,12 +1,13 @@
 // /api/payments/settle/route.ts
 // Replaces the fake setTimeout mock with real Circle CCTP attestation polling
-// and Arc L1 MessageTransmitter contract call.
+// and Arc L1 MessageTransmitter contract call. Locked down via API Key middleware.
 
 import { NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { createWalletClient, createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
+import { withApiKey } from "@/lib/middleware/withApiKey";
 
 const prisma = new PrismaClient();
 
@@ -93,8 +94,8 @@ async function mintOnArc(message: string, attestation: string): Promise<string> 
   return txHash;
 }
 
-// ─── Route Handler ────────────────────────────────────────────────────────────
-export async function POST(request: Request) {
+// ─── Internal Route Handler Logic ─────────────────────────────────────────────
+async function settleHandler(request: Request) {
   let fallbackReference: string | undefined;
 
   try {
@@ -103,8 +104,6 @@ export async function POST(request: Request) {
     fallbackReference = reference; // Cache reference safely for the catch block execution
 
     // messageHash is the keccak256 hash of the CCTP MessageSent event bytes
-    // from the burn transaction on the source chain (Arbitrum / Sepolia).
-    // Your frontend or agent must pass this after initiating the burn.
     if (!messageHash) {
       return NextResponse.json(
         {
@@ -117,7 +116,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. ✅ FIXED: Changed model to paymentLog to match your active SQLite configuration
+    // 1. Update status to polling state in your paymentLog table
     await prisma.paymentLog.update({
       where: { reference },
       data: { status: "POLLING_CIRCLE_TESTNET_IRIS_API" },
@@ -129,7 +128,7 @@ export async function POST(request: Request) {
     // 3. Submit attestation to Arc — this actually mints USDC on Arc L1
     const arcTxHash = await mintOnArc(message, attestation);
 
-    // 4. ✅ FIXED: Changed model to paymentLog and injected the real on-chain tracking hash
+    // 4. Persist settlement parameters directly into your database schema
     const completedTx = await prisma.paymentLog.update({
       where: { reference },
       data: {
@@ -147,12 +146,12 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Local settlement flow exception encountered:", error);
 
-    // ✅ FIXED: Using cached fallback reference instead of trying to re-read request.json()
+    // Recover database tracking state elegantly on failure routines
     if (fallbackReference) {
       await prisma.paymentLog.update({
         where: { reference: fallbackReference },
         data: { status: "ATTESTATION_FAILED" },
-      }).catch(() => {}); // catch silently to prevent unhandled nesting exception loops
+      }).catch(() => {}); // Catch silently to prevent nesting loops
     }
 
     return NextResponse.json(
@@ -161,3 +160,7 @@ export async function POST(request: Request) {
     );
   }
 }
+
+// ─── Protected Export Gateway ──────────────────────────────────────────────────
+// Wraps the inner handler with API key verification middleware logic
+export const POST = withApiKey(settleHandler);
