@@ -1,38 +1,27 @@
+// src/app/api/payments/initialize/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
 
 /**
- * Core Core handler for the payment initialization pipeline.
+ * Public Endpoint: Allows any sandbox user to initiate a checkout session
  */
-async function handler(req: Request) {
+export async function POST(req: Request) {
   try {
-    // 1. DYNAMIC ROUTE BYPASS FOR LAYOUT LOADING (GET)
-    if (req.method === "GET") {
-      return NextResponse.json({
-        success: true,
-        status: "ready",
-        message: "ArcFlare Gateway Ledger initialization channel is active.",
-      });
-    }
-
-    // 2. PROCESS ACTUAL CHECKOUT INITIALIZATION (POST)
     const body = await req.json();
     const { amount, currency, email, merchant } = body;
 
-    // Validate the incoming sandbox request payload
+    // Validate incoming sandbox request payload
     if (!amount || !currency || !email) {
       return NextResponse.json(
-        { success: false, error: "Missing required payload attributes (amount, currency, email)." },
+        { success: false, error: "Missing required attributes (amount, currency, email)." },
         { status: 400 }
       );
     }
 
-    // Generate a unique transaction reference trace token (Paystack style)
+    // Generate a unique transaction reference trace token
     const transactionReference = `arc_ref_${Math.random().toString(36).substring(2, 15)}${Date.now().toString(36)}`;
 
-    // Create a pending ledger transaction state records inside Prisma database
-    // This tracks the session context before booting up the Circle Smart Contract Account
+    // Create a pending transaction ledger record inside Prisma 
     await (prisma as any).transaction.create({
       data: {
         reference: transactionReference,
@@ -47,11 +36,10 @@ async function handler(req: Request) {
         }),
       },
     }).catch((e: any) => {
-      console.warn("Non-blocking warning: Prisma local ledger logging failed:", e.message);
+      console.warn("Non-blocking database log warning:", e.message);
     });
 
-    // 3. SECURE BACKEND RESPONSE
-    // Return the reference string context cleanly down the pipeline to the UI
+    // Return the authorization URL context back to the frontend
     return NextResponse.json({
       success: true,
       message: "Ledger checkout context initialization successful.",
@@ -61,7 +49,6 @@ async function handler(req: Request) {
         amount: amount,
         currency: currency,
         status: "ready",
-        // Direct internal application authorization route configuration fallback
         authorization_url: `/checkout/${transactionReference}`,
       },
     });
@@ -75,6 +62,7 @@ async function handler(req: Request) {
   }
 }
 
-// Wrap the router export inside the API Key verification middleware guard
-export const POST = withApiKey(handler);
-export const GET = withApiKey(handler);
+// Support a basic health check check on GET
+export async function GET() {
+  return NextResponse.json({ success: true, status: "operational" });
+}
