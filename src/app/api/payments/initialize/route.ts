@@ -1,25 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withApiKey } from "@/lib/middleware/withApiKey"; // 1. Import this
 
-// Circle CCTP official domain IDs for cross-chain mapping
 const CCTP_DOMAINS: Record<string, number> = {
   "Ethereum": 0,
   "Avalanche": 1,
   "Arbitrum": 3,
   "Base": 6,
-  "Arc": 7 // Arc-L1 network execution target domain
+  "Arc": 7
 };
 
-/**
- * POST Handler for Payment Initialization (Paystack-style architectural flow with CCTP support)
- * Endpoint: /api/payments/initialize
- */
-export async function POST(request: Request) {
+// 2. Wrap your logic in a 'handler'
+const handler = async (request: NextRequest) => {
   try {
     const body = await request.json();
     const { amount, email, metadata } = body;
 
-    // 1. Basic validation check
     if (!amount || !email) {
       return NextResponse.json(
         { error: "Missing required fields: amount and email are mandatory." },
@@ -27,10 +23,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Generate a unique custom transaction reference trace 
     const reference = `T${Math.floor(100000 + Math.random() * 900000)}${Date.now()}`;
 
-    // 3. Store the initial tracking state inside the PaymentLog database table
     const payment = await prisma.paymentLog.create({
       data: {
         reference: reference,
@@ -43,10 +37,6 @@ export async function POST(request: Request) {
       },
     });
 
-    // Determine target domain string context safely
-    const sourceChain = payment.chain;
-
-    // 4. Return deployment parameters back to the client/agent workspace with CCTP instructions
     return NextResponse.json(
       {
         status: true,
@@ -55,19 +45,17 @@ export async function POST(request: Request) {
           authorization_url: `https://arcflare-gateway.render.com/pay/${reference}`,
           access_code: `code_${Math.random().toString(36).substring(2, 11)}`,
           reference: payment.reference,
-          // 👇 CCTP cross-chain configuration routing parameters for machine consumption
           cctp_routing: {
-            source_chain: sourceChain,
+            source_chain: payment.chain,
             destination_chain: "Arc-L1",
             destination_domain_id: CCTP_DOMAINS["Arc"] || 7,
             token_contract_target: payment.currency,
-            status: sourceChain === "Arc-L1" ? "DIRECT_SETTLEMENT" : "READY_FOR_BURN"
+            status: payment.chain === "Arc-L1" ? "DIRECT_SETTLEMENT" : "READY_FOR_BURN"
           }
         },
       },
       { status: 200 }
     );
-
   } catch (error: any) {
     console.error("❌ Initialization Layer Failure:", error);
     return NextResponse.json(
@@ -75,4 +63,7 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
-}
+};
+
+// 3. Export the protected route
+export const POST = withApiKey(handler);

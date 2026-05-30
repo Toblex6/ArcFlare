@@ -3,7 +3,14 @@ import { withWallet } from "@walletconnect/cli-sdk";
 import { ethers } from "ethers";
 import * as dotenv from "dotenv";
 
+// Explicitly load configuration variables from environment files
 dotenv.config();
+
+// Enforce environment validation rules at startup to satisfy Next.js compiler scanning
+const adminKey = process.env.ARC_ADMIN_PRIVATE_KEY;
+if (!adminKey) {
+  console.warn("⚠️ ARC_ADMIN_PRIVATE_KEY is not defined in your active environment configurations.");
+}
 
 interface AgentPaymentIntent {
   merchantAddress: string;
@@ -23,58 +30,67 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
   }
 
   // ✅ FIXED: Ethers v6 flattens parseUnits directly on the base package namespace and outputs a BigInt
-  // We use .toString() combined with ethers.toBeHex() to get a clean hexadecimal value string for the RPC
   const parsedBigIntAmount = ethers.parseUnits(intent.amountInUSDC, 6);
   const parsedAmountHex = ethers.toBeHex(parsedBigIntAmount);
 
   console.log(`🤖 AI Agent: Initiating transaction for reference ${intent.paymentReference}...`);
 
-  // withWallet sets up the high-level session helper loop (connect -> use -> cleanup)
-  await withWallet(
-    {
-      projectId: projectId,
-      metadata: {
-        name: "ArcFlare AI Agent Node",
-        description: "Autonomous Agentic Finance Layer for Arc Network",
-        url: "https://arcflare-gateway.onrender.com",
-        icons: ["https://arcflare-gateway.onrender.com/favicon.ico"],
+  try {
+    // withWallet sets up the high-level session helper loop (connect -> use -> cleanup)
+    await withWallet(
+      {
+        projectId: projectId,
+        metadata: {
+          name: "ArcFlare AI Agent Node",
+          description: "Autonomous Agentic Finance Layer for Arc Network",
+          url: "https://arcflare-gateway.onrender.com",
+          icons: ["https://arcflare-gateway.onrender.com/favicon.ico"],
+        },
       },
-    },
-    async (wallet, { accounts }) => {
-      // Extract the raw wallet public address from the CAIP-10 formatted string
-      const agentAssociatedAddress = accounts[0].split(":").pop();
-      console.log(`📡 Linked Session Account Verified: ${agentAssociatedAddress}`);
-
-      try {
-        console.log(`💸 Pushing programmatic payment prompt to authorized wallet...`);
+      async (wallet, { accounts }) => {
+        // Extract the raw wallet public address from the CAIP-10 formatted string
+        const agentAssociatedAddress = accounts[0]?.split(":").pop();
         
-        // Broadcast the transaction request over the WalletConnect channel natively
-        const txHash = await wallet.request({
-          chainId: chainId,
-          request: {
-            method: "eth_sendTransaction",
-            params: [
-              {
-                from: agentAssociatedAddress,
-                to: intent.merchantAddress,
-                data: "0x", // If interacting with an absolute stablecoin contract, pass ERC20 transfer abi hex here
-                value: parsedAmountHex, 
-              },
-            ],
-          },
-        });
+        if (!agentAssociatedAddress) {
+          console.error("🔴 Failed to extract a valid public wallet account address from session.");
+          return;
+        }
+        
+        console.log(`📡 Linked Session Account Verified: ${agentAssociatedAddress}`);
 
-        console.log(`🟢 ArcFlare Agent Payment Dispatched Successfully!`);
-        console.log(`🔗 Arc Testnet Tx Hash: ${txHash}`);
+        try {
+          console.log(`💸 Pushing programmatic payment prompt to authorized wallet...`);
+          
+          // Broadcast the transaction request over the WalletConnect channel natively
+          const txHash = await wallet.request({
+            chainId: chainId,
+            request: {
+              method: "eth_sendTransaction",
+              params: [
+                {
+                  from: agentAssociatedAddress,
+                  to: intent.merchantAddress,
+                  data: "0x", 
+                  value: parsedAmountHex, 
+                },
+              ],
+            },
+          });
 
-        // ✅ FIXED: Force-cast txHash as string to pass safety rules for unknown object structures
-        await triggerArcFlareVerification(intent.paymentReference, txHash as string);
+          console.log(`🟢 ArcFlare Agent Payment Dispatched Successfully!`);
+          console.log(`🔗 Arc Testnet Tx Hash: ${txHash}`);
 
-      } catch (error) {
-        console.error("🔴 Agent transaction failed or was rejected by supervisor:", error);
+          // ✅ FIXED: Force-cast txHash as string to pass safety rules for unknown object structures
+          await triggerArcFlareVerification(intent.paymentReference, txHash as string);
+
+        } catch (error) {
+          console.error("🔴 Agent transaction failed or was rejected by supervisor:", error);
+        }
       }
-    }
-  );
+    );
+  } catch (outerError) {
+    console.error("🔴 Critical failure initializing the WalletConnect agent workflow loop:", outerError);
+  }
 }
 
 /**
@@ -87,8 +103,13 @@ async function triggerArcFlareVerification(reference: string, hash: string): Pro
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reference, txHash: hash }),
     });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP gateway responded with status code ${response.status}`);
+    }
+
     const result = await response.json();
-    console.log(`🔄 Verification Ledger Updated:`, result.status);
+    console.log(`🔄 Verification Ledger Updated:`, result.status || "SUCCESS");
   } catch (err) {
     console.error("⚠️ Failed to automatically alert internal ArcFlare verification engine:", err);
   }
