@@ -9,7 +9,7 @@
     "lint": "npx next lint"
   },
   "dependencies": {
-    "@circle-fin/developer-controlled-wallets": "^10.5.5",
+    "@circle-fin/developer-controlled-wallets": "^10.6.0",
     "@prisma/client": "^6.13.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@tanstack/react-query": "^5.100.14",
@@ -26,6 +26,5 @@
     "react-dom": "^19.2.6",
     "typescript": "^6.0.3",
     "viem": "^2.51.3"
-  },
-  "devDependencies": {}
+  }
 }
