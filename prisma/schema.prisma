@@ -6,7 +6,6 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
 }
 
 model PaymentLog {
@@ -18,7 +17,7 @@ model PaymentLog {
   senderEmail  String
   merchant     String
   status       String
-  arcTxHash    String?  // 1. ← Add this optional field for on-chain verification tracking
+  arcTxHash    String?  
   timestamp    DateTime @default(now())
 }
 
