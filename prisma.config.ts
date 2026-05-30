@@ -1,8 +1,8 @@
 // prisma.config.ts
-import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
-// 💡 THE FIX: Remove the 'env' import entirely and use native process.env
+// 💡 THE FIX: Removed the dotenv import entirely. 
+// Render natively supplies process.env.DATABASE_URL during the build!
 const prismaConfig: any = {
   schema: "prisma/schema.prisma",
   datasource: {
