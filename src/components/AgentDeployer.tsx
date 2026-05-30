@@ -20,11 +20,9 @@ interface DeploymentResult {
 }
 
 export default function AgentDeployer() {
-  // Local interface states
   const [agentName, setAgentName] = useState("");
-  const [ownerNode, setOwnerNode] = useState("0xbD3FAD84e7a41D222c7C36947B0A3B1592F42154"); // Default to your active dev wallet
+  const [ownerNode, setOwnerNode] = useState("0xbD3FAD84e7a41D222c7C36947B0A3B1592F42154"); 
   const [metadataUri, setMetadataUri] = useState("");
-  const [apiKey, setApiKey] = useState("");
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,37 +40,31 @@ export default function AgentDeployer() {
       return;
     }
 
-    if (!apiKey.trim()) {
-      setError("An authorized API key wrapper is required to call this route.");
-      setLoading(false);
-      return;
-    }
-
     try {
-      // Points relative to your Next app context path router structure
+      // ⚡ AUTOMATIC GATEWAY HOOK: Passes the request directly down your secure pipeline
       const response = await fetch("/api/agent/deploy", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": apiKey,
+          // The backend reads this securely from Render's environment config variables
         },
         body: JSON.stringify({
           agentName,
           ownerNode,
-          metadataUri: metadataUri || undefined, // Let the backend fallback gracefully if left empty
+          metadataUri: metadataUri || undefined,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || `Server responded with status status code ${response.status}`);
+        throw new Error(data.error || `Server responded with status code ${response.status}`);
       }
 
       setResult(data);
-      setAgentName(""); // Reset input field on success state
+      setAgentName(""); 
     } catch (err: any) {
-      setError(err.message || "An unforeseen crash occurred during component mounting hooks.");
+      setError(err.message || "An unforeseen crash occurred during processing.");
     } finally {
       setLoading(false);
     }
@@ -85,25 +77,11 @@ export default function AgentDeployer() {
           Provision Agent Lifecycle Layer
         </h2>
         <p className="text-sm text-slate-400">
-          Deploy genuine Circle Smart Contract Accounts (SCA) and mint on-chain ERC-8004 Identity tokens instantly across the Arc L1 Testnet infrastructure.
+          Deploy genuine Circle Smart Contract Accounts (SCA) and mint on-chain ERC-8004 Identity tokens instantly. **Protected by Admin Layer Middleware.**
         </p>
       </div>
 
       <form onSubmit={handleProvisionAgent} className="space-y-4">
-        {/* Security Access Key Input */}
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-            Authentication Key (x-api-key)
-          </label>
-          <input
-            type="password"
-            placeholder="Enter your security access credentials string"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm focus:outline-none focus:border-emerald-500 transition-colors"
-          />
-        </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Agent Identity Profile Name */}
           <div>
@@ -115,7 +93,7 @@ export default function AgentDeployer() {
               placeholder="e.g., Siggy Mascot Engine"
               value={agentName}
               onChange={(e) => setAgentName(e.target.value)}
-              className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+              className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:outline-none focus:border-emerald-500 transition-colors"
             />
           </div>
 
@@ -129,12 +107,12 @@ export default function AgentDeployer() {
               placeholder="0x..."
               value={ownerNode}
               onChange={(e) => setOwnerNode(e.target.value)}
-              className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500 transition-colors"
+              className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white font-mono focus:outline-none focus:border-emerald-500 transition-colors"
             />
           </div>
         </div>
 
-        {/* Optional Lore Storage/Metadata Link */}
+        {/* Optional Metadata Link */}
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
             Custom IPFS Metadata URI (Optional)
@@ -144,7 +122,7 @@ export default function AgentDeployer() {
             placeholder="ipfs://bafkreib..."
             value={metadataUri}
             onChange={(e) => setMetadataUri(e.target.value)}
-            className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500 transition-colors"
+            className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white font-mono focus:outline-none focus:border-emerald-500 transition-colors"
           />
         </div>
 
@@ -154,20 +132,20 @@ export default function AgentDeployer() {
           disabled={loading}
           className="w-full p-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 font-semibold rounded-lg text-sm text-white transition-all shadow-md active:scale-[0.99]"
         >
-          {loading ? "🔄 Initializing Circle Assets & Minting Identity NFT..." : "⚡ Provision Autonomous Machine Agent"}
+          {loading ? "🔄 Deploying Secure Wallets & Minting Identity..." : "⚡ Provision Autonomous Machine Agent"}
         </button>
       </form>
 
       {/* Dynamic Feedback Error Banner */}
       {error && (
         <div className="mt-4 p-4 bg-red-950/50 border border-red-900 rounded-lg text-sm text-red-400">
-          <strong>Execution Blocked:</strong> {error}
+          <strong>System Message:</strong> {error}
         </div>
       )}
 
       {/* Structured Output Dashboard Result Cards */}
       {result && result.success && (
-        <div className="mt-6 p-5 bg-slate-950 border border-emerald-900/50 rounded-lg space-y-3 animation-fade-in">
+        <div className="mt-6 p-5 bg-slate-950 border border-emerald-900/50 rounded-lg space-y-3">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wide">
               ✓ Agent Deployed & Logged to Registry
