@@ -5,8 +5,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL") // 💡 THE FIX: Satisfies Prisma's strict schema validator
+  provider = "postgresql" // 💡 THE SWITCH: Tells Prisma to connect to Render PostgreSQL
+  url      = env("DATABASE_URL")
 }
 
 model PaymentLog {
