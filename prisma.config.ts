@@ -1,13 +1,12 @@
 // prisma.config.ts
-import { defineConfig } from "prisma/config";
 
-// 💡 THE FIX: Removed the dotenv import entirely. 
-// Render natively supplies process.env.DATABASE_URL during the build!
-const prismaConfig: any = {
+// 💡 THE ULTIMATE FIX: Zero external imports! 
+// This prevents the Prisma CLI from crashing on Render when it looks for devDependencies.
+const prismaConfig = {
   schema: "prisma/schema.prisma",
   datasource: {
     url: process.env.DATABASE_URL || "file:./dev.db",
   },
 };
 
-export default defineConfig(prismaConfig);
+export default prismaConfig;
