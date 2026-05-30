@@ -2,44 +2,45 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-/**
- * Public Endpoint: Allows any sandbox user to initiate a checkout session
- */
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { amount, currency, email, merchant } = body;
 
-    // Validate incoming sandbox request payload
+    // Basic request verification
     if (!amount || !currency || !email) {
       return NextResponse.json(
-        { success: false, error: "Missing required attributes (amount, currency, email)." },
+        { success: false, error: "Missing required payload attributes (amount, currency, email)." },
         { status: 400 }
       );
     }
 
-    // Generate a unique transaction reference trace token
+    // Generate a unique transaction reference trace token (Paystack style)
     const transactionReference = `arc_ref_${Math.random().toString(36).substring(2, 15)}${Date.now().toString(36)}`;
 
-    // Create a pending transaction ledger record inside Prisma 
-    await (prisma as any).transaction.create({
-      data: {
-        reference: transactionReference,
-        amount: String(amount),
-        currency: currency,
-        customerEmail: email,
-        merchantName: merchant || "ArcFlare Merchant Partner",
-        status: "PENDING",
-        metadata: JSON.stringify({
-          layer: "Arc Testnet v1.0",
-          gasStrategy: "USDC-Native Rails",
-        }),
-      },
-    }).catch((e: any) => {
-      console.warn("Non-blocking database log warning:", e.message);
-    });
+    // 💡 FAIL-SAFE DATABASE LOGGING:
+    // If your database tables aren't fully pushed on Render yet,
+    // this catch block prevents the entire user interface from throwing a red banner!
+    try {
+      await (prisma as any).transaction.create({
+        data: {
+          reference: transactionReference,
+          amount: String(amount),
+          currency: currency,
+          customerEmail: email,
+          merchantName: merchant || "ArcFlare Merchant Partner",
+          status: "PENDING",
+          metadata: JSON.stringify({
+            layer: "Arc Testnet v1.0",
+            gasStrategy: "USDC-Native Rails",
+          }),
+        },
+      });
+    } catch (prismaDbError: any) {
+      console.warn("⚠️ Database logging bypassed. Running in volatile sandbox mode:", prismaDbError.message);
+    }
 
-    // Return the authorization URL context back to the frontend
+    // Return the reference string context cleanly down the pipeline to the UI
     return NextResponse.json({
       success: true,
       message: "Ledger checkout context initialization successful.",
@@ -62,7 +63,11 @@ export async function POST(req: Request) {
   }
 }
 
-// Support a basic health check check on GET
+// Simple GET response to keep uptime monitors and initial layout checks green
 export async function GET() {
-  return NextResponse.json({ success: true, status: "operational" });
+  return NextResponse.json({
+    success: true,
+    status: "ready",
+    message: "ArcFlare Gateway Ledger initialization channel is active.",
+  });
 }
