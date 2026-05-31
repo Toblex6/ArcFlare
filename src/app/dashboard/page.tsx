@@ -63,7 +63,7 @@ export default function MerchantDashboard() {
       const res = await fetch("/api/agent/deploy", {
         method: "POST",
         headers: {
-           "Content-Type": "application/json"
+           "Content-Type": "application/json",
             "x-api-key": "arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2"
           },
         body: JSON.stringify({
