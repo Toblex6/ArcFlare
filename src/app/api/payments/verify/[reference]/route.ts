@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ethers } from "ethers";
 
-const RPC_URL = process.env.ARC_TESTNET_RPC_URL || "https://rpc-testnet.arc-l1.network"; 
+const RPC_URL = process.env.ARC_TESTNET_RPC_URL || "https://rpc.testnet.arc.network"; 
 
 export async function GET(
   request: Request,
