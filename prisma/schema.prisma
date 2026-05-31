@@ -32,3 +32,15 @@ model ApiKey {
   lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
 }
+
+model AgentRegistry {
+  id             Int      @id @default(autoincrement())
+  name           String
+  tokenId        String   @unique
+  scaAddress     String   @unique
+  circleWalletId String?
+  ownerNode      String
+  metadataURI    String?
+  status         String
+  createdAt      DateTime @default(now())
+}
