@@ -8,7 +8,11 @@ export async function POST(req: Request) {
   }
 
   const result = await prisma.paymentLog.updateMany({
-    where: { status: "PENDING" },
+    where: {
+      status: {
+        notIn: ["SUCCESS", "REDEEMED_AND_MINTED", "FAILED"],
+      },
+    },
     data: { status: "FAILED" },
   });
 
