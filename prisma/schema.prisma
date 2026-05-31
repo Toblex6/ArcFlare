@@ -5,32 +5,22 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql" // 💡 THE SWITCH: Tells Prisma to connect to Render PostgreSQL
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model PaymentLog {
-  id           String   @id @default(uuid())
-  reference    String   @unique
-  amount       Float
-  currency     String
-  chain        String
-  senderEmail  String
-  merchant     String
-  status       String
-  arcTxHash    String?  
-  timestamp    DateTime @default(now())
-}
-
-model ApiKey {
-  id          Int       @id @default(autoincrement())
-  key         String    @unique
-  label       String
-  ownerEmail  String?
-  active      Boolean   @default(true)
-  usageCount  Int       @default(0)
-  lastUsedAt  DateTime?
-  createdAt   DateTime  @default(now())
+  id          String   @id @default(uuid())
+  reference   String   @unique
+  amount      Float
+  currency    String
+  chain       String
+  senderEmail String
+  merchant    String
+  status      String
+  arcTxHash   String?
+  webhookUrl  String?
+  timestamp   DateTime @default(now())
 }
 
 model AgentRegistry {
@@ -43,4 +33,15 @@ model AgentRegistry {
   metadataURI    String?
   status         String
   createdAt      DateTime @default(now())
+}
+
+model ApiKey {
+  id          Int       @id @default(autoincrement())
+  key         String    @unique
+  label       String
+  ownerEmail  String?
+  active      Boolean   @default(true)
+  usageCount  Int       @default(0)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
 }
