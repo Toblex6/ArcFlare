@@ -1,4 +1,3 @@
-// src/app/api/keys/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { randomBytes } from "crypto";
@@ -25,11 +24,12 @@ export async function POST(req: NextRequest) {
 
     const secureToken = `arc_live_${randomBytes(24).toString("hex")}`;
 
-    const newKey = await (prisma as any).apiKey.create({
+    const newKey = await prisma.apiKey.create({
       data: {
         key: secureToken,
         label,
         ownerEmail: ownerEmail || null,
+        active: true, // Default to true
       },
     });
 
@@ -57,8 +57,10 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Bad Request", message: "Target key string required." }, { status: 400 });
     }
 
-    await (prisma as any).apiKey.delete({
+    // Use update instead of delete to keep a record of the key history
+    await prisma.apiKey.update({
       where: { key },
+      data: { active: false },
     });
 
     return NextResponse.json({
