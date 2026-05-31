@@ -10,7 +10,7 @@ export default function AgentSimulator({ onRefresh }: { onRefresh: () => void })
     setLoading(true);
     setLogs([]);
 
-    const apiKey = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY ?? "";
+    const apiKey = "arc_live_6f809a9d89fc02e018dbdec9120df02d646a805b259b9df2";
 
     const headers = {
       "Content-Type": "application/json",
