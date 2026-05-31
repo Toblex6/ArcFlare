@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npx next dev",
-    "build": "next build",
-    "start": "npx next start",
-    "lint": "npx next lint"
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "npx prisma migrate deploy && next start",
+    "lint": "next lint"
   },
   "dependencies": {
     "@circle-fin/developer-controlled-wallets": "^10.6.0",
