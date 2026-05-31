@@ -62,7 +62,10 @@ export default function MerchantDashboard() {
     try {
       const res = await fetch("/api/agent/deploy", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+           "Content-Type": "application/json"
+            "x-api-key": "arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2"
+          },
         body: JSON.stringify({
           agentName: "DeFi Arbitrage Agent v1.0",
           metadataUri: "ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei"
