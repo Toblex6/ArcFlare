@@ -113,7 +113,7 @@ Prisma.NullTypes = {
  * Enums
  */
 
-exports.Prisma.TransactionIsolationLevel = makeStrictEnum({
+exports.Prisma.paymentlogIsolationLevel = makeStrictEnum({
   Serializable: 'Serializable'
 });
 

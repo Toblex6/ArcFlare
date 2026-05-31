@@ -1,35 +1,15 @@
--- CreateTable
-CREATE TABLE "PaymentLog" (
-    "id" TEXT NOT NULL,
-    "reference" TEXT NOT NULL,
-    "amount" DOUBLE PRECISION NOT NULL,
-    "currency" TEXT NOT NULL,
-    "chain" TEXT NOT NULL,
-    "senderEmail" TEXT NOT NULL,
-    "merchant" TEXT NOT NULL,
-    "status" TEXT NOT NULL,
-    "arcTxHash" TEXT,
-    "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "PaymentLog_pkey" PRIMARY KEY ("id")
+-- Create the _prisma_migrations table
+CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+    "id"                    VARCHAR(36) PRIMARY KEY NOT NULL,
+    "checksum"              VARCHAR(64) NOT NULL,
+    "finished_at"           TIMESTAMPTZ,
+    "migration_name"        VARCHAR(255) NOT NULL,
+    "logs"                  TEXT,
+    "rolled_back_at"        TIMESTAMPTZ,
+    "started_at"            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    "applied_steps_count"   INTEGER NOT NULL DEFAULT 0
 );
 
--- CreateTable
-CREATE TABLE "ApiKey" (
-    "id" SERIAL NOT NULL,
-    "key" TEXT NOT NULL,
-    "label" TEXT NOT NULL,
-    "ownerEmail" TEXT,
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "usageCount" INTEGER NOT NULL DEFAULT 0,
-    "lastUsedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "ApiKey_pkey" PRIMARY KEY ("id")
-);
-
--- CreateIndex
-CREATE UNIQUE INDEX "PaymentLog_reference_key" ON "PaymentLog"("reference");
-
--- CreateIndex
-CREATE UNIQUE INDEX "ApiKey_key_key" ON "ApiKey"("key");
+-- Insert the baseline record
+INSERT INTO "_prisma_migrations" (id, checksum, migration_name, finished_at, applied_steps_count)
+VALUES ('00000000-0000-0000-0000-000000000000', 'dummy', '0_init', NOW(), 1);

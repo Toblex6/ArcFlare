@@ -1,14 +1,13 @@
-// src/lib/middleware/withApiKey.ts
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 /**
  * Middleware wrapper to protect API endpoints using x-api-key auth.
  */
-export function withApiKey(handler: any) {
-  return async (req: Request, context?: any) => {
+export function withApiKey(handler: (req: NextRequest, context?: any) => Promise<NextResponse>) {
+  return async (req: NextRequest, context?: any) => {
     try {
-      // 💡 THE FIX: If it's just loading the interface (GET), bypass the key check!
+      // 💡 GET requests bypass the key check (e.g., for dashboard loading)
       if (req.method === "GET") {
         return await handler(req, context);
       }
@@ -26,7 +25,7 @@ export function withApiKey(handler: any) {
       }
 
       // Query database for matching active API key token
-      const record = await (prisma as any).apiKey.findUnique({
+      const record = await prisma.apiKey.findUnique({
         where: { key: apiKey },
       });
 
@@ -38,7 +37,7 @@ export function withApiKey(handler: any) {
       }
 
       // Bump usage counter (Fire and forget)
-      (prisma as any).apiKey
+      prisma.apiKey
         .update({
           where: { key: apiKey },
           data: { 
@@ -46,7 +45,7 @@ export function withApiKey(handler: any) {
             lastUsedAt: new Date() 
           },
         })
-        .catch((e: any) => console.error("Metrics increment failed silently:", e));
+        .catch((e: Error) => console.error("Metrics increment failed:", e.message));
 
       return await handler(req, context);
 
