@@ -38,7 +38,7 @@ export default function TransactionsPage() {
     <div style={{ display: "flex", minHeight: "100vh", background: "#f8fafc", fontFamily: "Inter, system-ui, sans-serif" }}>
 
       {/* Sidebar — same as dashboard */}
-      <aside style={{ width: 220, minHeight: "100vh", background: "#0f1117", display: "flex", flexDirection: "column", padding: "24px 14px", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
+      <aside style={{ width: 220, minHeight: "100vh", background: "#1f140f", display: "flex", flexDirection: "column", padding: "24px 14px", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6 }}>
           <div style={{ width: 32, height: 32, background: "rgba(13,124,95,0.25)", border: "1px solid rgba(13,124,95,0.5)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <span style={{ color: "#0d7c5f", fontSize: 16, fontWeight: 800 }}>A</span>
@@ -51,7 +51,7 @@ export default function TransactionsPage() {
         <nav style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
           {[
             { label: "Dashboard", href: "/dashboard", active: false },
-            { label: "Payments", href: "/", active: false },
+            { label: "Homepage", href: "/", active: false },
             { label: "Transactions", href: "/transactions", active: true },
             { label: "Checkout", href: "/checkout", active: false },
             { label: "Escrow", href: "/escrow", active: false },
