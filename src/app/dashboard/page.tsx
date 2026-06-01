@@ -137,7 +137,7 @@ export default function MerchantDashboard() {
       <aside style={{
         width: 220,
         minHeight: "100vh",
-        background: "#0f1117",
+        background: "#1f140f",
         display: "flex",
         flexDirection: "column",
         padding: "24px 14px",
@@ -166,7 +166,7 @@ export default function MerchantDashboard() {
               icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
             },
             {
-              label: "Payments", href: "/", active: false,
+              label: "Homepage", href: "/", active: false,
               icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
             },
             {
