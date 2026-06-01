@@ -1,18 +1,11 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer,
 } from "recharts";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface PaymentItem {
   id: string;
   reference: string;
@@ -24,6 +17,8 @@ interface PaymentItem {
   merchant: string;
   paid_at: string;
   cctp_telemetry: {
+    source_domain: number;
+    target_domain: number;
     attestation_status: string;
     nonce: number;
   };
@@ -35,81 +30,60 @@ interface DashboardMetrics {
   totalTransactions: number;
 }
 
-// ─── Sidebar Nav ──────────────────────────────────────────────────────────────
-const navItems = [
-  { label: "Dashboard", icon: "▦", href: "/dashboard", active: true },
-  { label: "Payments", icon: "↔", href: "/payments" },
-  { label: "Transactions", icon: "≡", href: "/transactions" },
-  { label: "Merchants", icon: "⊕", href: "/merchants" },
-  { label: "Wallets", icon: "◎", href: "/wallets" },
-  { label: "Analytics", icon: "↗", href: "/analytics" },
-  { label: "Webhooks", icon: "⟳", href: "/webhooks" },
-  { label: "Settings", icon: "⚙", href: "/settings" },
-];
-
-// ─── Sparkline data generator ─────────────────────────────────────────────────
-function generateSparkline(base: number, points = 8) {
-  return Array.from({ length: points }, (_, i) => ({
-    v: base + Math.sin(i * 0.8) * base * 0.15 + Math.random() * base * 0.1,
-  }));
-}
-
-export default function DashboardV2() {
-  const router = useRouter();
+export default function MerchantDashboard() {
   const [payments, setPayments] = useState<PaymentItem[]>([]);
-  const [metrics, setMetrics] = useState<DashboardMetrics>({
-    totalVolume: 0,
-    successRate: 100,
-    totalTransactions: 0,
-  });
-  const [loading, setLoading] = useState(true);
-  const [isDeploying, setIsDeploying] = useState(false);
+  const [metrics, setMetrics] = useState<DashboardMetrics>({ totalVolume: 0, successRate: 100, totalTransactions: 0 });
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isDeploying, setIsDeploying] = useState<boolean>(false);
   const [deployedAgent, setDeployedAgent] = useState<any>(null);
-  const [deployError, setDeployError] = useState<string | null>(null);
-  const [notifications] = useState(3);
+  const [deploymentError, setDeploymentError] = useState<string | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const fetchData = async (silent = false) => {
+  const fetchLiveDatabaseState = async (isSilentUpdate = false) => {
     try {
       const res = await fetch("/api/payments/all");
       const json = await res.json();
       if (json.status) {
         setPayments(json.data);
         setMetrics(json.metrics);
+        setError(null);
 
-        // Build chart from real transaction data grouped by day
-        const grouped: Record<string, number> = {};
+        const grouped: Record<string, { volume: number; count: number }> = {};
         json.data.forEach((p: PaymentItem) => {
           const day = new Date(p.paid_at).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
+            month: "short", day: "numeric",
           });
-          grouped[day] = (grouped[day] || 0) + p.amount;
+          if (!grouped[day]) grouped[day] = { volume: 0, count: 0 };
+          grouped[day].volume += p.amount;
+          grouped[day].count += 1;
         });
 
-        const days = Object.entries(grouped)
-          .slice(-7)
-          .map(([date, volume]) => ({ date, volume }));
+        const days = Object.entries(grouped).slice(-7).map(([date, d]) => ({
+          date,
+          volume: parseFloat(d.volume.toFixed(2)),
+          count: d.count,
+        }));
 
-        // Pad to 7 days if fewer
-        if (days.length < 2) {
+        if (days.length === 0) {
           const today = new Date();
-          const padded = Array.from({ length: 7 }, (_, i) => {
+          setChartData(Array.from({ length: 7 }, (_, i) => {
             const d = new Date(today);
             d.setDate(d.getDate() - (6 - i));
             return {
               date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-              volume: 0,
+              volume: 0, count: 0,
             };
-          });
-          padded[padded.length - 1].volume = json.metrics.totalVolume;
-          setChartData(padded);
+          }));
         } else {
           setChartData(days);
         }
+      } else {
+        throw new Error(json.error || "Failed to load data.");
       }
-    } catch (e) {
-      if (!silent) console.error(e);
+    } catch (err: any) {
+      if (!isSilentUpdate) setError("Failed to synchronize dashboard metrics with cloud engine.");
     } finally {
       setLoading(false);
     }
@@ -117,7 +91,7 @@ export default function DashboardV2() {
 
   const triggerAgentLifecycle = async () => {
     setIsDeploying(true);
-    setDeployError(null);
+    setDeploymentError(null);
     try {
       const res = await fetch("/api/agent/deploy", {
         method: "POST",
@@ -131,19 +105,20 @@ export default function DashboardV2() {
         }),
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "Lifecycle failed.");
+      if (!res.ok || data.error) throw new Error(data.error || "On-chain lifecycle execution failed.");
       setDeployedAgent(data);
-      fetchData(true);
     } catch (err: any) {
-      setDeployError(err.message);
+      setDeploymentError(err.message || "Failed to finalize agent configuration framework.");
     } finally {
       setIsDeploying(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(() => fetchData(true), 8000);
+    fetchLiveDatabaseState();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchLiveDatabaseState(true);
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -153,465 +128,411 @@ export default function DashboardV2() {
 
   if (loading) {
     return (
-      <div style={{
-        minHeight: "100vh", background: "#0f1117",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{
-            width: 40, height: 40, border: "3px solid #0d7c5f",
-            borderTopColor: "transparent", borderRadius: "50%",
-            animation: "spin 0.8s linear infinite", margin: "0 auto 16px",
-          }} />
-          <p style={{ color: "#4b5563", fontFamily: "monospace", fontSize: 12, letterSpacing: 2 }}>
-            SYNCING LEDGER...
-          </p>
-        </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0f1117" }}>
+        <p className="text-sm font-mono uppercase tracking-widest animate-pulse" style={{ color: "#0d7c5f" }}>
+          SYNCING TESTNET TELEMETRY INSTANCE...
+        </p>
       </div>
     );
   }
 
+  const navItems = [
+    {
+      label: "Dashboard",
+      icon: (
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+      ),
+      href: "/dashboard",
+      active: true,
+    },
+    {
+      label: "Homepage",
+      icon: (
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path d="M3 12L12 3l9 9"/><path d="M9 21V12h6v9"/>
+        </svg>
+      ),
+      href: "/",
+      active: false,
+    },
+    {
+      label: "Checkout",
+      icon: (
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+        </svg>
+      ),
+      href: "/checkout",
+      active: false,
+    },
+  ];
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#0f1117", color: "#e2e8f0", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: "#0f1117", color: "#e2e8f0" }}>
+
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: #0f1117; }
-        ::-webkit-scrollbar-thumb { background: #1e2535; border-radius: 2px; }
-        .nav-item { transition: all 0.15s ease; cursor: pointer; }
-        .nav-item:hover { background: rgba(13,124,95,0.1) !important; color: #0d7c5f !important; }
-        .card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
-        .card:hover { transform: translateY(-1px); box-shadow: 0 8px 32px rgba(0,0,0,0.4) !important; }
-        .btn-primary { transition: all 0.15s ease; }
-        .btn-primary:hover { background: #0a6b50 !important; transform: translateY(-1px); }
-        .action-btn { transition: all 0.15s ease; opacity: 0.6; cursor: pointer; }
-        .action-btn:hover { opacity: 1; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        .fade-in { animation: fadeIn 0.4s ease forwards; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .dash-card { background: #1a2235; border: 1px solid #232d42; border-radius: 16px; }
+        .dash-card-inner { background: #111827; border: 1px solid #1e2a3a; border-radius: 12px; }
+        .green { color: #0d7c5f; }
+        .green-bg { background: #0d7c5f; }
+        .green-subtle { background: rgba(13,124,95,0.12); border: 1px solid rgba(13,124,95,0.25); }
+        .green-subtle-text { color: #10b981; }
+        .muted { color: #6b7280; }
+        .red { color: #ef4444; }
+        .amber { color: #f59e0b; }
+        .mono { font-family: 'DM Mono', 'Courier New', monospace; }
+        .hover-row:hover { background: rgba(255,255,255,0.03); }
+        .btn-green { background: #0d7c5f; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; transition: background 0.15s; }
+        .btn-green:hover { background: #0a6b50; }
+        .btn-outline { background: transparent; border: 1px solid #232d42; border-radius: 10px; cursor: pointer; color: #9ca3af; transition: all 0.15s; }
+        .btn-outline:hover { border-color: #0d7c5f; color: #0d7c5f; }
+        .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; cursor: pointer; transition: all 0.15s; text-decoration: none; color: #6b7280; font-size: 13px; font-weight: 500; }
+        .nav-item:hover { background: rgba(13,124,95,0.08); color: #e2e8f0; }
+        .nav-item.active { background: rgba(13,124,95,0.15); color: #0d7c5f; border: 1px solid rgba(13,124,95,0.2); }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .pulse { animation: pulse 2s infinite; }
+        .sidebar-toggle:hover { background: rgba(255,255,255,0.05); }
       `}</style>
 
-      {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
+      {/* ── SIDEBAR ──────────────────────────────────────────────────────── */}
       <aside style={{
-        width: 220, background: "#0a0d13", borderRight: "1px solid #1a2235",
-        display: "flex", flexDirection: "column", padding: "24px 0", flexShrink: 0,
-        position: "sticky", top: 0, height: "100vh", overflowY: "auto",
+        width: sidebarCollapsed ? 64 : 220,
+        minHeight: "100vh",
+        background: "#0d1117",
+        borderRight: "1px solid #1e2a3a",
+        display: "flex",
+        flexDirection: "column",
+        padding: sidebarCollapsed ? "20px 10px" : "20px 14px",
+        transition: "width 0.2s ease",
+        flexShrink: 0,
       }}>
-        {/* Logo */}
-        <div style={{ padding: "0 20px 28px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <div style={{
-              width: 32, height: 32, background: "linear-gradient(135deg, #0d7c5f, #0a5c47)",
-              borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 14, fontWeight: 700, color: "#fff",
-            }}>A</div>
-            <span style={{ fontWeight: 700, fontSize: 18, color: "#fff", letterSpacing: -0.5 }}>ArcFlare</span>
-          </div>
-          <p style={{ fontSize: 10, color: "#4b5563", letterSpacing: 0.5, paddingLeft: 42 }}>
-            Stablecoin Payment Infrastructure
-          </p>
+
+        {/* Logo + collapse button */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
+          {!sidebarCollapsed && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 28, height: 28, background: "rgba(13,124,95,0.2)", border: "1px solid rgba(13,124,95,0.4)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ color: "#0d7c5f", fontSize: 14, fontWeight: 800 }}>A</span>
+              </div>
+              <div>
+                <p style={{ color: "#fff", fontSize: 13, fontWeight: 700, lineHeight: 1 }}>ArcFlare</p>
+                <p style={{ color: "#4b5563", fontSize: 9, marginTop: 2 }}>Payment Infrastructure</p>
+              </div>
+            </div>
+          )}
+          {sidebarCollapsed && (
+            <div style={{ width: 28, height: 28, background: "rgba(13,124,95,0.2)", border: "1px solid rgba(13,124,95,0.4)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
+              <span style={{ color: "#0d7c5f", fontSize: 14, fontWeight: 800 }}>A</span>
+            </div>
+          )}
+          {!sidebarCollapsed && (
+            <button
+              className="sidebar-toggle"
+              onClick={() => setSidebarCollapsed(true)}
+              style={{ background: "transparent", border: "none", cursor: "pointer", color: "#4b5563", padding: 4, borderRadius: 6 }}
+            >
+              ◀
+            </button>
+          )}
         </div>
 
-        {/* Nav */}
-        <nav style={{ flex: 1, padding: "0 12px" }}>
+        {/* Nav items */}
+        <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
           {navItems.map((item) => (
-            <div
+            <a
               key={item.label}
-              className="nav-item"
-              onClick={() => router.push(item.href)}
-              style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 12px", borderRadius: 8, marginBottom: 2,
-                background: item.active ? "rgba(13,124,95,0.15)" : "transparent",
-                color: item.active ? "#0d7c5f" : "#6b7280",
-                fontSize: 14, fontWeight: item.active ? 600 : 400,
-                borderLeft: item.active ? "2px solid #0d7c5f" : "2px solid transparent",
-              }}
+              href={item.href}
+              className={`nav-item${item.active ? " active" : ""}`}
+              title={sidebarCollapsed ? item.label : undefined}
+              style={sidebarCollapsed ? { justifyContent: "center", padding: "10px 0" } : {}}
             >
-              <span style={{ fontSize: 16, width: 20, textAlign: "center" }}>{item.icon}</span>
-              {item.label}
-            </div>
+              <span style={{ flexShrink: 0 }}>{item.icon}</span>
+              {!sidebarCollapsed && <span>{item.label}</span>}
+            </a>
           ))}
         </nav>
 
-        {/* Balance Card */}
-        <div style={{ margin: "16px 12px", padding: 16, background: "linear-gradient(135deg, #0d7c5f22, #0a5c4711)", border: "1px solid #0d7c5f33", borderRadius: 12 }}>
-          <p style={{ fontSize: 10, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>Total Balance</p>
-          <p style={{ fontSize: 22, fontWeight: 700, color: "#fff", fontFamily: "'DM Mono', monospace" }}>
-            {metrics.totalVolume.toFixed(2)} <span style={{ fontSize: 12, color: "#0d7c5f" }}>USDC</span>
-          </p>
-          <p style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>≈ ${metrics.totalVolume.toFixed(2)}</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, cursor: "pointer" }}>
-            <div style={{ width: 20, height: 20, background: "#0d7c5f", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10 }}>$</div>
-            <span style={{ fontSize: 12, color: "#9ca3af" }}>USDC Wallet</span>
-            <span style={{ marginLeft: "auto", color: "#0d7c5f", fontSize: 12 }}>→</span>
-          </div>
-        </div>
+        {/* Expand button when collapsed */}
+        {sidebarCollapsed && (
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            style={{ background: "transparent", border: "1px solid #1e2a3a", borderRadius: 8, cursor: "pointer", color: "#4b5563", padding: "6px 0", marginTop: 12, width: "100%" }}
+          >
+            ▶
+          </button>
+        )}
 
-        {/* Get Started Card */}
-        <div style={{ margin: "0 12px 16px", padding: 16, background: "linear-gradient(135deg, #0d7c5f, #0a5c47)", borderRadius: 12 }}>
-          <div style={{ fontSize: 20, marginBottom: 8 }}>🚀</div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: "#fff", marginBottom: 4 }}>Start Accepting Stablecoins Today</p>
-          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", marginBottom: 12, lineHeight: 1.5 }}>Simple, secure and scalable infrastructure for modern payments.</p>
-          <button onClick={() => router.push("/checkout")} style={{
-            width: "100%", padding: "8px 0", background: "rgba(255,255,255,0.15)",
-            border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8,
-            color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-          }}>Get Started →</button>
-        </div>
-
-        <div style={{ padding: "12px 24px", borderTop: "1px solid #1a2235" }}>
-          <div className="nav-item" style={{ display: "flex", alignItems: "center", gap: 8, color: "#4b5563", fontSize: 13, padding: "8px 0", borderRadius: 6 }}>
-            <span>?</span> Help & Support
+        {/* Testnet badge */}
+        {!sidebarCollapsed && (
+          <div style={{ marginTop: 16, background: "rgba(13,124,95,0.06)", border: "1px solid rgba(13,124,95,0.15)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <span className="pulse" style={{ width: 6, height: 6, borderRadius: "50%", background: "#0d7c5f", display: "inline-block" }} />
+              <span style={{ fontSize: 9, color: "#0d7c5f", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>Arc Testnet</span>
+            </div>
+            <p style={{ fontSize: 9, color: "#374151", lineHeight: 1.4 }}>Connected to live cloud ledger</p>
           </div>
-        </div>
+        )}
       </aside>
 
       {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
+      <main style={{ flex: 1, padding: "24px 28px", overflowX: "hidden" }}>
 
-        {/* Top Bar */}
-        <header style={{
-          height: 64, borderBottom: "1px solid #1a2235", display: "flex",
-          alignItems: "center", padding: "0 32px", gap: 16, background: "#0a0d13",
-          position: "sticky", top: 0, zIndex: 10,
-        }}>
-          {/* Search */}
-          <div style={{
-            flex: 1, maxWidth: 400, display: "flex", alignItems: "center", gap: 10,
-            background: "#0f1117", border: "1px solid #1a2235", borderRadius: 10,
-            padding: "8px 14px",
-          }}>
-            <span style={{ color: "#4b5563", fontSize: 14 }}>🔍</span>
-            <input placeholder="Search anything..." style={{
-              background: "none", border: "none", outline: "none",
-              color: "#9ca3af", fontSize: 13, flex: 1,
-            }} />
-            <span style={{ color: "#4b5563", fontSize: 11, background: "#1a2235", padding: "2px 6px", borderRadius: 4 }}>⌘K</span>
+        {/* Warning Banner */}
+        <div style={{ marginBottom: 20, background: "rgba(13,124,95,0.08)", border: "1px solid rgba(13,124,95,0.2)", borderRadius: 12, padding: "10px 20px", textAlign: "center" }}>
+          <p className="mono" style={{ fontSize: 11, color: "#0d7c5f", letterSpacing: 1, textTransform: "uppercase" }}>
+            ⚠ ArcFlare Ecosystem Monitoring Node — Running on{" "}
+            <span style={{ textDecoration: "underline", fontWeight: 700 }}>Arc Testnet Mode</span>.
+            Connected to Live Cloud Ledger.
+          </p>
+        </div>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #1e2a3a", paddingBottom: 20, marginBottom: 28 }}>
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: "#fff", marginBottom: 4 }}>ArcFlare Merchant Terminal</h1>
+            <p style={{ fontSize: 13, color: "#6b7280" }}>Here's what's happening with your network today.</p>
           </div>
+          <div className="green-subtle" style={{ borderRadius: 20, padding: "5px 14px", display: "flex", alignItems: "center", gap: 6 }}>
+            <span className="pulse" style={{ width: 7, height: 7, borderRadius: "50%", background: "#0d7c5f", display: "inline-block" }} />
+            <span className="mono" style={{ fontSize: 11, color: "#0d7c5f", fontWeight: 600, letterSpacing: 1 }}>LIVE NETWORK NODE ACTIVE</span>
+          </div>
+        </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>
-            {/* Connect Wallet */}
-            <button onClick={() => router.push("/wallets")} style={{
-              padding: "8px 16px", background: "transparent",
-              border: "1px solid #1a2235", borderRadius: 8,
-              color: "#9ca3af", fontSize: 13, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 6,
-            }}>
-              <span>◎</span> Connect Wallet
-            </button>
-
-            {/* Open Checkout */}
-            <button className="btn-primary" onClick={() => router.push("/checkout")} style={{
-              padding: "8px 16px", background: "#0d7c5f",
-              border: "none", borderRadius: 8,
-              color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 6,
-            }}>
-              🛒 Open Checkout
-            </button>
-
-            {/* Notifications */}
-            <div style={{ position: "relative", cursor: "pointer" }}>
-              <div style={{ width: 36, height: 36, background: "#0f1117", border: "1px solid #1a2235", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🔔</div>
-              {notifications > 0 && (
-                <div style={{ position: "absolute", top: -4, right: -4, width: 16, height: 16, background: "#0d7c5f", borderRadius: "50%", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700 }}>
-                  {notifications}
+        {/* METRIC CARDS */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+          {[
+            { label: "Testnet Volume Settled", value: metrics.totalVolume.toFixed(2), unit: "tUSDC", unitColor: "#f59e0b", icon: "$", iconBg: "rgba(13,124,95,0.15)", iconColor: "#0d7c5f", dataKey: "volume", strokeColor: "#0d7c5f" },
+            { label: "Total M2M Operations", value: metrics.totalTransactions.toString(), unit: "Recorded Tx", unitColor: "#6b7280", icon: "↔", iconBg: "rgba(139,92,246,0.15)", iconColor: "#8b5cf6", dataKey: "count", strokeColor: "#8b5cf6" },
+            { label: "CCTP Attestation Precision", value: `${metrics.successRate.toFixed(1)}%`, unit: `${successCount} settled`, unitColor: "#10b981", icon: "◎", iconBg: "rgba(16,185,129,0.15)", iconColor: "#10b981", dataKey: "volume", strokeColor: "#10b981" },
+          ].map((card, i) => (
+            <div key={i} className="dash-card" style={{ padding: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{ width: 36, height: 36, background: card.iconBg, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: card.iconColor }}>{card.icon}</div>
+                <p style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>{card.label}</p>
+              </div>
+              <p className="mono" style={{ fontSize: 28, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+                {card.value}{" "}<span style={{ fontSize: 13, fontWeight: 400, color: card.unitColor }}>{card.unit}</span>
+              </p>
+              {chartData.length > 0 && (
+                <div style={{ height: 44, marginTop: 12 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData}>
+                      <defs>
+                        <linearGradient id={`sg${i}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={card.strokeColor} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={card.strokeColor} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Area type="monotone" dataKey={card.dataKey} stroke={card.strokeColor} strokeWidth={1.5} fill={`url(#sg${i})`} dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               )}
             </div>
+          ))}
+        </div>
 
-            {/* User */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-              <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #0d7c5f, #0a5c47)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>MA</div>
+        {/* CHART + GATEWAY OVERVIEW */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20, marginBottom: 24 }}>
+
+          <div className="dash-card" style={{ padding: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
               <div>
-                <p style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Merchant Admin</p>
-                <p style={{ fontSize: 11, color: "#4b5563" }}>Admin</p>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: "#fff" }}>Payment Analytics</h3>
+                <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Stablecoin transaction activity</p>
               </div>
-              <span style={{ color: "#4b5563", fontSize: 12 }}>▾</span>
-            </div>
-          </div>
-        </header>
-
-        {/* Page Content */}
-        <div style={{ padding: "32px", flex: 1 }} className="fade-in">
-
-          {/* Welcome + Date */}
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>
-            <div>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
-                Welcome back, Merchant Admin 👋
-              </h1>
-              <p style={{ fontSize: 14, color: "#6b7280" }}>Here's what's happening with your business today.</p>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#0f1117", border: "1px solid #1a2235", borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>
-              <span style={{ fontSize: 14 }}>📅</span>
-              <span style={{ fontSize: 13, color: "#9ca3af" }}>{new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-              <span style={{ color: "#4b5563", fontSize: 12 }}>▾</span>
-            </div>
-          </div>
-
-          {/* ── METRIC CARDS ──────────────────────────────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-            {[
-              { label: "Total Volume", value: `${metrics.totalVolume.toFixed(2)} USDC`, change: "+18%", icon: "$", color: "#0d7c5f", data: generateSparkline(metrics.totalVolume || 1) },
-              { label: "Transactions", value: metrics.totalTransactions.toString(), change: "+12%", icon: "↔", color: "#8b5cf6", data: generateSparkline(metrics.totalTransactions || 1) },
-              { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, change: "+3%", icon: "✓", color: "#f59e0b", data: generateSparkline(metrics.successRate || 1) },
-              { label: "Avg Tx Value", value: `${avgTxValue.toFixed(2)} USDC`, change: "+11%", icon: "↗", color: "#3b82f6", data: generateSparkline(avgTxValue || 1) },
-            ].map((card, i) => (
-              <div key={i} className="card" style={{ background: "#0f1117", border: "1px solid #1a2235", borderRadius: 14, padding: 20, boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <div style={{ width: 36, height: 36, background: `${card.color}22`, border: `1px solid ${card.color}44`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: card.color }}>
-                    {card.icon}
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>{card.label}</p>
-                    <span style={{ fontSize: 11, color: "#0d7c5f", fontWeight: 600 }}>{card.change}</span>
-                  </div>
-                </div>
-                <p style={{ fontSize: 22, fontWeight: 700, color: "#fff", fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>{card.value}</p>
-                <p style={{ fontSize: 11, color: "#4b5563", marginBottom: 8 }}>vs last week</p>
-                <ResponsiveContainer width="100%" height={40}>
-                  <AreaChart data={card.data}>
-                    <defs>
-                      <linearGradient id={`grad${i}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={card.color} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={card.color} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Area type="monotone" dataKey="v" stroke={card.color} strokeWidth={1.5} fill={`url(#grad${i})`} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-outline" style={{ padding: "6px 12px", fontSize: 12 }}>Last 7 Days ▾</button>
+                <button className="btn-outline" style={{ padding: "6px 12px", fontSize: 12 }}>↓ Export</button>
               </div>
-            ))}
-          </div>
-
-          {/* ── ANALYTICS + GATEWAY OVERVIEW ─────────────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20, marginBottom: 24 }}>
-
-            {/* Chart */}
-            <div style={{ background: "#0f1117", border: "1px solid #1a2235", borderRadius: 14, padding: 24 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                <div>
-                  <h3 style={{ fontSize: 16, fontWeight: 600, color: "#fff" }}>Payment Analytics</h3>
-                  <p style={{ fontSize: 12, color: "#6b7280" }}>Stablecoin transaction activity</p>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button style={{ padding: "6px 12px", background: "#0f1117", border: "1px solid #1a2235", borderRadius: 6, color: "#9ca3af", fontSize: 12, cursor: "pointer" }}>
-                    Last 7 Days ▾
-                  </button>
-                  <button style={{ padding: "6px 12px", background: "#0f1117", border: "1px solid #1a2235", borderRadius: 6, color: "#9ca3af", fontSize: 12, cursor: "pointer" }}>
-                    ↓ Export
-                  </button>
-                  <button style={{ padding: "6px 12px", background: "#0f1117", border: "1px solid #1a2235", borderRadius: 6, color: "#9ca3af", fontSize: 12, cursor: "pointer" }}>
-                    ⋯
-                  </button>
-                </div>
-              </div>
-
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={chartData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+            </div>
+            <div style={{ height: 200, marginTop: 20 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="mainGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#0d7c5f" stopOpacity={0.4} />
                       <stop offset="95%" stopColor="#0d7c5f" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1a2235" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fill: "#4b5563", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#4b5563", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2a3a" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fill: "#4b5563", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#4b5563", fontSize: 10 }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#0a0d13", border: "1px solid #1a2235", borderRadius: 8, fontSize: 12 }}
+                    contentStyle={{ background: "#111827", border: "1px solid #232d42", borderRadius: 8, fontSize: 12 }}
                     labelStyle={{ color: "#9ca3af" }}
                     itemStyle={{ color: "#0d7c5f" }}
+                    formatter={(val: any) => [`${val} USDC`, "Volume"]}
                   />
                   <Area type="monotone" dataKey="volume" stroke="#0d7c5f" strokeWidth={2.5} fill="url(#mainGrad)" dot={{ fill: "#0d7c5f", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "#0d7c5f" }} />
                 </AreaChart>
               </ResponsiveContainer>
-
-              {/* Sub metrics */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 16, paddingTop: 16, borderTop: "1px solid #1a2235" }}>
-                {[
-                  { label: "Successful Payments", value: successCount, change: "+15%", up: true, icon: "✓", color: "#0d7c5f" },
-                  { label: "Failed Payments", value: failedCount, change: "-8%", up: false, icon: "✗", color: "#ef4444" },
-                  { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, change: "+3%", up: true, icon: "◎", color: "#3b82f6" },
-                  { label: "Avg Txn Value", value: `$${avgTxValue.toFixed(2)}`, change: "+11%", up: true, icon: "↗", color: "#f59e0b" },
-                ].map((m, i) => (
-                  <div key={i} style={{ padding: 12, background: "#0a0d13", borderRadius: 8, border: "1px solid #1a2235" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                      <span style={{ fontSize: 14, color: m.color }}>{m.icon}</span>
-                      <p style={{ fontSize: 10, color: "#6b7280" }}>{m.label}</p>
-                    </div>
-                    <p style={{ fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: "'DM Mono', monospace" }}>{m.value}</p>
-                    <p style={{ fontSize: 11, color: m.up ? "#0d7c5f" : "#ef4444", marginTop: 2 }}>
-                      {m.up ? "↑" : "↓"} {m.change}
-                    </p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 20, paddingTop: 20, borderTop: "1px solid #1e2a3a" }}>
+              {[
+                { label: "Successful Payments", value: successCount, color: "#0d7c5f", icon: "✓" },
+                { label: "Failed Payments", value: failedCount, color: "#ef4444", icon: "✗" },
+                { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, color: "#3b82f6", icon: "◎" },
+                { label: "Avg Txn Value", value: `$${avgTxValue.toFixed(2)}`, color: "#f59e0b", icon: "↗" },
+              ].map((m, i) => (
+                <div key={i} className="dash-card-inner" style={{ padding: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 6 }}>
+                    <span style={{ color: m.color, fontSize: 12 }}>{m.icon}</span>
+                    <p style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.3 }}>{m.label}</p>
                   </div>
-                ))}
+                  <p className="mono" style={{ fontSize: 18, fontWeight: 700, color: m.color }}>{m.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Gateway Overview */}
+          <div className="dash-card" style={{ padding: 24, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: "#fff" }}>Gateway Overview</h3>
+              <div className="green-subtle" style={{ borderRadius: 20, padding: "3px 10px", display: "flex", alignItems: "center", gap: 5 }}>
+                <span className="pulse" style={{ width: 6, height: 6, borderRadius: "50%", background: "#0d7c5f", display: "inline-block" }} />
+                <span style={{ fontSize: 10, color: "#0d7c5f", fontWeight: 600 }}>Live</span>
+              </div>
+            </div>
+            <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Total Revenue (USDC)</p>
+            <p className="mono" style={{ fontSize: 30, fontWeight: 700, color: "#fff", marginBottom: 2 }}>
+              {metrics.totalVolume.toFixed(2)}{" "}<span style={{ fontSize: 14, color: "#0d7c5f" }}>USDC</span>
+            </p>
+            <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 24 }}>≈ ${metrics.totalVolume.toFixed(2)}</p>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <p style={{ fontSize: 12, color: "#6b7280" }}>Successful Payments</p>
+                <p style={{ fontSize: 12, color: "#fff" }}>{metrics.successRate.toFixed(1)}%</p>
+              </div>
+              <p className="mono" style={{ fontSize: 20, fontWeight: 700, color: "#fff", marginBottom: 6 }}>{successCount}</p>
+              <div style={{ height: 5, background: "#1e2a3a", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${metrics.successRate}%`, background: "linear-gradient(90deg, #0d7c5f, #10b981)", borderRadius: 3, transition: "width 1s ease" }} />
               </div>
             </div>
 
-            {/* Gateway Overview */}
-            <div style={{ background: "#0f1117", border: "1px solid #1a2235", borderRadius: 14, padding: 24, display: "flex", flexDirection: "column" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 600, color: "#fff" }}>Gateway Overview</h3>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#0d7c5f11", border: "1px solid #0d7c5f33", borderRadius: 20, padding: "3px 10px" }}>
-                  <span style={{ width: 6, height: 6, background: "#0d7c5f", borderRadius: "50%", animation: "pulse 2s infinite" }} />
-                  <span style={{ fontSize: 11, color: "#0d7c5f", fontWeight: 600 }}>Live</span>
-                </div>
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <p style={{ fontSize: 12, color: "#6b7280" }}>Failed Payments</p>
+                <p style={{ fontSize: 12, color: "#fff" }}>{(100 - metrics.successRate).toFixed(1)}%</p>
               </div>
-
-              <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Total Revenue (USDC)</p>
-              <p style={{ fontSize: 32, fontWeight: 700, color: "#fff", fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>
-                {metrics.totalVolume.toFixed(2)} <span style={{ fontSize: 16, color: "#0d7c5f" }}>USDC</span>
-              </p>
-              <p style={{ fontSize: 12, color: "#4b5563", marginBottom: 24 }}>≈ ${metrics.totalVolume.toFixed(2)}</p>
-
-              {/* Successful */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <p style={{ fontSize: 12, color: "#6b7280" }}>Successful Payments</p>
-                  <p style={{ fontSize: 12, color: "#fff", fontWeight: 600 }}>{metrics.successRate.toFixed(1)}%</p>
-                </div>
-                <p style={{ fontSize: 20, fontWeight: 700, color: "#fff", marginBottom: 8, fontFamily: "'DM Mono', monospace" }}>{successCount}</p>
-                <div style={{ height: 6, background: "#1a2235", borderRadius: 3, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${metrics.successRate}%`, background: "linear-gradient(90deg, #0d7c5f, #10b981)", borderRadius: 3, transition: "width 1s ease" }} />
-                </div>
+              <p className="mono" style={{ fontSize: 20, fontWeight: 700, color: "#fff", marginBottom: 6 }}>{failedCount}</p>
+              <div style={{ height: 5, background: "#1e2a3a", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${100 - metrics.successRate}%`, background: "#ef4444", borderRadius: 3 }} />
               </div>
+            </div>
 
-              {/* Failed */}
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <p style={{ fontSize: 12, color: "#6b7280" }}>Failed Payments</p>
-                  <p style={{ fontSize: 12, color: "#fff", fontWeight: 600 }}>{(100 - metrics.successRate).toFixed(1)}%</p>
-                </div>
-                <p style={{ fontSize: 20, fontWeight: 700, color: "#fff", marginBottom: 8, fontFamily: "'DM Mono', monospace" }}>{failedCount}</p>
-                <div style={{ height: 6, background: "#1a2235", borderRadius: 3, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${100 - metrics.successRate}%`, background: "#ef4444", borderRadius: 3 }} />
-                </div>
-              </div>
-
-              {/* Agent Pipeline */}
-              <div style={{ padding: 14, background: "#0a0d13", border: "1px solid #1a2235", borderRadius: 10, marginBottom: 16 }}>
-                <p style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>ERC-8004 Agent Pipeline</p>
-                <button
-                  onClick={triggerAgentLifecycle}
-                  disabled={isDeploying}
-                  style={{
-                    width: "100%", padding: "8px 0", marginTop: 8,
-                    background: isDeploying ? "#1a2235" : "transparent",
-                    border: `1px solid ${isDeploying ? "#1a2235" : "#0d7c5f"}`,
-                    borderRadius: 6, color: isDeploying ? "#4b5563" : "#0d7c5f",
-                    fontSize: 11, fontWeight: 600, cursor: isDeploying ? "not-allowed" : "pointer",
-                    letterSpacing: 1, textTransform: "uppercase",
-                  }}
-                >
-                  {isDeploying ? "COMPILING..." : "⚡ LAUNCH AGENT"}
-                </button>
-                {deployError && <p style={{ color: "#ef4444", fontSize: 10, marginTop: 6 }}>❌ {deployError}</p>}
-                {deployedAgent && <p style={{ color: "#0d7c5f", fontSize: 10, marginTop: 6 }}>● Agent bound successfully</p>}
-              </div>
-
-              {/* Generate API Key */}
+            <div className="dash-card-inner" style={{ padding: 14, marginBottom: 14 }}>
+              <p style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 2 }}>ERC-8004 Agent Pipeline</p>
+              <p style={{ fontSize: 11, color: "#4b5563", marginBottom: 10 }}>Programmatically instantiate sandboxed SCA nodes</p>
               <button
-                className="btn-primary"
-                onClick={() => {
-                  navigator.clipboard.writeText("arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2");
-                  alert("API Key copied to clipboard!");
-                }}
+                onClick={triggerAgentLifecycle}
+                disabled={isDeploying}
                 style={{
-                  width: "100%", padding: "12px 0", background: "#0d7c5f",
-                  border: "none", borderRadius: 10, color: "#fff",
-                  fontSize: 13, fontWeight: 600, cursor: "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  marginTop: "auto",
+                  width: "100%", padding: "9px 0", borderRadius: 8,
+                  background: isDeploying ? "#1e2a3a" : "rgba(13,124,95,0.15)",
+                  border: `1px solid ${isDeploying ? "#232d42" : "#0d7c5f"}`,
+                  color: isDeploying ? "#4b5563" : "#0d7c5f",
+                  fontSize: 11, fontWeight: 700, cursor: isDeploying ? "not-allowed" : "pointer",
+                  letterSpacing: 1, textTransform: "uppercase", fontFamily: "monospace",
                 }}
               >
-                🔑 Generate API Key →
+                {isDeploying ? "COMPILING..." : "⚡ LAUNCH AGENT LIFECYCLE"}
               </button>
-            </div>
-          </div>
-
-          {/* ── RECENT TRANSACTIONS ───────────────────────────────────────── */}
-          <div style={{ background: "#0f1117", border: "1px solid #1a2235", borderRadius: 14, padding: 24 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 600, color: "#fff" }}>Recent Transactions</h3>
-              <button onClick={() => router.push("/transactions")} style={{ background: "none", border: "none", color: "#0d7c5f", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-                View all →
-              </button>
+              {deploymentError && <p style={{ color: "#ef4444", fontSize: 10, marginTop: 6 }}>❌ {deploymentError}</p>}
+              {deployedAgent && <p style={{ color: "#0d7c5f", fontSize: 10, marginTop: 6 }}>● Live Agent Registry Bound: #{deployedAgent.agentId}</p>}
             </div>
 
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid #1a2235" }}>
-                  {["Transaction ID", "Type", "Amount", "Status", "Date", "Merchant", "Actions"].map((h) => (
-                    <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, color: "#4b5563", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 500 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {payments.slice(0, 8).map((payment, i) => (
-                  <tr key={payment.id} style={{ borderBottom: "1px solid #0f1117", transition: "background 0.15s" }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "#0a0d13")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                  >
-                    <td style={{ padding: "14px 12px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 12, color: "#9ca3af", fontFamily: "'DM Mono', monospace" }}>
-                          {payment.reference.slice(0, 18)}...
-                        </span>
-                        <span className="action-btn" style={{ fontSize: 12, color: "#4b5563" }} onClick={() => navigator.clipboard.writeText(payment.reference)}>⧉</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: "14px 12px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 14, color: "#0d7c5f" }}>↔</span>
-                        <span style={{ fontSize: 13, color: "#9ca3af" }}>Payment</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: "14px 12px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ width: 18, height: 18, background: "#0d7c5f22", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#0d7c5f" }}>$</div>
-                        <span style={{ fontSize: 13, color: "#fff", fontFamily: "'DM Mono', monospace" }}>{payment.amount.toFixed(2)} {payment.currency}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: "14px 12px" }}>
-                      <span style={{
-                        padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-                        background: payment.status === "SUCCESS" ? "#0d7c5f22" : "#ef444422",
-                        color: payment.status === "SUCCESS" ? "#0d7c5f" : "#ef4444",
-                        border: `1px solid ${payment.status === "SUCCESS" ? "#0d7c5f44" : "#ef444444"}`,
-                      }}>
-                        ● {payment.status === "SUCCESS" ? "Completed" : payment.status}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 12px" }}>
-                      <span style={{ fontSize: 12, color: "#6b7280" }}>
-                        {new Date(payment.paid_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 12px" }}>
-                      <span style={{ fontSize: 13, color: "#9ca3af" }}>{payment.merchant}</span>
-                    </td>
-                    <td style={{ padding: "14px 12px" }}>
-                      <button className="action-btn" style={{ background: "none", border: "none", color: "#4b5563", fontSize: 18, cursor: "pointer" }}>⋯</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {payments.length === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 0", color: "#4b5563" }}>
-                <p style={{ fontSize: 14 }}>No transactions yet</p>
-                <p style={{ fontSize: 12, marginTop: 4 }}>Payments will appear here after checkout</p>
-              </div>
-            )}
+            <button
+              className="btn-green"
+              onClick={() => {
+                navigator.clipboard.writeText("arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2");
+                alert("API Key copied!");
+              }}
+              style={{ width: "100%", padding: "12px 0", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+            >
+              🔑 Generate API Key →
+            </button>
           </div>
         </div>
+
+        {/* SETTLEMENT STREAMS TABLE */}
+        <div className="dash-card" style={{ padding: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+            <h3 className="mono" style={{ fontSize: 13, fontWeight: 700, color: "#fff", textTransform: "uppercase", letterSpacing: 1 }}>
+              Inbound Agent Settlement Streams
+            </h3>
+            <span className="mono" style={{ fontSize: 10, color: "#4b5563", background: "#111827", padding: "4px 12px", borderRadius: 8, border: "1px solid #1e2a3a" }}>
+              Prisma Database Synchronization
+            </span>
+          </div>
+
+          {error && <p style={{ color: "#ef4444", fontSize: 12, fontFamily: "monospace", marginBottom: 16 }}>❌ {error}</p>}
+
+          {payments.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "48px 0" }}>
+              <p style={{ color: "#4b5563", fontSize: 13, fontFamily: "monospace" }}>No settlement streams recorded yet.</p>
+              <p style={{ color: "#374151", fontSize: 11, marginTop: 6 }}>Payments will appear here after checkout.</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "monospace" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #1e2a3a" }}>
+                    {["Reference / Timestamp", "Entity M2M Graph", "Execution Domain", "Payload Value", "Status", "Circle CCTP Attestation"].map((h) => (
+                      <th key={h} style={{ textAlign: "left", paddingBottom: 12, paddingRight: 16, fontSize: 10, color: "#4b5563", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 500 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((payment) => (
+                    <tr key={payment.id} className="hover-row" style={{ borderBottom: "1px solid #111827" }}>
+                      <td style={{ padding: "14px 16px 14px 0" }}>
+                        <div style={{ color: "#0d7c5f" }}>{payment.reference.slice(0, 16)}</div>
+                        <div style={{ color: "#4b5563", fontSize: 10, marginTop: 2 }}>{new Date(payment.paid_at).toLocaleString()}</div>
+                      </td>
+                      <td style={{ padding: "14px 16px 14px 0" }}>
+                        <div style={{ color: "#e2e8f0" }}>{payment.sender_email}</div>
+                        <div style={{ color: "#4b5563", fontSize: 10, marginTop: 2 }}>→ Merchant: {payment.merchant}</div>
+                      </td>
+                      <td style={{ padding: "14px 16px 14px 0" }}>
+                        <span style={{ background: "rgba(13,124,95,0.1)", color: "#0d7c5f", padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(13,124,95,0.25)", fontSize: 10 }}>
+                          {payment.chain.length > 20 ? "Arc-L1" : payment.chain}
+                        </span>
+                      </td>
+                      <td style={{ padding: "14px 16px 14px 0" }}>
+                        <div style={{ color: "#fff", fontWeight: 700 }}>{payment.amount.toFixed(2)}</div>
+                        <div style={{ color: "#f59e0b", fontSize: 10 }}>{payment.currency}</div>
+                      </td>
+                      <td style={{ padding: "14px 16px 14px 0" }}>
+                        <span style={{
+                          padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 700,
+                          background: payment.status === "SUCCESS" ? "rgba(13,124,95,0.15)" : payment.status === "ATTESTATION_FAILED" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)",
+                          color: payment.status === "SUCCESS" ? "#0d7c5f" : payment.status === "ATTESTATION_FAILED" ? "#ef4444" : "#f59e0b",
+                          border: `1px solid ${payment.status === "SUCCESS" ? "rgba(13,124,95,0.3)" : payment.status === "ATTESTATION_FAILED" ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"}`,
+                        }}>
+                          {payment.status === "SUCCESS" ? "SUCCESS" : payment.status === "ATTESTATION_FAILED" ? "FAILED" : "PENDING"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "14px 0" }}>
+                        <div style={{ color: payment.cctp_telemetry.attestation_status === "REDEEMED_AND_MINTED" ? "#10b981" : "#f59e0b", fontSize: 10 }}>
+                          {payment.cctp_telemetry.attestation_status === "REDEEMED_AND_MINTED" ? "REDEEMED_AND_MINTED" : "POLLING_CIRCLE_TESTNET_IRIS_API"}
+                        </div>
+                        <div style={{ color: "#374151", fontSize: 10, marginTop: 2 }}>Nonce: {payment.cctp_telemetry.nonce}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
       </main>
     </div>
   );
