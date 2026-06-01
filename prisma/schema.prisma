@@ -45,3 +45,38 @@ model ApiKey {
   lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
 }
+
+model Agent {
+  id            String   @id @default(cuid())
+  name          String
+  walletAddress String   @unique
+  scaAddress    String?
+  capabilities  String[]
+  pricePerJob   String
+  createdAt     DateTime @default(now())
+  jobs          Job[]
+}
+
+model Escrow {
+  id              String   @id @default(cuid())
+  contractAddress String
+  buyerAddress    String
+  agentAddress    String
+  amount          String
+  status          String   // pending | active | disputed | settled
+  deliverable     Json?
+  txHash          String?
+  createdAt       DateTime @default(now())
+  job             Job?
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  title       String
+  agentId     String
+  escrowId    String?  @unique
+  status      String
+  createdAt   DateTime @default(now())
+  agent       Agent    @relation(fields: [agentId], references: [id])
+  escrow      Escrow?  @relation(fields: [escrowId], references: [id])
+}
