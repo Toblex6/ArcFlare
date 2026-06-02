@@ -36,14 +36,14 @@ model AgentRegistry {
 }
 
 model ApiKey {
-  id          Int       @id @default(autoincrement())
-  key         String    @unique
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
   label       String
   ownerEmail  String?
-  active      Boolean   @default(true)
-  usageCount  Int       @default(0)
+  active      Boolean  @default(true)
+  usageCount  Int      @default(0)
   lastUsedAt  DateTime?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 }
 
 model Agent {
@@ -58,37 +58,47 @@ model Agent {
 }
 
 model Escrow {
-  id            String   @id @default(uuid())
-  reference     String   @unique
-  amount        Float
-  currency      String
-  depositorSCA  String
-  beneficiarySCA String
+  id              String    @id @default(uuid())
+  reference       String    @unique
+  amount          Float
+  currency        String
+  depositorSCA    String
+  beneficiarySCA  String
   contractAddress String
-  status        String   -- ACTIVE, RELEASED, DISPUTED
-  condition     String?
-  deadline      DateTime?
-  createdAt     DateTime @default(now())
+  status          String    // ACTIVE, RELEASED, DISPUTED
+  condition       String?
+  deadline        DateTime?
+  createdAt       DateTime @default(now())
 }
 
 model Stream {
-  id            String   @id @default(uuid())
-  senderSCA     String
-  receiverSCA   String
-  ratePerSecond Float
+  id             String    @id @default(uuid())
+  senderSCA      String
+  receiverSCA    String
+  ratePerSecond  Float
   totalDeposited Float
-  status        String   -- ACTIVE, STOPPED
-  startedAt     DateTime @default(now())
-  stoppedAt     DateTime?
+  status         String    // ACTIVE, STOPPED
+  startedAt      DateTime  @default(now())
+  stoppedAt      DateTime?
 }
 
 model NanoPayment {
-  id            String   @id @default(uuid())
-  agentSCA      String
-  merchantSCA   String
-  amount        Float
-  settled       Boolean  @default(false)
-  createdAt     DateTime @default(now())
+  id           String   @id @default(uuid())
+  agentSCA     String
+  merchantSCA  String
+  amount       Float
+  settled      Boolean  @default(false)
+  createdAt    DateTime @default(now())
 }
 
-
+model Job {
+  id          String   @id @default(uuid())
+  description String
+  amount      Float
+  status      String   // PENDING, COMPLETED, FAILED
+  createdAt   DateTime @default(now())
+  
+  // The relation linking this job back to a specific Agent
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id])
+}
