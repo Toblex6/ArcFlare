@@ -63,13 +63,14 @@ async function runErc8004Lifecycle() {
   console.log("--- [Phase 3: Validation Request] ---");
   const reqTx = await circleClient.createContractExecutionTransaction({
     walletId: ownerWallet.id, 
-    contractAddress: VALIDATION_REGISTRY_ADDRESS!, // Use the dynamic import
+    contractAddress: VALIDATION_REGISTRY_ADDRESS!,
+    // Canonical EVM signatures must not have spaces or storage keywords (like memory/calldata)
     abiFunctionSignature: "requestValidation(uint256,bytes32,string,address)",
     abiParameters: [
-      simulatedAgentId.toString(), 
+      "1", 
       valHash, 
       "ipfs://bafkreiexample", 
-      validatorWallet.address!
+      String(validatorWallet.address)
     ],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
@@ -78,13 +79,16 @@ async function runErc8004Lifecycle() {
   console.log("--- [Phase 4: Validation Response] ---");
   const resTx = await circleClient.createContractExecutionTransaction({
     walletId: validatorWallet.id,
-    contractAddress: VALIDATION_REGISTRY_ADDRESS!, // Use the dynamic import
+    contractAddress: VALIDATION_REGISTRY_ADDRESS!,
+    // Stripped down canonical types only
     abiFunctionSignature: "submitValidationResult(bytes32,uint8,string)",
-    // Note: In our new contract, status 1 = Passed. 
-    abiParameters: [valHash, "1", "kyc_verified"], 
+    abiParameters: [
+      valHash, 
+      "1", 
+      "kyc_verified"
+    ], 
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
-
   console.log(`\n🎉 Pipeline Synced!`);
   console.log(`   Request ID:  ${reqTx.data?.id}`);
   console.log(`   Response ID: ${resTx.data?.id}`);
