@@ -8,7 +8,7 @@ import { arcTestnet } from "viem/chains";
 import { withApiKey } from "@/lib/middleware/withApiKey";
 
 const MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
-const IRIS_API = "https://iris-api-sandbox.circle.com";
+const IRIS_API = "https://iris-api-sandbox.circle.com/v2";
 
 const MESSAGE_TRANSMITTER_ABI = [
   {
@@ -41,7 +41,7 @@ async function pollForAttestation(messageHash: string) {
 
 async function mintOnArc(message: string, attestation: string) {
   const adminKey = process.env.ARC_ADMIN_PRIVATE_KEY;
-  if (!adminKey) throw new Error("ARC_ADMIN_PRIVATE_KEY not set.");
+  if (!adminKey) throw new Error("0x99c8dbf024471cccdbd6c9eb7e0a355ac823e5440fa6a84bb27f105747ecfff9");
 
   const account = privateKeyToAccount(adminKey as `0x${string}`);
   const walletClient = createWalletClient({

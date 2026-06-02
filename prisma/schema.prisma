@@ -58,25 +58,37 @@ model Agent {
 }
 
 model Escrow {
-  id              String   @id @default(cuid())
+  id            String   @id @default(uuid())
+  reference     String   @unique
+  amount        Float
+  currency      String
+  depositorSCA  String
+  beneficiarySCA String
   contractAddress String
-  buyerAddress    String
-  agentAddress    String
-  amount          String
-  status          String   // pending | active | disputed | settled
-  deliverable     Json?
-  txHash          String?
-  createdAt       DateTime @default(now())
-  job             Job?
+  status        String   -- ACTIVE, RELEASED, DISPUTED
+  condition     String?
+  deadline      DateTime?
+  createdAt     DateTime @default(now())
 }
 
-model Job {
-  id          String   @id @default(cuid())
-  title       String
-  agentId     String
-  escrowId    String?  @unique
-  status      String
-  createdAt   DateTime @default(now())
-  agent       Agent    @relation(fields: [agentId], references: [id])
-  escrow      Escrow?  @relation(fields: [escrowId], references: [id])
+model Stream {
+  id            String   @id @default(uuid())
+  senderSCA     String
+  receiverSCA   String
+  ratePerSecond Float
+  totalDeposited Float
+  status        String   -- ACTIVE, STOPPED
+  startedAt     DateTime @default(now())
+  stoppedAt     DateTime?
 }
+
+model NanoPayment {
+  id            String   @id @default(uuid())
+  agentSCA      String
+  merchantSCA   String
+  amount        Float
+  settled       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+}
+
+
