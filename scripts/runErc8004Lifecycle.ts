@@ -1,3 +1,4 @@
+import { VALIDATION_REGISTRY_ADDRESS } from "../config/contracts";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { keccak256, stringToBytes } from "viem";
 import dotenv from "dotenv";
@@ -62,9 +63,14 @@ async function runErc8004Lifecycle() {
   console.log("--- [Phase 3: Validation Request] ---");
   const reqTx = await circleClient.createContractExecutionTransaction({
     walletId: ownerWallet.id, 
-    contractAddress: VALIDATION_REGISTRY,
-    abiFunctionSignature: "validationRequest(address,uint256,string,bytes32)",
-    abiParameters: [validatorWallet.address!, simulatedAgentId.toString(), "ipfs://bafkreiexample", valHash],
+    contractAddress: VALIDATION_REGISTRY_ADDRESS!, // Use the dynamic import
+    abiFunctionSignature: "requestValidation(uint256,bytes32,string,address)",
+    abiParameters: [
+      simulatedAgentId.toString(), 
+      valHash, 
+      "ipfs://bafkreiexample", 
+      validatorWallet.address!
+    ],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
 
@@ -72,9 +78,10 @@ async function runErc8004Lifecycle() {
   console.log("--- [Phase 4: Validation Response] ---");
   const resTx = await circleClient.createContractExecutionTransaction({
     walletId: validatorWallet.id,
-    contractAddress: VALIDATION_REGISTRY,
-    abiFunctionSignature: "validationResponse(bytes32,uint8,string,bytes32,string)",
-    abiParameters: [valHash, 100, "", "0x0000000000000000000000000000000000000000000000000000000000000000", "kyc_verified"],
+    contractAddress: VALIDATION_REGISTRY_ADDRESS!, // Use the dynamic import
+    abiFunctionSignature: "submitValidationResult(bytes32,uint8,string)",
+    // Note: In our new contract, status 1 = Passed. 
+    abiParameters: [valHash, "1", "kyc_verified"], 
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
 
