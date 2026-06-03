@@ -41,7 +41,7 @@ async function pollForAttestation(messageHash: string) {
 
 async function mintOnArc(message: string, attestation: string) {
   const adminKey = process.env.ARC_ADMIN_PRIVATE_KEY;
-  if (!adminKey) throw new Error("0x99c8dbf024471cccdbd6c9eb7e0a355ac823e5440fa6a84bb27f105747ecfff9");
+  if (!adminKey) throw new Error("ARC_ADMIN_PRIVATE_KEY not set in environment.");
 
   const account = privateKeyToAccount(adminKey as `0x${string}`);
   const walletClient = createWalletClient({
