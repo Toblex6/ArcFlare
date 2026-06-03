@@ -1,16 +1,15 @@
-// 1. Generator Configuration
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/client"
 }
 
-// 2. Data Source Configuration
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// --- IDENTITY & REGISTRY MODELS ---
+// ─── Agent Models ─────────────────────────────────────────────────────────────
 
 model Agent {
   id            String   @id @default(cuid())
@@ -46,65 +45,7 @@ model ApiKey {
   createdAt  DateTime  @default(now())
 }
 
-// --- FINANCIAL ENGINES (ESCROW/STREAMS/PAYMENTS) ---
-
-model Escrow {
-  id              String    @id @default(uuid())
-  reference       String    @unique
-  amount          String
-  currency        String    @default("USDC")
-  depositorSCA    String?
-  beneficiarySCA  String?
-  contractAddress String?
-  factoryUsed     String?
-  status          String    @default("PENDING")
-  condition       String?
-  deadline        DateTime?
-  disputedBy      String?   // Added to resolve type error
-  createdAt       DateTime  @default(now())
-}
-
-model Stream {
-  id             String    @id @default(uuid())
-  senderSCA      String
-  receiverSCA    String
-  ratePerSecond  Float
-  totalDeposited Float
-  status         String    // ACTIVE, STOPPED
-  startedAt      DateTime  @default(now())
-  stoppedAt      DateTime?
-}
-
-model NanoPayment {
-  id          String   @id @default(uuid())
-  agentSCA    String
-  merchantSCA String
-  amount      Float
-  settled     Boolean  @default(false)
-  createdAt   DateTime @default(now())
-}
-
-// --- LOGGING & UTILITY MODELS ---
-
-model Job {
-  id          String   @id @default(uuid())
-  description String
-  amount      Float
-  status      String   // PENDING, COMPLETED, FAILED
-  createdAt   DateTime @default(now())
-  agentId     String
-  agent       Agent    @relation(fields: [agentId], references: [id])
-}
-
-model Payment {
-  id           String   @id @default(cuid())
-  reference    String   @unique
-  amount       Float
-  email        String
-  merchantName String
-  status       String
-  createdAt    DateTime @default(now())
-}
+// ─── Payment Models ───────────────────────────────────────────────────────────
 
 model PaymentLog {
   id          String   @id @default(uuid())
@@ -118,4 +59,76 @@ model PaymentLog {
   arcTxHash   String?
   webhookUrl  String?
   timestamp   DateTime @default(now())
+}
+
+// ─── Escrow Model ─────────────────────────────────────────────────────────────
+
+model Escrow {
+  id                   String    @id @default(uuid())
+  reference            String    @unique
+  amount               Float
+  currency             String    @default("USDC")
+  depositorSCA         String?
+  beneficiarySCA       String?
+  contractAddress      String?
+  onchainId            String?
+  factoryUsed          String?
+  status               String    @default("PENDING")
+  condition            String?
+  deadline             DateTime?
+  txHash               String?
+  releaseTxHash        String?
+  disputeTxHash        String?
+  disputeReason        String?
+  disputedBy           String?
+  depositorConfirmed   Boolean   @default(false)
+  beneficiaryConfirmed Boolean   @default(false)
+  webhookUrl           String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+// ─── Stream Model ─────────────────────────────────────────────────────────────
+
+model Stream {
+  id              String    @id @default(uuid())
+  reference       String    @unique
+  senderSCA       String
+  receiverSCA     String
+  ratePerSecond   Float
+  totalDeposited  Float
+  totalStreamed    Float     @default(0)
+  currency        String    @default("USDC")
+  status          String
+  contractAddress String?
+  txHash          String?
+  webhookUrl      String?
+  startedAt       DateTime  @default(now())
+  stoppedAt       DateTime?
+}
+
+// ─── NanoPayment Model ────────────────────────────────────────────────────────
+
+model NanoPayment {
+  id          String   @id @default(uuid())
+  agentSCA    String
+  merchantSCA String
+  amount      Float
+  currency    String   @default("USDC")
+  description String?
+  settled     Boolean  @default(false)
+  batchRef    String?
+  createdAt   DateTime @default(now())
+}
+
+// ─── Job Model ────────────────────────────────────────────────────────────────
+
+model Job {
+  id          String   @id @default(uuid())
+  description String
+  amount      Float
+  status      String
+  createdAt   DateTime @default(now())
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id])
 }

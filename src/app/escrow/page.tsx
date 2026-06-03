@@ -116,8 +116,11 @@ export default function EscrowDashboard() {
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
               <a href="/dashboard" style={{ color: "#4b5563", fontSize: 13, textDecoration: "none" }}>← Dashboard</a>
             </div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#fff" }}>Escrow Management</h1>
-            <p style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <img src="/logo.png" alt="ArcFlare Logo" style={{ height: "32px", width: "auto" }} />
+              <h1 style={{ fontSize: 22, fontWeight: 700, color: "#fff", margin: 0 }}>Escrow Management</h1>
+            </div>
+            <p style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>
               Trustless USDC escrow on Arc Testnet via ArcFlareEscrow contract
             </p>
           </div>
@@ -212,7 +215,7 @@ export default function EscrowDashboard() {
                         <td style={{ padding: "14px 14px 14px 0" }}>
                           <div style={{ color: "#e2e8f0" }}>📤 {e.depositorSCA.slice(0, 10)}...</div>
                           <div style={{ color: "#4b5563", fontSize: 10, marginTop: 2 }}>
-                            📥 {e.beneficiarySCA.slice(0, 10)}...
+                            {`📥 ${e.beneficiarySCA.slice(0, 10)}...`}
                           </div>
                         </td>
 
