@@ -1,11 +1,99 @@
+// 1. Generator Configuration
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/client"
 }
 
+// 2. Data Source Configuration
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// --- IDENTITY & REGISTRY MODELS ---
+
+model Agent {
+  id            String   @id @default(cuid())
+  name          String
+  walletAddress String   @unique
+  scaAddress    String?
+  capabilities  String[]
+  pricePerJob   String
+  createdAt     DateTime @default(now())
+  jobs          Job[]
+}
+
+model AgentRegistry {
+  id             Int      @id @default(autoincrement())
+  name           String
+  tokenId        String   @unique
+  scaAddress     String   @unique
+  circleWalletId String?
+  ownerNode      String
+  metadataURI    String?
+  status         String
+  createdAt      DateTime @default(now())
+}
+
+model ApiKey {
+  id         Int       @id @default(autoincrement())
+  key        String    @unique
+  label      String
+  ownerEmail String?
+  active     Boolean   @default(true)
+  usageCount Int       @default(0)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// --- FINANCIAL ENGINES (ESCROW/STREAMS/PAYMENTS) ---
+
+model Escrow {
+  id              String    @id @default(uuid())
+  reference       String    @unique
+  amount          String
+  currency        String    @default("USDC")
+  depositorSCA    String?
+  beneficiarySCA  String?
+  contractAddress String?
+  factoryUsed     String?
+  status          String    @default("PENDING")
+  condition       String?
+  deadline        DateTime?
+  disputedBy      String?   // Added to resolve type error
+  createdAt       DateTime  @default(now())
+}
+
+model Stream {
+  id             String    @id @default(uuid())
+  senderSCA      String
+  receiverSCA    String
+  ratePerSecond  Float
+  totalDeposited Float
+  status         String    // ACTIVE, STOPPED
+  startedAt      DateTime  @default(now())
+  stoppedAt      DateTime?
+}
+
+model NanoPayment {
+  id          String   @id @default(uuid())
+  agentSCA    String
+  merchantSCA String
+  amount      Float
+  settled     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+// --- LOGGING & UTILITY MODELS ---
+
+model Job {
+  id          String   @id @default(uuid())
+  description String
+  amount      Float
+  status      String   // PENDING, COMPLETED, FAILED
+  createdAt   DateTime @default(now())
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id])
 }
 
 model Payment {
@@ -16,4 +104,18 @@ model Payment {
   merchantName String
   status       String
   createdAt    DateTime @default(now())
+}
+
+model PaymentLog {
+  id          String   @id @default(uuid())
+  reference   String   @unique
+  amount      Float
+  currency    String
+  chain       String
+  senderEmail String
+  merchant    String
+  status      String
+  arcTxHash   String?
+  webhookUrl  String?
+  timestamp   DateTime @default(now())
 }

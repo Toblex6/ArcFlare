@@ -28,5 +28,9 @@
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
     "viem": "^2.51.3"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
+    "hardhat": "^3.7.0"
   }
 }

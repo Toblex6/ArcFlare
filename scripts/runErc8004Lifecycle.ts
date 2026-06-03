@@ -1,4 +1,3 @@
-import { VALIDATION_REGISTRY_ADDRESS } from "../config/contracts";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { keccak256, stringToBytes } from "viem";
 import dotenv from "dotenv";
@@ -10,8 +9,7 @@ dotenv.config({ path: envPath });
 // Registry Addresses
 const IDENTITY_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e";
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
-// YOUR CUSTOM CONTRACT:
-const VALIDATION_REGISTRY = "0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F"; 
+const VALIDATION_REGISTRY = "0x28836b53b821f5FE3aBcdeDB7a8A67B0D8D08A9E"; 
 
 async function runErc8004Lifecycle() {
   console.log("🚀 [ArcFlare Core] Booting Machine Identity Lifecycle Engine...");
@@ -63,8 +61,7 @@ async function runErc8004Lifecycle() {
   console.log("--- [Phase 3: Validation Request] ---");
   const reqTx = await circleClient.createContractExecutionTransaction({
     walletId: ownerWallet.id, 
-    contractAddress: VALIDATION_REGISTRY_ADDRESS!,
-    // Canonical EVM signatures must not have spaces or storage keywords (like memory/calldata)
+    contractAddress: VALIDATION_REGISTRY,
     abiFunctionSignature: "requestValidation(uint256,bytes32,string,address)",
     abiParameters: [
       "1", 
@@ -79,8 +76,7 @@ async function runErc8004Lifecycle() {
   console.log("--- [Phase 4: Validation Response] ---");
   const resTx = await circleClient.createContractExecutionTransaction({
     walletId: validatorWallet.id,
-    contractAddress: VALIDATION_REGISTRY_ADDRESS!,
-    // Stripped down canonical types only
+    contractAddress: VALIDATION_REGISTRY,
     abiFunctionSignature: "submitValidationResult(bytes32,uint8,string)",
     abiParameters: [
       valHash, 
@@ -89,6 +85,7 @@ async function runErc8004Lifecycle() {
     ], 
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
+
   console.log(`\n🎉 Pipeline Synced!`);
   console.log(`   Request ID:  ${reqTx.data?.id}`);
   console.log(`   Response ID: ${resTx.data?.id}`);

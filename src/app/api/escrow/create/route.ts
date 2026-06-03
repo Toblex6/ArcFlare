@@ -1,3 +1,7 @@
+// src/app/api/escrow/create/route.ts
+// Creates a trustless escrow on Arc Testnet using Circle SCA wallet
+// and the ArcFlareEscrow contract. Funds locked in smart contract.
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKey } from "@/lib/middleware/withApiKey";
@@ -158,3 +162,4 @@ async function createEscrowHandler(request: Request) {
   }
 }
 
+export const POST = withApiKey(createEscrowHandler);

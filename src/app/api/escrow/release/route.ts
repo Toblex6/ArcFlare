@@ -1,3 +1,6 @@
+// src/app/api/escrow/release/route.ts
+// Releases escrowed USDC to beneficiary when conditions are met.
+// Called by depositor confirming delivery, or admin releasing directly.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -127,3 +130,5 @@ async function releaseHandler(request: Request) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+export const POST = withApiKey(releaseHandler);

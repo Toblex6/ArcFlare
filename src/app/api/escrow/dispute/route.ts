@@ -1,3 +1,7 @@
+// src/app/api/escrow/dispute/route.ts
+// Raises a dispute on an active escrow.
+// Admin can then resolve via resolveDispute on the contract.
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKey } from "@/lib/middleware/withApiKey";
@@ -106,3 +110,5 @@ async function disputeHandler(request: Request) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+export const POST = withApiKey(disputeHandler);
