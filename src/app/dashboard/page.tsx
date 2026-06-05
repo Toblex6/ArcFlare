@@ -259,7 +259,7 @@ export default function MerchantDashboard() {
           </p>
         </div>
 
-        {/* METRIC CARDS — 4 cards matching the screenshot */}
+        {/* METRIC CARDS — 4 cards matching the dashboard design */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
           {[
             { label: "Total Volume", value: metrics.totalVolume.toFixed(2), unit: "USDC", change: "+18%", iconBg: "#dcfce7", iconColor: "#16a34a", icon: "$", dataKey: "volume", stroke: "#0d7c5f" },
@@ -410,8 +410,8 @@ export default function MerchantDashboard() {
               >
                 {isDeploying ? "COMPILING..." : "⚡ LAUNCH AGENT LIFECYCLE"}
               </button>
-              {deploymentError && <p style={{ color: "#dc2626", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>❌ {deploymentError}</p>}
-              {deployedAgent && <p style={{ color: "#0d7c5f", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>● Live Agent Registry Bound: #{deployedAgent.agentId}</p>}
+              {deploymentError && <p style={{ color: "#dc2626", fontSize: 10, margin: "6px 0 0 0" }}>❌ {deploymentError}</p>}
+              {deployedAgent && <p style={{ color: "#0d7c5f", fontSize: 10, margin: "6px 0 0 0" }}>● Live Agent Registry Bound: #{deployedAgent.agentId}</p>}
             </div>
 
             <button
@@ -423,7 +423,7 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* SETTLEMENT STREAMS TABLE — keep dark card exactly as-is */}
+        {/* SETTLEMENT STREAMS TABLE — preserved dark card structure exactly as-is */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-base font-bold tracking-wide uppercase font-mono text-white">
