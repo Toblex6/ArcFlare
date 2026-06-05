@@ -11,7 +11,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Image
-              src="/arcflare-logo.png"
+              src="/arcflare-logo.png.png"
               alt="ArcFlare"
               width={42}
               height={42}
@@ -60,7 +60,7 @@ export default function HomePage() {
           <p className="text-xl text-gray-400 leading-relaxed mb-10">
             ArcFlare enables developers and merchants
             to accept programmable stablecoin payments
-            through hosted checkout, wallet abstraction,
+            through hosted checkout, esrow services,
             automated settlement, and onchain payment APIs.
           </p>
 
