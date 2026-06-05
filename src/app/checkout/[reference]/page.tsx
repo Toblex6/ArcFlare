@@ -110,7 +110,7 @@ export default function CheckoutPage() {
       <div className="max-w-6xl mx-auto flex items-center justify-between mb-12">
         <div className="flex items-center gap-4">
           <Image
-            src="/arcflare-logo.png"
+            src="/arcflare-logo.png.png"
             alt="ArcFlare Logo"
             width={55}
             height={55}
