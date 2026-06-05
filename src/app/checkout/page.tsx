@@ -47,7 +47,7 @@ export default function CheckoutHubPage() {
       {/* Header */}
       <header style={{ borderBottom: "1px solid #2d2015", padding: "16px 48px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Image src="/arcflare-logo.png" alt="ArcFlare" width={40} height={40} style={{ borderRadius: 10, objectFit: "contain" }} />
+          <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={40} height={40} style={{ borderRadius: 10, objectFit: "contain" }} />
           <div>
             <p style={{ color: "#f0ece6", fontSize: 16, fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>ARCFLARE</p>
             <p style={{ color: "#6b5a45", fontSize: 9, margin: 0, letterSpacing: 2, textTransform: "uppercase", fontFamily: "monospace" }}>Sandbox Environment</p>
