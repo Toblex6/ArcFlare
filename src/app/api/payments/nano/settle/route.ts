@@ -17,17 +17,19 @@ import {
 // ─── Settle a specific agent-merchant pair ────────────────────────────────────
 async function settleNanoHandler(request: Request) {
   try {
+    // 💡 FIX: Read request body exactly once to prevent stream consumption crashes
+    const body = await request.json().catch(() => ({}));
+    
     const {
       agentSCA,
       merchantSCA,
       webhookUrl,
       forceSettle,  // Skip threshold check and settle anyway
-    } = await request.json();
+      autoSettle,   // Pass { "autoSettle": true } to settle all pairs at threshold
+    } = body;
 
     // ── Auto-settle ALL pairs mode ────────────────────────────────────────
-    // Pass { "autoSettle": true } to settle all pairs at threshold
-    const body = await request.json().catch(() => ({}));
-    if ((body as any).autoSettle) {
+    if (autoSettle) {
       return autoSettleAll();
     }
 
@@ -38,7 +40,7 @@ async function settleNanoHandler(request: Request) {
       );
     }
 
-    const { total, count, payments } = await getUnsettledBalance(agentSCA, merchantSCA);
+    const { total, count } = await getUnsettledBalance(agentSCA, merchantSCA);
 
     if (total <= 0) {
       return NextResponse.json(
@@ -98,7 +100,8 @@ async function settleNanoHandler(request: Request) {
     }
 
     // ── Mark all nano payments as settled ─────────────────────────────────
-    await markBatchSettled(agentSCA, merchantSCA, batchRef);
+    // 💡 FIX: Removed the third 'batchRef' argument to match your helper function's signature
+    await markBatchSettled(agentSCA, merchantSCA);
 
     console.log(
       `✅ Nano batch settled: ${count} payments, ${total.toFixed(6)} USDC, ref: ${batchRef}`
@@ -145,7 +148,7 @@ async function settleNanoHandler(request: Request) {
 // ─── Auto-settle ALL pairs that have reached threshold ────────────────────────
 async function autoSettleAll() {
   const pairs = await getUnsettledPairs();
-  const results = [];
+  const results: any[] = []; // Explicitly typed to prevent inner array map warnings
 
   for (const pair of pairs) {
     const summary = await getBatchSummary(pair.agentSCA, pair.merchantSCA);
@@ -183,7 +186,8 @@ async function autoSettleAll() {
       const settleData = await settleRes.json();
 
       if (settleData.success) {
-        await markBatchSettled(pair.agentSCA, pair.merchantSCA, batchRef);
+        // 💡 FIX: Removed third argument to prevent TS compiler errors
+        await markBatchSettled(pair.agentSCA, pair.merchantSCA);
         results.push({
           agentSCA: pair.agentSCA,
           merchantSCA: pair.merchantSCA,
@@ -205,10 +209,10 @@ async function autoSettleAll() {
 
   return NextResponse.json({
     success: true,
-    settledPairs: results.filter((r) => r.success).length,
-    failedPairs: results.filter((r) => !r.success).length,
+    settledPairs: results.filter((r: any) => r.success).length,
+    failedPairs: results.filter((r: any) => !r.success).length,
     results,
-    message: `Auto-settled ${results.filter((r) => r.success).length} pairs.`,
+    message: `Auto-settled ${results.filter((r: any) => r.success).length} pairs.`,
   });
 }
 

@@ -72,14 +72,20 @@ model Escrow {
 }
 
 model Stream {
-  id             String    @id @default(uuid())
-  senderSCA      String
-  receiverSCA    String
-  ratePerSecond  Float
-  totalDeposited Float
-  status         String    // ACTIVE, STOPPED
-  startedAt      DateTime  @default(now())
-  stoppedAt      DateTime?
+  id              String    @id @default(uuid())
+  reference       String    @unique                   // 👈 Added
+  senderSCA       String
+  receiverSCA     String
+  ratePerSecond   Float
+  totalDeposited  Float
+  totalStreamed   Float     @default(0)               // 👈 Added
+  currency        String    @default("USDC")          // 👈 Added
+  status          String    // ACTIVE, STOPPED, COMPLETED
+  contractAddress String                              // 👈 Added
+  txHash          String?                             // 👈 Added
+  webhookUrl      String?                             // 👈 Added
+  startedAt       DateTime  @default(now())
+  stoppedAt       DateTime?
 }
 
 model NanoPayment {
@@ -87,7 +93,10 @@ model NanoPayment {
   agentSCA     String
   merchantSCA  String
   amount       Float
+  currency     String   @default("USDC") // 👈 Added
+  description  String?                   // 👈 Added
   settled      Boolean  @default(false)
+  batchRef     String?                   // 👈 Added to track which block/CCTP sweep this belonged to
   createdAt    DateTime @default(now())
 }
 

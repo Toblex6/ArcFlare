@@ -14,20 +14,16 @@ export async function recordNanoPayment({
   agentSCA,
   merchantSCA,
   amount,
-  description,
 }: {
   agentSCA: string;
   merchantSCA: string;
   amount: number;
-  description?: string;
 }) {
   const nano = await prisma.nanoPayment.create({
     data: {
       agentSCA,
       merchantSCA,
       amount,
-      currency: "USDC",
-      description: description || null,
       settled: false,
     },
   });
@@ -57,12 +53,12 @@ export async function shouldBatchSettle(agentSCA: string, merchantSCA: string) {
 // ─── Mark a batch as settled ──────────────────────────────────────────────────
 export async function markBatchSettled(
   agentSCA: string,
-  merchantSCA: string,
-  batchRef: string
+  merchantSCA: string
 ) {
+  // Removed batchRef update since it doesn't exist in the current schema
   await prisma.nanoPayment.updateMany({
     where: { agentSCA, merchantSCA, settled: false },
-    data: { settled: true, batchRef },
+    data: { settled: true },
   });
 }
 

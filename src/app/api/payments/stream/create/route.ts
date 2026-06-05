@@ -181,8 +181,11 @@ async function listStreamsHandler(request: Request) {
     });
 
     const now = Date.now();
-    const enriched = streams.map((s) => {
-      const elapsedSeconds = (now - new Date(s.startedAt).getTime()) / 1000;
+    const enriched = streams.map((s: any) => {
+      // Lock evaluation window if the stream was already stopped or finalized
+      const endTime = s.status === "ACTIVE" ? now : (s.stoppedAt ? new Date(s.stoppedAt).getTime() : now);
+      const elapsedSeconds = Math.max(0, (endTime - new Date(s.startedAt).getTime()) / 1000);
+      
       const streamed = Math.min(
         s.ratePerSecond * elapsedSeconds,
         s.totalDeposited
@@ -194,24 +197,25 @@ async function listStreamsHandler(request: Request) {
         ...s,
         currentStreamed: parseFloat(streamed.toFixed(6)),
         remainingBalance: parseFloat(remaining.toFixed(6)),
-        secondsRemaining: Math.floor(secondsRemaining),
+        secondsRemaining: s.status !== "ACTIVE" ? 0 : Math.floor(secondsRemaining),
         explorerUrl: s.txHash
           ? `https://testnet.arcscan.app/tx/${s.txHash}`
           : null,
       };
     });
 
+    // Calculate aggregated active balances safely
     const totalStreaming = enriched
-      .filter((s) => s.status === "ACTIVE")
-      .reduce((sum, s) => sum + s.totalDeposited, 0);
+      .filter((s: any) => s.status === "ACTIVE")
+      .reduce((sum: number, s: any) => sum + s.remainingBalance, 0);
 
     return NextResponse.json({
       success: true,
       metrics: {
         total: streams.length,
-        active: streams.filter((s) => s.status === "ACTIVE").length,
-        stopped: streams.filter((s) => s.status === "STOPPED").length,
-        completed: streams.filter((s) => s.status === "COMPLETED").length,
+        active: streams.filter((s: any) => s.status === "ACTIVE").length,
+        stopped: streams.filter((s: any) => s.status === "STOPPED").length,
+        completed: streams.filter((s: any) => s.status === "COMPLETED").length,
         totalStreaming: parseFloat(totalStreaming.toFixed(4)),
       },
       streams: enriched,

@@ -225,7 +225,7 @@ export default function MerchantDashboard() {
           </p>
         </div>
 
-        {/* Metric Cards */}
+        {/* METRIC CARDS — 4 cards matching the screenshot */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
           {[
             { label: "Total Volume", value: metrics.totalVolume.toFixed(2), unit: "USDC", change: "+18%", iconBg: "#dcfce7", iconColor: "#16a34a", icon: "$", dataKey: "volume", stroke: "#0d7c5f" },
@@ -350,7 +350,7 @@ export default function MerchantDashboard() {
                 {isDeploying ? "COMPILING..." : "⚡ LAUNCH AGENT LIFECYCLE"}
               </button>
               {deploymentError && <p style={{ color: "#dc2626", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>❌ {deploymentError}</p>}
-              {deployedAgent && <p style={{ color: "#0d7c5f", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>● Live Agent Registry Bound</p>}
+              {deployedAgent && <p style={{ color: "#0d7c5f", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>● Live Agent Registry Bound: #{deployedAgent.agentId}</p>}
             </div>
             <button onClick={() => { navigator.clipboard.writeText("arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2"); alert("API Key copied!"); }} style={{ width: "100%", padding: "12px 0", fontSize: 13, background: "#0d7c5f", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 600 }}>
               🔑 Generate API Key →
@@ -358,7 +358,7 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* Settlement Table */}
+        {/* SETTLEMENT STREAMS TABLE — keep dark card exactly as-is */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-base font-bold tracking-wide uppercase font-mono text-white">Inbound Agent Settlement Streams</h3>
