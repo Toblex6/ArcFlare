@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -6,19 +6,16 @@ import Image from "next/image";
 
 export default function CheckoutHubPage() {
   const router = useRouter();
-  const [isInitializing, setIsInitializing] = useState<boolean>(false);
+  const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleLaunchTestnetSession = async () => {
     setIsInitializing(true);
     setError(null);
-
     try {
       const res = await fetch("/api/payments/initialize", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: 0.1,
           currency: "USDC",
@@ -26,24 +23,18 @@ export default function CheckoutHubPage() {
           merchant: "Dispatch Marketplace",
         }),
       });
-
       const result = await res.json();
-      console.log("=== ARCFLARE DEBUG DATA ===", result);
-
-      // Extract reference normally, fallback to parsing the end of the authorization_url
-      let reference = result.reference || result.data?.reference || result.token || result.data?.token;
-      
+      let reference = result.reference || result.data?.reference;
       if (!reference && result.data?.authorization_url) {
         reference = result.data.authorization_url.split("/").pop();
       }
-
+      
       if (reference) {
         router.push(`/checkout/${reference}`);
       } else {
         setError(result.message || result.error || "Ledger rejected context token generation.");
       }
-    } catch (err) {
-      console.error("API Connection Error:", err);
+    } catch {
       setError("Unable to initialize connection with ArcFlare Gateway.");
     } finally {
       setIsInitializing(false);
@@ -51,54 +42,100 @@ export default function CheckoutHubPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#120b08] text-white flex flex-col justify-between px-6 py-12">
-      <div className="max-w-4xl w-full mx-auto flex items-center gap-4 mb-8">
-        <Image src="/arcflare-logo.png" alt="ArcFlare Logo" width={50} height={50} className="object-contain" />
-        <div>
-          <h1 className="text-2xl font-bold tracking-wide">ArcFlare</h1>
-          <p className="text-cyan-300 text-xs uppercase tracking-widest">Sandbox Environment</p>
-        </div>
-      </div>
+    <main style={{ minHeight: "100vh", background: "#0e0b08", color: "#f0ece6", fontFamily: "Inter, system-ui, sans-serif", display: "flex", flexDirection: "column" }}>
 
-      <div className="max-w-xl w-full mx-auto bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-8 shadow-2xl my-auto">
-        <div className="text-center mb-8">
-          <span className="bg-cyan-400/10 text-cyan-300 font-mono text-xs px-3 py-1 rounded-full border border-cyan-400/20">
-            Arc Testnet v1.0
-          </span>
-          <h2 className="text-3xl font-bold mt-4 mb-2">Developer Playbox</h2>
-          <p className="text-gray-400 text-sm leading-relaxed">
-            Generate autonomous machine purchase instances on the Arc Network ledger layer.
+      {/* Header */}
+      <header style={{ borderBottom: "1px solid #2d2015", padding: "16px 48px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Image src="/arcflare-logo.png" alt="ArcFlare" width={40} height={40} style={{ borderRadius: 10, objectFit: "contain" }} />
+          <div>
+            <p style={{ color: "#f0ece6", fontSize: 16, fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>ARCFLARE</p>
+            <p style={{ color: "#6b5a45", fontSize: 9, margin: 0, letterSpacing: 2, textTransform: "uppercase", fontFamily: "monospace" }}>Sandbox Environment</p>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#1a1410", border: "1px solid #2d2015", borderRadius: 20, padding: "6px 14px" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#06b6d4", display: "inline-block" }} />
+          <span style={{ fontSize: 10, color: "#06b6d4", fontWeight: 600, fontFamily: "monospace", letterSpacing: 1 }}>ROUTING NODE // ONLINE</span>
+        </div>
+      </header>
+
+      {/* Main */}
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 24px" }}>
+        <div style={{ width: "100%", maxWidth: 480 }}>
+
+          {/* Card */}
+          <div style={{ background: "#1a1410", border: "1px solid #2d2015", borderRadius: 28, padding: 40, boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+
+            {/* Logo + badge */}
+            <div style={{ textAlign: "center", marginBottom: 32 }}>
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                <Image src="/arcflare-logo.png" alt="ArcFlare" width={56} height={56} style={{ borderRadius: 14, objectFit: "contain" }} />
+              </div>
+              <div style={{ display: "inline-block", background: "rgba(200,151,90,0.1)", border: "1px solid rgba(200,151,90,0.3)", borderRadius: 20, padding: "4px 14px", marginBottom: 16 }}>
+                <span style={{ fontSize: 10, color: "#c8975a", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase" }}>Arc Testnet v1.0</span>
+              </div>
+              <h2 style={{ fontSize: 28, fontWeight: 800, color: "#f0ece6", margin: "0 0 8px" }}>Developer Playbox</h2>
+              <p style={{ color: "#6b5a45", fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+                Generate autonomous machine purchase instances on the Arc Network ledger layer.
+              </p>
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 14, padding: 16, marginBottom: 20, textAlign: "center" }}>
+                <p style={{ color: "#f87171", fontSize: 13, margin: 0 }}>{error}</p>
+              </div>
+            )}
+
+            {/* Items */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 28 }}>
+              {[
+                { label: "Mock Item", value: "Dispatch Node License" },
+                { label: "Gas Asset Strategy", value: "USDC-Native Rails" },
+                { label: "Settlement Network", value: "Arc Testnet • CCTP V2" },
+              ].map((item, i) => (
+                <div key={i} style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ color: "#6b5a45", fontSize: 13 }}>{item.label}</span>
+                  <span style={{ color: i === 0 ? "#f0ece6" : "#c8975a", fontSize: 13, fontWeight: 600, fontFamily: i > 0 ? "monospace" : "inherit" }}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Amount */}
+            <div style={{ background: "rgba(200,151,90,0.06)", border: "1px solid rgba(200,151,90,0.2)", borderRadius: 14, padding: "16px 18px", marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: "#8a7560", fontSize: 13 }}>Amount Due</span>
+              <span style={{ color: "#f0ece6", fontSize: 22, fontWeight: 800, fontFamily: "monospace" }}>
+                0.10 <span style={{ color: "#c8975a", fontSize: 14 }}>USDC</span>
+              </span>
+            </div>
+
+            {/* Button */}
+            <button
+              onClick={handleLaunchTestnetSession}
+              disabled={isInitializing}
+              style={{
+                width: "100%",
+                padding: "16px",
+                background: isInitializing ? "rgba(200,151,90,0.3)" : "#c8975a",
+                color: isInitializing ? "rgba(14,11,8,0.5)" : "#0e0b08",
+                border: "none",
+                borderRadius: 14,
+                fontSize: 15,
+                fontWeight: 800,
+                cursor: isInitializing ? "not-allowed" : "pointer",
+                letterSpacing: 0.5,
+                transition: "all 0.15s",
+              }}
+            >
+              {isInitializing ? "Minting Ledger Token..." : "Launch Live Testnet Checkout"}
+            </button>
+          </div>
+
+          {/* Footer note */}
+          <p style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: "#3d2e1a", fontFamily: "monospace", letterSpacing: 1 }}>
+            ARCFLARE PAYMENT INFRASTRUCTURE NODE • CIRCLE CCTP V2
           </p>
         </div>
-
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-6 text-center">
-            <p className="text-red-400 text-sm font-medium">{error}</p>
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div className="bg-[#2a1c15] border border-[#493328] rounded-2xl p-4 flex justify-between items-center text-sm">
-            <span className="text-gray-400">Mock Item</span>
-            <span className="font-semibold text-gray-200">Dispatch Node License</span>
-          </div>
-          <div className="bg-[#2a1c15] border border-[#493328] rounded-2xl p-4 flex justify-between items-center text-sm">
-            <span className="text-gray-400">Gas Asset Strategy</span>
-            <span className="font-mono text-cyan-300 font-bold">USDC-Native Rails</span>
-          </div>
-        </div>
-
-        <button
-          onClick={handleLaunchTestnetSession}
-          disabled={isInitializing}
-          className="w-full mt-8 bg-cyan-400 hover:bg-cyan-300 disabled:bg-cyan-800 disabled:text-gray-500 text-black font-bold py-4 rounded-2xl text-lg transition-all"
-        >
-          {isInitializing ? "Minting Ledger Token..." : "Launch Live Testnet Checkout"}
-        </button>
-      </div>
-
-      <div className="max-w-4xl w-full mx-auto text-center mt-8 text-xs text-gray-500">
-        <p>ArcFlare Payment Infrastructure Node • Configured for Cross-Chain Circle CCTP Simulations</p>
       </div>
     </main>
   );
