@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -28,7 +28,6 @@ export default function CheckoutHubPage() {
       if (!reference && result.data?.authorization_url) {
         reference = result.data.authorization_url.split("/").pop();
       }
-      
       if (reference) {
         router.push(`/checkout/${reference}`);
       } else {
