@@ -69,7 +69,7 @@ export default function CheckoutHubPage() {
             {/* Logo + badge */}
             <div style={{ textAlign: "center", marginBottom: 32 }}>
               <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-                <Image src="/arcflare-logo.png" alt="ArcFlare" width={56} height={56} style={{ borderRadius: 14, objectFit: "contain" }} />
+                <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={56} height={56} style={{ borderRadius: 14, objectFit: "contain" }} />
               </div>
               <div style={{ display: "inline-block", background: "rgba(200,151,90,0.1)", border: "1px solid rgba(200,151,90,0.3)", borderRadius: 20, padding: "4px 14px", marginBottom: 16 }}>
                 <span style={{ fontSize: 10, color: "#c8975a", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase" }}>Arc Testnet v1.0</span>
