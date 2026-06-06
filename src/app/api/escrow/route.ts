@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { PrismaClient } from "../../../generated/client";
+import { prisma } from "@/lib/prisma";
 
 // Prevent internal Next.js build-time prerendering issues
 export const dynamic = "force-dynamic";
 
-const prisma = new PrismaClient();
+//const prisma = new PrismaClient();
 
 // Canonical Factory address for dynamic on-demand deployments
 const ARCFLARE_FACTORY_ADDRESS = "0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F";
