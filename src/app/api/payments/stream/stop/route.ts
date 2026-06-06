@@ -12,10 +12,10 @@ const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
 
 // Arc Testnet public RPC
 const arcTestnet = {
-  id: 7777777,
+  id: 5042002,
   name: "Arc Testnet",
-  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] } },
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network", "https://arc-testnet.drpc.org"] } },
 } as const;
 
 const publicClient = createPublicClient({
