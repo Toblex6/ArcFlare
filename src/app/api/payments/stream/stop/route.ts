@@ -1,50 +1,42 @@
 // src/app/api/payments/stream/stop/route.ts
-// Stops an active stream by reading the streamId from the StreamCreated event log.
-// Sender gets refund of unused USDC. Receiver gets all earned USDC up to stop time.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKey } from "@/lib/middleware/withApiKey";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
-import { createPublicClient, http, decodeEventLog } from "viem";
+import { createPublicClient, http } from "viem";
 
 const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
 
-// Arc Testnet public RPC
 const arcTestnet = {
   id: 5042002,
   name: "Arc Testnet",
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network", "https://arc-testnet.drpc.org"] } },
+  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.testnet.arc.network"] },
+    public:  { http: ["https://rpc.testnet.arc.network"] },
+  },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http(),
+  transport: http("https://rpc.testnet.arc.network"),
 });
 
-// ABI for the StreamCreated event only — enough to decode the log
-const STREAM_ABI = [
-  {
-    type: "event",
-    name: "StreamCreated",
-    inputs: [
-      { name: "streamId", type: "bytes32", indexed: true },
-      { name: "sender",   type: "address", indexed: false },
-      { name: "receiver", type: "address", indexed: false },
-      { name: "ratePerSecond",  type: "uint256", indexed: false },
-      { name: "totalDeposited", type: "uint256", indexed: false },
-      { name: "ref",  type: "string",  indexed: false },
-    ],
-  },
-  {
-    type: "function",
-    name: "stopStream",
-    inputs: [{ name: "streamId", type: "bytes32" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
+// ── EXACT ABI matching your deployed ArcFlareStream.sol ──────────────────────
+// StreamCreated has 3 indexed params: streamId, sender, receiver
+const STREAM_CREATED_EVENT = {
+  type: "event",
+  name: "StreamCreated",
+  inputs: [
+    { name: "streamId",       type: "bytes32", indexed: true  },
+    { name: "sender",         type: "address", indexed: true  },
+    { name: "receiver",       type: "address", indexed: true  },
+    { name: "ratePerSecond",  type: "uint256", indexed: false },
+    { name: "totalDeposited", type: "uint256", indexed: false },
+    { name: "ref",            type: "string",  indexed: false },
+  ],
+} as const;
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -70,34 +62,52 @@ async function waitForCircleTx(
   throw new Error("Stop stream transaction timed out.");
 }
 
-/**
- * Reads the StreamCreated event from the original createStream tx receipt
- * and extracts the bytes32 streamId the contract generated.
- */
-async function getContractStreamId(txHash: string): Promise<`0x${string}`> {
+// ── Read streamId from tx receipt logs ───────────────────────────────────────
+// streamId is topics[1] since it's the first indexed param
+async function getStreamIdFromReceipt(txHash: string): Promise<`0x${string}`> {
+  console.log(`🔍 Fetching receipt for tx: ${txHash}`);
+
   const receipt = await publicClient.getTransactionReceipt({
     hash: txHash as `0x${string}`,
   });
 
+  console.log(`📋 Receipt has ${receipt.logs.length} logs`);
+
+  // Log all topics for debugging
+  receipt.logs.forEach((log, i) => {
+    console.log(`Log ${i}: address=${log.address}, topics=${JSON.stringify(log.topics)}`);
+  });
+
+  // Find the log from our stream contract
+  const contractAddress = STREAM_CONTRACT.toLowerCase();
+
   for (const log of receipt.logs) {
-    try {
-      const decoded = decodeEventLog({
-        abi: STREAM_ABI,
-        data: log.data,
-        topics: log.topics,
-      });
-      if (decoded.eventName === "StreamCreated") {
-        // streamId is the first indexed topic (topics[1])
-        return log.topics[1] as `0x${string}`;
-      }
-    } catch {
-      // not this log, continue
+    // Match log from stream contract
+    if (log.address.toLowerCase() !== contractAddress) continue;
+
+    // StreamCreated has 4 topics: eventSig + streamId + sender + receiver
+    if (log.topics.length !== 4) continue;
+
+    // topics[1] is the streamId (first indexed param)
+    const streamId = log.topics[1] as `0x${string}`;
+    console.log(`✅ Found streamId: ${streamId}`);
+    return streamId;
+  }
+
+  // Fallback: try any log with 4 topics (in case contract address check fails)
+  for (const log of receipt.logs) {
+    if (log.topics.length === 4) {
+      const streamId = log.topics[1] as `0x${string}`;
+      console.log(`⚠️ Fallback streamId from log: ${streamId}`);
+      return streamId;
     }
   }
 
   throw new Error(
     `Could not find StreamCreated event in tx ${txHash}. ` +
-    `Make sure ARCFLARE_STREAM_CONTRACT_ADDRESS matches the deployed contract.`
+    `Contract address in DB: ${STREAM_CONTRACT}. ` +
+    `Logs found: ${receipt.logs.length}. ` +
+    `Check that ARCFLARE_STREAM_CONTRACT_ADDRESS matches your deployed contract.`
   );
 }
 
@@ -114,18 +124,14 @@ async function stopStreamHandler(request: Request) {
 
     if (!STREAM_CONTRACT) {
       return NextResponse.json(
-        { success: false, error: "ARCFLARE_STREAM_CONTRACT_ADDRESS not set." },
+        { success: false, error: "ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment." },
         { status: 500 }
       );
     }
 
-    // Load stream from DB
     const stream = await prisma.stream.findUnique({ where: { reference } });
     if (!stream) {
-      return NextResponse.json(
-        { success: false, error: "Stream not found." },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: "Stream not found." }, { status: 404 });
     }
     if (stream.status !== "ACTIVE") {
       return NextResponse.json(
@@ -135,23 +141,20 @@ async function stopStreamHandler(request: Request) {
     }
     if (!stream.txHash) {
       return NextResponse.json(
-        { success: false, error: "Stream has no txHash — cannot look up contract streamId." },
+        { success: false, error: "Stream has no txHash." },
         { status: 400 }
       );
     }
 
-    // ── Get the bytes32 streamId from the original tx receipt ────────────
-    console.log(`🔍 Reading StreamCreated event from tx: ${stream.txHash}`);
-    const contractStreamId = await getContractStreamId(stream.txHash);
-    console.log(`✅ Contract streamId: ${contractStreamId}`);
+    // Get bytes32 streamId from original createStream tx
+    const contractStreamId = await getStreamIdFromReceipt(stream.txHash);
 
-    // ── Calculate earnings at stop time ───────────────────────────────────
+    // Calculate earnings
     const now = Date.now();
     const elapsedSeconds = (now - new Date(stream.startedAt).getTime()) / 1000;
     const earned = Math.min(stream.ratePerSecond * elapsedSeconds, stream.totalDeposited);
     const refundAmount = Math.max(0, stream.totalDeposited - earned);
 
-    // ── Call stopStream on the contract ───────────────────────────────────
     const circleClient = getCircleClient();
 
     const stopTx = await circleClient.createContractExecutionTransaction({
@@ -168,9 +171,8 @@ async function stopStreamHandler(request: Request) {
     }
 
     const stopTxHash = await waitForCircleTx(circleClient, stopTx.data.id);
-    console.log(`✅ Stream stopped on Arc. Tx: ${stopTxHash}`);
+    console.log(`✅ Stream stopped. Tx: ${stopTxHash}`);
 
-    // ── Update DB ─────────────────────────────────────────────────────────
     const updated = await prisma.stream.update({
       where: { reference },
       data: {
@@ -180,7 +182,6 @@ async function stopStreamHandler(request: Request) {
       },
     });
 
-    // ── Fire webhook ──────────────────────────────────────────────────────
     if (stream.webhookUrl) {
       fetch(stream.webhookUrl, {
         method: "POST",
@@ -188,11 +189,8 @@ async function stopStreamHandler(request: Request) {
         body: JSON.stringify({
           event: "stream.stopped",
           reference,
-          senderSCA: stream.senderSCA,
-          receiverSCA: stream.receiverSCA,
           totalStreamed: parseFloat(earned.toFixed(6)),
           refundedToSender: parseFloat(refundAmount.toFixed(6)),
-          currency: stream.currency,
           txHash: stopTxHash,
           stoppedAt: new Date().toISOString(),
           explorerUrl: `https://testnet.arcscan.app/tx/${stopTxHash}`,
@@ -211,10 +209,7 @@ async function stopStreamHandler(request: Request) {
     });
   } catch (error: any) {
     console.error("❌ Stop stream error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

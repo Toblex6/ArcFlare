@@ -1,48 +1,27 @@
 // src/app/api/payments/stream/withdraw/route.ts
-// Receiver withdraws earned USDC from an active stream.
-// Reads the bytes32 streamId from the original StreamCreated event.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKey } from "@/lib/middleware/withApiKey";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
-import { createPublicClient, http, decodeEventLog } from "viem";
+import { createPublicClient, http } from "viem";
 
 const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
 
 const arcTestnet = {
   id: 5042002,
   name: "Arc Testnet",
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network", "https://arc-testnet.drpc.org"] } },
+  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://rpc.testnet.arc.network"] },
+    public:  { http: ["https://rpc.testnet.arc.network"] },
+  },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http(),
+  transport: http("https://rpc.testnet.arc.network"),
 });
-
-const STREAM_ABI = [
-  {
-    type: "event",
-    name: "StreamCreated",
-    inputs: [
-      { name: "streamId", type: "bytes32", indexed: true },
-      { name: "sender",   type: "address", indexed: false },
-      { name: "receiver", type: "address", indexed: false },
-      { name: "ratePerSecond",  type: "uint256", indexed: false },
-      { name: "totalDeposited", type: "uint256", indexed: false },
-      { name: "ref",  type: "string",  indexed: false },
-    ],
-  },
-  {
-    type: "function",
-    name: "withdraw",
-    inputs: [{ name: "streamId", type: "bytes32" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -68,28 +47,43 @@ async function waitForCircleTx(
   throw new Error("Withdraw transaction timed out.");
 }
 
-async function getContractStreamId(txHash: string): Promise<`0x${string}`> {
+// ── Same streamId extraction logic as stop route ──────────────────────────────
+async function getStreamIdFromReceipt(txHash: string): Promise<`0x${string}`> {
+  console.log(`🔍 Fetching receipt for tx: ${txHash}`);
+
   const receipt = await publicClient.getTransactionReceipt({
     hash: txHash as `0x${string}`,
   });
 
+  console.log(`📋 Receipt has ${receipt.logs.length} logs`);
+
+  receipt.logs.forEach((log, i) => {
+    console.log(`Log ${i}: address=${log.address}, topics=${JSON.stringify(log.topics)}`);
+  });
+
+  const contractAddress = STREAM_CONTRACT.toLowerCase();
+
+  // First try: match by contract address + 4 topics
   for (const log of receipt.logs) {
-    try {
-      const decoded = decodeEventLog({
-        abi: STREAM_ABI,
-        data: log.data,
-        topics: log.topics,
-      });
-      if (decoded.eventName === "StreamCreated") {
-        return log.topics[1] as `0x${string}`;
-      }
-    } catch {
-      // not this log, continue
+    if (log.address.toLowerCase() !== contractAddress) continue;
+    if (log.topics.length !== 4) continue;
+    const streamId = log.topics[1] as `0x${string}`;
+    console.log(`✅ Found streamId: ${streamId}`);
+    return streamId;
+  }
+
+  // Fallback: any log with 4 topics
+  for (const log of receipt.logs) {
+    if (log.topics.length === 4) {
+      const streamId = log.topics[1] as `0x${string}`;
+      console.log(`⚠️ Fallback streamId: ${streamId}`);
+      return streamId;
     }
   }
 
   throw new Error(
-    `Could not find StreamCreated event in tx ${txHash}.`
+    `Could not find StreamCreated event in tx ${txHash}. ` +
+    `Contract: ${STREAM_CONTRACT}. Logs: ${receipt.logs.length}.`
   );
 }
 
@@ -113,10 +107,7 @@ async function withdrawHandler(request: Request) {
 
     const stream = await prisma.stream.findUnique({ where: { reference } });
     if (!stream) {
-      return NextResponse.json(
-        { success: false, error: "Stream not found." },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: "Stream not found." }, { status: 404 });
     }
     if (stream.status !== "ACTIVE") {
       return NextResponse.json(
@@ -131,7 +122,7 @@ async function withdrawHandler(request: Request) {
       );
     }
 
-    // Calculate available to withdraw
+    // Calculate available
     const now = Date.now();
     const elapsedSeconds = (now - new Date(stream.startedAt).getTime()) / 1000;
     const totalEarned = Math.min(stream.ratePerSecond * elapsedSeconds, stream.totalDeposited);
@@ -144,10 +135,8 @@ async function withdrawHandler(request: Request) {
       );
     }
 
-    // ── Get bytes32 streamId from original tx receipt ─────────────────────
-    console.log(`🔍 Reading StreamCreated event from tx: ${stream.txHash}`);
-    const contractStreamId = await getContractStreamId(stream.txHash);
-    console.log(`✅ Contract streamId: ${contractStreamId}`);
+    // Get bytes32 streamId
+    const contractStreamId = await getStreamIdFromReceipt(stream.txHash);
 
     const circleClient = getCircleClient();
 
@@ -188,7 +177,6 @@ async function withdrawHandler(request: Request) {
           receiverSCA,
           amountWithdrawn: parseFloat(available.toFixed(6)),
           totalStreamed: parseFloat(newTotalStreamed.toFixed(6)),
-          currency: stream.currency,
           txHash,
           withdrawnAt: new Date().toISOString(),
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
@@ -208,10 +196,7 @@ async function withdrawHandler(request: Request) {
     });
   } catch (error: any) {
     console.error("❌ Withdraw error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
