@@ -14,7 +14,7 @@ import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-
 import { parseUnits } from "viem";
 
 const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
-const USDC_ARC = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+const USDC_ARC = "0x3600000000000000000000000000000000000000";
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
