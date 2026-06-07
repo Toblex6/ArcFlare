@@ -78,8 +78,10 @@ async function settleNanoHandler(request: Request) {
       },
     });
 
-    // ── Settle via M2M auto-settle path (WITH BULLETPROOF FETCH) ──────────
-    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://arcflare-gateway.onrender.com").replace(/\/$/, "");
+    // ── Settle via M2M Local Routing Path ─────────────────────────────────
+    // Using 127.0.0.1 bypasses Render's external router to stop the 404 hairpining loop
+    const internalPort = process.env.PORT || "10000";
+    const baseUrl = `http://127.0.0.1:${internalPort}`;
     
     const settleRes = await fetch(`${baseUrl}/api/payments/settle`, {
       method: "POST",
@@ -90,13 +92,12 @@ async function settleNanoHandler(request: Request) {
       body: JSON.stringify({ reference: paymentReference }),
     });
 
-    // Safely read response as text first to prevent JSON crash on 404s
     const responseText = await settleRes.text();
     let settleData;
     try {
       settleData = JSON.parse(responseText);
     } catch (err) {
-      throw new Error(`Internal route returned non-JSON (${settleRes.status}): ${responseText}`);
+      throw new Error(`Internal local route returned non-JSON (${settleRes.status}): ${responseText}`);
     }
 
     if (!settleData.success) {
@@ -172,8 +173,9 @@ async function autoSettleAll() {
         },
       });
 
-      // ── Settle via M2M auto-settle path (WITH BULLETPROOF FETCH) ──────────
-      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://arcflare-gateway.onrender.com").replace(/\/$/, "");
+      // ── Settle via M2M Local Routing Path ─────────────────────────────────
+      const internalPort = process.env.PORT || "10000";
+      const baseUrl = `http://127.0.0.1:${internalPort}`;
       
       const settleRes = await fetch(`${baseUrl}/api/payments/settle`, {
         method: "POST",
@@ -184,20 +186,18 @@ async function autoSettleAll() {
         body: JSON.stringify({ reference: paymentReference }),
       });
 
-      // Safely read response as text first
       const responseText = await settleRes.text();
       let settleData;
       try {
         settleData = JSON.parse(responseText);
       } catch (err) {
-        throw new Error(`Internal route returned non-JSON (${settleRes.status}): ${responseText}`);
+        throw new Error(`Internal local route returned non-JSON (${settleRes.status}): ${responseText}`);
       }
 
       if (!settleData.success) {
          throw new Error(`Settlement failed: ${settleData.error}`);
       }
 
-      // Mark settled
       await markBatchSettled(pair.agentSCA, pair.merchantSCA);
       
       results.push({
