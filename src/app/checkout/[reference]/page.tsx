@@ -24,6 +24,9 @@ interface AgentData {
   status: string;
 }
 
+// The dashboard API key — used to call internal settle endpoint from the UI
+const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2";
+
 export default function CheckoutPage() {
   const params = useParams<{ reference: string }>();
   const reference = params?.reference;
@@ -36,7 +39,6 @@ export default function CheckoutPage() {
   const [isTxPending, setIsTxPending] = useState(false);
   const [settleError, setSettleError] = useState<string | null>(null);
 
-  // ── Fetch payment details ─────────────────────────────────────────────────
   const fetchLedgerStatus = async (txHash?: string) => {
     if (!reference) return;
     try {
@@ -47,8 +49,6 @@ export default function CheckoutPage() {
       if (result.status === true && result.data) {
         setPayment(result.data);
         setError(null);
-
-        // Fetch real agent wallet if senderEmail looks like an SCA address
         const senderEmail = result.data.sender_email;
         if (senderEmail && senderEmail.startsWith("0x") && !agent) {
           fetchAgentWallet(senderEmail);
@@ -63,7 +63,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // ── Fetch real agent wallet from AgentRegistry ────────────────────────────
   const fetchAgentWallet = async (scaAddress: string) => {
     try {
       const res = await fetch(`/api/agent/status?scaAddress=${scaAddress}`);
@@ -81,8 +80,6 @@ export default function CheckoutPage() {
   }, [reference]);
 
   // ── REAL Payment Handler ──────────────────────────────────────────────────
-  // Calls /api/payments/settle which does M2M_AUTO_SETTLE on Arc Testnet.
-  // This is the same flow that worked perfectly in your curl tests.
   const handlePayment = async () => {
     if (!reference || !payment) return;
 
@@ -90,10 +87,13 @@ export default function CheckoutPage() {
       setSettleError(null);
       setIsTxPending(true);
 
-      // Step 1 — Call the real settle endpoint
+      // Call the real settle endpoint with the API key
       const settleRes = await fetch("/api/payments/settle", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": INTERNAL_API_KEY,
+        },
         body: JSON.stringify({ reference }),
       });
 
@@ -106,7 +106,7 @@ export default function CheckoutPage() {
       setIsTxPending(false);
       setIsVerifying(true);
 
-      // Step 2 — Verify the updated status from DB
+      // Verify updated status from DB
       await fetchLedgerStatus();
       setIsVerifying(false);
 
@@ -149,7 +149,7 @@ export default function CheckoutPage() {
       <div style={{ maxWidth: 1200, margin: "0 auto 40px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Image
-            src="/file_0000000097a071f4b0a1cc1a98af52bd.png"
+            src="/arcflare-logo.png.png"
             alt="ArcFlare"
             width={44}
             height={44}
@@ -224,36 +224,26 @@ export default function CheckoutPage() {
             onClick={handlePayment}
             disabled={isTxPending || isVerifying || isConfirmed}
             style={{
-              width: "100%",
-              padding: "16px",
-              borderRadius: 14,
-              border: "none",
-              fontSize: 15,
-              fontWeight: 800,
+              width: "100%", padding: "16px", borderRadius: 14, border: "none",
+              fontSize: 15, fontWeight: 800,
               cursor: isConfirmed ? "default" : isTxPending || isVerifying ? "not-allowed" : "pointer",
               background: isConfirmed ? "rgba(6,182,212,0.1)" : isTxPending || isVerifying ? "#6b5a45" : "#c8975a",
               color: isConfirmed ? "#06b6d4" : "#0e0b08",
-              letterSpacing: 0.3,
-              transition: "all 0.15s",
+              letterSpacing: 0.3, transition: "all 0.15s",
             }}
           >
-            {isConfirmed
-              ? "✓ Ledger Settlement Confirmed"
-              : isTxPending
-              ? "⏳ Submitting to Arc Testnet..."
-              : isVerifying
-              ? "🔍 Verifying Settlement..."
+            {isConfirmed ? "✓ Ledger Settlement Confirmed"
+              : isTxPending ? "⏳ Submitting to Arc Testnet..."
+              : isVerifying ? "🔍 Verifying Settlement..."
               : `Pay ${payment.amount} ${payment.currency}`}
           </button>
 
-          {/* Settle Error */}
           {settleError && (
             <div style={{ marginTop: 12, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 12, padding: 14, textAlign: "center" }}>
               <p style={{ color: "#f87171", fontSize: 12, margin: 0 }}>❌ {settleError}</p>
             </div>
           )}
 
-          {/* Success */}
           {isConfirmed && (
             <div style={{ marginTop: 16, background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", borderRadius: 14, padding: 16, textAlign: "center" }}>
               <p style={{ color: "#06b6d4", fontWeight: 700, fontSize: 13, margin: "0 0 4px" }}>✓ Payment settled on Arc Testnet</p>
@@ -266,7 +256,6 @@ export default function CheckoutPage() {
         <div style={{ background: "#1a1410", border: "1px solid #2d2015", borderRadius: 24, padding: 32, display: "flex", flexDirection: "column", gap: 16 }}>
           <h3 style={{ fontSize: 20, fontWeight: 700, color: "#f0ece6", margin: 0 }}>Payment Gateway Tracking</h3>
 
-          {/* Status + Response */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: 18 }}>
               <p style={{ color: "#6b5a45", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 6px" }}>Network Status</p>
@@ -276,13 +265,10 @@ export default function CheckoutPage() {
             </div>
             <div style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: 18 }}>
               <p style={{ color: "#6b5a45", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 6px" }}>System Response</p>
-              <p style={{ fontSize: 18, fontWeight: 800, color: "#f0ece6", margin: 0 }}>
-                {payment.gateway_response}
-              </p>
+              <p style={{ fontSize: 18, fontWeight: 800, color: "#f0ece6", margin: 0 }}>{payment.gateway_response}</p>
             </div>
           </div>
 
-          {/* Success Rate */}
           <div style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
               <span style={{ color: "#6b5a45", fontSize: 13 }}>Gateway Infrastructure Success Rate</span>
@@ -293,7 +279,6 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* Current Ledger Instance */}
           <div style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: 18, flex: 1 }}>
             <h4 style={{ fontSize: 14, fontWeight: 700, color: "#f0ece6", margin: "0 0 16px" }}>Current Ledger Instance</h4>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -311,7 +296,6 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* Settlement Type Badge — shows after success */}
           {isConfirmed && (
             <div style={{ background: "rgba(13,124,95,0.1)", border: "1px solid rgba(13,124,95,0.25)", borderRadius: 14, padding: 16, textAlign: "center" }}>
               <p style={{ fontSize: 11, color: "#0d7c5f", fontFamily: "monospace", fontWeight: 700, margin: "0 0 4px", letterSpacing: 1 }}>M2M_AUTO_SETTLE</p>
@@ -319,17 +303,10 @@ export default function CheckoutPage() {
             </div>
           )}
 
-          {/* Brand Footer */}
           <div style={{ background: "#0e0b08", border: "1px solid rgba(200,151,90,0.15)", borderRadius: 14, padding: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Image
-                  src="/file_0000000097a071f4b0a1cc1a98af52bd.png"
-                  alt="ArcFlare"
-                  width={24}
-                  height={24}
-                  style={{ borderRadius: 6, objectFit: "contain" }}
-                />
+                <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={24} height={24} style={{ borderRadius: 6, objectFit: "contain" }} />
                 <p style={{ color: "#6b5a45", fontSize: 12, fontWeight: 600, margin: 0 }}>ArcFlare Engine</p>
               </div>
               <span style={{ fontSize: 10, color: "#c8975a", fontFamily: "monospace", background: "rgba(200,151,90,0.1)", border: "1px solid rgba(200,151,90,0.2)", padding: "2px 8px", borderRadius: 10 }}>Active Rails</span>
