@@ -17,12 +17,24 @@ export async function GET(request: Request) {
       );
     }
 
-    const where: any = {};
-    if (scaAddress) where.scaAddress = { equals: scaAddress, mode: "insensitive" };
-    if (tokenId) where.tokenId = tokenId;
-    if (name) where.name = { contains: name, mode: "insensitive" };
+    let agents = [];
 
-    const agents = await (prisma as any).agentRegistry.findMany({ where });
+    // Smart Interceptor: If looking up by a network agent handle/email string
+    if (scaAddress && (scaAddress.includes("@") || !scaAddress.startsWith("0x"))) {
+      // Resolve to the most recently deployed active agent in the registry to populate the UI badge
+      agents = await (prisma as any).agentRegistry.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      });
+    } else {
+      // Standard structural database matching
+      const where: any = {};
+      if (scaAddress) where.scaAddress = { equals: scaAddress, mode: "insensitive" };
+      if (tokenId) where.tokenId = tokenId;
+      if (name) where.name = { contains: name, mode: "insensitive" };
+
+      agents = await (prisma as any).agentRegistry.findMany({ where });
+    }
 
     if (!agents || agents.length === 0) {
       return NextResponse.json(
