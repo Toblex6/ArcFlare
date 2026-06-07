@@ -21,13 +21,11 @@ export async function GET(request: Request) {
 
     // Smart Interceptor: If looking up by a network agent handle/email string
     if (scaAddress && (scaAddress.includes("@") || !scaAddress.startsWith("0x"))) {
-      // Resolve to the most recently deployed active agent in the registry to populate the UI badge
       agents = await (prisma as any).agentRegistry.findMany({
         orderBy: { createdAt: "desc" },
         take: 1,
       });
     } else {
-      // Standard structural database matching
       const where: any = {};
       if (scaAddress) where.scaAddress = { equals: scaAddress, mode: "insensitive" };
       if (tokenId) where.tokenId = tokenId;
@@ -70,8 +68,10 @@ export async function GET(request: Request) {
       })
     );
 
+    // FIX: Provide both singular 'agent' and plural 'agents' properties
     return NextResponse.json({
       success: true,
+      agent: enriched[0], 
       agents: enriched,
       count: enriched.length,
     });
