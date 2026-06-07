@@ -17,7 +17,6 @@ import {
 // ─── Settle a specific agent-merchant pair ────────────────────────────────────
 async function settleNanoHandler(request: Request) {
   try {
-    // 💡 FIX: Read request body exactly once to prevent stream consumption crashes
     const body = await request.json().catch(() => ({}));
     
     const {
@@ -63,10 +62,9 @@ async function settleNanoHandler(request: Request) {
     }
 
     const batchRef = `nano_batch_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-
-    // ── Create a PaymentLog for the batch ─────────────────────────────────
     const paymentReference = `arc_nano_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+    // ── Create a PaymentLog for the batch ─────────────────────────────────
     await prisma.paymentLog.create({
       data: {
         reference: paymentReference,
@@ -80,32 +78,35 @@ async function settleNanoHandler(request: Request) {
       },
     });
 
-    // ── Settle via M2M auto-settle path ───────────────────────────────────
-    const settleRes = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL || "https://arcflare-gateway.onrender.com"}/api/payments/settle`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.INTERNAL_API_KEY || "",
-        },
-        body: JSON.stringify({ reference: paymentReference }),
-      }
-    );
+    // ── Settle via M2M auto-settle path (WITH BULLETPROOF FETCH) ──────────
+    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://arcflare-gateway.onrender.com").replace(/\/$/, "");
+    
+    const settleRes = await fetch(`${baseUrl}/api/payments/settle`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.INTERNAL_API_KEY || "",
+      },
+      body: JSON.stringify({ reference: paymentReference }),
+    });
 
-    const settleData = await settleRes.json();
+    // Safely read response as text first to prevent JSON crash on 404s
+    const responseText = await settleRes.text();
+    let settleData;
+    try {
+      settleData = JSON.parse(responseText);
+    } catch (err) {
+      throw new Error(`Internal route returned non-JSON (${settleRes.status}): ${responseText}`);
+    }
 
     if (!settleData.success) {
       throw new Error(`Settlement failed: ${settleData.error}`);
     }
 
     // ── Mark all nano payments as settled ─────────────────────────────────
-    // 💡 FIX: Removed the third 'batchRef' argument to match your helper function's signature
     await markBatchSettled(agentSCA, merchantSCA);
 
-    console.log(
-      `✅ Nano batch settled: ${count} payments, ${total.toFixed(6)} USDC, ref: ${batchRef}`
-    );
+    console.log(`✅ Nano batch settled: ${count} payments, ${total.toFixed(6)} USDC, ref: ${batchRef}`);
 
     // Fire webhook
     if (webhookUrl) {
@@ -148,7 +149,7 @@ async function settleNanoHandler(request: Request) {
 // ─── Auto-settle ALL pairs that have reached threshold ────────────────────────
 async function autoSettleAll() {
   const pairs = await getUnsettledPairs();
-  const results: any[] = []; // Explicitly typed to prevent inner array map warnings
+  const results: any[] = []; 
 
   for (const pair of pairs) {
     const summary = await getBatchSummary(pair.agentSCA, pair.merchantSCA);
@@ -171,32 +172,43 @@ async function autoSettleAll() {
         },
       });
 
-      const settleRes = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL || "https://arcflare-gateway.onrender.com"}/api/payments/settle`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": process.env.INTERNAL_API_KEY || "",
-          },
-          body: JSON.stringify({ reference: paymentReference }),
-        }
-      );
+      // ── Settle via M2M auto-settle path (WITH BULLETPROOF FETCH) ──────────
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://arcflare-gateway.onrender.com").replace(/\/$/, "");
+      
+      const settleRes = await fetch(`${baseUrl}/api/payments/settle`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.INTERNAL_API_KEY || "",
+        },
+        body: JSON.stringify({ reference: paymentReference }),
+      });
 
-      const settleData = await settleRes.json();
-
-      if (settleData.success) {
-        // 💡 FIX: Removed third argument to prevent TS compiler errors
-        await markBatchSettled(pair.agentSCA, pair.merchantSCA);
-        results.push({
-          agentSCA: pair.agentSCA,
-          merchantSCA: pair.merchantSCA,
-          totalSettled: summary.total,
-          count: summary.count,
-          batchRef,
-          success: true,
-        });
+      // Safely read response as text first
+      const responseText = await settleRes.text();
+      let settleData;
+      try {
+        settleData = JSON.parse(responseText);
+      } catch (err) {
+        throw new Error(`Internal route returned non-JSON (${settleRes.status}): ${responseText}`);
       }
+
+      if (!settleData.success) {
+         throw new Error(`Settlement failed: ${settleData.error}`);
+      }
+
+      // Mark settled
+      await markBatchSettled(pair.agentSCA, pair.merchantSCA);
+      
+      results.push({
+        agentSCA: pair.agentSCA,
+        merchantSCA: pair.merchantSCA,
+        totalSettled: summary.total,
+        count: summary.count,
+        batchRef,
+        success: true,
+      });
+      
     } catch (err: any) {
       results.push({
         agentSCA: pair.agentSCA,
