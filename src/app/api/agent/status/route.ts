@@ -1,7 +1,3 @@
-// src/app/api/agent/status/route.ts
-// Returns agent wallet details from AgentRegistry by SCA address or API key.
-// Used by agents to fetch their own wallet before making payments.
-
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -35,11 +31,16 @@ export async function GET(request: Request) {
       );
     }
 
-    // For each agent, get their payment history
+    // Process payment history dynamically
     const enriched = await Promise.all(
       agents.map(async (agent: any) => {
         const payments = await prisma.paymentLog.findMany({
-          where: { senderEmail: { equals: agent.scaAddress, mode: "insensitive" } },
+          where: {
+            OR: [
+              { senderEmail: { equals: agent.scaAddress, mode: "insensitive" } },
+              { senderEmail: { contains: "agent", mode: "insensitive" } }
+            ]
+          },
           orderBy: { timestamp: "desc" },
           take: 5,
         });
