@@ -34,20 +34,21 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isTxPending, setIsTxPending] = useState(false);
+  const [settleError, setSettleError] = useState<string | null>(null);
 
   // ── Fetch payment details ─────────────────────────────────────────────────
-  const fetchLedgerStatus = async (hash?: string) => {
+  const fetchLedgerStatus = async (txHash?: string) => {
     if (!reference) return;
     try {
       let url = `/api/payments/verify/${reference}`;
-      if (hash) url += `?txHash=${hash}`;
+      if (txHash) url += `?txHash=${txHash}`;
       const res = await fetch(url);
       const result = await res.json();
       if (result.status === true && result.data) {
         setPayment(result.data);
         setError(null);
 
-        // ── Fetch real agent wallet if senderEmail looks like an SCA address ─
+        // Fetch real agent wallet if senderEmail looks like an SCA address
         const senderEmail = result.data.sender_email;
         if (senderEmail && senderEmail.startsWith("0x") && !agent) {
           fetchAgentWallet(senderEmail);
@@ -79,18 +80,40 @@ export default function CheckoutPage() {
     if (reference) fetchLedgerStatus();
   }, [reference]);
 
-  // ── Payment handler ───────────────────────────────────────────────────────
+  // ── REAL Payment Handler ──────────────────────────────────────────────────
+  // Calls /api/payments/settle which does M2M_AUTO_SETTLE on Arc Testnet.
+  // This is the same flow that worked perfectly in your curl tests.
   const handlePayment = async () => {
+    if (!reference || !payment) return;
+
     try {
+      setSettleError(null);
       setIsTxPending(true);
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      // Step 1 — Call the real settle endpoint
+      const settleRes = await fetch("/api/payments/settle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference }),
+      });
+
+      const settleData = await settleRes.json();
+
+      if (!settleRes.ok || !settleData.success) {
+        throw new Error(settleData.error || settleData.message || "Settlement failed.");
+      }
+
       setIsTxPending(false);
       setIsVerifying(true);
-      await fetchLedgerStatus("0xSUCCESS");
+
+      // Step 2 — Verify the updated status from DB
+      await fetchLedgerStatus();
       setIsVerifying(false);
-    } catch {
+
+    } catch (err: any) {
       setIsTxPending(false);
       setIsVerifying(false);
+      setSettleError(err.message || "Payment failed. Please try again.");
     }
   };
 
@@ -116,11 +139,8 @@ export default function CheckoutPage() {
   }
 
   const isConfirmed = payment.status === "SUCCESS";
-
-  // Resolve display address — use real agent SCA if found, else use sender_email
   const displayAddress = agent?.scaAddress || payment.sender_email || "0xArcFlare...AutonomousAgent";
   const displayName = agent?.name || "Autonomous Agent";
-  const displayTokenId = agent?.tokenId || null;
 
   return (
     <main style={{ minHeight: "100vh", background: "#0e0b08", color: "#f0ece6", fontFamily: "Inter, system-ui, sans-serif", padding: "32px 24px" }}>
@@ -128,7 +148,13 @@ export default function CheckoutPage() {
       {/* Header */}
       <div style={{ maxWidth: 1200, margin: "0 auto 40px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Image src="/arcflare-logo.png" alt="ArcFlare" width={44} height={44} style={{ borderRadius: 10, objectFit: "contain" }} />
+          <Image
+            src="/file_0000000097a071f4b0a1cc1a98af52bd.png"
+            alt="ArcFlare"
+            width={44}
+            height={44}
+            style={{ borderRadius: 10, objectFit: "contain" }}
+          />
           <div>
             <p style={{ color: "#f0ece6", fontSize: 16, fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>ARCFLARE</p>
             <p style={{ color: "#6b5a45", fontSize: 11, margin: 0 }}>Stablecoin Payment Infrastructure</p>
@@ -156,7 +182,7 @@ export default function CheckoutPage() {
               { label: "Payment Reference", value: payment.reference, mono: true, truncate: true },
               { label: "Amount Due", value: `${payment.amount} ${payment.currency}`, highlight: true },
               { label: "Target Settlement Layer", value: payment.chain, cyan: true },
-              { label: "Connected Chain ID", value: "84532", cyan: true },
+              { label: "Connected Chain ID", value: "5042002", cyan: true },
             ].map((row, i) => (
               <div key={i} style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ color: "#6b5a45", fontSize: 13 }}>{row.label}</span>
@@ -172,7 +198,7 @@ export default function CheckoutPage() {
               </div>
             ))}
 
-            {/* Agent Wallet — REAL data from AgentRegistry */}
+            {/* Agent Wallet */}
             <div style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: "14px 18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: agent ? 8 : 0 }}>
                 <span style={{ color: "#6b5a45", fontSize: 13 }}>Connected Wallet</span>
@@ -190,11 +216,6 @@ export default function CheckoutPage() {
                   {displayName} • Circle SCA • {agent.status}
                 </p>
               )}
-              {!agent && payment.sender_email?.startsWith("0x") && (
-                <p style={{ color: "#4b4035", fontSize: 10, margin: "4px 0 0", fontFamily: "monospace" }}>
-                  Autonomous Agent Wallet
-                </p>
-              )}
             </div>
           </div>
 
@@ -210,7 +231,7 @@ export default function CheckoutPage() {
               fontSize: 15,
               fontWeight: 800,
               cursor: isConfirmed ? "default" : isTxPending || isVerifying ? "not-allowed" : "pointer",
-              background: isConfirmed ? "rgba(6,182,212,0.1)" : "#c8975a",
+              background: isConfirmed ? "rgba(6,182,212,0.1)" : isTxPending || isVerifying ? "#6b5a45" : "#c8975a",
               color: isConfirmed ? "#06b6d4" : "#0e0b08",
               letterSpacing: 0.3,
               transition: "all 0.15s",
@@ -219,12 +240,20 @@ export default function CheckoutPage() {
             {isConfirmed
               ? "✓ Ledger Settlement Confirmed"
               : isTxPending
-              ? "Submitting to Arc Testnet..."
+              ? "⏳ Submitting to Arc Testnet..."
               : isVerifying
-              ? "Verifying Settlement..."
+              ? "🔍 Verifying Settlement..."
               : `Pay ${payment.amount} ${payment.currency}`}
           </button>
 
+          {/* Settle Error */}
+          {settleError && (
+            <div style={{ marginTop: 12, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 12, padding: 14, textAlign: "center" }}>
+              <p style={{ color: "#f87171", fontSize: 12, margin: 0 }}>❌ {settleError}</p>
+            </div>
+          )}
+
+          {/* Success */}
           {isConfirmed && (
             <div style={{ marginTop: 16, background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", borderRadius: 14, padding: 16, textAlign: "center" }}>
               <p style={{ color: "#06b6d4", fontWeight: 700, fontSize: 13, margin: "0 0 4px" }}>✓ Payment settled on Arc Testnet</p>
@@ -241,8 +270,8 @@ export default function CheckoutPage() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: 18 }}>
               <p style={{ color: "#6b5a45", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 6px" }}>Network Status</p>
-              <p style={{ fontSize: 18, fontWeight: 800, color: isConfirmed ? "#06b6d4" : "#f59e0b", margin: 0, fontFamily: "monospace" }}>
-                {isConfirmed ? "SUCCESS" : "PENDING"}
+              <p style={{ fontSize: 18, fontWeight: 800, color: isConfirmed ? "#06b6d4" : isTxPending ? "#c8975a" : "#f59e0b", margin: 0, fontFamily: "monospace" }}>
+                {isConfirmed ? "SUCCESS" : isTxPending ? "SETTLING" : "PENDING"}
               </p>
             </div>
             <div style={{ background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 14, padding: 18 }}>
@@ -282,11 +311,25 @@ export default function CheckoutPage() {
             </div>
           </div>
 
+          {/* Settlement Type Badge — shows after success */}
+          {isConfirmed && (
+            <div style={{ background: "rgba(13,124,95,0.1)", border: "1px solid rgba(13,124,95,0.25)", borderRadius: 14, padding: 16, textAlign: "center" }}>
+              <p style={{ fontSize: 11, color: "#0d7c5f", fontFamily: "monospace", fontWeight: 700, margin: "0 0 4px", letterSpacing: 1 }}>M2M_AUTO_SETTLE</p>
+              <p style={{ fontSize: 10, color: "#4b5563", margin: 0 }}>Settled autonomously via ArcFlare agent pipeline</p>
+            </div>
+          )}
+
           {/* Brand Footer */}
           <div style={{ background: "#0e0b08", border: "1px solid rgba(200,151,90,0.15)", borderRadius: 14, padding: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Image src="/arcflare-logo.png" alt="ArcFlare" width={24} height={24} style={{ borderRadius: 6, objectFit: "contain" }} />
+                <Image
+                  src="/file_0000000097a071f4b0a1cc1a98af52bd.png"
+                  alt="ArcFlare"
+                  width={24}
+                  height={24}
+                  style={{ borderRadius: 6, objectFit: "contain" }}
+                />
                 <p style={{ color: "#6b5a45", fontSize: 12, fontWeight: 600, margin: 0 }}>ArcFlare Engine</p>
               </div>
               <span style={{ fontSize: 10, color: "#c8975a", fontFamily: "monospace", background: "rgba(200,151,90,0.1)", border: "1px solid rgba(200,151,90,0.2)", padding: "2px 8px", borderRadius: 10 }}>Active Rails</span>
