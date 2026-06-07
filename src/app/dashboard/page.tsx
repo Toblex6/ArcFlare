@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
 import Image from "next/image";
+import React, { useEffect, useState } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
@@ -151,7 +151,7 @@ export default function MerchantDashboard() {
         {/* Logo */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6 }}>
         <Image
-          src="/arcflare-logo.png"
+          src="/arcflare-logo.png.png"
           alt="ArcFlare"
           width={36}
           height={36}
