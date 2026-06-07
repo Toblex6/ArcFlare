@@ -1,6 +1,3 @@
-// src/app/api/payments/initialize/route.ts
-// Updated to verify agentSCA against AgentRegistry before creating payment
-
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
