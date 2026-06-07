@@ -86,6 +86,7 @@ model Stream {
   webhookUrl      String?                             // 👈 Added
   startedAt       DateTime  @default(now())
   stoppedAt       DateTime?
+  contractStreamId String?   // bytes32 streamId returned by createStream()
 }
 
 model NanoPayment {
