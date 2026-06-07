@@ -22,9 +22,9 @@ export async function GET(request: Request) {
     }
 
     const where: any = {};
-    if (scaAddress) where.scaAddress = scaAddress;
+    if (scaAddress) where.scaAddress = { equals: scaAddress, mode: "insensitive" };
     if (tokenId) where.tokenId = tokenId;
-    if (name) where.name = { contains: name };
+    if (name) where.name = { contains: name, mode: "insensitive" };
 
     const agents = await (prisma as any).agentRegistry.findMany({ where });
 
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     const enriched = await Promise.all(
       agents.map(async (agent: any) => {
         const payments = await prisma.paymentLog.findMany({
-          where: { senderEmail: agent.scaAddress },
+          where: { senderEmail: { equals: agent.scaAddress, mode: "insensitive" } },
           orderBy: { timestamp: "desc" },
           take: 5,
         });
