@@ -31,6 +31,9 @@ interface DashboardMetrics {
   totalTransactions: number;
 }
 
+// The dashboard API key — used to call internal settle endpoint from the UI
+const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
+
 export default function MerchantDashboard() {
   const [payments, setPayments] = useState<PaymentItem[]>([]);
   const [metrics, setMetrics] = useState<DashboardMetrics>({ totalVolume: 0, successRate: 100, totalTransactions: 0 });
@@ -92,7 +95,7 @@ export default function MerchantDashboard() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": "arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2",
+          "x-api-key": INTERNAL_API_KEY,
         },
         body: JSON.stringify({
           agentName: "DeFi Arbitrage Agent v1.0",

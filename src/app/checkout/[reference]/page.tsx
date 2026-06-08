@@ -25,7 +25,7 @@ interface AgentData {
 }
 
 // The dashboard API key — used to call internal settle endpoint from the UI
-const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2";
+const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
 
 export default function CheckoutPage() {
   const params = useParams<{ reference: string }>();

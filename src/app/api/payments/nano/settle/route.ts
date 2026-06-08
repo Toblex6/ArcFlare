@@ -3,9 +3,11 @@
 // Aggregates micro-charges into one USDC payment via ArcFlare settle route.
 // Can also auto-settle ALL pairs that have reached threshold.
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKey } from "@/lib/middleware/withApiKey";
+import { checkRateLimit } from "@/lib/ratelimit";
+import { parseBody, NanoSettleSchema } from "@/lib/validation";
 import {
   getUnsettledBalance,
   markBatchSettled,
@@ -15,17 +17,24 @@ import {
 } from "@/lib/nanopayment";
 
 // ─── Settle a specific agent-merchant pair ────────────────────────────────────
-async function settleNanoHandler(request: Request) {
+async function settleNanoHandler(request: NextRequest) {
   try {
+    // 1. Rate Limiting Check
+    const { allowed, response: limitResponse } = await checkRateLimit(request, "nano");
+    if (!allowed) return limitResponse;
+
+    // 2. Zod Input Validation Check
     const body = await request.json().catch(() => ({}));
-    
+    const { data, error: validationError } = parseBody(NanoSettleSchema, body);
+    if (validationError) return validationError;
+
     const {
       agentSCA,
       merchantSCA,
       webhookUrl,
       forceSettle,  // Skip threshold check and settle anyway
       autoSettle,   // Pass { "autoSettle": true } to settle all pairs at threshold
-    } = body;
+    } = data;
 
     // ── Auto-settle ALL pairs mode ────────────────────────────────────────
     if (autoSettle) {
@@ -79,7 +88,6 @@ async function settleNanoHandler(request: Request) {
     });
 
     // ── Settle via M2M Local Routing Path ─────────────────────────────────
-    // Using 127.0.0.1 bypasses Render's external router to stop the 404 hairpining loop
     const internalPort = process.env.PORT || "10000";
     const baseUrl = `http://127.0.0.1:${internalPort}`;
     
@@ -109,7 +117,6 @@ async function settleNanoHandler(request: Request) {
 
     console.log(`✅ Nano batch settled: ${count} payments, ${total.toFixed(6)} USDC, ref: ${batchRef}`);
 
-    // Fire webhook
     if (webhookUrl) {
       fetch(webhookUrl, {
         method: "POST",
@@ -228,4 +235,4 @@ async function autoSettleAll() {
   });
 }
 
-export const POST = withApiKey(settleNanoHandler);
+export const POST = withApiKey(settleNanoHandler as any);

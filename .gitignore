@@ -45,3 +45,5 @@ yarn-error.log*
 
 # Generated Prisma Client
 /src/generated/client
+# Sentry Config File
+.env.sentry-build-plugin

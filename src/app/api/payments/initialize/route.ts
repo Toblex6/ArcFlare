@@ -1,20 +1,23 @@
 // src/app/api/payments/initialize/route.ts
-// Updated to verify agentSCA against AgentRegistry before creating payment
+// Updated with active Rate Limiting and Zod Input Validation
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { checkRateLimit } from "@/lib/ratelimit";
+import { parseBody, InitializeSchema } from "@/lib/validation";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { amount, currency, email, merchant, agentSCA, webhookUrl } = body;
+    // 1. Rate Limiting Check
+    const { allowed, response: limitResponse } = await checkRateLimit(req, "payments");
+    if (!allowed) return limitResponse;
 
-    if (!amount || !currency) {
-      return NextResponse.json(
-        { success: false, error: "Missing required fields: amount, currency." },
-        { status: 400 }
-      );
-    }
+    // 2. Zod Input Validation Check
+    const body = await req.json().catch(() => ({}));
+    const { data, error: validationError } = parseBody(InitializeSchema, body);
+    if (validationError) return validationError;
+
+    const { amount, currency, email, merchant, agentSCA, webhookUrl } = data;
 
     // ── If agentSCA provided, verify it exists in AgentRegistry ──────────
     let resolvedSenderEmail = email || "autonomous-agent@arc.network";
@@ -45,8 +48,8 @@ export async function POST(req: Request) {
     await prisma.paymentLog.create({
       data: {
         reference: transactionReference,
-        amount: Number(amount),
-        currency,
+        amount: Number(amount), 
+        currency: currency ?? "USDC", // 👈 Provide a default fallback here
         chain: "Arc Testnet v1.0",
         senderEmail: resolvedSenderEmail,
         merchant: merchant || "Dispatch Marketplace",
@@ -71,7 +74,7 @@ export async function POST(req: Request) {
       data: {
         reference: transactionReference,
         amount,
-        currency,
+        currency: currency ?? "USDC",
         status: "ready",
         authorization_url: `/checkout/${transactionReference}`,
       },

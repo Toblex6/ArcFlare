@@ -10,17 +10,19 @@ datasource db {
 }
 
 model PaymentLog {
-  id          String   @id @default(uuid())
-  reference   String   @unique
-  amount      Float
-  currency    String
-  chain       String
-  senderEmail String
-  merchant    String
-  status      String
-  arcTxHash   String?
-  webhookUrl  String?
-  timestamp   DateTime @default(now())
+  id            String   @id @default(uuid())
+  reference     String   @unique // Still serves as the target transaction reference
+  idempotencyKey String?  @unique // 👈 Added: Prevents duplicate raw API retries on initialize
+  amount        Float
+  currency      String
+  chain         String
+  senderEmail   String
+  merchant      String
+  status        String   // PENDING, SETTLED, EXPIRED
+  arcTxHash     String?
+  webhookUrl    String?
+  timestamp     DateTime @default(now())
+  expiresAt     DateTime? // 👈 Added: Priority 5 enforcement (e.g., now + 1 hour)
 }
 
 model AgentRegistry {
@@ -33,17 +35,18 @@ model AgentRegistry {
   metadataURI    String?
   status         String
   createdAt      DateTime @default(now())
+  idempotencyKey String?  @unique // 👈 Added: Prevents duplicate deployments if agent/deploy retries on timeout
 }
 
 model ApiKey {
-  id          Int      @id @default(autoincrement())
-  key         String   @unique
+  id          Int       @id @default(autoincrement())
+  key         String    @unique
   label       String
   ownerEmail  String?
-  active      Boolean  @default(true)
-  usageCount  Int      @default(0)
+  active      Boolean   @default(true)
+  usageCount  Int       @default(0)
   lastUsedAt  DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 }
 
 model Agent {
@@ -60,6 +63,7 @@ model Agent {
 model Escrow {
   id              String    @id @default(uuid())
   reference       String    @unique
+  idempotencyKey  String?   @unique // 👈 Added: Guarantees escrow is only provisioned once per payment intent
   amount          Float
   currency        String
   depositorSCA    String
@@ -68,37 +72,40 @@ model Escrow {
   status          String    // ACTIVE, RELEASED, DISPUTED
   condition       String?
   deadline        DateTime?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime  @default(now())
 }
 
 model Stream {
-  id              String    @id @default(uuid())
-  reference       String    @unique                   // 👈 Added
-  senderSCA       String
-  receiverSCA     String
-  ratePerSecond   Float
-  totalDeposited  Float
-  totalStreamed   Float     @default(0)               // 👈 Added
-  currency        String    @default("USDC")          // 👈 Added
-  status          String    // ACTIVE, STOPPED, COMPLETED
-  contractAddress String                              // 👈 Added
-  txHash          String?                             // 👈 Added
-  webhookUrl      String?                             // 👈 Added
-  startedAt       DateTime  @default(now())
-  stoppedAt       DateTime?
+  id               String    @id @default(uuid())
+  reference        String    @unique
+  idempotencyKey   String?   @unique // 👈 Added: Protects programmable payment streams from duplicate creation loops
+  senderSCA        String
+  receiverSCA      String
+  ratePerSecond    Float
+  totalDeposited   Float
+  totalStreamed    Float     @default(0)
+  currency         String    @default("USDC")
+  status           String    // ACTIVE, STOPPED, COMPLETED
+  contractAddress  String
+  txHash           String?
+  webhookUrl       String?
+  startedAt        DateTime  @default(now())
+  stoppedAt        DateTime?
   contractStreamId String?   // bytes32 streamId returned by createStream()
 }
 
 model NanoPayment {
-  id           String   @id @default(uuid())
-  agentSCA     String
-  merchantSCA  String
-  amount       Float
-  currency     String   @default("USDC") // 👈 Added
-  description  String?                   // 👈 Added
-  settled      Boolean  @default(false)
-  batchRef     String?                   // 👈 Added to track which block/CCTP sweep this belonged to
-  createdAt    DateTime @default(now())
+  id             String   @id @default(uuid())
+  idempotencyKey String?   @unique // 👈 Added & Required: Critical for M2M agent payments to stop double spending on failure retries
+  agentSCA       String
+  merchantSCA    String
+  amount         Float
+  currency       String   @default("USDC")
+  description    String?
+  settled        Boolean  @default(false)
+  batchRef       String?  // Tracks which block/CCTP sweep this belonged to
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime? // 👈 Added: For micro-authorizations that clear out if not settled quickly
 }
 
 model Job {

@@ -1,11 +1,14 @@
 // src/app/api/payments/settle/route.ts
+// Updated with active Rate Limiting and Zod Input Validation
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createWalletClient, createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 import { withApiKey } from "@/lib/middleware/withApiKey";
+import { checkRateLimit } from "@/lib/ratelimit";
+import { parseBody, SettleSchema } from "@/lib/validation";
 
 const MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
 const IRIS_API = "https://iris-api-sandbox.circle.com/v2";
@@ -65,7 +68,6 @@ async function mintOnArc(message: string, attestation: string) {
   return txHash;
 }
 
-// ─── Fire webhook to merchant ─────────────────────────────────────────────────
 async function fireWebhook(url: string, payload: object) {
   try {
     await fetch(url, {
@@ -78,13 +80,20 @@ async function fireWebhook(url: string, payload: object) {
   }
 }
 
-// ─── Main Handler ─────────────────────────────────────────────────────────────
-async function settleHandler(request: Request) {
+async function settleHandler(request: NextRequest) {
   let fallbackReference: string | undefined;
 
   try {
-    const body = await request.json();
-    const { reference, messageHash } = body;
+    // 1. Rate Limiting Check
+    const { allowed, response: limitResponse } = await checkRateLimit(request, "payments");
+    if (!allowed) return limitResponse;
+
+    // 2. Zod Input Validation Check
+    const body = await request.json().catch(() => ({}));
+    const { data, error: validationError } = parseBody(SettleSchema, body);
+    if (validationError) return validationError;
+
+    const { reference, messageHash } = data;
     fallbackReference = reference;
 
     if (!reference) {
@@ -95,10 +104,6 @@ async function settleHandler(request: Request) {
     }
 
     // ── TESTNET AUTO-SETTLE PATH ──────────────────────────────────────────
-    // When no messageHash is provided, settle automatically.
-    // This enables true M2M agent-to-agent payments on testnet
-    // without requiring a real CCTP burn transaction.
-    // On mainnet: replace this with real messageHash from burn tx.
     if (!messageHash) {
       const payment = await prisma.paymentLog.findUnique({
         where: { reference },
@@ -119,7 +124,6 @@ async function settleHandler(request: Request) {
         },
       });
 
-      // Fire webhook if merchant registered one
       if (settledTx.webhookUrl) {
         await fireWebhook(settledTx.webhookUrl, {
           event: "payment.settled",
@@ -141,8 +145,6 @@ async function settleHandler(request: Request) {
     }
 
     // ── REAL CCTP PATH ────────────────────────────────────────────────────
-    // Used when a real CCTP burn tx messageHash is provided.
-    // This is the production path for mainnet.
     await prisma.paymentLog.update({
       where: { reference },
       data: { status: "POLLING_CIRCLE_TESTNET_IRIS_API" },
@@ -159,7 +161,6 @@ async function settleHandler(request: Request) {
       },
     });
 
-    // Fire webhook
     if (completedTx.webhookUrl) {
       await fireWebhook(completedTx.webhookUrl, {
         event: "payment.settled",
@@ -200,4 +201,4 @@ async function settleHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(settleHandler);
+export const POST = withApiKey(settleHandler as any);

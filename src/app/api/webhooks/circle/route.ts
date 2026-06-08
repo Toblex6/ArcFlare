@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     if (!isValid) {
       console.warn("⚠️ Webhook signature mismatch — possible spoofed request.");
       // Uncomment for production strict mode:
-      // return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
     let body: any;
