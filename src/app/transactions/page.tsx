@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
-import logo from "../public/arcflare-logo.png.png"; 
 
 interface PaymentItem {
   id: string;
@@ -43,7 +42,13 @@ export default function TransactionsPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6 }}>
           {/* Logo Container */}
           <div style={{ width: 32, height: 32, borderRadius: 9, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Image src={logo} alt="ArcFlare Logo" width={32} height={32} style={{ objectFit: "contain" }} />
+            <Image 
+              src="/arcflare-logo.png.png" 
+              alt="ArcFlare Logo" 
+              width={32} 
+              height={32} 
+              style={{ objectFit: "contain" }} 
+            />
           </div>
           <div>
             <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>ArcFlare</p>
