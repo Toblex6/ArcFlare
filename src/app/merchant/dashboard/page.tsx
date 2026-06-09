@@ -12,16 +12,10 @@ export default function MerchantDashboard() {
 
   const fetchDashboard = () => {
     const key = localStorage.getItem("arcflare_api_key");
-    if (!key) {
-      window.location.href = "/merchant/login";
-      return;
-    }
+    if (!key) { window.location.href = "/merchant/login"; return; }
     fetch("/api/merchant/dashboard", { headers: { "x-api-key": key } })
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.error) window.location.href = "/merchant/login";
-        else setData(json);
-      });
+      .then(res => res.json())
+      .then(setData);
   };
 
   const createLink = async () => {
@@ -35,75 +29,59 @@ export default function MerchantDashboard() {
     if (json.checkoutUrl) setGeneratedLink(json.checkoutUrl);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("arcflare_api_key");
-    window.location.href = "/merchant/login";
-  };
-
-  if (!data) return <div className="p-10 text-slate-400 bg-slate-950 min-h-screen">Loading...</div>;
+  if (!data) return <div style={{ background: "#0e0b08", minHeight: "100vh", color: "#6b5a45", padding: 40 }}>Loading Gateway...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-950 p-10 text-white">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">Welcome, {data.businessName}</h1>
-        <button onClick={handleLogout} className="text-slate-500 hover:text-red-400 text-sm transition-colors">
-          Logout
-        </button>
-      </div>
-      
-      {/* 1. Generator Section */}
-      <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 mb-8">
-        <h2 className="text-lg font-bold mb-4">Create Payment Link</h2>
-        <div className="flex gap-4">
-          <input 
-            placeholder="Amount" 
-            className="bg-slate-800 p-2 rounded-lg border border-slate-700 focus:border-cyan-500 outline-none w-32" 
-            onChange={(e) => setLinkData({ ...linkData, amount: e.target.value })} 
-          />
-          <button onClick={createLink} className="bg-cyan-600 hover:bg-cyan-500 px-6 py-2 rounded-lg font-bold transition-all">
-            Generate
-          </button>
-        </div>
+    <main style={{ minHeight: "100vh", background: "#0e0b08", color: "#f0ece6", fontFamily: "Inter, system-ui, sans-serif", padding: "40px" }}>
+      <div style={{ maxWidth: 800, margin: "0 auto" }}>
+        
+        {/* Header */}
+        <header style={{ marginBottom: 40, borderBottom: "1px solid #2d2015", paddingBottom: 20 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, color: "#c8975a" }}>MERCHANT PORTAL</h1>
+          <p style={{ color: "#6b5a45", fontSize: 12, fontFamily: "monospace", letterSpacing: 1 }}>WELCOME BACK, {data.businessName.toUpperCase()}</p>
+        </header>
 
-        {generatedLink && (
-          <div className="mt-4 p-4 bg-slate-950 border border-cyan-800 rounded-lg flex items-center justify-between">
-            <div className="overflow-hidden mr-4">
-              <span className="text-sm text-cyan-300 truncate block font-mono">
-                {generatedLink}
-              </span>
-            </div>
+        {/* Generator Card */}
+        <section style={{ background: "#1a1410", border: "1px solid #2d2015", borderRadius: 24, padding: 32, marginBottom: 32 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#f0ece6", marginBottom: 20 }}>Create Payment Link</h2>
+          <div style={{ display: "flex", gap: 12 }}>
+            <input 
+              placeholder="Amount (USDC)" 
+              style={{ background: "#0e0b08", border: "1px solid #3d2e1a", borderRadius: 12, padding: "12px 16px", color: "#f0ece6", flex: 1 }}
+              onChange={e => setLinkData({...linkData, amount: e.target.value})} 
+            />
             <button 
-              onClick={() => {
-                navigator.clipboard.writeText(generatedLink);
-                const btn = document.getElementById('copy-btn');
-                if (btn) {
-                  btn.innerText = "Copied!";
-                  setTimeout(() => btn.innerText = "Copy Link", 2000);
-                }
-              }}
-              id="copy-btn"
-              className="bg-cyan-900 hover:bg-cyan-800 text-cyan-200 px-3 py-1 rounded-md text-xs font-bold transition-all shrink-0"
+              onClick={createLink} 
+              style={{ background: "#c8975a", color: "#0e0b08", border: "none", borderRadius: 12, padding: "0 24px", fontWeight: 800, cursor: "pointer" }}
             >
-              Copy Link
+              GENERATE
             </button>
           </div>
-        )}
-      </div>
 
-      {/* 2. Transaction List */}
-      <h2 className="text-xl font-bold mb-4">Your Transactions</h2>
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-        {data.payments.length > 0 ? (
-          data.payments.map((p: any) => (
-            <div key={p.id} className="p-4 border-b border-slate-800 flex justify-between items-center hover:bg-slate-800/50 transition-colors">
-              <span className="font-mono text-sm text-slate-400">{p.reference}</span>
-              <span className="text-cyan-400 font-bold">{p.amount} {p.currency}</span>
+          {generatedLink && (
+            <div style={{ marginTop: 20, background: "#0e0b08", border: "1px solid #c8975a", borderRadius: 12, padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "#c8975a", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis" }}>{generatedLink}</span>
+              <button 
+                onClick={() => navigator.clipboard.writeText(generatedLink)}
+                style={{ background: "transparent", border: "1px solid #c8975a", color: "#c8975a", padding: "4px 8px", borderRadius: 6, fontSize: 10, cursor: "pointer" }}
+              >
+                COPY
+              </button>
             </div>
-          ))
-        ) : (
-          <div className="p-8 text-center text-slate-500">No transactions found yet.</div>
-        )}
+          )}
+        </section>
+
+        {/* Transactions */}
+        <h3 style={{ fontSize: 14, color: "#6b5a45", marginBottom: 16, letterSpacing: 2, textTransform: "uppercase" }}>Transaction Ledger</h3>
+        <div style={{ background: "#1a1410", border: "1px solid #2d2015", borderRadius: 20, overflow: "hidden" }}>
+          {data.payments.map((p: any) => (
+            <div key={p.id} style={{ padding: "20px", borderBottom: "1px solid #2d2015", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, fontFamily: "monospace", color: "#8a7560" }}>{p.reference}</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#f0ece6" }}>{p.amount} {p.currency}</span>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
