@@ -22,7 +22,8 @@ model PaymentLog {
   arcTxHash     String?
   webhookUrl    String?
   timestamp     DateTime @default(now())
-  expiresAt     DateTime? // 👈 Added: Priority 5 enforcement (e.g., now + 1 hour)
+  expiresAt     DateTime?
+  agentSCA      String?
 }
 
 model AgentRegistry {
@@ -106,6 +107,15 @@ model NanoPayment {
   batchRef       String?  // Tracks which block/CCTP sweep this belonged to
   createdAt      DateTime @default(now())
   expiresAt      DateTime? // 👈 Added: For micro-authorizations that clear out if not settled quickly
+}
+model Merchant {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  businessName String
+  passwordHash String
+  apiKey       String   @unique
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
 }
 
 model Job {

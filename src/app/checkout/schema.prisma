@@ -1,0 +1,25 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // Or your database provider, e.g., "mysql", "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model PaymentLog {
+  id             String    @id @default(cuid())
+  reference      String    @unique
+  idempotencyKey String?
+  amount         Float
+  currency       String
+  chain          String
+  senderEmail    String
+  merchant       String
+  status         String
+  arcTxHash      String?
+  webhookUrl     String?
+  timestamp      DateTime  @default(now())
+  expiresAt      DateTime?
+  agentSCA       String? // New field added here
+}

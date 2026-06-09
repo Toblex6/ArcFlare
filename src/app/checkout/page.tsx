@@ -1,13 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { PaymentLog } from "@prisma/client";
 
 export default function CheckoutHubPage() {
+  const searchParams = useSearchParams();
+  const paymentId = searchParams.get("id"); // Changed to 'id'
   const router = useRouter();
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [payment, setPayment] = useState<PaymentLog | null>(null);
+  const [isLoadingPayment, setIsLoadingPayment] = useState(false);
 
   const handleLaunchTestnetSession = async () => {
     setIsInitializing(true);
@@ -24,14 +29,10 @@ export default function CheckoutHubPage() {
         }),
       });
       const result = await res.json();
-      let reference = result.reference || result.data?.reference;
-      if (!reference && result.data?.authorization_url) {
-        reference = result.data.authorization_url.split("/").pop();
-      }
-      if (reference) {
-        router.push(`/checkout/${reference}`);
+      if (result.success && result.checkoutUrl) {
+        router.push(result.checkoutUrl); // Use the new checkoutUrl from the API
       } else {
-        setError(result.message || result.error || "Ledger rejected context token generation.");
+        setError(result.error || "Ledger rejected context token generation.");
       }
     } catch {
       setError("Unable to initialize connection with ArcFlare Gateway.");
@@ -40,6 +41,76 @@ export default function CheckoutHubPage() {
     }
   };
 
+  // New useEffect for fetching and polling payment details
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    const fetchPaymentDetails = async () => {
+      if (!paymentId) return;
+
+      setIsLoadingPayment(true);
+      try {
+        const res = await fetch(`/api/payments?id=${paymentId}`); // Use 'id' query parameter
+        const result = await res.json();
+
+        if (result.success && result.payment) {
+          setPayment(result.payment);
+          // Stop polling if payment is settled or expired
+          if (result.payment.status === "SETTLED" || result.payment.status === "EXPIRED") {
+            clearInterval(intervalId);
+          }
+        } else {
+          setError(result.error || "Failed to fetch payment details.");
+        }
+      } catch (err) {
+        setError("Error fetching payment details.");
+        console.error("Error fetching payment details:", err);
+      } finally {
+        setIsLoadingPayment(false);
+      }
+    };
+
+    if (paymentId) {
+      fetchPaymentDetails(); // Initial fetch
+      intervalId = setInterval(fetchPaymentDetails, 5000); // Poll every 5 seconds
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [paymentId]);
+
+  if (paymentId && isLoadingPayment && !payment) {
+    return (
+      <main style={{ minHeight: "100vh", background: "#0e0b08", color: "#f0ece6", fontFamily: "Inter, system-ui, sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <p style={{ color: "#c8975a" }}>Loading payment details...</p>
+      </main>
+    );
+  } else if (paymentId && payment) {
+    // Display payment details (adapted from user's proposed AgentCheckoutHub)
+    return (
+      <main style={{ minHeight: "100vh", background: "#050403", color: "#f0ece6", fontFamily: "monospace", padding: 40 }}>
+        <div style={{ maxWidth: 600, margin: "0 auto", border: "1px dashed #2d2015", padding: 24, background: "#0e0b08" }}>
+          <h2 style={{ color: "#c8975a", margin: "0 0 8px 0" }}>ARCFLARE HEADLESS HUB</h2>
+          <p style={{ color: "#6b5a45", fontSize: 12, margin: "0 0 24px 0" }}>TARGET STATUS: {payment.status}</p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, background: "#050403", padding: 16, borderRadius: 8 }}>
+            <p style={{ margin: 0 }}><strong>Recipient:</strong> {payment.merchant}</p>
+            <p style={{ margin: 0 }}><strong>Invoice Ref:</strong> {payment.reference}</p>
+            <p style={{ margin: 0 }}><strong>Settle Requirements:</strong> <span style={{ color: "#00ffcc" }}>{payment.amount} {payment.currency}</span></p>
+            {payment.agentSCA && <p style={{ margin: 0 }}><strong>Agent SCA:</strong> {payment.agentSCA}</p>}
+            {payment.arcTxHash && <p style={{ margin: 0 }}><strong>Transaction Hash:</strong> {payment.arcTxHash}</p>}
+          </div>
+          
+          <p style={{ color: "#3d2e1a", fontSize: 11, marginTop: 24, textAlign: "center" }}>MACHINE OPTIMIZED CONTENT NODE — NO HMI REQUIRED</p>
+        </div>
+      </main>
+    );
+  }
+
+  // Original UI for launching a testnet session if no paymentId
   return (
     <main style={{ minHeight: "100vh", background: "#0e0b08", color: "#f0ece6", fontFamily: "Inter, system-ui, sans-serif", display: "flex", flexDirection: "column" }}>
 

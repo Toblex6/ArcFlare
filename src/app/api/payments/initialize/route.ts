@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { parseBody, InitializeSchema } from "@/lib/validation";
-import { withApiKey } from "@/lib/middleware/withApiKey";
 
-export const POST = withApiKey(async (req: NextRequest) => {
+export async function POST(req: NextRequest) {
   try {
     // 1. Rate Limiting Check
     const { allowed, response: limitResponse } = await checkRateLimit(req, "payments");
@@ -16,7 +15,6 @@ export const POST = withApiKey(async (req: NextRequest) => {
     if (validationError) return validationError as NextResponse;
 
     const { amount, currency, email, agentSCA, webhookUrl } = data;
-    const merchant = (req as any).merchant;
 
     // 3. Logic... (keep your existing logic here)
     // ...
@@ -30,4 +28,4 @@ export const POST = withApiKey(async (req: NextRequest) => {
   } catch (error: any) {
     return NextResponse.json({ success: false, error: "Internal Error" }, { status: 500 });
   }
-});
+}
