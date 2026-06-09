@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { PaymentLog } from "@prisma/client";
 
-export default function CheckoutHubPage() {
+function CheckoutHubPageContent() {
   const searchParams = useSearchParams();
   const paymentId = searchParams.get("id"); // Changed to 'id'
   const router = useRouter();
@@ -208,5 +208,13 @@ export default function CheckoutHubPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function CheckoutHubPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: "100vh", background: "#0e0b08", display: "flex", alignItems: "center", justifyContent: "center", color: "#c8975a" }}>Loading...</div>}>
+      <CheckoutHubPageContent />
+    </Suspense>
   );
 }
