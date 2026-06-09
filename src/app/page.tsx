@@ -22,14 +22,23 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-6">
-            {/* Updated to point to the Merchant Dashboard */}
+            {/* 1. Main Dashboard Link */}
             <Link
-              href="/merchant/dashboard"
+              href="/dashboard"
               className="text-sm text-gray-400 hover:text-cyan-300 transition"
             >
               Dashboard
             </Link>
 
+            {/* 2. Brand New Merchant Dashboard Link */}
+            <Link
+              href="/merchant/dashboard"
+              className="text-sm text-gray-400 hover:text-cyan-300 transition"
+            >
+              Merchant Dashboard
+            </Link>
+
+            {/* 3. Demo Checkout Link */}
             <Link
               href="/checkout"
               className="text-sm text-gray-400 hover:text-cyan-300 transition"
@@ -37,7 +46,7 @@ export default function HomePage() {
               Demo Checkout
             </Link>
 
-            {/* Login and Sign Up Links */}
+            {/* 4 & 5. Login and Sign Up Links */}
             <div className="flex items-center gap-3 border-l border-[#3a2a22] pl-6">
               <Link
                 href="/merchant/login"
@@ -98,7 +107,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* RIGHT PANEL - Kept exactly as you provided */}
+        {/* RIGHT PANEL */}
         <div className="bg-[#1a120d] border border-[#2d2019] rounded-[32px] p-8 shadow-2xl">
           <div className="flex items-center justify-between mb-8">
             <div>
@@ -117,43 +126,83 @@ export default function HomePage() {
           <div className="space-y-5">
             <div className="bg-[#241913] rounded-2xl p-5 flex items-center justify-between">
               <div>
-                <p className="font-semibold">Merchant Checkout</p>
-                <p className="text-sm text-gray-400">Hosted USDC payments</p>
+                <p className="font-semibold">
+                  Merchant Checkout
+                </p>
+                <p className="text-sm text-gray-400">
+                  Hosted USDC payments
+                </p>
               </div>
-              <p className="text-cyan-300">Active</p>
+              <p className="text-cyan-300">
+                Active
+              </p>
             </div>
+
             <div className="bg-[#241913] rounded-2xl p-5 flex items-center justify-between">
               <div>
-                <p className="font-semibold">Payment APIs</p>
-                <p className="text-sm text-gray-400">Initialize & Verify</p>
+                <p className="font-semibold">
+                  Payment APIs
+                </p>
+                <p className="text-sm text-gray-400">
+                  Initialize & Verify
+                </p>
               </div>
-              <p className="text-cyan-300">Online</p>
+              <p className="text-cyan-300">
+                Online
+              </p>
             </div>
+
             <div className="bg-[#241913] rounded-2xl p-5 flex items-center justify-between">
               <div>
-                <p className="font-semibold">Webhook Infrastructure</p>
-                <p className="text-sm text-gray-400">Real-time settlement events</p>
+                <p className="font-semibold">
+                  Webhook Infrastructure
+                </p>
+                <p className="text-sm text-gray-400">
+                  Real-time settlement events
+                </p>
               </div>
-              <p className="text-cyan-300">Running</p>
+              <p className="text-cyan-300">
+                Running
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* FEATURES - Kept exactly as you provided */}
+      {/* FEATURES */}
       <section className="max-w-7xl mx-auto px-6 pb-24">
         <div className="grid md:grid-cols-3 gap-8">
           <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 hover:border-cyan-900/50 transition duration-300">
-            <h3 className="text-2xl font-bold mb-4">Hosted Checkout</h3>
-            <p className="text-gray-400 leading-relaxed">Accept USDC payments through dynamic checkout pages with wallet-native UX.</p>
+            <h3 className="text-2xl font-bold mb-4">
+              Hosted Checkout
+            </h3>
+            <p className="text-gray-400 leading-relaxed">
+              Accept USDC payments through
+              dynamic checkout pages with
+              wallet-native UX.
+            </p>
           </div>
+
           <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 hover:border-cyan-900/50 transition duration-300">
-            <h3 className="text-2xl font-bold mb-4">Payment APIs</h3>
-            <p className="text-gray-400 leading-relaxed">Initialize, verify, and automate programmable payment flows using ArcFlare APIs.</p>
+            <h3 className="text-2xl font-bold mb-4">
+              Payment APIs
+            </h3>
+            <p className="text-gray-400 leading-relaxed">
+              Initialize, verify, and automate
+              programmable payment flows
+              using ArcFlare APIs.
+            </p>
           </div>
+
           <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 hover:border-cyan-900/50 transition duration-300">
-            <h3 className="text-2xl font-bold mb-4">Agentic Finance</h3>
-            <p className="text-gray-400 leading-relaxed">Build autonomous payment systems, programmable treasury flows, and intelligent settlement rails.</p>
+            <h3 className="text-2xl font-bold mb-4">
+              Agentic Finance
+            </h3>
+            <p className="text-gray-400 leading-relaxed">
+              Build autonomous payment systems,
+              programmable treasury flows,
+              and intelligent settlement rails.
+            </p>
           </div>
         </div>
       </section>
