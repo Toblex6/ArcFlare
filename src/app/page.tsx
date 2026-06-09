@@ -21,23 +21,32 @@ export default function HomePage() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-5">
-            <Link
-              href="/dashboard"
-              className="text-sm text-gray-300 hover:text-white"
-            >
-              Dashboard
-            </Link>
-
+          <div className="flex items-center gap-6">
             <Link
               href="/checkout"
-              className="text-sm text-gray-300 hover:text-white"
+              className="text-sm text-gray-400 hover:text-cyan-300 transition"
             >
-              Checkout
+              Demo Checkout
             </Link>
 
-            {/* Cyber-styled System Indicator replacing the old ConnectButton */}
-            <div className="flex items-center gap-2 px-4 py-2 bg-[#1f140f] border border-[#3a2a22] rounded-xl text-xs font-mono text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.05)]">
+            {/* Added Login and Sign Up Links */}
+            <div className="flex items-center gap-3 border-l border-[#3a2a22] pl-6">
+              <Link
+                href="/merchant/login"
+                className="text-sm text-gray-300 hover:text-white transition"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/merchant/signup"
+                className="text-sm bg-[#1f140f] border border-[#3a2a22] text-cyan-400 px-4 py-2 rounded-xl hover:bg-[#2a1d16] hover:border-cyan-400/50 transition shadow-[0_0_10px_rgba(34,211,238,0.02)]"
+              >
+                Sign Up
+              </Link>
+            </div>
+
+            {/* Cyber-styled System Indicator */}
+            <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-[#1f140f] border border-[#3a2a22] rounded-xl text-xs font-mono text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.05)] ml-2">
               <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
               AGENT-CORE // ACTIVE
             </div>
@@ -60,23 +69,24 @@ export default function HomePage() {
           <p className="text-xl text-gray-400 leading-relaxed mb-10">
             ArcFlare enables developers and merchants
             to accept programmable stablecoin payments
-            through hosted checkout, esrow services,
+            through hosted checkout, escrow services,
             automated settlement, and onchain payment APIs.
           </p>
 
           <div className="flex flex-wrap gap-5">
+            {/* Updated Hero CTAs to point to Merchant flows */}
             <Link
-              href="/dashboard"
-              className="bg-cyan-400 text-black font-semibold px-8 py-4 rounded-2xl hover:scale-105 transition"
+              href="/merchant/signup"
+              className="bg-cyan-400 text-black font-semibold px-8 py-4 rounded-2xl hover:scale-105 transition shadow-[0_0_20px_rgba(34,211,238,0.2)]"
             >
-              Launch Dashboard
+              Start Accepting Payments
             </Link>
 
             <Link
-              href="/checkout"
-              className="border border-[#3a2a22] px-8 py-4 rounded-2xl hover:bg-[#1d1410] transition"
+              href="/merchant/login"
+              className="border border-[#3a2a22] bg-[#1a120d] px-8 py-4 rounded-2xl hover:bg-[#241913] hover:border-[#4a362a] transition"
             >
-              View Checkout
+              Merchant Portal
             </Link>
           </div>
         </div>
@@ -146,7 +156,7 @@ export default function HomePage() {
       {/* FEATURES */}
       <section className="max-w-7xl mx-auto px-6 pb-24">
         <div className="grid md:grid-cols-3 gap-8">
-          <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8">
+          <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 hover:border-cyan-900/50 transition duration-300">
             <h3 className="text-2xl font-bold mb-4">
               Hosted Checkout
             </h3>
@@ -157,7 +167,7 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8">
+          <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 hover:border-cyan-900/50 transition duration-300">
             <h3 className="text-2xl font-bold mb-4">
               Payment APIs
             </h3>
@@ -168,7 +178,7 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8">
+          <div className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 hover:border-cyan-900/50 transition duration-300">
             <h3 className="text-2xl font-bold mb-4">
               Agentic Finance
             </h3>
