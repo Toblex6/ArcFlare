@@ -29,7 +29,7 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-  ],
+, "src/app/api/agent/status/route.old"  ],
   "exclude": [
     "node_modules", 
     "src/app/dashboard/page.old.tsx", // 2. ✅ Excluded to silence legacy wagmi/rainbowkit missing module errors

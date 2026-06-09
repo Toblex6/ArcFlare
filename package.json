@@ -21,8 +21,10 @@
     "@upstash/redis": "^1.38.0",
     "@walletconnect/cli-sdk": "^0.8.5",
     "axios": "^1.16.1",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "ethers": "^6.16.0",
+    "jose": "^6.2.3",
     "next": "^16.2.6",
     "prisma": "^6.13.0",
     "react": "^19.2.6",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^7.0.0",
+    "@types/bcryptjs": "^2.4.6",
     "hardhat": "^3.7.0"
   }
 }
