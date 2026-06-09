@@ -13,15 +13,15 @@ export default function MerchantDashboard() {
   const fetchDashboard = () => {
     const key = localStorage.getItem("arcflare_api_key");
     
-    // Fallback Mock Data: If no API key is found, don't kick the user out to login.
-    // Instead, load this mock data immediately so the frontend dashboard renders beautifully.
+    // Fixed: Instead of booting you to /merchant/login immediately,
+    // we provide a safe demo fallback state so you can see your dashboard UI layout.
     if (!key) { 
       setData({
         businessName: "ArcFlare Demo Network",
         payments: [
-          { id: "1", reference: "tx_arc_98421_settled", amount: "1,500.00", currency: "USDC" },
-          { id: "2", reference: "tx_arc_77319_settled", amount: "420.00", currency: "USDC" },
-          { id: "3", reference: "tx_arc_12044_settled", amount: "85.50", currency: "USDC" }
+          { id: "demo-1", reference: "tx_arc_98421_settled", amount: "1,500.00", currency: "USDC" },
+          { id: "demo-2", reference: "tx_arc_77319_settled", amount: "420.00", currency: "USDC" },
+          { id: "demo-3", reference: "tx_arc_12044_settled", amount: "85.50", currency: "USDC" }
         ]
       });
       return; 
@@ -31,7 +31,7 @@ export default function MerchantDashboard() {
       .then(res => res.json())
       .then(setData)
       .catch(() => {
-        // Fallback state if database or API route is unavailable
+        // Safe fallback if your backend API isn't running locally yet
         setData({ businessName: "Demo Workspace", payments: [] });
       });
   };
@@ -39,7 +39,7 @@ export default function MerchantDashboard() {
   const createLink = async () => {
     const key = localStorage.getItem("arcflare_api_key");
     
-    // If previewing without being logged in, generate a mock functional link
+    // Allows the link generator button to work right here in the frontend demo preview
     if (!key) {
       const mockAmount = linkData.amount || "0.00";
       setGeneratedLink(`https://arcflare.finance/checkout/demo_link_amt_${mockAmount}`);
@@ -48,7 +48,7 @@ export default function MerchantDashboard() {
 
     const res = await fetch("/api/payments/initialize", {
       method: "POST",
-      headers: { "x-api-key": key || "", "Content-Type": "application/json" },
+      headers: { "x-api-key": key, "Content-Type": "application/json" },
       body: JSON.stringify(linkData),
     });
     const json = await res.json();
@@ -100,16 +100,12 @@ export default function MerchantDashboard() {
         {/* Transactions */}
         <h3 style={{ fontSize: 14, color: "#6b5a45", marginBottom: 16, letterSpacing: 2, textTransform: "uppercase" }}>Transaction Ledger</h3>
         <div style={{ background: "#1a1410", border: "1px solid #2d2015", borderRadius: 20, overflow: "hidden" }}>
-          {data.payments && data.payments.length > 0 ? (
-            data.payments.map((p: any) => (
-              <div key={p.id} style={{ padding: "20px", borderBottom: "1px solid #2d2015", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 13, fontFamily: "monospace", color: "#8a7560" }}>{p.reference}</span>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#f0ece6" }}>{p.amount} {p.currency}</span>
-              </div>
-            ))
-          ) : (
-            <div style={{ padding: "20px", color: "#6b5a45", textAlign: "center", fontSize: 14 }}>No transactions recorded yet.</div>
-          )}
+          {data.payments.map((p: any) => (
+            <div key={p.id} style={{ padding: "20px", borderBottom: "1px solid #2d2015", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, fontFamily: "monospace", color: "#8a7560" }}>{p.reference}</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#f0ece6" }}>{p.amount} {p.currency}</span>
+            </div>
+          ))}
         </div>
       </div>
     </main>
