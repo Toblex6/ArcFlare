@@ -30,7 +30,7 @@ export default function HomePage() {
               Dashboard
             </Link>
 
-            {/* 2. Brand New Merchant Dashboard Link */}
+            {/* 2. Merchant Dashboard Link (Maps directly to your merchant/dashboard/page.tsx file) */}
             <Link
               href="/merchant/dashboard"
               className="text-sm text-gray-400 hover:text-cyan-300 transition"
