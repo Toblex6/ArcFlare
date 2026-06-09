@@ -22,6 +22,14 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-6">
+            {/* Restored Dashboard Navigation */}
+            <Link
+              href="/dashboard"
+              className="text-sm text-gray-400 hover:text-cyan-300 transition"
+            >
+              Dashboard
+            </Link>
+
             <Link
               href="/checkout"
               className="text-sm text-gray-400 hover:text-cyan-300 transition"
@@ -29,7 +37,7 @@ export default function HomePage() {
               Demo Checkout
             </Link>
 
-            {/* Added Login and Sign Up Links */}
+            {/* Login and Sign Up Links */}
             <div className="flex items-center gap-3 border-l border-[#3a2a22] pl-6">
               <Link
                 href="/merchant/login"
@@ -74,7 +82,6 @@ export default function HomePage() {
           </p>
 
           <div className="flex flex-wrap gap-5">
-            {/* Updated Hero CTAs to point to Merchant flows */}
             <Link
               href="/merchant/signup"
               className="bg-cyan-400 text-black font-semibold px-8 py-4 rounded-2xl hover:scale-105 transition shadow-[0_0_20px_rgba(34,211,238,0.2)]"
