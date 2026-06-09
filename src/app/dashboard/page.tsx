@@ -127,7 +127,7 @@ export default function MerchantDashboard() {
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p style={{ color: "#0d7c5f", fontFamily: "monospace", fontSize: 13, letterSpacing: 2, textTransform: "uppercase" }}>
+        <p style={{ color: "#0891b2", fontFamily: "monospace", fontSize: 13, letterSpacing: 2, textTransform: "uppercase" }}>
           SYNCING TESTNET TELEMETRY INSTANCE...
         </p>
       </div>
@@ -166,7 +166,6 @@ export default function MerchantDashboard() {
         </div>
       </div>
 
-
         {/* Nav */}
         <nav style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
           {[
@@ -203,9 +202,9 @@ export default function MerchantDashboard() {
                 padding: "9px 12px", borderRadius: 9,
                 textDecoration: "none", fontSize: 13, fontWeight: 500,
                 transition: "all 0.15s",
-                background: item.active ? "rgba(13,124,95,0.18)" : "transparent",
-                color: item.active ? "#0d7c5f" : "#6b7280",
-                border: item.active ? "1px solid rgba(13,124,95,0.25)" : "1px solid transparent",
+                background: item.active ? "rgba(34,211,238,0.18)" : "transparent",
+                color: item.active ? "#22d3ee" : "#6b7280",
+                border: item.active ? "1px solid rgba(34,211,238,0.25)" : "1px solid transparent",
               }}
               onMouseEnter={e => { if (!item.active) { (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.04)"; (e.currentTarget as HTMLAnchorElement).style.color = "#d1d5db"; } }}
               onMouseLeave={e => { if (!item.active) { (e.currentTarget as HTMLAnchorElement).style.background = "transparent"; (e.currentTarget as HTMLAnchorElement).style.color = "#6b7280"; } }}
@@ -217,16 +216,16 @@ export default function MerchantDashboard() {
         </nav>
 
         {/* Total Balance card */}
-        <div style={{ background: "rgba(13,124,95,0.1)", border: "1px solid rgba(13,124,95,0.2)", borderRadius: 12, padding: "14px 14px", marginTop: 16 }}>
+        <div style={{ background: "rgba(34,211,238,0.1)", border: "1px solid rgba(34,211,238,0.2)", borderRadius: 12, padding: "14px 14px", marginTop: 16 }}>
           <p style={{ color: "#4b5563", fontSize: 9, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 6px 0" }}>Total Balance</p>
           <p style={{ color: "#fff", fontSize: 20, fontWeight: 700, fontFamily: "monospace", margin: "0 0 2px 0" }}>
-            {metrics.totalVolume.toFixed(2)} <span style={{ color: "#0d7c5f", fontSize: 12 }}>USDC</span>
+            {metrics.totalVolume.toFixed(2)} <span style={{ color: "#22d3ee", fontSize: 12 }}>USDC</span>
           </p>
           <p style={{ color: "#4b5563", fontSize: 10, margin: "0 0 10px 0" }}>≈ ${metrics.totalVolume.toFixed(2)}</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(13,124,95,0.15)", borderRadius: 8, padding: "6px 10px" }}>
-            <span style={{ color: "#0d7c5f", fontSize: 12 }}>◎</span>
-            <span style={{ color: "#0d7c5f", fontSize: 11, fontWeight: 600 }}>USDC Wallet</span>
-            <span style={{ color: "#0d7c5f", marginLeft: "auto", fontSize: 12 }}>→</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(34,211,238,0.15)", borderRadius: 8, padding: "6px 10px" }}>
+            <span style={{ color: "#22d3ee", fontSize: 12 }}>◎</span>
+            <span style={{ color: "#22d3ee", fontSize: 11, fontWeight: 600 }}>USDC Wallet</span>
+            <span style={{ color: "#22d3ee", marginLeft: "auto", fontSize: 12 }}>→</span>
           </div>
         </div>
 
@@ -254,9 +253,9 @@ export default function MerchantDashboard() {
             <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "7px 14px", fontSize: 13, color: "#64748b", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
               📅 {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(13,124,95,0.08)", border: "1px solid rgba(13,124,95,0.2)", borderRadius: 10, padding: "7px 14px" }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#0d7c5f", display: "inline-block", animation: "pulse 2s infinite" }} />
-              <span style={{ fontSize: 11, color: "#0d7c5f", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", fontFamily: "monospace" }}>Live Node Active</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(8,145,178,0.08)", border: "1px solid rgba(8,145,178,0.2)", borderRadius: 10, padding: "7px 14px" }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#0891b2", display: "inline-block", animation: "pulse 2s infinite" }} />
+              <span style={{ fontSize: 11, color: "#0891b2", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", fontFamily: "monospace" }}>Live Node Active</span>
             </div>
           </div>
         </div>
@@ -271,7 +270,7 @@ export default function MerchantDashboard() {
         {/* METRIC CARDS — 4 cards matching the screenshot */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
           {[
-            { label: "Total Volume", value: metrics.totalVolume.toFixed(2), unit: "USDC", change: "+18%", iconBg: "#dcfce7", iconColor: "#16a34a", icon: "$", dataKey: "volume", stroke: "#0d7c5f" },
+            { label: "Total Volume", value: metrics.totalVolume.toFixed(2), unit: "USDC", change: "+18%", iconBg: "#dcfce7", iconColor: "#16a34a", icon: "$", dataKey: "volume", stroke: "#0891b2" },
             { label: "Transactions", value: metrics.totalTransactions.toString(), unit: "", change: "+12%", iconBg: "#ede9fe", iconColor: "#7c3aed", icon: "↔", dataKey: "count", stroke: "#8b5cf6" },
             { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, unit: "", change: "+3%", iconBg: "#fef9c3", iconColor: "#ca8a04", icon: "✓", dataKey: "volume", stroke: "#f59e0b" },
             { label: "Avg Tx Value", value: `$${avgTxValue.toFixed(2)}`, unit: "USDC", change: "+11%", iconBg: "#dbeafe", iconColor: "#2563eb", icon: "↗", dataKey: "volume", stroke: "#3b82f6" },
@@ -326,8 +325,8 @@ export default function MerchantDashboard() {
                 <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="mainGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0d7c5f" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#0d7c5f" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#0891b2" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#0891b2" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -336,10 +335,10 @@ export default function MerchantDashboard() {
                   <Tooltip
                     contentStyle={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
                     labelStyle={{ color: "#64748b" }}
-                    itemStyle={{ color: "#0d7c5f" }}
+                    itemStyle={{ color: "#0891b2" }}
                     formatter={(val: any) => [`${val} USDC`, "Volume"]}
                   />
-                  <Area type="monotone" dataKey="volume" stroke="#0d7c5f" strokeWidth={2.5} fill="url(#mainGrad)" dot={{ fill: "#0d7c5f", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "#0d7c5f" }} />
+                  <Area type="monotone" dataKey="volume" stroke="#0891b2" strokeWidth={2.5} fill="url(#mainGrad)" dot={{ fill: "#0891b2", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "#0891b2" }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -347,7 +346,7 @@ export default function MerchantDashboard() {
             {/* Sub metrics */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 18, paddingTop: 18, borderTop: "1px solid #f1f5f9" }}>
               {[
-                { label: "Successful Payments", value: successCount, color: "#0d7c5f", bg: "#f0fdf4", border: "#bbf7d0", icon: "✓" },
+                { label: "Successful Payments", value: successCount, color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc", icon: "✓" },
                 { label: "Failed Payments", value: failedCount, color: "#dc2626", bg: "#fef2f2", border: "#fecaca", icon: "✗" },
                 { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", icon: "◎" },
                 { label: "Avg Txn Value", value: `$${avgTxValue.toFixed(2)}`, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "↗" },
@@ -375,7 +374,7 @@ export default function MerchantDashboard() {
 
             <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 4px 0" }}>Total Revenue (USDC)</p>
             <p style={{ fontSize: 28, fontWeight: 700, color: "#0f172a", fontFamily: "monospace", margin: "0 0 2px 0" }}>
-              {metrics.totalVolume.toFixed(2)} <span style={{ fontSize: 14, color: "#0d7c5f" }}>USDC</span>
+              {metrics.totalVolume.toFixed(2)} <span style={{ fontSize: 14, color: "#0891b2" }}>USDC</span>
             </p>
             <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 20px 0" }}>≈ ${metrics.totalVolume.toFixed(2)}</p>
 
@@ -386,7 +385,7 @@ export default function MerchantDashboard() {
               </div>
               <p style={{ fontSize: 20, fontWeight: 700, color: "#0f172a", fontFamily: "monospace", margin: "0 0 8px 0" }}>{successCount}</p>
               <div style={{ height: 5, background: "#f1f5f9", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${metrics.successRate}%`, background: "linear-gradient(90deg,#0d7c5f,#16a34a)", borderRadius: 3, transition: "width 1s ease" }} />
+                <div style={{ height: "100%", width: `${metrics.successRate}%`, background: "linear-gradient(90deg,#0891b2,#22d3ee)", borderRadius: 3, transition: "width 1s ease" }} />
               </div>
             </div>
 
@@ -410,9 +409,9 @@ export default function MerchantDashboard() {
                 disabled={isDeploying}
                 style={{
                   width: "100%", padding: "9px 0", borderRadius: 8,
-                  background: isDeploying ? "#f1f5f9" : "rgba(13,124,95,0.08)",
-                  border: `1px solid ${isDeploying ? "#e2e8f0" : "rgba(13,124,95,0.3)"}`,
-                  color: isDeploying ? "#94a3b8" : "#0d7c5f",
+                  background: isDeploying ? "#f1f5f9" : "rgba(8,145,178,0.08)",
+                  border: `1px solid ${isDeploying ? "#e2e8f0" : "rgba(8,145,178,0.3)"}`,
+                  color: isDeploying ? "#94a3b8" : "#0891b2",
                   fontSize: 11, fontWeight: 700, cursor: isDeploying ? "not-allowed" : "pointer",
                   letterSpacing: 1, textTransform: "uppercase", fontFamily: "monospace",
                 }}
@@ -420,19 +419,19 @@ export default function MerchantDashboard() {
                 {isDeploying ? "COMPILING..." : "⚡ LAUNCH AGENT LIFECYCLE"}
               </button>
               {deploymentError && <p style={{ color: "#dc2626", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>❌ {deploymentError}</p>}
-              {deployedAgent && <p style={{ color: "#0d7c5f", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>● Live Agent Registry Bound: #{deployedAgent.agentId}</p>}
+              {deployedAgent && <p style={{ color: "#0891b2", fontSize: 10, marginTop: 6, margin: "6px 0 0 0" }}>● Live Agent Registry Bound: #{deployedAgent.agentId}</p>}
             </div>
 
             <button
               onClick={() => { navigator.clipboard.writeText("arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2"); alert("API Key copied!"); }}
-              style={{ width: "100%", padding: "12px 0", fontSize: 13, background: "#0d7c5f", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+              style={{ width: "100%", padding: "12px 0", fontSize: 13, background: "#0891b2", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
             >
               🔑 Generate API Key →
             </button>
           </div>
         </div>
 
-        {/* SETTLEMENT STREAMS TABLE — keep dark card exactly as-is */}
+        {/* SETTLEMENT STREAMS TABLE — dark card */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-base font-bold tracking-wide uppercase font-mono text-white">
@@ -467,7 +466,7 @@ export default function MerchantDashboard() {
                   {payments.map((payment) => (
                     <tr key={payment.id} className="hover:bg-[#120b08]/40 transition-colors">
                       <td className="py-4 pr-4">
-                        <div className="text-emerald-400">{payment.reference.slice(0, 16)}</div>
+                        <div className="text-cyan-400">{payment.reference.slice(0, 16)}</div>
                         <div className="text-gray-500 text-[10px] mt-0.5">{new Date(payment.paid_at).toLocaleString()}</div>
                       </td>
                       <td className="py-4 pr-4">
@@ -475,7 +474,7 @@ export default function MerchantDashboard() {
                         <div className="text-gray-500 text-[10px] mt-0.5">→ Merchant: {payment.merchant}</div>
                       </td>
                       <td className="py-4 pr-4">
-                        <span className="bg-emerald-400/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-400/20 text-[10px]">
+                        <span className="bg-cyan-400/10 text-cyan-400 px-2 py-0.5 rounded border border-cyan-400/20 text-[10px]">
                           {payment.chain.length > 20 ? "Arc-L1" : payment.chain}
                         </span>
                       </td>
