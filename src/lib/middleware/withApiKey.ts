@@ -15,15 +15,15 @@ export function withApiKey(handler: (req: NextRequest) => Promise<NextResponse>)
         return NextResponse.json({ success: false, error: "Missing API key." }, { status: 401 });
       }
 
-      const merchant = await (prisma as any).merchant.findUnique({
-        where: { apiKey: apiKey },
+      const apiKeyRecord = await (prisma as any).apiKey.findUnique({
+        where: { key: apiKey },
       });
 
-      if (!merchant) {
+      if (!apiKeyRecord) {
         return NextResponse.json({ success: false, error: "Invalid API key." }, { status: 403 });
       }
 
-      (req as any).merchant = merchant;
+      (req as any).apiKey = apiKeyRecord;
       return await handler(req);
     } catch (error: any) {
       console.error("Auth System Error:", error);
