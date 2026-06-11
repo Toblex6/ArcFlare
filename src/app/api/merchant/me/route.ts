@@ -1,7 +1,7 @@
 // src/app/api/merchant/me/route.ts
 // Returns current merchant profile + their payments + API key hint
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 import { jwtVerify } from "jose";
 
 const JWT_SECRET = new TextEncoder().encode(

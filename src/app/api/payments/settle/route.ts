@@ -2,13 +2,13 @@
 // Updated with active Rate Limiting and Zod Input Validation
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 import { createWalletClient, createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
-import { withApiKey } from "@/lib/middleware/withApiKey";
-import { checkRateLimit } from "@/lib/ratelimit";
-import { parseBody, SettleSchema } from "@/lib/validation";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
+import { checkRateLimit } from "@/src/lib/ratelimit";
+import { parseBody, SettleSchema } from "@/src/lib/validation";
 
 const MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
 const IRIS_API = "https://iris-api-sandbox.circle.com/v2";

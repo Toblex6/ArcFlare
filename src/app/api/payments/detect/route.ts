@@ -3,9 +3,9 @@
 // Used by agents self-reporting a burn tx or for manual testing.
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { pollForAttestation, mintOnArc, getChainName } from "@/lib/cctp";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { prisma } from "@/src/lib/prisma";
+import { pollForAttestation, mintOnArc, getChainName } from "@/src/lib/cctp";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
 
 async function detectHandler(request: Request) {
   try {

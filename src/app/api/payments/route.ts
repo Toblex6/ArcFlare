@@ -1,7 +1,7 @@
 // src/app/api/payments/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { checkRateLimit } from "@/lib/ratelimit";
+import { prisma } from "@/src/lib/prisma";
+import { checkRateLimit } from "@/src/lib/ratelimit";
 import { z } from "zod";
 
 // Define a schema for the query parameters

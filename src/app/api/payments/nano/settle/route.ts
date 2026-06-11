@@ -4,17 +4,17 @@
 // Can also auto-settle ALL pairs that have reached threshold.
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
-import { checkRateLimit } from "@/lib/ratelimit";
-import { parseBody, NanoSettleSchema } from "@/lib/validation";
+import { prisma } from "@/src/lib/prisma";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
+import { checkRateLimit } from "@/src/lib/ratelimit";
+import { parseBody, NanoSettleSchema } from "@/src/lib/validation";
 import {
   getUnsettledBalance,
   markBatchSettled,
   getUnsettledPairs,
   getBatchSummary,
   NANO_BATCH_THRESHOLD_USDC,
-} from "@/lib/nanopayment";
+} from "@/src/lib/nanopayment";
 
 // ─── Settle a specific agent-merchant pair ────────────────────────────────────
 async function settleNanoHandler(request: NextRequest) {

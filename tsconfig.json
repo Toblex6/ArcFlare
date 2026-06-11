@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2020", // 1. ✅ Upgraded from ES2017 to support BigInt literals natively
+    "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
@@ -19,7 +19,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*", "./*"]   // 👈 ADD "./*" to also look in root
     }
   },
   "include": [
@@ -28,11 +28,12 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
-, "src/app/api/agent/status/route.old"  ],
+    "**/*.mts",
+    "src/app/api/agent/status/route.old"
+  ],
   "exclude": [
     "node_modules", 
-    "src/app/dashboard/page.old.tsx", // 2. ✅ Excluded to silence legacy wagmi/rainbowkit missing module errors
-    "src/lib/wagmi.ts"                // 2. ✅ Excluded to silence legacy wagmi/rainbowkit missing module errors
+    "src/app/dashboard/page.old.tsx",
+    "src/lib/wagmi.ts"
   ]
 }

@@ -1,9 +1,9 @@
 // src/app/api/merchant/payment-link/route.ts
 // Authenticated merchants create shareable payment links
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 import { jwtVerify } from "jose";
-import { checkRateLimit } from "@/lib/ratelimit";
+import { checkRateLimit } from "@/src/lib/ratelimit";
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.MERCHANT_JWT_SECRET || "arcflare-merchant-secret-change-on-mainnet"

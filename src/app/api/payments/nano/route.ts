@@ -4,13 +4,13 @@
 // Used by agents paying per API call, per token, per second of compute etc.
 
 import { NextResponse } from "next/server";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
 import {
   recordNanoPayment,
   getUnsettledBalance,
   getBatchSummary,
   NANO_BATCH_THRESHOLD_USDC,
-} from "@/lib/nanopayment";
+} from "@/src/lib/nanopayment";
 
 async function nanoHandler(request: Request) {
   try {

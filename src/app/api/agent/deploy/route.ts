@@ -4,7 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { createPublicClient, http, parseAbiItem } from "viem";
 import { arcTestnet } from "viem/chains";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
 
 const prisma = new PrismaClient();
 

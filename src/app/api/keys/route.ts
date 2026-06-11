@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 import { randomBytes } from "crypto";
 
 function verifyAdminSecret(req: NextRequest): boolean {

@@ -1,8 +1,8 @@
 // src/app/api/payments/stream/stop/route.ts
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { prisma } from "@/src/lib/prisma";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { createPublicClient, http } from "viem";
 
