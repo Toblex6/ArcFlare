@@ -1,21 +1,14 @@
-@import "tailwindcss";
-
-/* RainbowKit styles (commented out until you re-add the package) */
-/* @import "~@rainbow-me/rainbowkit/styles.css"; */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Custom theme variables */
 :root {
-  --background: #0E0B08;   /* matches darkbg from screenshot */
-  --foreground: #F0ECE6;   /* warm white */
-  --copper: #C8975A;        /* primary accent from screenshot */
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-copper: var(--copper);
-  --color-darkbg: #0E0B08;
-  --color-cardbg: #1A1410;
+  --background: #0E0B08;
+  --foreground: #F0ECE6;
+  --copper: #C8975A;
+  --darkbg: #0E0B08;
+  --cardbg: #1A1410;
 }
 
 /* Global reset */
@@ -32,7 +25,7 @@ body {
   min-height: 100vh;
 }
 
-/* Optional: custom scrollbar */
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
 }
