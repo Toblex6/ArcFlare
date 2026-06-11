@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma"; // Direct named import from unified utility layer
+import { prisma } from "@/src/lib/prisma"; // Direct named import from unified utility layer
 
 /**
  * GET Handler for ArcFlare's Agentic Paywall Endpoint

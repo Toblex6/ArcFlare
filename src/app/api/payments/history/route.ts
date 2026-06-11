@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 
 // Force Next.js to treat this route as a dynamic live-data feed
 export const dynamic = "force-dynamic";

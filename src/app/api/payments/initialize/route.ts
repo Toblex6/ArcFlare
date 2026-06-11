@@ -1,8 +1,8 @@
 // src/app/api/payments/initialize/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { checkRateLimit } from "@/lib/ratelimit";
-import { parseBody, InitializeSchema } from "@/lib/validation";
+import { prisma } from "@/src/lib/prisma";
+import { checkRateLimit } from "@/src/lib/ratelimit";
+import { parseBody, InitializeSchema } from "@/src/lib/validation";
 
 export async function POST(req: NextRequest) {
   try {

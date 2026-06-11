@@ -3,8 +3,8 @@
 // Admin can then resolve via resolveDispute on the contract.
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { prisma } from "@/src/lib/prisma";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || "";

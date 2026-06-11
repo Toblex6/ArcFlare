@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 
 // Prevent internal Next.js build-time prerendering issues
 export const dynamic = "force-dynamic";

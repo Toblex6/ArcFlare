@@ -3,13 +3,13 @@
 // detected USDC transfers to Arc via CCTP V2.
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 import {
   pollForAttestation,
   mintOnArc,
   verifyCircleWebhookSignature,
   getChainName,
-} from "@/lib/cctp";
+} from "@/src/lib/cctp";
 
 export async function POST(req: NextRequest) {
   try {

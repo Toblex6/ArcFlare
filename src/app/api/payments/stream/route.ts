@@ -8,8 +8,8 @@
 //   POST /api/payments/stream/withdraw  → receiver withdraws earned USDC
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { prisma } from "@/src/lib/prisma";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { parseUnits } from "viem";
 

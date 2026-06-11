@@ -2,8 +2,8 @@
 // Returns status of a specific escrow by reference.
 
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { prisma } from "@/src/lib/prisma";
+import { withApiKey } from "@/src/lib/middleware/withApiKey";
 
 async function statusHandler(request: Request) {
   try {
