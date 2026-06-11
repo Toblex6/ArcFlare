@@ -69,6 +69,25 @@ export default function HomePage() {
               Try Demo Checkout
             </Link>
           </div>
+          <div className="flex flex-wrap gap-4 mt-6">
+            <a
+              href="/ArcFlare-Documentation.docx"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-cyan-800 bg-cyan-950/20 px-5 py-3 rounded-xl hover:bg-cyan-900/30 transition text-sm"
+            >
+              📄 Technical Documentation
+            </a>
+
+            <a
+              href="/ArcFlare-Investor-Deck.pptx"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-orange-800 bg-orange-950/20 px-5 py-3 rounded-xl hover:bg-orange-900/30 transition text-sm"
+            >
+              📊 Investor Deck
+            </a>
+          </div>
         </div>
 
         {/* RIGHT PANEL — live stats */}
@@ -119,14 +138,14 @@ export default function HomePage() {
               title: "AI Agents",
               desc: "Deploy ERC-8004 identity wallets and pay other agents per API call, per second, or per task — fully autonomous.",
               cta: "View API docs",
-              href: "/docs",
+              href: "/ArcFlare-Documentation.docx",
             },
             {
               icon: "⚡",
               title: "Developers",
               desc: "Integrate ArcFlare APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.",
               cta: "Read the docs",
-              href: "/docs",
+              href: "/ArcFlare-Documentation.docx",
             },
           ].map((card, i) => (
             <div key={i} className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 flex flex-col hover:border-cyan-900/50 transition duration-300">
