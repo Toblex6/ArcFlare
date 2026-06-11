@@ -1,4 +1,3 @@
-// src/app/api/jobs/fund/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
 import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT } from "@/lib/contracts/erc8183";

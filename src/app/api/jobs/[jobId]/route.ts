@@ -1,16 +1,14 @@
-// src/app/api/jobs/[jobId]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi, JOB_STATUS } from "@/lib/contracts/erc8183";
 import { createPublicClient, http, formatUnits } from "viem";
 import { arcTestnet } from "viem/chains";
 
-export async function GET(req: NextRequest, { params }: { params: { jobId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
-    const jobId = params.jobId;
+    const { jobId } = await params;
     const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
 
-    // On-chain state
     const onchainJob = await publicClient.readContract({
       address: AGENTIC_COMMERCE_CONTRACT,
       abi: agenticCommerceAbi,
@@ -18,7 +16,6 @@ export async function GET(req: NextRequest, { params }: { params: { jobId: strin
       args: [BigInt(jobId)],
     }) as any;
 
-    // Database record
     const dbJob = await prisma.erc8183Job.findUnique({ where: { jobId: BigInt(jobId) } });
 
     return NextResponse.json({

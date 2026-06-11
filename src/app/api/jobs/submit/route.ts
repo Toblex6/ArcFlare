@@ -1,6 +1,5 @@
-// src/app/api/jobs/submit/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createContractTransaction, getCircleClient } from "@/lib/circle/client";
+import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
 import { AGENTIC_COMMERCE_CONTRACT } from "@/lib/contracts/erc8183";
 import { prisma } from "@/lib/prisma";
 import { keccak256, toHex } from "viem";
