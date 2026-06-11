@@ -119,14 +119,14 @@ export default function HomePage() {
               title: "AI Agents",
               desc: "Deploy ERC-8004 identity wallets and pay other agents per API call, per second, or per task — fully autonomous.",
               cta: "View API docs",
-              href: "/docs/api/page.tsx",
+              href: "/docs/agents",
             },
             {
               icon: "⚡",
               title: "Developers",
               desc: "Integrate ArcFlare APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.",
               cta: "Read the docs",
-              href: "/docs/page.tsx",
+              href: "/docs",
             },
           ].map((card, i) => (
             <div key={i} className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 flex flex-col hover:border-cyan-900/50 transition duration-300">
