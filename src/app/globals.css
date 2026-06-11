@@ -1,21 +1,45 @@
 @import "tailwindcss";
-/*@import "~@rainbow-me/rainbowkit/styles.css";*/
 
-/* Base fallback configurations */
+/* RainbowKit styles (commented out until you re-add the package) */
+/* @import "~@rainbow-me/rainbowkit/styles.css"; */
+
+/* Custom theme variables */
 :root {
-  --background: #1A120B;
-  --foreground: #FFF8EA;
+  --background: #0E0B08;   /* matches darkbg from screenshot */
+  --foreground: #F0ECE6;   /* warm white */
+  --copper: #C8975A;        /* primary accent from screenshot */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-copper: var(--copper);
+  --color-darkbg: #0E0B08;
+  --color-cardbg: #1A1410;
 }
 
-/* Explicitly set body rules that won't fight with Tailwind utilities */
+/* Global reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 body {
   background-color: var(--background);
   color: var(--foreground);
-  margin: 0;
-  padding: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  min-height: 100vh;
+}
+
+/* Optional: custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1A1410;
+}
+::-webkit-scrollbar-thumb {
+  background: #C8975A;
+  border-radius: 4px;
 }

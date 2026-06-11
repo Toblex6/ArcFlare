@@ -38,7 +38,7 @@ async function main() {
 
   // ---------- 2. Set Budget (10 USDC = 10_000_000 with 6 decimals) ----------
   console.log("2️⃣ Setting budget (10 USDC)...");
-  const budget = 10_000_000n;
+  const budget = 100_000n;
   const setBudgetTx = await circleClient.createContractExecutionTransaction({
     walletAddress: PROVIDER_ADDRESS,
     blockchain: "ARC-TESTNET",

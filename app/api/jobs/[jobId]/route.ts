@@ -4,9 +4,9 @@ import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi, JOB_STATUS } from "@/lib
 import { createPublicClient, http, formatUnits } from "viem";
 import { arcTestnet } from "viem/chains";
 
-export async function GET(req: NextRequest, { params }: { params: { jobId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
-    const jobId = params.jobId;
+    const { jobId } = await params;
     const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
 
     const onchainJob = await publicClient.readContract({
