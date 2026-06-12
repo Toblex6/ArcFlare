@@ -19,7 +19,6 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
     "@walletconnect/cli-sdk": "^0.8.5",
-    "autoprefixer": "^10.5.0",
     "axios": "^1.16.1",
     "bcryptjs": "^3.0.3",
     "docx": "^9.7.1",
@@ -27,13 +26,11 @@
     "ethers": "^6.16.0",
     "jose": "^6.2.3",
     "next": "^16.2.6",
-    "postcss": "^8.5.15",
     "pptxgenjs": "^4.0.1",
     "prisma": "^6.13.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "^3.8.1",
-    "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3",
     "viem": "^2.52.2",
     "zod": "^3.25.76"
@@ -41,6 +38,9 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^7.0.0",
     "@types/bcryptjs": "^2.4.6",
-    "hardhat": "^3.7.0"
+    "autoprefixer": "^10.5.0",
+    "hardhat": "^3.7.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.19"
   }
 }
