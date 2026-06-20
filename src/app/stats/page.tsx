@@ -87,7 +87,7 @@ export default function PublicStatsPage() {
       {/* Header */}
       <header style={S.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Image src="/arcflare-logo.png" alt="ArcFlare" width={36} height={36} style={{ borderRadius: 8, objectFit: "contain" }} />
+          <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={36} height={36} style={{ borderRadius: 8, objectFit: "contain" }} />
           <div>
             <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>ArcFlare</p>
             <p style={{ fontSize: 10, color: "#6b5a45", margin: 0 }}>Public Analytics — Arc Testnet</p>
