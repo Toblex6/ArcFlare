@@ -3,8 +3,8 @@
 // referenced in the Circle CLI skill, and pulls real data instead of stubs.
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireGatewayPayment, GatewayPaymentContext } from "@/lib/gateway-middleware";
+import { prisma } from "@/src/lib/prisma";
+import { requireGatewayPayment, GatewayPaymentContext } from "@/src/lib/gateway-middleware";
 
 const SELLER_WALLET_ADDRESS = process.env.SELLER_WALLET_ADDRESS!;
 
@@ -134,9 +134,9 @@ async function handlePaidResource(
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { endpoint: string } }
+  { params }: { params: Promise<{ endpoint: string }> }
 ) {
-  const endpoint = params.endpoint;
+  const { endpoint } = await params;   // ✅ unwrap the Promise
   const priceUSDC = PRICE_TABLE[endpoint];
 
   if (!priceUSDC) {
