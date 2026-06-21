@@ -1,6 +1,6 @@
 // src/app/api/payments/verify/[reference]/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 
 export async function GET(
   request: Request,
