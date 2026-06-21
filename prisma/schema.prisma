@@ -20,10 +20,8 @@ model PaymentLog {
   merchant       String
   status         String
   arcTxHash      String?
-  circleTxId     String?
   webhookUrl     String?
   timestamp      DateTime  @default(now())
-  updatedAt      DateTime? @updatedAt
   expiresAt      DateTime?
   agentSCA       String?
   circleTxId     String? // Circle transaction ID for debugging
