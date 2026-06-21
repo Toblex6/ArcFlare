@@ -104,7 +104,7 @@ export default function ScheduledPaymentsPage() {
     main:    { flex: 1, padding: "32px", overflowX: "hidden" as const },
     card:    { background: "#1a1410", border: "1px solid #2d2015", borderRadius: 16, padding: 24, marginBottom: 20 },
     input:   { width: "100%", padding: "10px 14px", background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 10, color: "#f0ece6", fontSize: 13, fontFamily: "monospace", outline: "none", boxSizing: "border-box" as const, marginBottom: 10 },
-    btn:     (disabled = false) => ({ padding: "12px 24px", background: disabled ? "rgba(200,151,90,0.3)" : "#c8975a", color: disabled ? "rgba(14,11,8,0.5)" : "#0e0b08", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer" },
+    btn:     (disabled = false) => ({ padding: "12px 24px", background: disabled ? "rgba(200,151,90,0.3)" : "#c8975a", color: disabled ? "rgba(14,11,8,0.5)" : "#0e0b08", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: disabled ? "not-allowed" : "pointer" }),
     tab:     (active: boolean) => ({ padding: "8px 16px", borderRadius: 8, fontSize: 12, cursor: "pointer", border: `1px solid ${active ? "#c8975a" : "#2d2015"}`, background: active ? "rgba(200,151,90,0.1)" : "transparent", color: active ? "#c8975a" : "#6b5a45", fontWeight: active ? 700 : 400 }),
     label:   { fontSize: 10, color: "#6b5a45", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 4, display: "block" as const },
   };
@@ -113,7 +113,7 @@ export default function ScheduledPaymentsPage() {
     <div style={S.page}>
       <aside style={S.aside}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6 }}>
-          <Image src="/arcflare-logo.png" alt="ArcFlare" width={36} height={36} style={{ borderRadius: 8, objectFit: "contain" }} />
+          <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={36} height={36} style={{ borderRadius: 8, objectFit: "contain" }} />
           <div>
             <p style={{ color: "#f0ece6", fontSize: 14, fontWeight: 700, margin: 0 }}>ArcFlare</p>
             <p style={{ color: "#6b5a45", fontSize: 9, margin: 0 }}>Stablecoin Payment Infrastructure</p>
