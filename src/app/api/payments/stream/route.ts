@@ -13,7 +13,7 @@ import { withApiKey } from "@/src/lib/middleware/withApiKey";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { parseUnits } from "viem";
 
-const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
+const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "0xc9BbeDFb142b6306c34838a39521c894F3dbc872";
 const USDC_ARC = "0x3600000000000000000000000000000000000000";
 
 function getCircleClient() {

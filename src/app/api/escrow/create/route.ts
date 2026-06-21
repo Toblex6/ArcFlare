@@ -8,8 +8,7 @@ import { withApiKey } from "@/lib/middleware/withApiKey";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { parseUnits } from "viem";
 
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS ||
-  "0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F";
+const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || "";
 const USDC_ARC = "0x3600000000000000000000000000000000000000";
 
 function getCircleClient() {
