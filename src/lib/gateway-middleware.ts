@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const ARC_TESTNET_CHAIN = "eip155:5042002";
 const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
+const GATEWAY_CONTRACT_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
 
 export interface GatewayPaymentContext {
   payer: string;
@@ -32,16 +33,20 @@ export function requireGatewayPayment(
           error: "Payment Required",
           accepts: [
             {
-              scheme: "exact",
+              scheme: "GatewayWalletBatched",
               network: ARC_TESTNET_CHAIN,
               maxAmountRequired: priceToAtomicUnits(options.priceUSDC),
               resource: req.nextUrl.pathname,
               payTo: options.sellerAddress,
               asset: "USDC",
               facilitator: FACILITATOR_URL,
-              name: "ArcFlare",       // ✅ flat — not nested in domain: {}
-              version: "1.0.0",
-              chainId: 5042002,
+              // ✅ Correct EIP-712 domain structure for CLI/SDKs
+              extra: {
+                name: "ArcFlare",
+                version: "1.0.0",
+                chainId: 5042002,
+                verifyingContract: GATEWAY_CONTRACT_ADDRESS,
+              },
             },
           ],
         },
