@@ -32,7 +32,7 @@ export function requireGatewayPayment(
           error: "Payment Required",
           accepts: [
             {
-              scheme: "GatewayWalletBatched",
+              scheme: "exact",
               network: ARC_TESTNET_CHAIN,
               maxAmountRequired: priceToAtomicUnits(options.priceUSDC),
               resource: req.nextUrl.pathname,
