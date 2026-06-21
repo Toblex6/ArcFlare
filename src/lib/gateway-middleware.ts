@@ -1,11 +1,17 @@
 // src/lib/gateway-middleware.ts
 // Circle Gateway Nanopayments — x402 middleware wrapper for ArcFlare endpoints
+// FIXED: corrected payment requirements to match real x402 spec.
+// Previous version used "domain"/"maxAmountRequired" — wrong field names.
+// Real spec uses "extra" (EIP-712 domain of the USDC token itself, not your
+// app) and "amount". Source: x402 spec + Circle's own x402 blog post.
 
 import { NextRequest, NextResponse } from "next/server";
 
 const ARC_TESTNET_CHAIN = "eip155:5042002";
 const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
-const GATEWAY_CONTRACT_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
+
+// USDC on Arc Testnet — same address used everywhere else in ArcFlare
+const USDC_ARC_TESTNET = "0x3600000000000000000000000000000000000000";
 
 export interface GatewayPaymentContext {
   payer: string;
@@ -24,28 +30,34 @@ export function requireGatewayPayment(
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
 ) {
   return async function wrappedHandler(req: NextRequest): Promise<NextResponse> {
-    const paymentSignature = req.headers.get("payment-signature");
+    // Circle/x402 clients send the signed payload as X-PAYMENT, not "payment-signature"
+    const paymentHeader = req.headers.get("x-payment") || req.headers.get("payment-signature");
 
-    // ── No payment provided — return 402 with payment requirements ──────────
-    if (!paymentSignature) {
+    // ── No payment provided — return 402 with CORRECT payment requirements ──
+    if (!paymentHeader) {
       return NextResponse.json(
         {
-          error: "Payment Required",
+          x402Version: 2,
+          error: "Payment required",
+          resource: {
+            url: req.nextUrl.pathname,
+            description: `ArcFlare paid resource: ${req.nextUrl.pathname}`,
+            mimeType: "application/json",
+          },
           accepts: [
             {
-              scheme: "GatewayWalletBatched",
+              scheme: "exact",
               network: ARC_TESTNET_CHAIN,
-              maxAmountRequired: priceToAtomicUnits(options.priceUSDC),
-              resource: req.nextUrl.pathname,
+              amount: priceToAtomicUnits(options.priceUSDC),
+              asset: USDC_ARC_TESTNET,
               payTo: options.sellerAddress,
-              asset: "USDC",
-              facilitator: FACILITATOR_URL,
-              // ✅ Correct EIP-712 domain structure for CLI/SDKs
+              maxTimeoutSeconds: 300,
+              // ✅ extra = EIP-712 domain of the USDC TOKEN CONTRACT, not your app.
+              // This MUST match what the USDC contract itself expects when
+              // verifying the EIP-3009 transferWithAuthorization signature.
               extra: {
-                name: "ArcFlare",
-                version: "1.0.0",
-                chainId: 5042002,
-                verifyingContract: GATEWAY_CONTRACT_ADDRESS,
+                name: "USDC",
+                version: "2",
               },
             },
           ],
@@ -54,17 +66,21 @@ export function requireGatewayPayment(
       );
     }
 
-    // ── Verify the payment signature ──────────────────────────────────────────
+    // ── Verify the payment signature with Circle's facilitator ──────────────
     try {
       const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          paymentSignature,
-          sellerAddress: options.sellerAddress,
-          network: ARC_TESTNET_CHAIN,
-          maxAmountRequired: priceToAtomicUnits(options.priceUSDC),
-          resource: req.nextUrl.pathname,
+          paymentPayload: paymentHeader,
+          paymentRequirements: {
+            scheme: "exact",
+            network: ARC_TESTNET_CHAIN,
+            amount: priceToAtomicUnits(options.priceUSDC),
+            asset: USDC_ARC_TESTNET,
+            payTo: options.sellerAddress,
+            extra: { name: "USDC", version: "2" },
+          },
         }),
       });
 
@@ -77,11 +93,21 @@ export function requireGatewayPayment(
         );
       }
 
-      // ── Queue for Gateway batch settlement ──────────────────────────────────
+      // ── Settle via Circle's facilitator ──────────────────────────────────
       const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentSignature, sellerAddress: options.sellerAddress }),
+        body: JSON.stringify({
+          paymentPayload: paymentHeader,
+          paymentRequirements: {
+            scheme: "exact",
+            network: ARC_TESTNET_CHAIN,
+            amount: priceToAtomicUnits(options.priceUSDC),
+            asset: USDC_ARC_TESTNET,
+            payTo: options.sellerAddress,
+            extra: { name: "USDC", version: "2" },
+          },
+        }),
       });
 
       const settleData = await settleRes.json();
