@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/protected-service
@@ -6,8 +6,8 @@ import { NextResponse } from "next/server";
  */
 export async function POST(request: Request) {
   try {
-    const headerToken = request.headers.get("X-ArcFlare-Reference");
-    
+    const headerToken = request.headers.get('X-ArcFlare-Reference');
+
     // 1. Dynamically extract the origin (handles localhost or Render automatically)
     const { origin } = new URL(request.url);
 
@@ -16,39 +16,39 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           status: false,
-          error: "Payment Required",
-          message: "This resource is protected by ArcFlare Agentic Paywalls.",
+          error: 'Payment Required',
+          message: 'This resource is protected by ArcFlare Agentic Paywalls.',
           payment_instructions: {
-            currency: "USDC",
-            amount: 0.10,
-            chain: "Arc-L1",
+            currency: 'USDC',
+            amount: 0.1,
+            chain: 'Arc-L1',
             // 👇 Dynamically uses localhost on your machine, or Render when live!
-            initialization_endpoint: `${origin}/api/payments/initialize`
-          }
+            initialization_endpoint: `${origin}/api/payments/initialize`,
+          },
         },
-        { 
+        {
           status: 402,
-          headers: { "WWW-Authenticate": "ArcFlare-USDC-Micropayment" }
+          headers: { 'WWW-Authenticate': 'ArcFlare-USDC-Micropayment' },
         }
       );
     }
 
     // 2. Dynamically look up the verification route on the current running host
     const verificationUrl = `${origin}/api/payments/verify/${headerToken}`;
-    
+
     console.log(`📡 [Gatekeeper]: Verifying reference via: ${verificationUrl}`);
-    
+
     // 3. Query the internal validation route
     const verifyCheck = await fetch(verificationUrl);
     const verifyResult = await verifyCheck.json();
 
-    if (!verifyResult.status || verifyResult.data.status !== "SUCCESS") {
+    if (!verifyResult.status || verifyResult.data.status !== 'SUCCESS') {
       return NextResponse.json(
-        { 
-          status: false, 
-          error: "Payment Unverified", 
-          message: "The provided payment reference has not been settled on-chain yet.",
-          verification_check_url: verificationUrl
+        {
+          status: false,
+          error: 'Payment Unverified',
+          message: 'The provided payment reference has not been settled on-chain yet.',
+          verification_check_url: verificationUrl,
         },
         { status: 402 }
       );
@@ -58,19 +58,19 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         status: true,
-        message: "Access Granted. Resource unlocked successfully.",
+        message: 'Access Granted. Resource unlocked successfully.',
         data: {
-          secretPayload: "Welcome to the agentic economy. This is secure data processed autonomously.",
-          computedBy: "ArcFlare Gateway Engine"
-        }
+          secretPayload:
+            'Welcome to the agentic economy. This is secure data processed autonomously.',
+          computedBy: 'ArcFlare Gateway Engine',
+        },
       },
       { status: 200 }
     );
-
   } catch (error: any) {
-    console.error("❌ Gatekeeper Failure:", error);
+    console.error('❌ Gatekeeper Failure:', error);
     return NextResponse.json(
-      { error: "Internal Server Error", details: error.message },
+      { error: 'Internal Server Error', details: error.message },
       { status: 500 }
     );
   }

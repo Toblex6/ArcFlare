@@ -4,67 +4,67 @@
 // Step 2 (POST /respond): Validator submits response (100 = passed, 0 = failed)
 // Step 3 (GET /status): Anyone reads validation status onchain
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
-import { createPublicClient, http, keccak256, toHex } from "viem";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createPublicClient, http, keccak256, toHex } from 'viem';
 
-const VALIDATION_REGISTRY = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272";
+const VALIDATION_REGISTRY = '0x8004Cb1BF31DAf7788923b405b754f57acEB4272';
 
 const arcTestnet = {
   id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  name: 'Arc Testnet',
+  nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://rpc.testnet.arc.network"] },
-    public:  { http: ["https://rpc.testnet.arc.network"] },
+    default: { http: ['https://rpc.testnet.arc.network'] },
+    public: { http: ['https://rpc.testnet.arc.network'] },
   },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http("https://rpc.testnet.arc.network"),
+  transport: http('https://rpc.testnet.arc.network'),
 });
 
 const VALIDATION_ABI = [
   {
-    name: "validationRequest",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'validationRequest',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "validator", type: "address" },
-      { name: "agentId",   type: "uint256" },
-      { name: "requestURI",  type: "string"  },
-      { name: "requestHash", type: "bytes32" },
+      { name: 'validator', type: 'address' },
+      { name: 'agentId', type: 'uint256' },
+      { name: 'requestURI', type: 'string' },
+      { name: 'requestHash', type: 'bytes32' },
     ],
     outputs: [],
   },
   {
-    name: "validationResponse",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'validationResponse',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "requestHash",  type: "bytes32" },
-      { name: "response",     type: "uint8"   },
-      { name: "responseURI",  type: "string"  },
-      { name: "responseHash", type: "bytes32" },
-      { name: "tag",          type: "string"  },
+      { name: 'requestHash', type: 'bytes32' },
+      { name: 'response', type: 'uint8' },
+      { name: 'responseURI', type: 'string' },
+      { name: 'responseHash', type: 'bytes32' },
+      { name: 'tag', type: 'string' },
     ],
     outputs: [],
   },
   {
-    name: "getValidationStatus",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "requestHash", type: "bytes32" }],
+    name: 'getValidationStatus',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'requestHash', type: 'bytes32' }],
     outputs: [
-      { name: "validatorAddress", type: "address" },
-      { name: "agentId",          type: "uint256" },
-      { name: "response",         type: "uint8"   },
-      { name: "responseHash",     type: "bytes32" },
-      { name: "tag",              type: "string"  },
-      { name: "lastUpdate",       type: "uint256" },
+      { name: 'validatorAddress', type: 'address' },
+      { name: 'agentId', type: 'uint256' },
+      { name: 'response', type: 'uint8' },
+      { name: 'responseHash', type: 'bytes32' },
+      { name: 'tag', type: 'string' },
+      { name: 'lastUpdate', type: 'uint256' },
     ],
   },
 ] as const;
@@ -83,14 +83,14 @@ async function waitForTx(
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Validation transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Validation transaction failed onchain.');
     }
   }
-  throw new Error("Validation transaction timed out.");
+  throw new Error('Validation transaction timed out.');
 }
 
 // ─── POST /api/agent/validation ───────────────────────────────────────────────
@@ -100,25 +100,25 @@ async function validationHandler(request: Request) {
     const body = await request.json();
     const { action } = body;
 
-    if (!action || !["request", "respond"].includes(action)) {
+    if (!action || !['request', 'respond'].includes(action)) {
       return NextResponse.json(
         {
           success: false,
           error: "action must be 'request' or 'respond'.",
           usage: {
             request: {
-              action: "request",
-              agentId: "68210",
-              ownerSCA: "0xOwnerWalletAddress",
-              validatorSCA: "0xValidatorWalletAddress",
-              requestTag: "kyc_verification",
+              action: 'request',
+              agentId: '68210',
+              ownerSCA: '0xOwnerWalletAddress',
+              validatorSCA: '0xValidatorWalletAddress',
+              requestTag: 'kyc_verification',
             },
             respond: {
-              action: "respond",
-              validatorSCA: "0xValidatorWalletAddress",
-              requestHash: "0xTheRequestHash",
+              action: 'respond',
+              validatorSCA: '0xValidatorWalletAddress',
+              requestHash: '0xTheRequestHash',
               passed: true,
-              tag: "kyc_verified",
+              tag: 'kyc_verified',
             },
           },
         },
@@ -129,12 +129,12 @@ async function validationHandler(request: Request) {
     const circleClient = getCircleClient();
 
     // ── ACTION: REQUEST ───────────────────────────────────────────────────────
-    if (action === "request") {
+    if (action === 'request') {
       const { agentId, ownerSCA, validatorSCA, requestTag } = body;
 
       if (!agentId || !ownerSCA || !validatorSCA || !requestTag) {
         return NextResponse.json(
-          { success: false, error: "agentId, ownerSCA, validatorSCA and requestTag are required." },
+          { success: false, error: 'agentId, ownerSCA, validatorSCA and requestTag are required.' },
           { status: 400 }
         );
       }
@@ -156,7 +156,7 @@ async function validationHandler(request: Request) {
         return NextResponse.json(
           {
             success: false,
-            error: "Only the agent owner SCA can request validation.",
+            error: 'Only the agent owner SCA can request validation.',
           },
           { status: 403 }
         );
@@ -169,19 +169,14 @@ async function validationHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: ownerSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: VALIDATION_REGISTRY,
-        abiFunctionSignature: "validationRequest(address,uint256,string,bytes32)",
-        abiParameters: [
-          validatorSCA,
-          agentId.toString(),
-          requestURI,
-          requestHash,
-        ],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        abiFunctionSignature: 'validationRequest(address,uint256,string,bytes32)',
+        abiParameters: [validatorSCA, agentId.toString(), requestURI, requestHash],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
 
       const txHash = await waitForTx(circleClient, tx.data.id);
 
@@ -189,7 +184,7 @@ async function validationHandler(request: Request) {
 
       return NextResponse.json({
         success: true,
-        action: "request",
+        action: 'request',
         agentId,
         agentName: agent.name,
         validatorSCA,
@@ -203,14 +198,14 @@ async function validationHandler(request: Request) {
     }
 
     // ── ACTION: RESPOND ───────────────────────────────────────────────────────
-    if (action === "respond") {
+    if (action === 'respond') {
       const { validatorSCA, requestHash, passed, tag } = body;
 
       if (!validatorSCA || !requestHash || passed === undefined || !tag) {
         return NextResponse.json(
           {
             success: false,
-            error: "validatorSCA, requestHash, passed (boolean) and tag are required.",
+            error: 'validatorSCA, requestHash, passed (boolean) and tag are required.',
           },
           { status: 400 }
         );
@@ -222,21 +217,14 @@ async function validationHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: validatorSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: VALIDATION_REGISTRY,
-        abiFunctionSignature:
-          "validationResponse(bytes32,uint8,string,bytes32,string)",
-        abiParameters: [
-          requestHash,
-          responseCode.toString(),
-          "",
-          `0x${"0".repeat(64)}`,
-          tag,
-        ],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        abiFunctionSignature: 'validationResponse(bytes32,uint8,string,bytes32,string)',
+        abiParameters: [requestHash, responseCode.toString(), '', `0x${'0'.repeat(64)}`, tag],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
 
       const txHash = await waitForTx(circleClient, tx.data.id);
 
@@ -246,7 +234,7 @@ async function validationHandler(request: Request) {
 
       return NextResponse.json({
         success: true,
-        action: "respond",
+        action: 'respond',
         requestHash,
         passed,
         responseCode,
@@ -255,15 +243,12 @@ async function validationHandler(request: Request) {
         txHash,
         explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
         nextStep: `Check status via GET /api/agent/validation?requestHash=${requestHash}`,
-        message: `Validation response submitted — ${passed ? "PASSED ✅" : "FAILED ❌"} (tag: ${tag})`,
+        message: `Validation response submitted — ${passed ? 'PASSED ✅' : 'FAILED ❌'} (tag: ${tag})`,
       });
     }
   } catch (error: any) {
-    console.error("❌ Validation error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Validation error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -274,26 +259,26 @@ export const POST = withApiKey(validationHandler);
 async function getValidationHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const requestHash = searchParams.get("requestHash");
+    const requestHash = searchParams.get('requestHash');
 
     if (!requestHash) {
       return NextResponse.json(
-        { success: false, error: "requestHash query param required." },
+        { success: false, error: 'requestHash query param required.' },
         { status: 400 }
       );
     }
 
-    const result = await publicClient.readContract({
+    const result = (await publicClient.readContract({
       address: VALIDATION_REGISTRY,
       abi: VALIDATION_ABI,
-      functionName: "getValidationStatus",
+      functionName: 'getValidationStatus',
       args: [requestHash as `0x${string}`],
-    }) as readonly [`0x${string}`, bigint, number, `0x${string}`, string, bigint];
+    })) as readonly [`0x${string}`, bigint, number, `0x${string}`, string, bigint];
 
     const [validatorAddress, agentId, response, responseHash, tag, lastUpdate] = result;
 
     const passed = response === 100;
-    const pending = validatorAddress === "0x0000000000000000000000000000000000000000";
+    const pending = validatorAddress === '0x0000000000000000000000000000000000000000';
 
     return NextResponse.json({
       success: true,
@@ -306,21 +291,16 @@ async function getValidationHandler(request: Request) {
         pending,
         tag,
         lastUpdate: lastUpdate.toString(),
-        lastUpdatedAt: lastUpdate > 0n
-          ? new Date(Number(lastUpdate) * 1000).toISOString()
-          : null,
+        lastUpdatedAt: lastUpdate > 0n ? new Date(Number(lastUpdate) * 1000).toISOString() : null,
       },
       validationRegistryAddress: VALIDATION_REGISTRY,
       arcScanUrl: `https://testnet.arcscan.app/address/${VALIDATION_REGISTRY}`,
       message: pending
-        ? "Validation request pending — validator has not responded yet."
-        : `Validation ${passed ? "PASSED ✅" : "FAILED ❌"} — tag: ${tag}`,
+        ? 'Validation request pending — validator has not responded yet.'
+        : `Validation ${passed ? 'PASSED ✅' : 'FAILED ❌'} — tag: ${tag}`,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

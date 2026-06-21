@@ -23,7 +23,7 @@ export default function CrossChainDetector({ userAddress }: { userAddress: strin
     queryFn: async () => {
       // 1. Added backticks for string interpolation
       const res = await fetch(`/api/cross-chain/detect?address=${userAddress}`);
-      
+
       // 2. Force fetch to throw on 4xx/5xx codes so TanStack registers the error
       if (!res.ok) {
         throw new Error('Failed to fetch telemetry from server.');
@@ -81,8 +81,8 @@ export default function CrossChainDetector({ userAddress }: { userAddress: strin
       {data.optimalChain && (
         <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
           <p className="text-sm text-green-700">
-            ✅ <strong>Optimal Chain:</strong> {data.optimalChain.toUpperCase()}{' '}
-            (Best gas price + balance available)
+            ✅ <strong>Optimal Chain:</strong> {data.optimalChain.toUpperCase()} (Best gas price +
+            balance available)
           </p>
         </div>
       )}

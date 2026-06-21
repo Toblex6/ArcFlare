@@ -1,14 +1,14 @@
 //src\app\api\escrow\route.ts
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
 
 // Prevent internal Next.js build-time prerendering issues
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 //const prisma = new PrismaClient();
 
 // Canonical Factory address for dynamic on-demand deployments
-const ARCFLARE_FACTORY_ADDRESS = "0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F";
+const ARCFLARE_FACTORY_ADDRESS = '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F';
 
 /**
  * POST /api/escrow
@@ -22,7 +22,10 @@ export async function POST(request: Request) {
     // 1. Strict validation of parameters
     if (!reference || !merchantAddress || !amount) {
       return NextResponse.json(
-        { error: "Missing required parameters: reference, merchantAddress, and amount are mandatory." },
+        {
+          error:
+            'Missing required parameters: reference, merchantAddress, and amount are mandatory.',
+        },
         { status: 400 }
       );
     }
@@ -37,7 +40,7 @@ export async function POST(request: Request) {
         merchantAddress: merchantAddress,
         agentId: agentId ? String(agentId) : null,
         amount: String(amount), // Kept as string to preserve high-precision 6-decimal token counts safely
-        status: "PENDING",       // Global state tracks: PENDING -> DEPLOYED -> DEPOSITED -> SETTLED
+        status: 'PENDING', // Global state tracks: PENDING -> DEPLOYED -> DEPOSITED -> SETTLED
         factoryUsed: ARCFLARE_FACTORY_ADDRESS,
       },
     });
@@ -46,30 +49,29 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        message: "Escrow tracking matrix initialized successfully.",
+        message: 'Escrow tracking matrix initialized successfully.',
         data: {
           id: newEscrowRecord.id,
           reference: newEscrowRecord.reference,
           status: newEscrowRecord.status,
-          ArcFlareFactory: ARCFLARE_FACTORY_ADDRESS
-        }
+          ArcFlareFactory: ARCFLARE_FACTORY_ADDRESS,
+        },
       },
       { status: 201 }
     );
-
   } catch (error: any) {
-    console.error("[ArcFlare API Error] Failed to process escrow initialization:", error);
-    
+    console.error('[ArcFlare API Error] Failed to process escrow initialization:', error);
+
     // Graceful error classification for unique reference collisions
-    if (error.code === "P2002") {
+    if (error.code === 'P2002') {
       return NextResponse.json(
-        { error: "Conflict: An escrow allocation with this exact reference already exists." },
+        { error: 'Conflict: An escrow allocation with this exact reference already exists.' },
         { status: 409 }
       );
     }
 
     return NextResponse.json(
-      { error: "Internal Server Error", details: error.message },
+      { error: 'Internal Server Error', details: error.message },
       { status: 500 }
     );
   } finally {
@@ -84,7 +86,7 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const reference = searchParams.get("reference");
+    const reference = searchParams.get('reference');
 
     if (reference) {
       const entry = await prisma.escrow.findUnique({
@@ -92,7 +94,7 @@ export async function GET(request: Request) {
       });
 
       if (!entry) {
-        return NextResponse.json({ error: "Escrow record not found." }, { status: 404 });
+        return NextResponse.json({ error: 'Escrow record not found.' }, { status: 404 });
       }
       return NextResponse.json({ success: true, data: entry }, { status: 200 });
     }
@@ -100,14 +102,13 @@ export async function GET(request: Request) {
     // Return a subset of the latest global allocations if no specific reference is flagged
     const recentEscrows = await prisma.escrow.findMany({
       take: 10,
-      orderBy: { id: "desc" },
+      orderBy: { id: 'desc' },
     });
 
     return NextResponse.json({ success: true, data: recentEscrows }, { status: 200 });
-
   } catch (error: any) {
-    console.error("[ArcFlare API Error] Query failed:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    console.error('[ArcFlare API Error] Query failed:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   } finally {
     await prisma.$disconnect();
   }

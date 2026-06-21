@@ -1,39 +1,39 @@
 export default function ApiDocsPage() {
   const endpointGroups = [
     {
-      title: "Payments",
+      title: 'Payments',
       endpoints: [
-        "POST /api/payments/initialize",
-        "POST /api/payments/settle",
-        "GET /api/payments/verify/:reference",
-        "GET /api/payments/all",
+        'POST /api/payments/initialize',
+        'POST /api/payments/settle',
+        'GET /api/payments/verify/:reference',
+        'GET /api/payments/all',
       ],
     },
     {
-      title: "Agents",
-      endpoints: ["POST /api/agent/deploy", "GET /api/agent/status"],
+      title: 'Agents',
+      endpoints: ['POST /api/agent/deploy', 'GET /api/agent/status'],
     },
     {
-      title: "Escrow",
+      title: 'Escrow',
       endpoints: [
-        "POST /api/escrow/create",
-        "POST /api/escrow/release",
-        "POST /api/escrow/dispute",
-        "GET /api/escrow/status",
-        "GET /api/escrow/list",
+        'POST /api/escrow/create',
+        'POST /api/escrow/release',
+        'POST /api/escrow/dispute',
+        'GET /api/escrow/status',
+        'GET /api/escrow/list',
       ],
     },
     {
-      title: "Streaming Payments",
+      title: 'Streaming Payments',
       endpoints: [
-        "POST /api/payments/stream",
-        "POST /api/payments/stream/stop",
-        "POST /api/payments/stream/withdraw",
+        'POST /api/payments/stream',
+        'POST /api/payments/stream/stop',
+        'POST /api/payments/stream/withdraw',
       ],
     },
     {
-      title: "Nanopayments",
-      endpoints: ["POST /api/payments/nano", "POST /api/payments/nano/settle"],
+      title: 'Nanopayments',
+      endpoints: ['POST /api/payments/nano', 'POST /api/payments/nano/settle'],
     },
   ];
 
@@ -45,8 +45,8 @@ export default function ApiDocsPage() {
         </div>
         <h1 className="text-4xl font-bold leading-tight md:text-6xl">API Reference</h1>
         <p className="mt-6 max-w-3xl text-lg leading-relaxed text-gray-400">
-          Authenticate requests, target the hosted gateway, and compose payment,
-          agent, escrow, streaming, and nanopayment endpoints.
+          Authenticate requests, target the hosted gateway, and compose payment, agent, escrow,
+          streaming, and nanopayment endpoints.
         </p>
       </header>
 
@@ -76,8 +76,8 @@ export default function ApiDocsPage() {
                   key={endpoint}
                   className="rounded-2xl bg-[#241913] px-4 py-3 font-mono text-sm text-gray-300"
                 >
-                  <span className="text-cyan-300">{endpoint.split(" ")[0]}</span>{" "}
-                  {endpoint.substring(endpoint.indexOf(" ") + 1)}
+                  <span className="text-cyan-300">{endpoint.split(' ')[0]}</span>{' '}
+                  {endpoint.substring(endpoint.indexOf(' ') + 1)}
                 </li>
               ))}
             </ul>

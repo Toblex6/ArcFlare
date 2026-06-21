@@ -49,7 +49,7 @@ export default function StreamingPaymentForm({ senderSCA }: StreamFormProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Safely parse numbers right at the submission boundary
     const amount = parseFloat(formData.amountPerMonth);
     const duration = parseInt(formData.durationMonths, 10);
@@ -117,9 +117,7 @@ export default function StreamingPaymentForm({ senderSCA }: StreamFormProps) {
           <p className="text-sm text-blue-900">
             Total Deposit: <strong>${totalAmount.toFixed(2)} USDC</strong>
           </p>
-          <p className="text-xs text-blue-700 mt-1">
-            Rate: ${rateDisplay.toFixed(2)}/month
-          </p>
+          <p className="text-xs text-blue-700 mt-1">Rate: ${rateDisplay.toFixed(2)}/month</p>
         </div>
 
         <button

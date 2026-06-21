@@ -1,7 +1,7 @@
 // src/components/AgentDeployer.tsx
-"use client";
+'use client';
 
-import React, { useState } from "react";
+import React, { useState } from 'react';
 
 interface DeploymentResult {
   success: boolean;
@@ -20,10 +20,10 @@ interface DeploymentResult {
 }
 
 export default function AgentDeployer() {
-  const [agentName, setAgentName] = useState("");
-  const [ownerNode, setOwnerNode] = useState("0xbD3FAD84e7a41D222c7C36947B0A3B1592F42154"); 
-  const [metadataUri, setMetadataUri] = useState("");
-  
+  const [agentName, setAgentName] = useState('');
+  const [ownerNode, setOwnerNode] = useState('0xbD3FAD84e7a41D222c7C36947B0A3B1592F42154');
+  const [metadataUri, setMetadataUri] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DeploymentResult | null>(null);
@@ -35,17 +35,17 @@ export default function AgentDeployer() {
     setResult(null);
 
     if (!agentName.trim()) {
-      setError("Please specify an identity name for the autonomous machine.");
+      setError('Please specify an identity name for the autonomous machine.');
       setLoading(false);
       return;
     }
 
     try {
       // ⚡ AUTOMATIC GATEWAY HOOK: Passes the request directly down your secure pipeline
-      const response = await fetch("/api/agent/deploy", {
-        method: "POST",
+      const response = await fetch('/api/agent/deploy', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           // The backend reads this securely from Render's environment config variables
         },
         body: JSON.stringify({
@@ -62,9 +62,9 @@ export default function AgentDeployer() {
       }
 
       setResult(data);
-      setAgentName(""); 
+      setAgentName('');
     } catch (err: any) {
-      setError(err.message || "An unforeseen crash occurred during processing.");
+      setError(err.message || 'An unforeseen crash occurred during processing.');
     } finally {
       setLoading(false);
     }
@@ -77,7 +77,8 @@ export default function AgentDeployer() {
           Provision Agent Lifecycle Layer
         </h2>
         <p className="text-sm text-slate-400">
-          Deploy genuine Circle Smart Contract Accounts (SCA) and mint on-chain ERC-8004 Identity tokens instantly. **Protected by Admin Layer Middleware.**
+          Deploy genuine Circle Smart Contract Accounts (SCA) and mint on-chain ERC-8004 Identity
+          tokens instantly. **Protected by Admin Layer Middleware.**
         </p>
       </div>
 
@@ -132,7 +133,9 @@ export default function AgentDeployer() {
           disabled={loading}
           className="w-full p-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 font-semibold rounded-lg text-sm text-white transition-all shadow-md active:scale-[0.99]"
         >
-          {loading ? "🔄 Deploying Secure Wallets & Minting Identity..." : "⚡ Provision Autonomous Machine Agent"}
+          {loading
+            ? '🔄 Deploying Secure Wallets & Minting Identity...'
+            : '⚡ Provision Autonomous Machine Agent'}
         </button>
       </form>
 
@@ -156,10 +159,30 @@ export default function AgentDeployer() {
           </div>
 
           <div className="space-y-2 text-xs font-mono text-slate-300">
-            <p><span className="text-slate-500 font-sans font-semibold inline-block w-28">Registry Token ID:</span> {result.agent?.tokenId}</p>
-            <p><span className="text-slate-500 font-sans font-semibold inline-block w-28">Owner SCA Wallet:</span> <span className="text-white select-all">{result.wallets?.owner}</span></p>
-            <p><span className="text-slate-500 font-sans font-semibold inline-block w-28">Validator Wallet:</span> <span className="text-slate-400 select-all">{result.wallets?.validator}</span></p>
-            <p><span className="text-slate-500 font-sans font-semibold inline-block w-28">Arc L1 Tx Hash:</span> <span className="text-slate-400 truncate">{result.txHash}</span></p>
+            <p>
+              <span className="text-slate-500 font-sans font-semibold inline-block w-28">
+                Registry Token ID:
+              </span>{' '}
+              {result.agent?.tokenId}
+            </p>
+            <p>
+              <span className="text-slate-500 font-sans font-semibold inline-block w-28">
+                Owner SCA Wallet:
+              </span>{' '}
+              <span className="text-white select-all">{result.wallets?.owner}</span>
+            </p>
+            <p>
+              <span className="text-slate-500 font-sans font-semibold inline-block w-28">
+                Validator Wallet:
+              </span>{' '}
+              <span className="text-slate-400 select-all">{result.wallets?.validator}</span>
+            </p>
+            <p>
+              <span className="text-slate-500 font-sans font-semibold inline-block w-28">
+                Arc L1 Tx Hash:
+              </span>{' '}
+              <span className="text-slate-400 truncate">{result.txHash}</span>
+            </p>
           </div>
 
           {result.explorerUrl && (

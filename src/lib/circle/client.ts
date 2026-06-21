@@ -1,4 +1,4 @@
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 // Singleton Circle client instance
 let circleClientInstance: ReturnType<typeof initiateDeveloperControlledWalletsClient> | null = null;
@@ -6,7 +6,9 @@ let circleClientInstance: ReturnType<typeof initiateDeveloperControlledWalletsCl
 export function getCircleClient() {
   if (!circleClientInstance) {
     if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
-      throw new Error("Missing Circle credentials: CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET must be set in environment");
+      throw new Error(
+        'Missing Circle credentials: CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET must be set in environment'
+      );
     }
 
     circleClientInstance = initiateDeveloperControlledWalletsClient({
@@ -35,7 +37,7 @@ export async function waitForTransaction(
       const { data } = await circleClient.getTransaction({ id: txId });
       const state = data?.transaction?.state;
 
-      if (state === "COMPLETE") {
+      if (state === 'COMPLETE') {
         const txHash = data.transaction.txHash;
         if (!txHash) {
           throw new Error(`${label} completed but no txHash returned`);
@@ -44,11 +46,11 @@ export async function waitForTransaction(
         return txHash;
       }
 
-      if (state === "FAILED") {
+      if (state === 'FAILED') {
         throw new Error(`${label} failed onchain`);
       }
 
-      process.stdout.write(".");
+      process.stdout.write('.');
     } catch (error) {
       console.error(`Error checking transaction ${txId}:`, error);
       throw error;
@@ -73,11 +75,11 @@ export async function createContractTransaction(
 
   const tx = await circleClient.createContractExecutionTransaction({
     walletAddress,
-    blockchain: "ARC-TESTNET",
+    blockchain: 'ARC-TESTNET',
     contractAddress,
     abiFunctionSignature,
     abiParameters: stringParams,
-    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+    fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
   });
 
   const txId = tx.data?.id;
@@ -94,11 +96,9 @@ export async function getWalletBalance(walletId: string): Promise<string> {
   const circleClient = getCircleClient();
 
   const balances = await circleClient.getWalletTokenBalance({ id: walletId });
-  const usdc = balances.data?.tokenBalances?.find(
-    (b) => b.token?.symbol === "USDC"
-  );
+  const usdc = balances.data?.tokenBalances?.find((b) => b.token?.symbol === 'USDC');
 
-  return usdc?.amount ?? "0";
+  return usdc?.amount ?? '0';
 }
 
 export async function getWallet(walletId: string) {
@@ -116,16 +116,16 @@ export async function createWallets(name: string, count: number = 2) {
 
   const walletSetId = walletSet.data?.walletSet?.id;
   if (!walletSetId) {
-    throw new Error("Failed to create wallet set");
+    throw new Error('Failed to create wallet set');
   }
 
   console.log(`  📦 Wallet set created: ${walletSetId}`);
 
   const walletsResponse = await circleClient.createWallets({
-    blockchains: ["ARC-TESTNET"],
+    blockchains: ['ARC-TESTNET'],
     count,
     walletSetId,
-    accountType: "SCA",
+    accountType: 'SCA',
   });
 
   const wallets = walletsResponse.data?.wallets ?? [];

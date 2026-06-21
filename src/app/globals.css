@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --background: #0E0B08;
-  --foreground: #F0ECE6;
-  --copper: #C8975A;
+  --background: #0e0b08;
+  --foreground: #f0ece6;
+  --copper: #c8975a;
 }
 
 body {
@@ -13,7 +13,13 @@ body {
   color: var(--foreground);
   margin: 0;
   padding: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    sans-serif;
 }
 
 /* Custom scrollbar */
@@ -21,9 +27,9 @@ body {
   width: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #1A1410;
+  background: #1a1410;
 }
 ::-webkit-scrollbar-thumb {
-  background: #C8975A;
+  background: #c8975a;
   border-radius: 4px;
 }

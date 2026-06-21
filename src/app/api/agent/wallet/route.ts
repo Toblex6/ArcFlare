@@ -11,16 +11,16 @@
 // Circle's Agent Wallets REST endpoints directly (shown below using
 // plain fetch so it works from any Next.js route without a CLI dependency).
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
 
-const CIRCLE_API_BASE = "https://api.circle.com/v1/w3s";
+const CIRCLE_API_BASE = 'https://api.circle.com/v1/w3s';
 
 function circleHeaders() {
   return {
     Authorization: `Bearer ${process.env.CIRCLE_API_KEY}`,
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   };
 }
 
@@ -29,32 +29,32 @@ async function createAgentWalletHandler(request: Request) {
   try {
     const {
       agentName,
-      dailySpendLimitUSDC,   // e.g. "10.00" — max USDC the agent can spend per day
-      allowedContracts,      // e.g. ["0x24DAB3...", "0xc9BbeD..."] — contract allowlist
+      dailySpendLimitUSDC, // e.g. "10.00" — max USDC the agent can spend per day
+      allowedContracts, // e.g. ["0x24DAB3...", "0xc9BbeD..."] — contract allowlist
     } = await request.json();
 
     if (!agentName) {
       return NextResponse.json(
-        { success: false, error: "agentName is required." },
+        { success: false, error: 'agentName is required.' },
         { status: 400 }
       );
     }
 
     // ── Step 1: Create the Agent Wallet on Arc Testnet ──────────────────────
     const createRes = await fetch(`${CIRCLE_API_BASE}/agent-wallets`, {
-      method: "POST",
+      method: 'POST',
       headers: circleHeaders(),
       body: JSON.stringify({
-        chain: "ARC-TESTNET",
-        accountType: "SCA",
-        metadata: { name: agentName, source: "arcflare" },
+        chain: 'ARC-TESTNET',
+        accountType: 'SCA',
+        metadata: { name: agentName, source: 'arcflare' },
       }),
     });
 
     const walletData = await createRes.json();
 
     if (!createRes.ok) {
-      throw new Error(walletData.message || "Failed to create Agent Wallet.");
+      throw new Error(walletData.message || 'Failed to create Agent Wallet.');
     }
 
     const walletAddress = walletData.data?.address;
@@ -65,12 +65,12 @@ async function createAgentWalletHandler(request: Request) {
 
     if (dailySpendLimitUSDC || allowedContracts) {
       const policyRes = await fetch(`${CIRCLE_API_BASE}/agent-wallets/${walletId}/policy`, {
-        method: "POST",
+        method: 'POST',
         headers: circleHeaders(),
         body: JSON.stringify({
           rules: {
             ...(dailySpendLimitUSDC && {
-              dailySpendLimit: { token: "USDC", amount: dailySpendLimitUSDC },
+              dailySpendLimit: { token: 'USDC', amount: dailySpendLimitUSDC },
             }),
             ...(allowedContracts && {
               contractAllowlist: allowedContracts,
@@ -83,16 +83,18 @@ async function createAgentWalletHandler(request: Request) {
     }
 
     // ── Step 3: Save reference in ArcFlare's own registry ───────────────────
-    await (prisma as any).agentRegistry.create({
-      data: {
-        name: agentName,
-        tokenId: `agentwallet_${walletId}`, // not an ERC-8004 token — distinct namespace
-        scaAddress: walletAddress,
-        circleWalletId: walletId,
-        ownerNode: "circle-agent-stack",
-        status: "ACTIVE_AGENT_WALLET",
-      },
-    }).catch(() => {});
+    await (prisma as any).agentRegistry
+      .create({
+        data: {
+          name: agentName,
+          tokenId: `agentwallet_${walletId}`, // not an ERC-8004 token — distinct namespace
+          scaAddress: walletAddress,
+          circleWalletId: walletId,
+          ownerNode: 'circle-agent-stack',
+          status: 'ACTIVE_AGENT_WALLET',
+        },
+      })
+      .catch(() => {});
 
     return NextResponse.json({
       success: true,
@@ -100,7 +102,7 @@ async function createAgentWalletHandler(request: Request) {
         name: agentName,
         address: walletAddress,
         walletId,
-        chain: "ARC-TESTNET",
+        chain: 'ARC-TESTNET',
       },
       policy: policyApplied
         ? {
@@ -108,14 +110,11 @@ async function createAgentWalletHandler(request: Request) {
             allowedContracts: allowedContracts || null,
           }
         : null,
-      message: `Agent Wallet created on Arc Testnet${policyApplied ? " with spending policy applied" : ""}.`,
+      message: `Agent Wallet created on Arc Testnet${policyApplied ? ' with spending policy applied' : ''}.`,
     });
   } catch (error: any) {
-    console.error("❌ Agent Wallet creation error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Agent Wallet creation error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -125,12 +124,12 @@ export const POST = withApiKey(createAgentWalletHandler);
 async function getAgentWalletHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const address = searchParams.get("address");
-    const walletId = searchParams.get("walletId");
+    const address = searchParams.get('address');
+    const walletId = searchParams.get('walletId');
 
     if (!address && !walletId) {
       return NextResponse.json(
-        { success: false, error: "address or walletId query param required." },
+        { success: false, error: 'address or walletId query param required.' },
         { status: 400 }
       );
     }
@@ -151,10 +150,7 @@ async function getAgentWalletHandler(request: Request) {
       balances: balances.data,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

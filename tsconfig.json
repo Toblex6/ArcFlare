@@ -19,7 +19,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*", "./*"]   // 👈 ADD "./*" to also look in root
+      "@/*": ["./src/*", "./*"] // 👈 ADD "./*" to also look in root
     }
   },
   "include": [
@@ -31,9 +31,5 @@
     "**/*.mts",
     "src/app/api/agent/status/route.old"
   ],
-  "exclude": [
-    "node_modules", 
-    "src/app/dashboard/page.old.tsx",
-    "src/lib/wagmi.ts"
-  ]
+  "exclude": ["node_modules", "src/app/dashboard/page.old.tsx", "src/lib/wagmi.ts"]
 }

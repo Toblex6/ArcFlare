@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
-const USDC_ARC = "0x3600000000000000000000000000000000000000";
-const DEFAULT_PAYER_WALLET_ID = "58ab0223-cad0-5128-896e-a88d6f217b43";
+const USDC_ARC = '0x3600000000000000000000000000000000000000';
+const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -20,14 +20,14 @@ async function waitForCircleTx(
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Scheduled payment transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Scheduled payment transaction failed onchain.');
     }
   }
-  throw new Error("Scheduled payment transaction timed out.");
+  throw new Error('Scheduled payment transaction timed out.');
 }
 
 async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof getCircleClient>) {
@@ -39,29 +39,29 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
   try {
     const transferTx = await circleClient.createTransaction({
       walletId,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       tokenAddress: USDC_ARC,
       destinationAddress: scheduled.receiverSCA,
       amounts: [amountStr],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     } as any);
 
-    if (!transferTx.data?.id) throw new Error("No transaction ID returned.");
+    if (!transferTx.data?.id) throw new Error('No transaction ID returned.');
     txHash = await waitForCircleTx(circleClient, transferTx.data.id);
   } catch (err: any) {
-    const { parseUnits } = await import("viem");
+    const { parseUnits } = await import('viem');
     const amountWei = parseUnits(amountStr, 6);
 
     const erc20Tx = await circleClient.createContractExecutionTransaction({
       walletAddress: scheduled.payerSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: USDC_ARC,
-      abiFunctionSignature: "transfer(address,uint256)",
+      abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [scheduled.receiverSCA, amountWei.toString()],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
-    if (!erc20Tx.data?.id) throw new Error("No transaction ID returned.");
+    if (!erc20Tx.data?.id) throw new Error('No transaction ID returned.');
     txHash = await waitForCircleTx(circleClient, erc20Tx.data.id);
   }
 
@@ -75,7 +75,7 @@ async function runScheduledHandler(request: Request) {
 
     const dueScheduled = await (prisma as any).scheduledPayment.findMany({
       where: {
-        status: "ACTIVE",
+        status: 'ACTIVE',
         nextRunAt: { lte: now },
       },
     });
@@ -98,22 +98,24 @@ async function runScheduledHandler(request: Request) {
             lastRunAt: now,
             runCount: newRunCount,
             nextRunAt: new Date(now.getTime() + scheduled.intervalDays * 24 * 60 * 60 * 1000),
-            status: isComplete ? "COMPLETED" : "ACTIVE",
+            status: isComplete ? 'COMPLETED' : 'ACTIVE',
           },
         });
 
         if (scheduled.webhookUrl) {
           fetch(scheduled.webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              event: "scheduled_payment.executed",
+              event: 'scheduled_payment.executed',
               reference: scheduled.reference,
               amount: scheduled.amount,
               txHash,
               explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
               runCount: newRunCount,
-              nextRunAt: isComplete ? null : new Date(now.getTime() + scheduled.intervalDays * 24 * 60 * 60 * 1000),
+              nextRunAt: isComplete
+                ? null
+                : new Date(now.getTime() + scheduled.intervalDays * 24 * 60 * 60 * 1000),
             }),
           }).catch(() => {});
         }
@@ -145,11 +147,8 @@ async function runScheduledHandler(request: Request) {
       results,
     });
   } catch (error: any) {
-    console.error("❌ Scheduled run error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Scheduled run error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

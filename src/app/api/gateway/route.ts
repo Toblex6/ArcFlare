@@ -3,50 +3,47 @@
 // earnings to your Payout Wallet. Use this to manage ArcFlare's seller
 // revenue from any Gateway-protected endpoints.
 
-import { NextResponse } from "next/server";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { NextResponse } from 'next/server';
+import { withApiKey } from '@/lib/middleware/withApiKey';
 
-const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
-const ARC_TESTNET_CHAIN = "ARC-TESTNET";
+const FACILITATOR_URL = 'https://gateway-api-testnet.circle.com';
+const ARC_TESTNET_CHAIN = 'ARC-TESTNET';
 
 // ── GET /api/gateway?sellerAddress=0x... ──────────────────────────────────────
 // Check the Seller Wallet's Gateway Balance (accrued revenue from paid calls)
 async function getBalanceHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const sellerAddress = searchParams.get("sellerAddress") || process.env.SELLER_WALLET_ADDRESS;
+    const sellerAddress = searchParams.get('sellerAddress') || process.env.SELLER_WALLET_ADDRESS;
 
     if (!sellerAddress) {
       return NextResponse.json(
-        { success: false, error: "sellerAddress is required." },
+        { success: false, error: 'sellerAddress is required.' },
         { status: 400 }
       );
     }
 
     const res = await fetch(
       `${FACILITATOR_URL}/balance?address=${sellerAddress}&chain=${ARC_TESTNET_CHAIN}`,
-      { headers: { "Content-Type": "application/json" } }
+      { headers: { 'Content-Type': 'application/json' } }
     );
 
     const data = await res.json();
 
     if (!res.ok) {
-      throw new Error(data.error || "Failed to fetch Gateway balance.");
+      throw new Error(data.error || 'Failed to fetch Gateway balance.');
     }
 
     return NextResponse.json({
       success: true,
       sellerAddress,
       gatewayBalance: data.balance,
-      currency: "USDC",
+      currency: 'USDC',
       chain: ARC_TESTNET_CHAIN,
       message: `Seller Gateway balance: ${data.balance} USDC accrued from paid API calls.`,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -64,15 +61,16 @@ async function withdrawHandler(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "sellerAddress, payoutAddress and amount are required (or set SELLER_WALLET_ADDRESS / PAYOUT_WALLET_ADDRESS env vars).",
+          error:
+            'sellerAddress, payoutAddress and amount are required (or set SELLER_WALLET_ADDRESS / PAYOUT_WALLET_ADDRESS env vars).',
         },
         { status: 400 }
       );
     }
 
     const res = await fetch(`${FACILITATOR_URL}/withdraw`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         address: resolvedSeller,
         chain: ARC_TESTNET_CHAIN,
@@ -84,7 +82,7 @@ async function withdrawHandler(request: Request) {
     const data = await res.json();
 
     if (!res.ok) {
-      throw new Error(data.error || "Withdrawal failed.");
+      throw new Error(data.error || 'Withdrawal failed.');
     }
 
     console.log(`✅ Withdrew ${amount} USDC from Gateway to ${resolvedPayout}`);
@@ -101,11 +99,8 @@ async function withdrawHandler(request: Request) {
       message: `Withdrew ${amount} USDC from Gateway balance to Payout Wallet on Arc Testnet.`,
     });
   } catch (error: any) {
-    console.error("❌ Gateway withdraw error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Gateway withdraw error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

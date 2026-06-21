@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React, { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   // Safe initialization of QueryClient for your API calls
@@ -17,9 +17,5 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       })
   );
 
-  return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
-  );
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }

@@ -1,26 +1,26 @@
 // src/app/api/payments/stream/withdraw/route.ts
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { withApiKey } from "@/src/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
-import { createPublicClient, http } from "viem";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createPublicClient, http } from 'viem';
 
-const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
+const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
 
 const arcTestnet = {
   id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  name: 'Arc Testnet',
+  nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://rpc.testnet.arc.network"] },
-    public:  { http: ["https://rpc.testnet.arc.network"] },
+    default: { http: ['https://rpc.testnet.arc.network'] },
+    public: { http: ['https://rpc.testnet.arc.network'] },
   },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http("https://rpc.testnet.arc.network"),
+  transport: http('https://rpc.testnet.arc.network'),
 });
 
 function getCircleClient() {
@@ -37,14 +37,14 @@ async function waitForCircleTx(
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Withdraw transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Withdraw transaction failed onchain.');
     }
   }
-  throw new Error("Withdraw transaction timed out.");
+  throw new Error('Withdraw transaction timed out.');
 }
 
 // ── Same streamId extraction logic as stop route ──────────────────────────────
@@ -83,7 +83,7 @@ async function getStreamIdFromReceipt(txHash: string): Promise<`0x${string}`> {
 
   throw new Error(
     `Could not find StreamCreated event in tx ${txHash}. ` +
-    `Contract: ${STREAM_CONTRACT}. Logs: ${receipt.logs.length}.`
+      `Contract: ${STREAM_CONTRACT}. Logs: ${receipt.logs.length}.`
   );
 }
 
@@ -93,33 +93,30 @@ async function withdrawHandler(request: Request) {
 
     if (!reference || !receiverSCA) {
       return NextResponse.json(
-        { success: false, error: "reference and receiverSCA are required." },
+        { success: false, error: 'reference and receiverSCA are required.' },
         { status: 400 }
       );
     }
 
     if (!STREAM_CONTRACT) {
       return NextResponse.json(
-        { success: false, error: "ARCFLARE_STREAM_CONTRACT_ADDRESS not set." },
+        { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set.' },
         { status: 500 }
       );
     }
 
     const stream = await prisma.stream.findUnique({ where: { reference } });
     if (!stream) {
-      return NextResponse.json({ success: false, error: "Stream not found." }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'Stream not found.' }, { status: 404 });
     }
-    if (stream.status !== "ACTIVE") {
+    if (stream.status !== 'ACTIVE') {
       return NextResponse.json(
         { success: false, error: `Stream is ${stream.status}.` },
         { status: 400 }
       );
     }
     if (!stream.txHash) {
-      return NextResponse.json(
-        { success: false, error: "Stream has no txHash." },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Stream has no txHash.' }, { status: 400 });
     }
 
     // Calculate available
@@ -130,7 +127,7 @@ async function withdrawHandler(request: Request) {
 
     if (available <= 0) {
       return NextResponse.json(
-        { success: false, error: "No USDC available to withdraw yet." },
+        { success: false, error: 'No USDC available to withdraw yet.' },
         { status: 400 }
       );
     }
@@ -142,15 +139,15 @@ async function withdrawHandler(request: Request) {
 
     const withdrawTx = await circleClient.createContractExecutionTransaction({
       walletAddress: receiverSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: STREAM_CONTRACT,
-      abiFunctionSignature: "withdraw(bytes32)",
+      abiFunctionSignature: 'withdraw(bytes32)',
       abiParameters: [contractStreamId],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
     if (!withdrawTx.data?.id) {
-      throw new Error("Circle withdraw transaction returned no ID.");
+      throw new Error('Circle withdraw transaction returned no ID.');
     }
 
     const txHash = await waitForCircleTx(circleClient, withdrawTx.data.id);
@@ -162,17 +159,17 @@ async function withdrawHandler(request: Request) {
       where: { reference },
       data: {
         totalStreamed: parseFloat(newTotalStreamed.toFixed(6)),
-        status: isCompleted ? "COMPLETED" : "ACTIVE",
+        status: isCompleted ? 'COMPLETED' : 'ACTIVE',
         stoppedAt: isCompleted ? new Date() : null,
       },
     });
 
     if (stream.webhookUrl) {
       fetch(stream.webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event: isCompleted ? "stream.completed" : "stream.withdrawn",
+          event: isCompleted ? 'stream.completed' : 'stream.withdrawn',
           reference,
           receiverSCA,
           amountWithdrawn: parseFloat(available.toFixed(6)),
@@ -195,7 +192,7 @@ async function withdrawHandler(request: Request) {
       message: `${available.toFixed(6)} USDC withdrawn from stream.`,
     });
   } catch (error: any) {
-    console.error("❌ Withdraw error:", error);
+    console.error('❌ Withdraw error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

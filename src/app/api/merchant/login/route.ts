@@ -1,17 +1,17 @@
 // src/app/api/merchant/login/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { checkRateLimit } from "@/src/lib/ratelimit";
-import bcrypt from "bcryptjs";
-import { SignJWT } from "jose";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { checkRateLimit } from '@/src/lib/ratelimit';
+import bcrypt from 'bcryptjs';
+import { SignJWT } from 'jose';
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.MERCHANT_JWT_SECRET || "arcflare-merchant-secret-change-on-mainnet"
+  process.env.MERCHANT_JWT_SECRET || 'arcflare-merchant-secret-change-on-mainnet'
 );
 
 export async function POST(req: NextRequest) {
   try {
-    const { allowed, response: limitResponse } = await checkRateLimit(req, "default");
+    const { allowed, response: limitResponse } = await checkRateLimit(req, 'default');
     if (!allowed) return limitResponse;
 
     const body = await req.json().catch(() => ({}));
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
 
     if (!email || !password) {
       return NextResponse.json(
-        { success: false, error: "email and password are required." },
+        { success: false, error: 'email and password are required.' },
         { status: 400 }
       );
     }
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     const merchant = await (prisma as any).merchant.findUnique({ where: { email } });
     if (!merchant) {
       return NextResponse.json(
-        { success: false, error: "Invalid email or password." },
+        { success: false, error: 'Invalid email or password.' },
         { status: 401 }
       );
     }
@@ -35,14 +35,14 @@ export async function POST(req: NextRequest) {
     const valid = await bcrypt.compare(password, merchant.passwordHash);
     if (!valid) {
       return NextResponse.json(
-        { success: false, error: "Invalid email or password." },
+        { success: false, error: 'Invalid email or password.' },
         { status: 401 }
       );
     }
 
     if (!merchant.active) {
       return NextResponse.json(
-        { success: false, error: "Account is deactivated." },
+        { success: false, error: 'Account is deactivated.' },
         { status: 403 }
       );
     }
@@ -53,9 +53,9 @@ export async function POST(req: NextRequest) {
       email: merchant.email,
       businessName: merchant.businessName,
     })
-      .setProtectedHeader({ alg: "HS256" })
+      .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
-      .setExpirationTime("7d")
+      .setExpirationTime('7d')
       .sign(JWT_SECRET);
 
     const response = NextResponse.json({
@@ -68,20 +68,17 @@ export async function POST(req: NextRequest) {
     });
 
     // Set HTTP-only cookie
-    response.cookies.set("merchant_token", token, {
+    response.cookies.set('merchant_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7, // 7 days
-      path: "/",
+      path: '/',
     });
 
     return response;
   } catch (error: any) {
-    console.error("Merchant login error:", error);
-    return NextResponse.json(
-      { success: false, error: "Internal server error." },
-      { status: 500 }
-    );
+    console.error('Merchant login error:', error);
+    return NextResponse.json({ success: false, error: 'Internal server error.' }, { status: 500 });
   }
 }

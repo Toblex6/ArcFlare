@@ -50,16 +50,22 @@ export default function TransactionList({ transactions }: TransactionListProps) 
   return (
     <div className="space-y-3">
       {transactions.map((tx) => (
-        <div 
-          key={tx.id} 
+        <div
+          key={tx.id}
           className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200 hover:bg-gray-100 transition"
         >
           {/* Left Column: Icon & Identity details */}
           <div className="flex items-center gap-3">
-            <span className="text-2xl flex items-center justify-center">{getTypeIcon(tx.type)}</span>
+            <span className="text-2xl flex items-center justify-center">
+              {getTypeIcon(tx.type)}
+            </span>
             <div>
-              <p className="font-semibold text-gray-900 text-sm tracking-wide">{tx.type.toUpperCase()}</p>
-              <p className="text-xs text-gray-500 font-mono">{formatAddress(tx.counterpartyAddress)}</p>
+              <p className="font-semibold text-gray-900 text-sm tracking-wide">
+                {tx.type.toUpperCase()}
+              </p>
+              <p className="text-xs text-gray-500 font-mono">
+                {formatAddress(tx.counterpartyAddress)}
+              </p>
             </div>
           </div>
 
@@ -71,7 +77,9 @@ export default function TransactionList({ transactions }: TransactionListProps) 
               <span className="text-[10px] text-gray-400 font-medium" suppressHydrationWarning>
                 {new Date(tx.createdAt).toLocaleDateString()}
               </span>
-              <span className={`inline-block px-2 py-0.5 text-[10px] font-bold uppercase rounded ${getStatusColor(tx.status)}`}>
+              <span
+                className={`inline-block px-2 py-0.5 text-[10px] font-bold uppercase rounded ${getStatusColor(tx.status)}`}
+              >
                 {tx.status}
               </span>
             </div>

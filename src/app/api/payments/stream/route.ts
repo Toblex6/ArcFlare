@@ -7,14 +7,15 @@
 //   POST /api/payments/stream/stop      → stop an active stream
 //   POST /api/payments/stream/withdraw  → receiver withdraws earned USDC
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { withApiKey } from "@/src/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
-import { parseUnits } from "viem";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { parseUnits } from 'viem';
 
-const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "0xc9BbeDFb142b6306c34838a39521c894F3dbc872";
-const USDC_ARC = "0x3600000000000000000000000000000000000000";
+const STREAM_CONTRACT =
+  process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '0xc9BbeDFb142b6306c34838a39521c894F3dbc872';
+const USDC_ARC = '0x3600000000000000000000000000000000000000';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -31,14 +32,14 @@ async function waitForCircleTx(
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Stream transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Stream transaction failed onchain.');
     }
   }
-  throw new Error("Stream transaction polling timed out.");
+  throw new Error('Stream transaction polling timed out.');
 }
 
 // ─── POST /api/payments/stream — Create a new stream ─────────────────────────
@@ -46,9 +47,9 @@ async function createStreamHandler(request: Request) {
   try {
     const body = await request.json();
     const {
-      senderSCA,      // Circle SCA wallet address of sender
-      receiverSCA,    // Recipient SCA wallet address
-      ratePerSecond,  // USDC per second e.g. "0.001"
+      senderSCA, // Circle SCA wallet address of sender
+      receiverSCA, // Recipient SCA wallet address
+      ratePerSecond, // USDC per second e.g. "0.001"
       totalDeposited, // Total USDC to lock e.g. "10.00"
       webhookUrl,
     } = body;
@@ -58,14 +59,14 @@ async function createStreamHandler(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "senderSCA, receiverSCA, ratePerSecond and totalDeposited are all required.",
+          error: 'senderSCA, receiverSCA, ratePerSecond and totalDeposited are all required.',
           hint: {
             example: {
-              senderSCA: "0xYourSenderSCAWallet",
-              receiverSCA: "0xYourReceiverSCAWallet",
-              ratePerSecond: "0.001",
-              totalDeposited: "10.00",
-              webhookUrl: "https://yoursite.com/webhook (optional)",
+              senderSCA: '0xYourSenderSCAWallet',
+              receiverSCA: '0xYourReceiverSCAWallet',
+              ratePerSecond: '0.001',
+              totalDeposited: '10.00',
+              webhookUrl: 'https://yoursite.com/webhook (optional)',
             },
           },
         },
@@ -77,8 +78,8 @@ async function createStreamHandler(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "ARCFLARE_STREAM_CONTRACT_ADDRESS is not set in Render environment variables.",
-          hint: "Add ARCFLARE_STREAM_CONTRACT_ADDRESS to your Render env vars once you deploy ArcFlareStream.sol.",
+          error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS is not set in Render environment variables.',
+          hint: 'Add ARCFLARE_STREAM_CONTRACT_ADDRESS to your Render env vars once you deploy ArcFlareStream.sol.',
         },
         { status: 500 }
       );
@@ -89,13 +90,13 @@ async function createStreamHandler(request: Request) {
 
     if (isNaN(rateNum) || rateNum <= 0) {
       return NextResponse.json(
-        { success: false, error: "ratePerSecond must be a positive number." },
+        { success: false, error: 'ratePerSecond must be a positive number.' },
         { status: 400 }
       );
     }
     if (isNaN(depositNum) || depositNum <= 0) {
       return NextResponse.json(
-        { success: false, error: "totalDeposited must be a positive number." },
+        { success: false, error: 'totalDeposited must be a positive number.' },
         { status: 400 }
       );
     }
@@ -111,44 +112,41 @@ async function createStreamHandler(request: Request) {
     const durationSeconds = depositNum / rateNum;
     const estimatedEndTime = new Date(Date.now() + durationSeconds * 1000);
 
-    console.log(`🚀 Creating stream: ${ratePerSecond} USDC/s for ${durationSeconds}s | ref: ${reference}`);
+    console.log(
+      `🚀 Creating stream: ${ratePerSecond} USDC/s for ${durationSeconds}s | ref: ${reference}`
+    );
 
     // ── Step 1: Approve stream contract to spend USDC ─────────────────────
-    console.log("⏳ Step 1/2: Approving USDC spend...");
+    console.log('⏳ Step 1/2: Approving USDC spend...');
     const approveTx = await circleClient.createContractExecutionTransaction({
       walletAddress: senderSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: USDC_ARC,
-      abiFunctionSignature: "approve(address,uint256)",
+      abiFunctionSignature: 'approve(address,uint256)',
       abiParameters: [STREAM_CONTRACT, depositWei.toString()],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
     if (!approveTx.data?.id) {
-      throw new Error("Circle approval transaction returned no ID.");
+      throw new Error('Circle approval transaction returned no ID.');
     }
 
     await waitForCircleTx(circleClient, approveTx.data.id);
-    console.log("✅ USDC approval confirmed");
+    console.log('✅ USDC approval confirmed');
 
     // ── Step 2: Create the stream on Arc ─────────────────────────────────
-    console.log("⏳ Step 2/2: Creating stream on Arc Testnet...");
+    console.log('⏳ Step 2/2: Creating stream on Arc Testnet...');
     const streamTx = await circleClient.createContractExecutionTransaction({
       walletAddress: senderSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: STREAM_CONTRACT,
-      abiFunctionSignature: "createStream(address,uint256,uint256,string)",
-      abiParameters: [
-        receiverSCA,
-        rateWei.toString(),
-        depositWei.toString(),
-        reference,
-      ],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      abiFunctionSignature: 'createStream(address,uint256,uint256,string)',
+      abiParameters: [receiverSCA, rateWei.toString(), depositWei.toString(), reference],
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
     if (!streamTx.data?.id) {
-      throw new Error("Circle stream transaction returned no ID.");
+      throw new Error('Circle stream transaction returned no ID.');
     }
 
     const streamTxHash = await waitForCircleTx(circleClient, streamTx.data.id);
@@ -163,8 +161,8 @@ async function createStreamHandler(request: Request) {
         ratePerSecond: rateNum,
         totalDeposited: depositNum,
         totalStreamed: 0,
-        currency: "USDC",
-        status: "ACTIVE",
+        currency: 'USDC',
+        status: 'ACTIVE',
         contractAddress: STREAM_CONTRACT,
         txHash: streamTxHash,
         webhookUrl: webhookUrl || null,
@@ -174,23 +172,23 @@ async function createStreamHandler(request: Request) {
     // ── Step 4: Fire webhook (non-blocking) ───────────────────────────────
     if (webhookUrl) {
       fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event: "stream.created",
+          event: 'stream.created',
           reference,
           senderSCA,
           receiverSCA,
           ratePerSecond: rateNum,
           totalDeposited: depositNum,
-          currency: "USDC",
+          currency: 'USDC',
           estimatedDurationSeconds: durationSeconds,
           estimatedEndTime: estimatedEndTime.toISOString(),
           txHash: streamTxHash,
           explorerUrl: `https://testnet.arcscan.app/tx/${streamTxHash}`,
           createdAt: new Date().toISOString(),
         }),
-      }).catch((e) => console.warn("Webhook delivery failed:", e.message));
+      }).catch((e) => console.warn('Webhook delivery failed:', e.message));
     }
 
     return NextResponse.json({
@@ -209,34 +207,31 @@ async function createStreamHandler(request: Request) {
       message: `Stream active — ${ratePerSecond} USDC/s flowing from ${senderSCA.slice(0, 10)}... to ${receiverSCA.slice(0, 10)}... on Arc Testnet.`,
     });
   } catch (error: any) {
-    console.error("❌ Stream create error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Stream create error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
 // ─── GET /api/payments/stream — List streams with live metrics ────────────────
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 async function listStreamsHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const sender   = searchParams.get("sender");
-    const receiver = searchParams.get("receiver");
-    const status   = searchParams.get("status");
-    const ref      = searchParams.get("reference");
+    const sender = searchParams.get('sender');
+    const receiver = searchParams.get('receiver');
+    const status = searchParams.get('status');
+    const ref = searchParams.get('reference');
 
     const where: any = {};
-    if (sender)   where.senderSCA   = sender;
+    if (sender) where.senderSCA = sender;
     if (receiver) where.receiverSCA = receiver;
-    if (status)   where.status      = status;
-    if (ref)      where.reference   = ref;
+    if (status) where.status = status;
+    if (ref) where.reference = ref;
 
     const streams = await prisma.stream.findMany({
       where,
-      orderBy: { startedAt: "desc" },
+      orderBy: { startedAt: 'desc' },
     });
 
     const now = Date.now();
@@ -244,38 +239,26 @@ async function listStreamsHandler(request: Request) {
     const enriched = streams.map((s: any) => {
       // Only accumulate time while stream was active
       const endTime =
-        s.status === "ACTIVE"
-          ? now
-          : s.stoppedAt
-          ? new Date(s.stoppedAt).getTime()
-          : now;
+        s.status === 'ACTIVE' ? now : s.stoppedAt ? new Date(s.stoppedAt).getTime() : now;
 
-      const elapsedSeconds = Math.max(
-        0,
-        (endTime - new Date(s.startedAt).getTime()) / 1000
-      );
+      const elapsedSeconds = Math.max(0, (endTime - new Date(s.startedAt).getTime()) / 1000);
 
       const streamed = Math.min(s.ratePerSecond * elapsedSeconds, s.totalDeposited);
       const remaining = Math.max(0, s.totalDeposited - streamed);
-      const secondsRemaining =
-        s.ratePerSecond > 0 ? remaining / s.ratePerSecond : 0;
+      const secondsRemaining = s.ratePerSecond > 0 ? remaining / s.ratePerSecond : 0;
 
       return {
         ...s,
         currentStreamed: parseFloat(streamed.toFixed(6)),
         remainingBalance: parseFloat(remaining.toFixed(6)),
-        secondsRemaining: s.status !== "ACTIVE" ? 0 : Math.floor(secondsRemaining),
-        percentComplete: parseFloat(
-          Math.min((streamed / s.totalDeposited) * 100, 100).toFixed(2)
-        ),
-        explorerUrl: s.txHash
-          ? `https://testnet.arcscan.app/tx/${s.txHash}`
-          : null,
+        secondsRemaining: s.status !== 'ACTIVE' ? 0 : Math.floor(secondsRemaining),
+        percentComplete: parseFloat(Math.min((streamed / s.totalDeposited) * 100, 100).toFixed(2)),
+        explorerUrl: s.txHash ? `https://testnet.arcscan.app/tx/${s.txHash}` : null,
       };
     });
 
     // Aggregate metrics
-    const activeStreams = enriched.filter((s: any) => s.status === "ACTIVE");
+    const activeStreams = enriched.filter((s: any) => s.status === 'ACTIVE');
     const totalStreaming = activeStreams.reduce(
       (sum: number, s: any) => sum + s.remainingBalance,
       0
@@ -290,21 +273,18 @@ async function listStreamsHandler(request: Request) {
       metrics: {
         total: streams.length,
         active: activeStreams.length,
-        stopped: streams.filter((s: any) => s.status === "STOPPED").length,
-        completed: streams.filter((s: any) => s.status === "COMPLETED").length,
+        stopped: streams.filter((s: any) => s.status === 'STOPPED').length,
+        completed: streams.filter((s: any) => s.status === 'COMPLETED').length,
         totalLockedUSDC: parseFloat(totalStreaming.toFixed(4)),
         totalRatePerSecond: parseFloat(totalRatePerSecond.toFixed(6)),
       },
       streams: enriched,
     });
   } catch (error: any) {
-    console.error("❌ List streams error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ List streams error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
 export const POST = withApiKey(createStreamHandler);
-export const GET  = withApiKey(listStreamsHandler);
+export const GET = withApiKey(listStreamsHandler);

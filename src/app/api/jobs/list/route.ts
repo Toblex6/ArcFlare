@@ -1,12 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const status = searchParams.get("status");
-    const clientAddress = searchParams.get("clientAddress");
-    const providerAddress = searchParams.get("providerAddress");
+    const status = searchParams.get('status');
+    const clientAddress = searchParams.get('clientAddress');
+    const providerAddress = searchParams.get('providerAddress');
 
     const where: any = {};
     if (status) where.status = status;
@@ -15,12 +15,12 @@ export async function GET(req: NextRequest) {
 
     const jobs = await prisma.erc8183Job.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
 
     return NextResponse.json({
       success: true,
-      jobs: jobs.map(j => ({
+      jobs: jobs.map((j) => ({
         id: j.id,
         jobId: j.jobId.toString(),
         clientSCA: j.clientSCA,

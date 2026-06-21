@@ -1,8 +1,8 @@
 export default function MerchantDocsPage() {
   const sections = [
     {
-      title: "Payment Initialization",
-      description: "Create a hosted USDC checkout link for a marketplace or merchant flow.",
+      title: 'Payment Initialization',
+      description: 'Create a hosted USDC checkout link for a marketplace or merchant flow.',
       code: `POST /api/payments/initialize
 
 {
@@ -12,19 +12,19 @@ export default function MerchantDocsPage() {
 }`,
     },
     {
-      title: "Escrow",
-      description: "Create trustless USDC escrows on ArcFlareEscrow.sol.",
-      code: "POST /api/escrow/create",
+      title: 'Escrow',
+      description: 'Create trustless USDC escrows on ArcFlareEscrow.sol.',
+      code: 'POST /api/escrow/create',
     },
     {
-      title: "Streaming Payments",
-      description: "Create continuous USDC payment streams.",
-      code: "POST /api/payments/stream",
+      title: 'Streaming Payments',
+      description: 'Create continuous USDC payment streams.',
+      code: 'POST /api/payments/stream',
     },
     {
-      title: "Nanopayments",
-      description: "Record micro-payments and batch settle automatically.",
-      code: "POST /api/payments/nano",
+      title: 'Nanopayments',
+      description: 'Record micro-payments and batch settle automatically.',
+      code: 'POST /api/payments/nano',
     },
   ];
 
@@ -34,12 +34,10 @@ export default function MerchantDocsPage() {
         <div className="mb-6 inline-flex rounded-full border border-[#3a2a22] bg-[#1f140f] px-4 py-2 text-sm text-cyan-300">
           Merchant flows
         </div>
-        <h1 className="text-4xl font-bold leading-tight md:text-6xl">
-          Merchant Documentation
-        </h1>
+        <h1 className="text-4xl font-bold leading-tight md:text-6xl">Merchant Documentation</h1>
         <p className="mt-6 max-w-3xl text-lg leading-relaxed text-gray-400">
-          Initialize checkout, escrow funds, and settle recurring or tiny USDC
-          payments with ArcFlare's hosted APIs.
+          Initialize checkout, escrow funds, and settle recurring or tiny USDC payments with
+          ArcFlare's hosted APIs.
         </p>
       </header>
 

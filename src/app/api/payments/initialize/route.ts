@@ -1,13 +1,13 @@
 // src/app/api/payments/initialize/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { checkRateLimit } from "@/src/lib/ratelimit";
-import { parseBody, InitializeSchema } from "@/src/lib/validation";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { checkRateLimit } from '@/src/lib/ratelimit';
+import { parseBody, InitializeSchema } from '@/src/lib/validation';
 
 export async function POST(req: NextRequest) {
   try {
     // 1. Rate Limiting
-    const { allowed, response: limitResponse } = await checkRateLimit(req, "payments");
+    const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse as NextResponse;
 
     // 2. Zod Validation
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     const { amount, currency, email, merchant, agentSCA, webhookUrl } = data;
 
     // 3. If agentSCA provided, verify it exists in AgentRegistry
-    let resolvedSenderEmail = email || "autonomous-agent@arc.network";
+    let resolvedSenderEmail = email || 'autonomous-agent@arc.network';
     let resolvedAgent = null;
 
     if (agentSCA) {
@@ -47,18 +47,18 @@ export async function POST(req: NextRequest) {
       data: {
         reference: transactionReference,
         amount: Number(amount),
-        currency: currency ?? "USDC",
-        chain: "Arc Testnet v1.0",
+        currency: currency ?? 'USDC',
+        chain: 'Arc Testnet v1.0',
         senderEmail: resolvedSenderEmail,
-        merchant: merchant || "Dispatch Marketplace",
-        status: "PENDING",
+        merchant: merchant || 'Dispatch Marketplace',
+        status: 'PENDING',
         webhookUrl: webhookUrl || null,
       },
     });
 
     return NextResponse.json({
       success: true,
-      message: "Payment initialized successfully.",
+      message: 'Payment initialized successfully.',
       reference: transactionReference,
       checkoutUrl: `https://arcflare-gateway.onrender.com/checkout/${transactionReference}`,
       agent: resolvedAgent
@@ -72,15 +72,15 @@ export async function POST(req: NextRequest) {
       data: {
         reference: transactionReference,
         amount,
-        currency: currency ?? "USDC",
-        status: "ready",
+        currency: currency ?? 'USDC',
+        status: 'ready',
         authorization_url: `/checkout/${transactionReference}`,
       },
     });
   } catch (error: any) {
-    console.error("Initialize error:", error);
+    console.error('Initialize error:', error);
     return NextResponse.json(
-      { success: false, error: "Internal Ledger Process Exception Error." },
+      { success: false, error: 'Internal Ledger Process Exception Error.' },
       { status: 500 }
     );
   }
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    status: "ready",
-    message: "ArcFlare Gateway Ledger initialization channel is active.",
+    status: 'ready',
+    message: 'ArcFlare Gateway Ledger initialization channel is active.',
   });
 }

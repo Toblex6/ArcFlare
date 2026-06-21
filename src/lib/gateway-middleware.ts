@@ -9,14 +9,14 @@
 // the x402 protocol before running. Circle's hosted Arc Testnet facilitator
 // verifies the signed payment and queues it for Gateway batch settlement.
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
 
 // Arc Testnet chain identifier in eip155 format
-const ARC_TESTNET_CHAIN = "eip155:5042002";
+const ARC_TESTNET_CHAIN = 'eip155:5042002';
 
 // Circle's hosted testnet facilitator — verifies x402 payments and
 // queues them for Gateway batch settlement. No infra to run yourself.
-const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
+const FACILITATOR_URL = 'https://gateway-api-testnet.circle.com';
 
 export interface GatewayPaymentContext {
   payer: string;
@@ -50,21 +50,21 @@ export function requireGatewayPayment(
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
 ) {
   return async function wrappedHandler(req: NextRequest): Promise<NextResponse> {
-    const paymentSignature = req.headers.get("payment-signature");
+    const paymentSignature = req.headers.get('payment-signature');
 
     // ── No payment provided — return 402 with payment requirements ──────────
     if (!paymentSignature) {
       return NextResponse.json(
         {
-          error: "Payment Required",
+          error: 'Payment Required',
           accepts: [
             {
-              scheme: "GatewayWalletBatched",
+              scheme: 'GatewayWalletBatched',
               network: ARC_TESTNET_CHAIN,
               maxAmountRequired: priceToAtomicUnits(options.priceUSDC),
               resource: req.nextUrl.pathname,
               payTo: options.sellerAddress,
-              asset: "USDC",
+              asset: 'USDC',
               facilitator: FACILITATOR_URL,
             },
           ],
@@ -76,8 +76,8 @@ export function requireGatewayPayment(
     // ── Verify the payment signature with Circle's facilitator ──────────────
     try {
       const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentSignature,
           sellerAddress: options.sellerAddress,
@@ -91,15 +91,15 @@ export function requireGatewayPayment(
 
       if (!verifyRes.ok || !verifyData.valid) {
         return NextResponse.json(
-          { error: "Invalid or expired payment signature.", details: verifyData },
+          { error: 'Invalid or expired payment signature.', details: verifyData },
           { status: 402 }
         );
       }
 
       // ── Queue for Gateway batch settlement ─────────────────────────────────
       const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paymentSignature, sellerAddress: options.sellerAddress }),
       });
 
@@ -115,9 +115,9 @@ export function requireGatewayPayment(
       // ── Payment verified — run the actual handler ────────────────────────
       return await handler(req, paymentContext);
     } catch (error: any) {
-      console.error("Gateway payment verification error:", error);
+      console.error('Gateway payment verification error:', error);
       return NextResponse.json(
-        { error: "Payment verification failed.", message: error.message },
+        { error: 'Payment verification failed.', message: error.message },
         { status: 500 }
       );
     }

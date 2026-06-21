@@ -1,39 +1,39 @@
 // src/app/api/v1/agent-service/route.ts
 // ✅ FIXED: Imported from "next/server" instead of "next" to satisfy Next.js App Router type rules
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
 
 // This is the "vending machine" endpoint that software interacts with
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("x-arcflare-tx-hash");
-    const costInUSDC = 0.01; 
+    const authHeader = req.headers.get('x-arcflare-tx-hash');
+    const costInUSDC = 0.01;
 
     // 1. If the machine hasn't paid yet, drop the HTTP 402 Roadblock
     if (!authHeader) {
       return new NextResponse(
         JSON.stringify({
-          error: "HTTP 402 Payment Required",
-          message: "Autonomous execution blocked. Stablecoin clearance required.",
+          error: 'HTTP 402 Payment Required',
+          message: 'Autonomous execution blocked. Stablecoin clearance required.',
           amount_due: costInUSDC,
-          currency: "USDC",
-          required_chain: "Arc-L1",
+          currency: 'USDC',
+          required_chain: 'Arc-L1',
           // The agent reads this payload programmatically to find out where to send the funds!
-          payment_gateway_address: "0xYourArcFlareEscrowAddressHere" 
+          payment_gateway_address: '0xYourArcFlareEscrowAddressHere',
         }),
-        { 
-          status: 402, 
-          headers: { "Content-Type": "application/json" } 
+        {
+          status: 402,
+          headers: { 'Content-Type': 'application/json' },
         }
       );
     }
 
     // 2. Cryptographic Settlement Verification (Placeholder for real Arc-L1 RPC check)
     // In production, your code checks the RPC using the tx hash to make sure 0.01 USDC arrived.
-    const isTxValid = true; 
+    const isTxValid = true;
 
     if (!isTxValid) {
       return NextResponse.json(
-        { error: "Payment Verification Failed", message: "Transaction hash invalid." },
+        { error: 'Payment Verification Failed', message: 'Transaction hash invalid.' },
         { status: 403 }
       );
     }
@@ -44,12 +44,12 @@ export async function POST(req: NextRequest) {
       cleared: true,
       tx_verified: authHeader,
       data: {
-        telemetry: "⚡ Premium Machine Data Stream Payload successfully compiled for autonomous ingestion.",
-        timestamp: new Date().toISOString()
-      }
+        telemetry:
+          '⚡ Premium Machine Data Stream Payload successfully compiled for autonomous ingestion.',
+        timestamp: new Date().toISOString(),
+      },
     });
-
   } catch (error) {
-    return NextResponse.json({ error: "Internal Machine Gateway Malfunction" }, { status: 500 });
+    return NextResponse.json({ error: 'Internal Machine Gateway Malfunction' }, { status: 500 });
   }
 }

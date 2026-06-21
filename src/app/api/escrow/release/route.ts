@@ -2,12 +2,12 @@
 // Releases escrowed USDC to beneficiary when conditions are met.
 // Called by depositor confirming delivery, or admin releasing directly.
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { withApiKey } from "@/src/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || "";
+const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -23,14 +23,14 @@ async function waitForCircleTx(
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Release transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Release transaction failed onchain.');
     }
   }
-  throw new Error("Release transaction timed out.");
+  throw new Error('Release transaction timed out.');
 }
 
 async function releaseHandler(request: Request) {
@@ -39,7 +39,7 @@ async function releaseHandler(request: Request) {
 
     if (!reference || !callerSCA) {
       return NextResponse.json(
-        { success: false, error: "reference and callerSCA are required." },
+        { success: false, error: 'reference and callerSCA are required.' },
         { status: 400 }
       );
     }
@@ -47,9 +47,9 @@ async function releaseHandler(request: Request) {
     // Fetch escrow from DB
     const escrow = await (prisma as any).escrow.findUnique({ where: { reference } });
     if (!escrow) {
-      return NextResponse.json({ success: false, error: "Escrow not found." }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'Escrow not found.' }, { status: 404 });
     }
-    if (escrow.status !== "ACTIVE") {
+    if (escrow.status !== 'ACTIVE') {
       return NextResponse.json(
         { success: false, error: `Escrow is ${escrow.status} — cannot release.` },
         { status: 400 }
@@ -63,11 +63,11 @@ async function releaseHandler(request: Request) {
     // If both parties confirm, contract auto-releases
     const confirmTx = await circleClient.createContractExecutionTransaction({
       walletAddress: callerSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: ESCROW_CONTRACT,
-      abiFunctionSignature: "confirmDelivery(bytes32)",
+      abiFunctionSignature: 'confirmDelivery(bytes32)',
       abiParameters: [escrow.onchainId || reference],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
     const txHash = await waitForCircleTx(circleClient, confirmTx.data?.id!);
@@ -83,7 +83,7 @@ async function releaseHandler(request: Request) {
 
     // If both confirmed — mark as RELEASED
     if (depositorConfirmed && beneficiaryConfirmed) {
-      newStatus = "RELEASED";
+      newStatus = 'RELEASED';
     }
 
     const updated = await (prisma as any).escrow.update({
@@ -92,17 +92,17 @@ async function releaseHandler(request: Request) {
         status: newStatus,
         depositorConfirmed,
         beneficiaryConfirmed,
-        releaseTxHash: newStatus === "RELEASED" ? txHash : null,
+        releaseTxHash: newStatus === 'RELEASED' ? txHash : null,
       },
     });
 
     // Fire webhook on full release
-    if (newStatus === "RELEASED" && escrow.webhookUrl) {
+    if (newStatus === 'RELEASED' && escrow.webhookUrl) {
       fetch(escrow.webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event: "escrow.released",
+          event: 'escrow.released',
           reference,
           amount: escrow.amount,
           currency: escrow.currency,
@@ -118,15 +118,15 @@ async function releaseHandler(request: Request) {
       success: true,
       escrow: updated,
       txHash,
-      released: newStatus === "RELEASED",
+      released: newStatus === 'RELEASED',
       explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
       message:
-        newStatus === "RELEASED"
+        newStatus === 'RELEASED'
           ? `Escrow fully released — ${escrow.amount} USDC sent to ${escrow.beneficiarySCA}`
-          : `Delivery confirmed by ${isDepositor ? "depositor" : "beneficiary"} — waiting for other party.`,
+          : `Delivery confirmed by ${isDepositor ? 'depositor' : 'beneficiary'} — waiting for other party.`,
     });
   } catch (error: any) {
-    console.error("Escrow release error:", error);
+    console.error('Escrow release error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

@@ -11,133 +11,124 @@
 // 6. Client completes job    → POST /api/jobs { action: "complete" }
 // 7. Anyone reads job state  → GET  /api/jobs?jobId=xxx
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
-import {
-  createPublicClient,
-  http,
-  decodeEventLog,
-  keccak256,
-  toHex,
-  formatUnits,
-} from "viem";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits } from 'viem';
 
 // ── ERC-8183 contract on Arc Testnet ─────────────────────────────────────────
-const AGENTIC_COMMERCE_CONTRACT = "0x0747EEf0706327138c69792bF28Cd525089e4583";
-const USDC_ARC = "0x3600000000000000000000000000000000000000";
+const AGENTIC_COMMERCE_CONTRACT = '0x0747EEf0706327138c69792bF28Cd525089e4583';
+const USDC_ARC = '0x3600000000000000000000000000000000000000';
 
 const arcTestnet = {
   id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  name: 'Arc Testnet',
+  nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://rpc.testnet.arc.network"] },
-    public:  { http: ["https://rpc.testnet.arc.network"] },
+    default: { http: ['https://rpc.testnet.arc.network'] },
+    public: { http: ['https://rpc.testnet.arc.network'] },
   },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http("https://rpc.testnet.arc.network"),
+  transport: http('https://rpc.testnet.arc.network'),
 });
 
-const JOB_STATUS_NAMES = [
-  "Open", "Funded", "Submitted", "Completed", "Rejected", "Expired",
-];
+const JOB_STATUS_NAMES = ['Open', 'Funded', 'Submitted', 'Completed', 'Rejected', 'Expired'];
 
 // ── ABI ───────────────────────────────────────────────────────────────────────
 const AGENTIC_ABI = [
   {
-    name: "createJob",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'createJob',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "provider",    type: "address" },
-      { name: "evaluator",   type: "address" },
-      { name: "expiredAt",   type: "uint256" },
-      { name: "description", type: "string"  },
-      { name: "hook",        type: "address" },
+      { name: 'provider', type: 'address' },
+      { name: 'evaluator', type: 'address' },
+      { name: 'expiredAt', type: 'uint256' },
+      { name: 'description', type: 'string' },
+      { name: 'hook', type: 'address' },
     ],
-    outputs: [{ name: "jobId", type: "uint256" }],
+    outputs: [{ name: 'jobId', type: 'uint256' }],
   },
   {
-    name: "setBudget",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'setBudget',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "jobId",     type: "uint256" },
-      { name: "amount",    type: "uint256" },
-      { name: "optParams", type: "bytes"   },
-    ],
-    outputs: [],
-  },
-  {
-    name: "fund",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "jobId",     type: "uint256" },
-      { name: "optParams", type: "bytes"   },
+      { name: 'jobId', type: 'uint256' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'optParams', type: 'bytes' },
     ],
     outputs: [],
   },
   {
-    name: "submit",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'fund',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "jobId",       type: "uint256"  },
-      { name: "deliverable", type: "bytes32"  },
-      { name: "optParams",   type: "bytes"    },
+      { name: 'jobId', type: 'uint256' },
+      { name: 'optParams', type: 'bytes' },
     ],
     outputs: [],
   },
   {
-    name: "complete",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'submit',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "jobId",     type: "uint256"  },
-      { name: "reason",    type: "bytes32"  },
-      { name: "optParams", type: "bytes"    },
+      { name: 'jobId', type: 'uint256' },
+      { name: 'deliverable', type: 'bytes32' },
+      { name: 'optParams', type: 'bytes' },
     ],
     outputs: [],
   },
   {
-    name: "getJob",
-    type: "function",
-    stateMutability: "view",
-    inputs: [{ name: "jobId", type: "uint256" }],
+    name: 'complete',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'jobId', type: 'uint256' },
+      { name: 'reason', type: 'bytes32' },
+      { name: 'optParams', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'getJob',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'jobId', type: 'uint256' }],
     outputs: [
       {
-        type: "tuple",
+        type: 'tuple',
         components: [
-          { name: "id",          type: "uint256"  },
-          { name: "client",      type: "address"  },
-          { name: "provider",    type: "address"  },
-          { name: "evaluator",   type: "address"  },
-          { name: "description", type: "string"   },
-          { name: "budget",      type: "uint256"  },
-          { name: "expiredAt",   type: "uint256"  },
-          { name: "status",      type: "uint8"    },
-          { name: "hook",        type: "address"  },
+          { name: 'id', type: 'uint256' },
+          { name: 'client', type: 'address' },
+          { name: 'provider', type: 'address' },
+          { name: 'evaluator', type: 'address' },
+          { name: 'description', type: 'string' },
+          { name: 'budget', type: 'uint256' },
+          { name: 'expiredAt', type: 'uint256' },
+          { name: 'status', type: 'uint8' },
+          { name: 'hook', type: 'address' },
         ],
       },
     ],
   },
   {
-    name: "JobCreated",
-    type: "event",
+    name: 'JobCreated',
+    type: 'event',
     anonymous: false,
     inputs: [
-      { indexed: true,  name: "jobId",     type: "uint256" },
-      { indexed: true,  name: "client",    type: "address" },
-      { indexed: true,  name: "provider",  type: "address" },
-      { indexed: false, name: "evaluator", type: "address" },
-      { indexed: false, name: "expiredAt", type: "uint256" },
-      { indexed: false, name: "hook",      type: "address" },
+      { indexed: true, name: 'jobId', type: 'uint256' },
+      { indexed: true, name: 'client', type: 'address' },
+      { indexed: true, name: 'provider', type: 'address' },
+      { indexed: false, name: 'evaluator', type: 'address' },
+      { indexed: false, name: 'expiredAt', type: 'uint256' },
+      { indexed: false, name: 'hook', type: 'address' },
     ],
   },
 ] as const;
@@ -156,14 +147,14 @@ async function waitForTx(
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Transaction failed onchain.');
     }
   }
-  throw new Error("Transaction timed out.");
+  throw new Error('Transaction timed out.');
 }
 
 async function extractJobId(txHash: string): Promise<string> {
@@ -178,14 +169,14 @@ async function extractJobId(txHash: string): Promise<string> {
         data: log.data,
         topics: log.topics,
       });
-      if (decoded.eventName === "JobCreated") {
+      if (decoded.eventName === 'JobCreated') {
         return (decoded.args as any).jobId.toString();
       }
     } catch {
       continue;
     }
   }
-  throw new Error("Could not parse JobCreated event from receipt.");
+  throw new Error('Could not parse JobCreated event from receipt.');
 }
 
 // ─── POST /api/jobs ───────────────────────────────────────────────────────────
@@ -194,27 +185,31 @@ async function jobsHandler(request: Request) {
     const body = await request.json();
     const { action } = body;
 
-    const validActions = ["create", "setBudget", "approve", "fund", "submit", "complete"];
+    const validActions = ['create', 'setBudget', 'approve', 'fund', 'submit', 'complete'];
 
     if (!action || !validActions.includes(action)) {
-      return NextResponse.json({
-        success: false,
-        error: `action must be one of: ${validActions.join(", ")}`,
-        flow: {
-          "1_create":    "POST { action:'create', clientSCA, providerSCA, amountUSDC, description, deadlineHours }",
-          "2_setBudget": "POST { action:'setBudget', jobId, providerSCA, amountUSDC }",
-          "3_approve":   "POST { action:'approve', jobId, clientSCA, amountUSDC }",
-          "4_fund":      "POST { action:'fund', jobId, clientSCA }",
-          "5_submit":    "POST { action:'submit', jobId, providerSCA, deliverable }",
-          "6_complete":  "POST { action:'complete', jobId, clientSCA }",
+      return NextResponse.json(
+        {
+          success: false,
+          error: `action must be one of: ${validActions.join(', ')}`,
+          flow: {
+            '1_create':
+              "POST { action:'create', clientSCA, providerSCA, amountUSDC, description, deadlineHours }",
+            '2_setBudget': "POST { action:'setBudget', jobId, providerSCA, amountUSDC }",
+            '3_approve': "POST { action:'approve', jobId, clientSCA, amountUSDC }",
+            '4_fund': "POST { action:'fund', jobId, clientSCA }",
+            '5_submit': "POST { action:'submit', jobId, providerSCA, deliverable }",
+            '6_complete': "POST { action:'complete', jobId, clientSCA }",
+          },
         },
-      }, { status: 400 });
+        { status: 400 }
+      );
     }
 
     const circleClient = getCircleClient();
 
     // ── 1. CREATE JOB ─────────────────────────────────────────────────────────
-    if (action === "create") {
+    if (action === 'create') {
       const {
         clientSCA,
         providerSCA,
@@ -226,7 +221,10 @@ async function jobsHandler(request: Request) {
 
       if (!clientSCA || !providerSCA || !amountUSDC || !description) {
         return NextResponse.json(
-          { success: false, error: "clientSCA, providerSCA, amountUSDC and description are required." },
+          {
+            success: false,
+            error: 'clientSCA, providerSCA, amountUSDC and description are required.',
+          },
           { status: 400 }
         );
       }
@@ -236,37 +234,39 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
-        abiFunctionSignature: "createJob(address,address,uint256,string,address)",
+        abiFunctionSignature: 'createJob(address,address,uint256,string,address)',
         abiParameters: [
           providerSCA,
           evaluatorSCA || clientSCA, // client is evaluator by default
           expiredAt.toString(),
           description,
-          "0x0000000000000000000000000000000000000000", // no hook
+          '0x0000000000000000000000000000000000000000', // no hook
         ],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
       const jobId = await extractJobId(txHash);
 
       // Save to Postgres
-      await prisma.job.create({
-        data: {
-          id: `erc8183_${jobId}`,
-          description,
-          amount: parseFloat(amountUSDC),
-          status: "PENDING",
-          agentId: providerSCA, // using providerSCA as agentId reference
-        },
-      }).catch(() => {}); // Job model may need agentId FK — graceful fail
+      await prisma.job
+        .create({
+          data: {
+            id: `erc8183_${jobId}`,
+            description,
+            amount: parseFloat(amountUSDC),
+            status: 'PENDING',
+            agentId: providerSCA, // using providerSCA as agentId reference
+          },
+        })
+        .catch(() => {}); // Job model may need agentId FK — graceful fail
 
       return NextResponse.json({
         success: true,
-        action: "create",
+        action: 'create',
         jobId,
         clientSCA,
         providerSCA,
@@ -281,12 +281,12 @@ async function jobsHandler(request: Request) {
     }
 
     // ── 2. SET BUDGET ─────────────────────────────────────────────────────────
-    if (action === "setBudget") {
+    if (action === 'setBudget') {
       const { jobId, providerSCA, amountUSDC } = body;
 
       if (!jobId || !providerSCA || !amountUSDC) {
         return NextResponse.json(
-          { success: false, error: "jobId, providerSCA and amountUSDC are required." },
+          { success: false, error: 'jobId, providerSCA and amountUSDC are required.' },
           { status: 400 }
         );
       }
@@ -295,19 +295,19 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
-        abiFunctionSignature: "setBudget(uint256,uint256,bytes)",
-        abiParameters: [jobId.toString(), amountWei.toString(), "0x"],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        abiFunctionSignature: 'setBudget(uint256,uint256,bytes)',
+        abiParameters: [jobId.toString(), amountWei.toString(), '0x'],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
 
       return NextResponse.json({
         success: true,
-        action: "setBudget",
+        action: 'setBudget',
         jobId,
         amountUSDC,
         providerSCA,
@@ -319,12 +319,12 @@ async function jobsHandler(request: Request) {
     }
 
     // ── 3. APPROVE USDC ───────────────────────────────────────────────────────
-    if (action === "approve") {
+    if (action === 'approve') {
       const { jobId, clientSCA, amountUSDC } = body;
 
       if (!jobId || !clientSCA || !amountUSDC) {
         return NextResponse.json(
-          { success: false, error: "jobId, clientSCA and amountUSDC are required." },
+          { success: false, error: 'jobId, clientSCA and amountUSDC are required.' },
           { status: 400 }
         );
       }
@@ -333,19 +333,19 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: USDC_ARC,
-        abiFunctionSignature: "approve(address,uint256)",
+        abiFunctionSignature: 'approve(address,uint256)',
         abiParameters: [AGENTIC_COMMERCE_CONTRACT, amountWei.toString()],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
 
       return NextResponse.json({
         success: true,
-        action: "approve",
+        action: 'approve',
         jobId,
         amountUSDC,
         clientSCA,
@@ -357,31 +357,31 @@ async function jobsHandler(request: Request) {
     }
 
     // ── 4. FUND ESCROW ────────────────────────────────────────────────────────
-    if (action === "fund") {
+    if (action === 'fund') {
       const { jobId, clientSCA } = body;
 
       if (!jobId || !clientSCA) {
         return NextResponse.json(
-          { success: false, error: "jobId and clientSCA are required." },
+          { success: false, error: 'jobId and clientSCA are required.' },
           { status: 400 }
         );
       }
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
-        abiFunctionSignature: "fund(uint256,bytes)",
-        abiParameters: [jobId.toString(), "0x"],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        abiFunctionSignature: 'fund(uint256,bytes)',
+        abiParameters: [jobId.toString(), '0x'],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
 
       return NextResponse.json({
         success: true,
-        action: "fund",
+        action: 'fund',
         jobId,
         clientSCA,
         txHash,
@@ -392,12 +392,12 @@ async function jobsHandler(request: Request) {
     }
 
     // ── 5. SUBMIT DELIVERABLE ─────────────────────────────────────────────────
-    if (action === "submit") {
+    if (action === 'submit') {
       const { jobId, providerSCA, deliverable } = body;
 
       if (!jobId || !providerSCA || !deliverable) {
         return NextResponse.json(
-          { success: false, error: "jobId, providerSCA and deliverable are required." },
+          { success: false, error: 'jobId, providerSCA and deliverable are required.' },
           { status: 400 }
         );
       }
@@ -406,19 +406,19 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
-        abiFunctionSignature: "submit(uint256,bytes32,bytes)",
-        abiParameters: [jobId.toString(), deliverableHash, "0x"],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        abiFunctionSignature: 'submit(uint256,bytes32,bytes)',
+        abiParameters: [jobId.toString(), deliverableHash, '0x'],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
 
       return NextResponse.json({
         success: true,
-        action: "submit",
+        action: 'submit',
         jobId,
         deliverable,
         deliverableHash,
@@ -431,44 +431,44 @@ async function jobsHandler(request: Request) {
     }
 
     // ── 6. COMPLETE JOB ───────────────────────────────────────────────────────
-    if (action === "complete") {
+    if (action === 'complete') {
       const { jobId, clientSCA } = body;
 
       if (!jobId || !clientSCA) {
         return NextResponse.json(
-          { success: false, error: "jobId and clientSCA are required." },
+          { success: false, error: 'jobId and clientSCA are required.' },
           { status: 400 }
         );
       }
 
-      const reasonHash = keccak256(toHex("deliverable-approved")) as `0x${string}`;
+      const reasonHash = keccak256(toHex('deliverable-approved')) as `0x${string}`;
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: 'ARC-TESTNET' as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
-        abiFunctionSignature: "complete(uint256,bytes32,bytes)",
-        abiParameters: [jobId.toString(), reasonHash, "0x"],
-        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+        abiFunctionSignature: 'complete(uint256,bytes32,bytes)',
+        abiParameters: [jobId.toString(), reasonHash, '0x'],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
-      if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
+      if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
 
       // Read final job state
-      const jobData = await publicClient.readContract({
+      const jobData = (await publicClient.readContract({
         address: AGENTIC_COMMERCE_CONTRACT,
         abi: AGENTIC_ABI,
-        functionName: "getJob",
+        functionName: 'getJob',
         args: [BigInt(jobId)],
-      }) as any;
+      })) as any;
 
-      const statusName = JOB_STATUS_NAMES[Number(jobData.status)] || "Unknown";
+      const statusName = JOB_STATUS_NAMES[Number(jobData.status)] || 'Unknown';
       const budgetUSDC = formatUnits(jobData.budget, 6);
 
       return NextResponse.json({
         success: true,
-        action: "complete",
+        action: 'complete',
         jobId,
         clientSCA,
         txHash,
@@ -484,13 +484,9 @@ async function jobsHandler(request: Request) {
         message: `Job #${jobId} completed — status: ${statusName}. Payment of ${budgetUSDC} USDC released to provider.`,
       });
     }
-
   } catch (error: any) {
-    console.error("❌ Jobs route error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Jobs route error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -501,23 +497,23 @@ export const POST = withApiKey(jobsHandler);
 async function getJobHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const jobId = searchParams.get("jobId");
+    const jobId = searchParams.get('jobId');
 
     if (!jobId) {
       return NextResponse.json(
-        { success: false, error: "jobId query param required." },
+        { success: false, error: 'jobId query param required.' },
         { status: 400 }
       );
     }
 
-    const jobData = await publicClient.readContract({
+    const jobData = (await publicClient.readContract({
       address: AGENTIC_COMMERCE_CONTRACT,
       abi: AGENTIC_ABI,
-      functionName: "getJob",
+      functionName: 'getJob',
       args: [BigInt(jobId)],
-    }) as any;
+    })) as any;
 
-    const statusName = JOB_STATUS_NAMES[Number(jobData.status)] || "Unknown";
+    const statusName = JOB_STATUS_NAMES[Number(jobData.status)] || 'Unknown';
     const budgetUSDC = formatUnits(jobData.budget, 6);
     const expiredAt = new Date(Number(jobData.expiredAt) * 1000).toISOString();
     const isExpired = Date.now() > Number(jobData.expiredAt) * 1000;
@@ -541,12 +537,9 @@ async function getJobHandler(request: Request) {
       arcScanUrl: `https://testnet.arcscan.app/address/${AGENTIC_COMMERCE_CONTRACT}`,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
 export const GET = withApiKey(getJobHandler);
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';

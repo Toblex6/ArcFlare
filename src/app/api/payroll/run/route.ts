@@ -3,12 +3,12 @@
 // onchain USDC transfer logic as /api/payments/settle, run in sequence
 // across an array of recipients.
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
-const USDC_ARC = "0x3600000000000000000000000000000000000000";
+const USDC_ARC = '0x3600000000000000000000000000000000000000';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -24,14 +24,14 @@ async function waitForCircleTx(
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Payroll transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Payroll transaction failed onchain.');
     }
   }
-  throw new Error("Payroll transaction timed out.");
+  throw new Error('Payroll transaction timed out.');
 }
 
 interface PayrollRecipient {
@@ -51,29 +51,29 @@ async function payOneRecipient(
   try {
     const transferTx = await circleClient.createTransaction({
       walletId: payerWalletId,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       tokenAddress: USDC_ARC,
       destinationAddress: recipient.recipientSCA,
       amounts: [amountStr],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     } as any);
 
-    if (!transferTx.data?.id) throw new Error("No transaction ID returned.");
+    if (!transferTx.data?.id) throw new Error('No transaction ID returned.');
     return await waitForCircleTx(circleClient, transferTx.data.id);
   } catch (err: any) {
-    const { parseUnits } = await import("viem");
+    const { parseUnits } = await import('viem');
     const amountWei = parseUnits(amountStr, 6);
 
     const erc20Tx = await circleClient.createContractExecutionTransaction({
       walletAddress: payerSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: USDC_ARC,
-      abiFunctionSignature: "transfer(address,uint256)",
+      abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [recipient.recipientSCA, amountWei.toString()],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
-    if (!erc20Tx.data?.id) throw new Error("No transaction ID returned.");
+    if (!erc20Tx.data?.id) throw new Error('No transaction ID returned.');
     return await waitForCircleTx(circleClient, erc20Tx.data.id);
   }
 }
@@ -84,7 +84,7 @@ async function runPayrollHandler(request: Request) {
     const {
       payerSCA,
       payerWalletId,
-      recipients,    // array of { recipientSCA, amount, label? }
+      recipients, // array of { recipientSCA, amount, label? }
       webhookUrl,
       description,
     } = await request.json();
@@ -93,13 +93,13 @@ async function runPayrollHandler(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "payerSCA, payerWalletId and a non-empty recipients array are required.",
+          error: 'payerSCA, payerWalletId and a non-empty recipients array are required.',
           example: {
-            payerSCA: "0xPayerAddress",
-            payerWalletId: "circle-wallet-uuid",
+            payerSCA: '0xPayerAddress',
+            payerWalletId: 'circle-wallet-uuid',
             recipients: [
-              { recipientSCA: "0xEmployee1...", amount: "500", label: "EMP-001" },
-              { recipientSCA: "0xEmployee2...", amount: "750", label: "EMP-002" },
+              { recipientSCA: '0xEmployee1...', amount: '500', label: 'EMP-001' },
+              { recipientSCA: '0xEmployee2...', amount: '750', label: 'EMP-002' },
             ],
           },
         },
@@ -113,7 +113,9 @@ async function runPayrollHandler(request: Request) {
       0
     );
 
-    console.log(`💰 Running payroll batch: ${recipients.length} recipients, ${totalAmount} USDC total`);
+    console.log(
+      `💰 Running payroll batch: ${recipients.length} recipients, ${totalAmount} USDC total`
+    );
 
     // Create the batch record up front so it's trackable even mid-run
     const batch = await (prisma as any).payrollBatch.create({
@@ -123,7 +125,7 @@ async function runPayrollHandler(request: Request) {
         payerWalletId,
         totalAmount,
         recipientCount: recipients.length,
-        status: "PROCESSING",
+        status: 'PROCESSING',
         webhookUrl: webhookUrl || null,
       },
     });
@@ -140,7 +142,7 @@ async function runPayrollHandler(request: Request) {
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
           label: recipient.label || null,
-          status: "SUCCESS",
+          status: 'SUCCESS',
           txHash,
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
         });
@@ -150,17 +152,17 @@ async function runPayrollHandler(request: Request) {
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
           label: recipient.label || null,
-          status: "FAILED",
+          status: 'FAILED',
           error: err.message,
         });
         console.error(`❌ Failed to pay ${recipient.recipientSCA}:`, err.message);
       }
     }
 
-    const successCount = results.filter((r) => r.status === "SUCCESS").length;
-    const failedCount = results.filter((r) => r.status === "FAILED").length;
+    const successCount = results.filter((r) => r.status === 'SUCCESS').length;
+    const failedCount = results.filter((r) => r.status === 'FAILED').length;
     const finalStatus =
-      failedCount === 0 ? "COMPLETED" : successCount === 0 ? "FAILED" : "PARTIAL_FAILURE";
+      failedCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL_FAILURE';
 
     const updatedBatch = await (prisma as any).payrollBatch.update({
       where: { id: batch.id },
@@ -175,10 +177,10 @@ async function runPayrollHandler(request: Request) {
 
     if (webhookUrl) {
       fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event: "payroll.completed",
+          event: 'payroll.completed',
           batchRef,
           status: finalStatus,
           totalAmount,
@@ -189,7 +191,9 @@ async function runPayrollHandler(request: Request) {
       }).catch(() => {});
     }
 
-    console.log(`✅ Payroll batch ${batchRef} complete: ${successCount}/${recipients.length} succeeded`);
+    console.log(
+      `✅ Payroll batch ${batchRef} complete: ${successCount}/${recipients.length} succeeded`
+    );
 
     return NextResponse.json({
       success: true,
@@ -203,11 +207,8 @@ async function runPayrollHandler(request: Request) {
       message: `Payroll batch ${finalStatus} — ${successCount}/${recipients.length} payments succeeded, totalling ${totalAmount} USDC.`,
     });
   } catch (error: any) {
-    console.error("❌ Payroll run error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Payroll run error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -217,11 +218,11 @@ export const POST = withApiKey(runPayrollHandler);
 async function getPayrollBatchHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const batchRef = searchParams.get("batchRef");
+    const batchRef = searchParams.get('batchRef');
 
     if (!batchRef) {
       return NextResponse.json(
-        { success: false, error: "batchRef query param required." },
+        { success: false, error: 'batchRef query param required.' },
         { status: 400 }
       );
     }
@@ -239,10 +240,7 @@ async function getPayrollBatchHandler(request: Request) {
 
     return NextResponse.json({ success: true, batch });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

@@ -1,40 +1,40 @@
 // src/app/api/payments/stream/stop/route.ts
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { withApiKey } from "@/src/lib/middleware/withApiKey";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
-import { createPublicClient, http } from "viem";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createPublicClient, http } from 'viem';
 
-const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
+const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
 
 const arcTestnet = {
   id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  name: 'Arc Testnet',
+  nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://rpc.testnet.arc.network"] },
-    public:  { http: ["https://rpc.testnet.arc.network"] },
+    default: { http: ['https://rpc.testnet.arc.network'] },
+    public: { http: ['https://rpc.testnet.arc.network'] },
   },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http("https://rpc.testnet.arc.network"),
+  transport: http('https://rpc.testnet.arc.network'),
 });
 
 // ── EXACT ABI matching your deployed ArcFlareStream.sol ──────────────────────
 // StreamCreated has 3 indexed params: streamId, sender, receiver
 const STREAM_CREATED_EVENT = {
-  type: "event",
-  name: "StreamCreated",
+  type: 'event',
+  name: 'StreamCreated',
   inputs: [
-    { name: "streamId",       type: "bytes32", indexed: true  },
-    { name: "sender",         type: "address", indexed: true  },
-    { name: "receiver",       type: "address", indexed: true  },
-    { name: "ratePerSecond",  type: "uint256", indexed: false },
-    { name: "totalDeposited", type: "uint256", indexed: false },
-    { name: "ref",            type: "string",  indexed: false },
+    { name: 'streamId', type: 'bytes32', indexed: true },
+    { name: 'sender', type: 'address', indexed: true },
+    { name: 'receiver', type: 'address', indexed: true },
+    { name: 'ratePerSecond', type: 'uint256', indexed: false },
+    { name: 'totalDeposited', type: 'uint256', indexed: false },
+    { name: 'ref', type: 'string', indexed: false },
   ],
 } as const;
 
@@ -52,14 +52,14 @@ async function waitForCircleTx(
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Stop stream transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Stop stream transaction failed onchain.');
     }
   }
-  throw new Error("Stop stream transaction timed out.");
+  throw new Error('Stop stream transaction timed out.');
 }
 
 // ── Read streamId from tx receipt logs ───────────────────────────────────────
@@ -105,9 +105,9 @@ async function getStreamIdFromReceipt(txHash: string): Promise<`0x${string}`> {
 
   throw new Error(
     `Could not find StreamCreated event in tx ${txHash}. ` +
-    `Contract address in DB: ${STREAM_CONTRACT}. ` +
-    `Logs found: ${receipt.logs.length}. ` +
-    `Check that ARCFLARE_STREAM_CONTRACT_ADDRESS matches your deployed contract.`
+      `Contract address in DB: ${STREAM_CONTRACT}. ` +
+      `Logs found: ${receipt.logs.length}. ` +
+      `Check that ARCFLARE_STREAM_CONTRACT_ADDRESS matches your deployed contract.`
   );
 }
 
@@ -117,33 +117,30 @@ async function stopStreamHandler(request: Request) {
 
     if (!reference || !callerSCA) {
       return NextResponse.json(
-        { success: false, error: "reference and callerSCA are required." },
+        { success: false, error: 'reference and callerSCA are required.' },
         { status: 400 }
       );
     }
 
     if (!STREAM_CONTRACT) {
       return NextResponse.json(
-        { success: false, error: "ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment." },
+        { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment.' },
         { status: 500 }
       );
     }
 
     const stream = await prisma.stream.findUnique({ where: { reference } });
     if (!stream) {
-      return NextResponse.json({ success: false, error: "Stream not found." }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'Stream not found.' }, { status: 404 });
     }
-    if (stream.status !== "ACTIVE") {
+    if (stream.status !== 'ACTIVE') {
       return NextResponse.json(
         { success: false, error: `Stream is already ${stream.status}.` },
         { status: 400 }
       );
     }
     if (!stream.txHash) {
-      return NextResponse.json(
-        { success: false, error: "Stream has no txHash." },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Stream has no txHash.' }, { status: 400 });
     }
 
     // Get bytes32 streamId from original createStream tx
@@ -159,15 +156,15 @@ async function stopStreamHandler(request: Request) {
 
     const stopTx = await circleClient.createContractExecutionTransaction({
       walletAddress: callerSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: STREAM_CONTRACT,
-      abiFunctionSignature: "stopStream(bytes32)",
+      abiFunctionSignature: 'stopStream(bytes32)',
       abiParameters: [contractStreamId],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
     if (!stopTx.data?.id) {
-      throw new Error("Circle stop transaction returned no ID.");
+      throw new Error('Circle stop transaction returned no ID.');
     }
 
     const stopTxHash = await waitForCircleTx(circleClient, stopTx.data.id);
@@ -176,7 +173,7 @@ async function stopStreamHandler(request: Request) {
     const updated = await prisma.stream.update({
       where: { reference },
       data: {
-        status: "STOPPED",
+        status: 'STOPPED',
         totalStreamed: parseFloat(earned.toFixed(6)),
         stoppedAt: new Date(),
       },
@@ -184,10 +181,10 @@ async function stopStreamHandler(request: Request) {
 
     if (stream.webhookUrl) {
       fetch(stream.webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event: "stream.stopped",
+          event: 'stream.stopped',
           reference,
           totalStreamed: parseFloat(earned.toFixed(6)),
           refundedToSender: parseFloat(refundAmount.toFixed(6)),
@@ -208,7 +205,7 @@ async function stopStreamHandler(request: Request) {
       message: `Stream stopped — ${earned.toFixed(6)} USDC streamed, ${refundAmount.toFixed(6)} USDC refunded to sender.`,
     });
   } catch (error: any) {
-    console.error("❌ Stop stream error:", error);
+    console.error('❌ Stop stream error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

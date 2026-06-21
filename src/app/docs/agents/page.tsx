@@ -1,21 +1,21 @@
 export default function AgentDocsPage() {
   const deploymentSteps = [
-    "Create wallet set",
-    "Create owner wallet",
-    "Create validator wallet",
-    "Register ERC-8004 identity",
-    "Store agent in registry",
+    'Create wallet set',
+    'Create owner wallet',
+    'Create validator wallet',
+    'Register ERC-8004 identity',
+    'Store agent in registry',
   ];
 
   const cctpSteps = [
-    "Burn USDC on source chain",
-    "Poll Iris API",
-    "Receive COMPLETE attestation",
-    "Submit attestation to Arc",
-    "Mint USDC on Arc",
+    'Burn USDC on source chain',
+    'Poll Iris API',
+    'Receive COMPLETE attestation',
+    'Submit attestation to Arc',
+    'Mint USDC on Arc',
   ];
 
-  const networks = ["Ethereum", "Arbitrum", "Base", "Arc"];
+  const networks = ['Ethereum', 'Arbitrum', 'Base', 'Arc'];
 
   return (
     <article className="space-y-8">
@@ -23,12 +23,10 @@ export default function AgentDocsPage() {
         <div className="mb-6 inline-flex rounded-full border border-[#3a2a22] bg-[#1f140f] px-4 py-2 text-sm text-cyan-300">
           Autonomous payments
         </div>
-        <h1 className="text-4xl font-bold leading-tight md:text-6xl">
-          Agent Documentation
-        </h1>
+        <h1 className="text-4xl font-bold leading-tight md:text-6xl">Agent Documentation</h1>
         <p className="mt-6 max-w-3xl text-lg leading-relaxed text-gray-400">
-          Deploy ERC-8004 agent identities, provision Circle wallets, and route
-          autonomous USDC payments into Arc.
+          Deploy ERC-8004 agent identities, provision Circle wallets, and route autonomous USDC
+          payments into Arc.
         </p>
       </header>
 

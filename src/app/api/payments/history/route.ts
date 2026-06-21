@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
 
 // Force Next.js to treat this route as a dynamic live-data feed
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 /**
  * GET Handler for ArcFlare's Live Ledger Activity Dashboard
@@ -13,7 +13,7 @@ export async function GET() {
     // 1. Fetch the latest 50 agent micro-transactions from your paymentLog table
     const logs = await prisma.paymentLog.findMany({
       orderBy: {
-        timestamp: "desc", // Most recent transactions first
+        timestamp: 'desc', // Most recent transactions first
       },
       take: 50,
     });
@@ -23,7 +23,7 @@ export async function GET() {
 
     // 3. Compute live aggregate ecosystem metrics using our inferred type
     const totalTransactions = logs.length;
-    
+
     // Explicitly defining parameters via our dynamic model shape to clear strict-any flags
     const totalVolume = logs.reduce((sum: number, log: LogRowType) => sum + log.amount, 0);
 
@@ -38,8 +38,8 @@ export async function GET() {
           totalTransactions,
           totalVolumeProcessed: parseFloat(totalVolume.toFixed(4)),
           estimatedGasSavedUSD: parseFloat(estimatedGasSavedUSD.toFixed(2)),
-          settlementCurrency: "USDC",
-          primaryChain: "Arc-L1"
+          settlementCurrency: 'USDC',
+          primaryChain: 'Arc-L1',
         },
         transactions: logs.map((log: LogRowType) => ({
           id: log.id,
@@ -55,11 +55,10 @@ export async function GET() {
       },
       { status: 200 }
     );
-
   } catch (error: any) {
-    console.error("❌ Ledger History API Failure:", error);
+    console.error('❌ Ledger History API Failure:', error);
     return NextResponse.json(
-      { success: false, error: "Internal Server Error", details: error.message },
+      { success: false, error: 'Internal Server Error', details: error.message },
       { status: 500 }
     );
   }

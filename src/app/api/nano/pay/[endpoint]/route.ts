@@ -7,16 +7,16 @@
 // This is a TEMPLATE — duplicate this file per paid resource, or adapt
 // it into a generic catch-all route as shown.
 
-import { NextRequest, NextResponse } from "next/server";
-import { requireGatewayPayment, GatewayPaymentContext } from "@/lib/gateway-middleware";
+import { NextRequest, NextResponse } from 'next/server';
+import { requireGatewayPayment, GatewayPaymentContext } from '@/lib/gateway-middleware';
 
 const SELLER_WALLET_ADDRESS = process.env.SELLER_WALLET_ADDRESS!;
 
 // Price table per resource — extend as you add more paid endpoints
 const PRICE_TABLE: Record<string, string> = {
-  "agent-lookup": "0.001",
-  "reputation-check": "0.0005",
-  "job-status": "0.0001",
+  'agent-lookup': '0.001',
+  'reputation-check': '0.0005',
+  'job-status': '0.0001',
 };
 
 async function handlePaidResource(
@@ -26,13 +26,13 @@ async function handlePaidResource(
 ): Promise<NextResponse> {
   // ── Your actual paid logic goes here ───────────────────────────────────────
   // Example: agent-lookup resource
-  if (endpoint === "agent-lookup") {
+  if (endpoint === 'agent-lookup') {
     const { searchParams } = new URL(req.url);
-    const scaAddress = searchParams.get("scaAddress");
+    const scaAddress = searchParams.get('scaAddress');
 
     return NextResponse.json({
       success: true,
-      resource: "agent-lookup",
+      resource: 'agent-lookup',
       scaAddress,
       // ...fetch real agent data from your DB here
       paid: {
@@ -52,18 +52,12 @@ async function handlePaidResource(
 }
 
 // ── Dynamic route: /api/nano/pay/agent-lookup, /api/nano/pay/reputation-check, etc ──
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { endpoint: string } }
-) {
+export async function POST(req: NextRequest, { params }: { params: { endpoint: string } }) {
   const endpoint = params.endpoint;
   const priceUSDC = PRICE_TABLE[endpoint];
 
   if (!priceUSDC) {
-    return NextResponse.json(
-      { error: `Unknown paid resource: ${endpoint}` },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: `Unknown paid resource: ${endpoint}` }, { status: 404 });
   }
 
   const wrapped = requireGatewayPayment(

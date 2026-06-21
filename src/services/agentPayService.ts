@@ -1,7 +1,7 @@
 // src/services/agentPayService.ts
-import { withWallet } from "@walletconnect/cli-sdk";
-import { ethers } from "ethers";
-import * as dotenv from "dotenv";
+import { withWallet } from '@walletconnect/cli-sdk';
+import { ethers } from 'ethers';
+import * as dotenv from 'dotenv';
 
 // Explicitly load configuration variables from environment files
 dotenv.config();
@@ -9,7 +9,9 @@ dotenv.config();
 // Enforce environment validation rules at startup to satisfy Next.js compiler scanning
 const adminKey = process.env.ARC_ADMIN_PRIVATE_KEY;
 if (!adminKey) {
-  console.warn("⚠️ ARC_ADMIN_PRIVATE_KEY is not defined in your active environment configurations.");
+  console.warn(
+    '⚠️ ARC_ADMIN_PRIVATE_KEY is not defined in your active environment configurations.'
+  );
 }
 
 interface AgentPaymentIntent {
@@ -23,10 +25,10 @@ interface AgentPaymentIntent {
  */
 export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<void> {
   const projectId = process.env.WALLETCONNECT_PROJECT_ID;
-  const chainId = process.env.ARC_CHAIN_ID || "eip155:49111";
+  const chainId = process.env.ARC_CHAIN_ID || 'eip155:49111';
 
   if (!projectId) {
-    throw new Error("Missing WALLETCONNECT_PROJECT_ID in environment variables.");
+    throw new Error('Missing WALLETCONNECT_PROJECT_ID in environment variables.');
   }
 
   // ✅ FIXED: Ethers v6 flattens parseUnits directly on the base package namespace and outputs a BigInt
@@ -41,37 +43,37 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
       {
         projectId: projectId,
         metadata: {
-          name: "ArcFlare AI Agent Node",
-          description: "Autonomous Agentic Finance Layer for Arc Network",
-          url: "https://arcflare-gateway.onrender.com",
-          icons: ["https://arcflare-gateway.onrender.com/favicon.ico"],
+          name: 'ArcFlare AI Agent Node',
+          description: 'Autonomous Agentic Finance Layer for Arc Network',
+          url: 'https://arcflare-gateway.onrender.com',
+          icons: ['https://arcflare-gateway.onrender.com/favicon.ico'],
         },
       },
       async (wallet, { accounts }) => {
         // Extract the raw wallet public address from the CAIP-10 formatted string
-        const agentAssociatedAddress = accounts[0]?.split(":").pop();
-        
+        const agentAssociatedAddress = accounts[0]?.split(':').pop();
+
         if (!agentAssociatedAddress) {
-          console.error("🔴 Failed to extract a valid public wallet account address from session.");
+          console.error('🔴 Failed to extract a valid public wallet account address from session.');
           return;
         }
-        
+
         console.log(`📡 Linked Session Account Verified: ${agentAssociatedAddress}`);
 
         try {
           console.log(`💸 Pushing programmatic payment prompt to authorized wallet...`);
-          
+
           // Broadcast the transaction request over the WalletConnect channel natively
           const txHash = await wallet.request({
             chainId: chainId,
             request: {
-              method: "eth_sendTransaction",
+              method: 'eth_sendTransaction',
               params: [
                 {
                   from: agentAssociatedAddress,
                   to: intent.merchantAddress,
-                  data: "0x", 
-                  value: parsedAmountHex, 
+                  data: '0x',
+                  value: parsedAmountHex,
                 },
               ],
             },
@@ -82,14 +84,16 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
 
           // ✅ FIXED: Force-cast txHash as string to pass safety rules for unknown object structures
           await triggerArcFlareVerification(intent.paymentReference, txHash as string);
-
         } catch (error) {
-          console.error("🔴 Agent transaction failed or was rejected by supervisor:", error);
+          console.error('🔴 Agent transaction failed or was rejected by supervisor:', error);
         }
       }
     );
   } catch (outerError) {
-    console.error("🔴 Critical failure initializing the WalletConnect agent workflow loop:", outerError);
+    console.error(
+      '🔴 Critical failure initializing the WalletConnect agent workflow loop:',
+      outerError
+    );
   }
 }
 
@@ -98,19 +102,19 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
  */
 async function triggerArcFlareVerification(reference: string, hash: string): Promise<void> {
   try {
-    const response = await fetch("https://arcflare-gateway.onrender.com/api/payments/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const response = await fetch('https://arcflare-gateway.onrender.com/api/payments/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reference, txHash: hash }),
     });
-    
+
     if (!response.ok) {
       throw new Error(`HTTP gateway responded with status code ${response.status}`);
     }
 
     const result = await response.json();
-    console.log(`🔄 Verification Ledger Updated:`, result.status || "SUCCESS");
+    console.log(`🔄 Verification Ledger Updated:`, result.status || 'SUCCESS');
   } catch (err) {
-    console.error("⚠️ Failed to automatically alert internal ArcFlare verification engine:", err);
+    console.error('⚠️ Failed to automatically alert internal ArcFlare verification engine:', err);
   }
 }

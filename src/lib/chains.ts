@@ -1,22 +1,21 @@
 export const supportedChains = {
-
   ethereum: {
     chainId: 11155111,
-    name: "Ethereum Sepolia",
+    name: 'Ethereum Sepolia',
   },
 
   base: {
     chainId: 84532,
-    name: "Base Sepolia",
+    name: 'Base Sepolia',
   },
 
   arbitrum: {
     chainId: 421614,
-    name: "Arbitrum Sepolia",
+    name: 'Arbitrum Sepolia',
   },
 
   arc: {
     chainId: 78600,
-    name: "Arc Testnet",
+    name: 'Arc Testnet',
   },
 };

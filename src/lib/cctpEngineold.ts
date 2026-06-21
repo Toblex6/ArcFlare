@@ -1,15 +1,16 @@
-import { ethers } from "ethers";
+import { ethers } from 'ethers';
 
 // Circle CCTP official domain IDs for cross-chain mapping
 export const CCTP_DOMAINS: Record<string, number> = {
-  "Ethereum": 0,
-  "Avalanche": 1,
-  "Arbitrum": 3,
-  "Base": 6,
-  "Arc": 7 // Example network domain identifier
+  Ethereum: 0,
+  Avalanche: 1,
+  Arbitrum: 3,
+  Base: 6,
+  Arc: 7, // Example network domain identifier
 };
 
-const CIRCLE_API_URL = process.env.CIRCLE_ATTESTATION_API || "https://iris-api-sandbox.circle.com/attestations";
+const CIRCLE_API_URL =
+  process.env.CIRCLE_ATTESTATION_API || 'https://iris-api-sandbox.circle.com/attestations';
 
 /**
  * Service to manage cross-chain USDC settlement protocols via Circle CCTP
@@ -22,7 +23,7 @@ export class CCTPEngine {
   static async fetchCircleAttestation(messageHash: string): Promise<string | null> {
     try {
       console.log(`🔍 Querying Circle Attestation Service for message hash: ${messageHash}`);
-      
+
       let attestation: string | null = null;
       let attempts = 0;
       const maxAttempts = 10;
@@ -32,9 +33,9 @@ export class CCTPEngine {
         const response = await fetch(`${CIRCLE_API_URL}/${messageHash}`);
         const result = await response.json();
 
-        if (result && result.status === "complete") {
+        if (result && result.status === 'complete') {
           attestation = result.attestation;
-          console.log("✅ Circle Attestation successfully retrieved!");
+          console.log('✅ Circle Attestation successfully retrieved!');
           break;
         }
 
@@ -45,7 +46,7 @@ export class CCTPEngine {
 
       return attestation;
     } catch (error) {
-      console.error("❌ Failed to pull attestation from Circle API:", error);
+      console.error('❌ Failed to pull attestation from Circle API:', error);
       return null;
     }
   }

@@ -3,11 +3,11 @@
 // Records micro-charges in Postgres without settling immediately.
 // When threshold or time interval is reached, batches and settles via CCTP V2.
 
-import { prisma } from "@/lib/prisma";
+import { prisma } from '@/lib/prisma';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-export const NANO_BATCH_THRESHOLD_USDC = 1.0;  // Settle when batch reaches 1 USDC
-export const NANO_BATCH_INTERVAL_MS = 60000;    // Or every 60 seconds
+export const NANO_BATCH_THRESHOLD_USDC = 1.0; // Settle when batch reaches 1 USDC
+export const NANO_BATCH_INTERVAL_MS = 60000; // Or every 60 seconds
 
 // ─── Record a single nanopayment ─────────────────────────────────────────────
 export async function recordNanoPayment({
@@ -51,10 +51,7 @@ export async function shouldBatchSettle(agentSCA: string, merchantSCA: string) {
 }
 
 // ─── Mark a batch as settled ──────────────────────────────────────────────────
-export async function markBatchSettled(
-  agentSCA: string,
-  merchantSCA: string
-) {
+export async function markBatchSettled(agentSCA: string, merchantSCA: string) {
   // Removed batchRef update since it doesn't exist in the current schema
   await prisma.nanoPayment.updateMany({
     where: { agentSCA, merchantSCA, settled: false },
@@ -67,7 +64,7 @@ export async function getUnsettledPairs() {
   const unsettled = await prisma.nanoPayment.findMany({
     where: { settled: false },
     select: { agentSCA: true, merchantSCA: true },
-    distinct: ["agentSCA", "merchantSCA"],
+    distinct: ['agentSCA', 'merchantSCA'],
   });
   return unsettled;
 }
@@ -76,7 +73,7 @@ export async function getUnsettledPairs() {
 export async function getBatchSummary(agentSCA: string, merchantSCA: string) {
   const payments = await prisma.nanoPayment.findMany({
     where: { agentSCA, merchantSCA, settled: false },
-    orderBy: { createdAt: "asc" },
+    orderBy: { createdAt: 'asc' },
   });
 
   const total = payments.reduce((sum, n) => sum + n.amount, 0);
@@ -89,9 +86,7 @@ export async function getBatchSummary(agentSCA: string, merchantSCA: string) {
     total: parseFloat(total.toFixed(6)),
     count: payments.length,
     ageMs,
-    shouldSettle:
-      total >= NANO_BATCH_THRESHOLD_USDC ||
-      ageMs >= NANO_BATCH_INTERVAL_MS,
+    shouldSettle: total >= NANO_BATCH_THRESHOLD_USDC || ageMs >= NANO_BATCH_INTERVAL_MS,
     payments,
   };
 }

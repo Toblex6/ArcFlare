@@ -2,23 +2,22 @@
 // Manually trigger CCTP V2 cross-chain detection for a specific burn tx hash.
 // Used by agents self-reporting a burn tx or for manual testing.
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { pollForAttestation, mintOnArc, getChainName } from "@/src/lib/cctp";
-import { withApiKey } from "@/src/lib/middleware/withApiKey";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { pollForAttestation, mintOnArc, getChainName } from '@/src/lib/cctp';
+import { withApiKey } from '@/src/lib/middleware/withApiKey';
 
 async function detectHandler(request: Request) {
   try {
-    const { messageHash, amount, currency, sourceDomain, webhookUrl } =
-      await request.json();
+    const { messageHash, amount, currency, sourceDomain, webhookUrl } = await request.json();
 
     if (!messageHash) {
       return NextResponse.json(
         {
           success: false,
           error:
-            "messageHash is required — pass the keccak256 hash of the " +
-            "CCTP V2 MessageSent event bytes from the source chain burn tx.",
+            'messageHash is required — pass the keccak256 hash of the ' +
+            'CCTP V2 MessageSent event bytes from the source chain burn tx.',
         },
         { status: 400 }
       );
@@ -34,11 +33,11 @@ async function detectHandler(request: Request) {
       data: {
         reference,
         amount: parseFloat(amount) || 0,
-        currency: currency || "USDC",
+        currency: currency || 'USDC',
         chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
-        senderEmail: "cross-chain-detect@arc.network",
-        merchant: "ArcFlare CCTP V2 Router",
-        status: "POLLING_CIRCLE_TESTNET_IRIS_API",
+        senderEmail: 'cross-chain-detect@arc.network',
+        merchant: 'ArcFlare CCTP V2 Router',
+        status: 'POLLING_CIRCLE_TESTNET_IRIS_API',
         webhookUrl: webhookUrl || null,
       },
     });
@@ -51,14 +50,14 @@ async function detectHandler(request: Request) {
     } catch (cctpErr: any) {
       await prisma.paymentLog.update({
         where: { reference },
-        data: { status: "ATTESTATION_FAILED" },
+        data: { status: 'ATTESTATION_FAILED' },
       });
       return NextResponse.json(
         {
           success: false,
           error: cctpErr.message,
           reference,
-          hint: "The burn tx may still be confirming. Retry in 30 seconds.",
+          hint: 'The burn tx may still be confirming. Retry in 30 seconds.',
         },
         { status: 502 }
       );
@@ -68,7 +67,7 @@ async function detectHandler(request: Request) {
     const settled = await prisma.paymentLog.update({
       where: { reference },
       data: {
-        status: "REDEEMED_AND_MINTED",
+        status: 'REDEEMED_AND_MINTED',
         arcTxHash,
         chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
       },
@@ -77,18 +76,18 @@ async function detectHandler(request: Request) {
     // Fire webhook
     if (webhookUrl) {
       fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event: "payment.detected_and_settled",
+          event: 'payment.detected_and_settled',
           reference,
           arcTxHash,
           amount: settled.amount,
           currency: settled.currency,
           sourceChain,
-          status: "SUCCESS",
+          status: 'SUCCESS',
           settledAt: new Date().toISOString(),
-          settlementType: "CCTP_V2_MANUAL_DETECT",
+          settlementType: 'CCTP_V2_MANUAL_DETECT',
           explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
         }),
       }).catch(() => {});
@@ -99,16 +98,13 @@ async function detectHandler(request: Request) {
       reference,
       arcTxHash,
       sourceChain,
-      settlementType: "CCTP_V2_MANUAL_DETECT",
+      settlementType: 'CCTP_V2_MANUAL_DETECT',
       explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
       message: `USDC auto-routed from ${sourceChain} to Arc Testnet via CCTP V2.`,
     });
   } catch (error: any) {
-    console.error("Detect route error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('Detect route error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

@@ -1,6 +1,6 @@
 //src\app\api\agent\checkout\route.ts
-import { NextResponse } from "next/server";
-import { executeAgentPayment } from "@/services/agentPayService";
+import { NextResponse } from 'next/server';
+import { executeAgentPayment } from '@/services/agentPayService';
 
 export async function POST(request: Request) {
   try {
@@ -9,7 +9,7 @@ export async function POST(request: Request) {
 
     if (!merchantAddress || !amountInUSDC || !paymentReference) {
       return NextResponse.json(
-        { success: false, error: "Missing required agent payload fields." },
+        { success: false, error: 'Missing required agent payload fields.' },
         { status: 400 }
       );
     }
@@ -19,12 +19,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "ArcFlare Agent loop spawned. Check persistent connection log to approve."
+      message: 'ArcFlare Agent loop spawned. Check persistent connection log to approve.',
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

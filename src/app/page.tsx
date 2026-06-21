@@ -1,12 +1,11 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import Image from "next/image";
+import Link from 'next/link';
+import Image from 'next/image';
 
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-[#120b08] text-white">
-
       {/* NAVBAR */}
       <nav className="border-b border-[#2a1d16]">
         <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
@@ -19,12 +18,18 @@ export default function HomePage() {
             <Link href="/checkout" className="text-sm text-gray-400 hover:text-cyan-300 transition">
               Demo Checkout
             </Link>
-            <Link href="/dashboard" className="text-sm text-gray-400 hover:text-cyan-300 transition">
+            <Link
+              href="/dashboard"
+              className="text-sm text-gray-400 hover:text-cyan-300 transition"
+            >
               Admin
             </Link>
 
             <div className="flex items-center gap-3 border-l border-[#3a2a22] pl-6">
-              <Link href="/merchant/login" className="text-sm text-gray-300 hover:text-white transition">
+              <Link
+                href="/merchant/login"
+                className="text-sm text-gray-300 hover:text-white transition"
+              >
                 Log in
               </Link>
               <Link
@@ -50,9 +55,9 @@ export default function HomePage() {
           </h1>
 
           <p className="text-xl text-gray-400 leading-relaxed mb-10">
-            ArcFlare lets merchants accept USDC payments through hosted checkout links,
-            and enables AI agents to transact autonomously — with streaming payments,
-            escrow, and micro-billing built in.
+            ArcFlare lets merchants accept USDC payments through hosted checkout links, and enables
+            AI agents to transact autonomously — with streaming payments, escrow, and micro-billing
+            built in.
           </p>
 
           <div className="flex flex-wrap gap-5">
@@ -85,12 +90,27 @@ export default function HomePage() {
 
           <div className="space-y-4">
             {[
-              { title: "Hosted Checkout", desc: "Shareable payment links for any amount", status: "Live" },
-              { title: "Payment Streaming", desc: "USDC drips per second to receivers", status: "Live" },
-              { title: "Escrow", desc: "Trustless USDC escrow via smart contract", status: "Live" },
-              { title: "Agent M2M Payments", desc: "Autonomous micro-billing between AI agents", status: "Live" },
+              {
+                title: 'Hosted Checkout',
+                desc: 'Shareable payment links for any amount',
+                status: 'Live',
+              },
+              {
+                title: 'Payment Streaming',
+                desc: 'USDC drips per second to receivers',
+                status: 'Live',
+              },
+              { title: 'Escrow', desc: 'Trustless USDC escrow via smart contract', status: 'Live' },
+              {
+                title: 'Agent M2M Payments',
+                desc: 'Autonomous micro-billing between AI agents',
+                status: 'Live',
+              },
             ].map((item, i) => (
-              <div key={i} className="bg-[#241913] rounded-2xl p-4 flex items-center justify-between">
+              <div
+                key={i}
+                className="bg-[#241913] rounded-2xl p-4 flex items-center justify-between"
+              >
                 <div>
                   <p className="font-semibold text-sm">{item.title}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{item.desc}</p>
@@ -104,32 +124,37 @@ export default function HomePage() {
 
       {/* HOW IT WORKS */}
       <section className="max-w-7xl mx-auto px-6 pb-16">
-        <h2 className="text-3xl font-bold mb-12 text-center">For merchants. For agents. For developers.</h2>
+        <h2 className="text-3xl font-bold mb-12 text-center">
+          For merchants. For agents. For developers.
+        </h2>
         <div className="grid md:grid-cols-3 gap-8">
           {[
             {
-              icon: "🏪",
-              title: "Merchants",
-              desc: "Sign up, get an API key, and generate payment links in seconds. Customers pay in USDC — you receive it on Arc.",
-              cta: "Create account",
-              href: "/merchant/signup",
+              icon: '🏪',
+              title: 'Merchants',
+              desc: 'Sign up, get an API key, and generate payment links in seconds. Customers pay in USDC — you receive it on Arc.',
+              cta: 'Create account',
+              href: '/merchant/signup',
             },
             {
-              icon: "🤖",
-              title: "AI Agents",
-              desc: "Deploy ERC-8004 identity wallets and pay other agents per API call, per second, or per task — fully autonomous.",
-              cta: "View API docs",
-              href: "/docs/agents",
+              icon: '🤖',
+              title: 'AI Agents',
+              desc: 'Deploy ERC-8004 identity wallets and pay other agents per API call, per second, or per task — fully autonomous.',
+              cta: 'View API docs',
+              href: '/docs/agents',
             },
             {
-              icon: "⚡",
-              title: "Developers",
-              desc: "Integrate ArcFlare APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.",
-              cta: "Read the docs",
-              href: "/docs",
+              icon: '⚡',
+              title: 'Developers',
+              desc: 'Integrate ArcFlare APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.',
+              cta: 'Read the docs',
+              href: '/docs',
             },
           ].map((card, i) => (
-            <div key={i} className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 flex flex-col hover:border-cyan-900/50 transition duration-300">
+            <div
+              key={i}
+              className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 flex flex-col hover:border-cyan-900/50 transition duration-300"
+            >
               <div className="text-4xl mb-4">{card.icon}</div>
               <h3 className="text-xl font-bold mb-3">{card.title}</h3>
               <p className="text-gray-400 leading-relaxed flex-1">{card.desc}</p>
@@ -152,10 +177,18 @@ export default function HomePage() {
             <span className="text-gray-500 text-sm">ArcFlare — Built on Arc Testnet</span>
           </div>
           <div className="flex gap-6 text-sm text-gray-500">
-            <Link href="/merchant/signup" className="hover:text-white transition">Sign Up</Link>
-            <Link href="/merchant/login" className="hover:text-white transition">Login</Link>
-            <Link href="/checkout" className="hover:text-white transition">Demo</Link>
-            <Link href="/dashboard" className="hover:text-white transition">Admin</Link>
+            <Link href="/merchant/signup" className="hover:text-white transition">
+              Sign Up
+            </Link>
+            <Link href="/merchant/login" className="hover:text-white transition">
+              Login
+            </Link>
+            <Link href="/checkout" className="hover:text-white transition">
+              Demo
+            </Link>
+            <Link href="/dashboard" className="hover:text-white transition">
+              Admin
+            </Link>
           </div>
         </div>
       </footer>

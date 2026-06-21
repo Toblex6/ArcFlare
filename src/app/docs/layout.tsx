@@ -1,18 +1,14 @@
-import Link from "next/link";
-import Image from "next/image";
+import Link from 'next/link';
+import Image from 'next/image';
 
 const docsLinks = [
-  { href: "/docs", label: "Overview" },
-  { href: "/docs/api", label: "API Reference" },
-  { href: "/docs/merchant", label: "Merchant Guide" },
-  { href: "/docs/agents", label: "Agent Guide" },
+  { href: '/docs', label: 'Overview' },
+  { href: '/docs/api', label: 'API Reference' },
+  { href: '/docs/merchant', label: 'Merchant Guide' },
+  { href: '/docs/agents', label: 'Agent Guide' },
 ];
 
-export default function DocsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#120b08] text-white">
       <div className="border-b border-[#2a1d16] bg-[#120b08]/95">
@@ -60,9 +56,7 @@ export default function DocsLayout({
           </div>
         </aside>
 
-        <main className="min-w-0">
-          {children}
-        </main>
+        <main className="min-w-0">{children}</main>
       </div>
     </div>
   );

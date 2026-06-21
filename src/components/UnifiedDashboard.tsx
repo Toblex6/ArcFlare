@@ -46,7 +46,7 @@ export default function StreamingPaymentForm({ senderSCA }: StreamFormProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const amount = parseFloat(formData.amountPerMonth);
     const duration = parseInt(formData.durationMonths, 10);
 

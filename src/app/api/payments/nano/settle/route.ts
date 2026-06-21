@@ -2,28 +2,28 @@
 // 📦 MERGED NANO SETTLEMENT ROUTE
 // Combines On-chain USDC movement with robust validation and rate limiting.
 
-import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "crypto";
-import { prisma } from "@/src/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
-import { checkRateLimit } from "@/lib/ratelimit";
-import { parseBody, NanoSettleSchema } from "@/lib/validation";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
+import { prisma } from '@/src/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { checkRateLimit } from '@/lib/ratelimit';
+import { parseBody, NanoSettleSchema } from '@/lib/validation';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import {
   getUnsettledPairs,
   getBatchSummary,
   NANO_BATCH_THRESHOLD_USDC,
-} from "@/src/lib/nanopayment";
+} from '@/src/lib/nanopayment';
 
 // ── Constants & Types ────────────────────────────────────────────────────────
-const USDC_ARC = "0x3600000000000000000000000000000000000000";
-const DEFAULT_PAYER_SCA = "0x7a8214dad7630a7a39054e0121acdbc7a65821c9";
-const DEFAULT_PAYER_WALLET_ID = "58ab0223-cad0-5128-896e-a88d6f217b43";
+const USDC_ARC = '0x3600000000000000000000000000000000000000';
+const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
+const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
 
 class CircleTxFailedError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "CircleTxFailedError";
+    this.name = 'CircleTxFailedError';
   }
 }
 
@@ -40,24 +40,25 @@ async function waitForCircleTx(client: any, txId: string) {
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) return data.transaction.txHash;
-    
-    if (data?.transaction?.state === "FAILED") {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash)
+      return data.transaction.txHash;
+
+    if (data?.transaction?.state === 'FAILED') {
       throw new CircleTxFailedError(`Circle tx failed: ${data.transaction.errorReason}`);
     }
   }
-  throw new Error("Circle transaction timed out.");
+  throw new Error('Circle transaction timed out.');
 }
 
 async function fireWebhook(url: string, payload: object) {
   try {
     await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
   } catch (err: any) {
-    console.error("Webhook delivery failed:", err.message);
+    console.error('Webhook delivery failed:', err.message);
   }
 }
 
@@ -66,23 +67,23 @@ async function fireWebhook(url: string, payload: object) {
 async function recoverStaleLocks(agentSCA: string, merchantSCA: string) {
   const staleLogs = await prisma.paymentLog.findMany({
     where: {
-      status: "PENDING",
-      senderEmail: "nano-batch-system",
+      status: 'PENDING',
+      senderEmail: 'nano-batch-system',
       agentSCA,
       merchant: merchantSCA,
-      createdAt: { lt: new Date(Date.now() - 5 * 60 * 1000) }
-    }
+      createdAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
+    },
   });
 
   for (const stale of staleLogs) {
     await prisma.$transaction(async (tx) => {
       await tx.nanoPayment.updateMany({
         where: { batchRef: stale.reference, agentSCA, merchantSCA, settled: false },
-        data: { batchRef: null }
+        data: { batchRef: null },
       });
       await tx.paymentLog.update({
         where: { id: stale.id },
-        data: { status: "EXPIRED" }
+        data: { status: 'EXPIRED' },
       });
     });
   }
@@ -93,33 +94,33 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
     where: {
       agentSCA,
       merchant: merchantSCA,
-      status: "SUBMITTED",
-      senderEmail: "nano-batch-system"
+      status: 'SUBMITTED',
+      senderEmail: 'nano-batch-system',
     },
     orderBy: {
-    createdAt: "asc"
-    }
+      createdAt: 'asc',
+    },
   });
 
   if (existingLog?.circleTxId) {
     const circleClient = getCircleClient();
     try {
       const txHash = await waitForCircleTx(circleClient, existingLog.circleTxId);
-      
+
       await prisma.$transaction(async (tx) => {
         await tx.nanoPayment.updateMany({
-          where: { 
-            batchRef: existingLog.reference, 
-            agentSCA, 
-            merchantSCA, 
-            settled: false 
+          where: {
+            batchRef: existingLog.reference,
+            agentSCA,
+            merchantSCA,
+            settled: false,
           },
-          data: { settled: true }
+          data: { settled: true },
         });
-        
+
         await tx.paymentLog.updateMany({
-          where: { id: existingLog.id, status: "SUBMITTED" },
-          data: { status: "SETTLED", arcTxHash: txHash }
+          where: { id: existingLog.id, status: 'SUBMITTED' },
+          data: { status: 'SETTLED', arcTxHash: txHash },
         });
       });
 
@@ -129,18 +130,18 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
         explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
         resumed: true,
         total: existingLog.amount,
-        count: 0
+        count: 0,
       };
     } catch (error: any) {
-      if (error.name === "CircleTxFailedError") {
+      if (error.name === 'CircleTxFailedError') {
         await prisma.$transaction(async (tx) => {
           await tx.nanoPayment.updateMany({
             where: { batchRef: existingLog.reference, agentSCA, merchantSCA, settled: false },
-            data: { batchRef: null }
+            data: { batchRef: null },
           });
           await tx.paymentLog.update({
             where: { id: existingLog.id },
-            data: { status: "FAILED" }
+            data: { status: 'FAILED' },
           });
         });
       }
@@ -150,13 +151,9 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
   return null;
 }
 
-async function settleOnchain(
-  agentSCA: string,
-  merchantSCA: string,
-  webhookUrl?: string
-) {
+async function settleOnchain(agentSCA: string, merchantSCA: string, webhookUrl?: string) {
   await recoverStaleLocks(agentSCA, merchantSCA);
-  
+
   const resumedTx = await resumeExistingTransaction(agentSCA, merchantSCA);
   if (resumedTx) return resumedTx;
 
@@ -186,19 +183,19 @@ async function settleOnchain(
     });
 
     const lockedTotal = lockedRows.reduce((sum, n) => sum + n.amount, 0);
-    
+
     if (lockedRows.length > 0) {
       await tx.paymentLog.create({
         data: {
           reference: batchRef,
           amount: lockedTotal,
-          currency: "USDC",
-          chain: "ARC-TESTNET",
-          senderEmail: "nano-batch-system",
+          currency: 'USDC',
+          chain: 'ARC-TESTNET',
+          senderEmail: 'nano-batch-system',
           merchant: merchantSCA,
           agentSCA: agentSCA,
-          status: "PENDING"
-        }
+          status: 'PENDING',
+        },
       });
     }
 
@@ -206,7 +203,7 @@ async function settleOnchain(
   });
 
   if (count === 0 || total <= 0) {
-    throw new Error("No pending payments found or already settling.");
+    throw new Error('No pending payments found or already settling.');
   }
 
   const amountStr = total.toFixed(6);
@@ -216,20 +213,20 @@ async function settleOnchain(
   try {
     transferTx = await circleClient.createTransaction({
       walletId: payerWalletId,
-      blockchain: "ARC-TESTNET",
+      blockchain: 'ARC-TESTNET',
       tokenAddress: USDC_ARC,
       destinationAddress: merchantSCA,
       amounts: [amountStr],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
   } catch (nativeError: any) {
     transferTx = await circleClient.createContractExecutionTransaction({
-      walletId: payerWalletId, 
-      blockchain: "ARC-TESTNET",
+      walletId: payerWalletId,
+      blockchain: 'ARC-TESTNET',
       contractAddress: USDC_ARC,
-      abiFunctionSignature: "transfer(address,uint256)",
+      abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [merchantSCA, amountScaled],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
   }
 
@@ -237,20 +234,20 @@ async function settleOnchain(
     await prisma.$transaction(async (tx) => {
       await tx.nanoPayment.updateMany({
         where: { batchRef, agentSCA, merchantSCA, settled: false },
-        data: { batchRef: null }
+        data: { batchRef: null },
       });
       await tx.paymentLog.updateMany({
         where: { reference: batchRef },
-        data: { status: "FAILED" }
+        data: { status: 'FAILED' },
       });
     });
-    throw new Error("Circle transfer failed to initiate on both native and ERC20 routes.");
+    throw new Error('Circle transfer failed to initiate on both native and ERC20 routes.');
   }
 
   await prisma.paymentLog.updateMany({
     where: { reference: batchRef },
     data: {
-      status: "SUBMITTED",
+      status: 'SUBMITTED',
       circleTxId: transferTx.data.id,
     },
   });
@@ -266,13 +263,13 @@ async function settleOnchain(
       });
       await tx.paymentLog.updateMany({
         where: { reference: batchRef },
-        data: { status: "SETTLED", arcTxHash: txHash }
+        data: { status: 'SETTLED', arcTxHash: txHash },
       });
     });
 
     if (webhookUrl) {
       await fireWebhook(webhookUrl, {
-        event: "nano.batch_settled",
+        event: 'nano.batch_settled',
         batchRef,
         agentSCA,
         merchantSCA,
@@ -285,17 +282,16 @@ async function settleOnchain(
     }
 
     return { batchRef, txHash, explorerUrl, total, count, resumed: false };
-    
   } catch (error: any) {
-    if (error.name === "CircleTxFailedError") {
+    if (error.name === 'CircleTxFailedError') {
       await prisma.$transaction(async (tx) => {
         await tx.nanoPayment.updateMany({
           where: { batchRef, agentSCA, merchantSCA, settled: false },
-          data: { batchRef: null }
+          data: { batchRef: null },
         });
         await tx.paymentLog.updateMany({
           where: { reference: batchRef },
-          data: { status: "FAILED" }
+          data: { status: 'FAILED' },
         });
       });
     }
@@ -307,7 +303,7 @@ async function settleOnchain(
 
 async function mergedNanoSettleHandler(request: NextRequest) {
   try {
-    const { allowed, response: limitResponse } = await checkRateLimit(request, "nano");
+    const { allowed, response: limitResponse } = await checkRateLimit(request, 'nano');
     if (!allowed) return limitResponse;
 
     const body = await request.json().catch(() => ({}));
@@ -345,22 +341,28 @@ async function mergedNanoSettleHandler(request: NextRequest) {
     }
 
     if (!agentSCA || !merchantSCA) {
-      return NextResponse.json({ success: false, error: "agentSCA and merchantSCA are required." }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'agentSCA and merchantSCA are required.' },
+        { status: 400 }
+      );
     }
 
     const preCheck = await prisma.nanoPayment.aggregate({
       _sum: { amount: true },
-      where: { agentSCA, merchantSCA, settled: false, batchRef: null }
+      where: { agentSCA, merchantSCA, settled: false, batchRef: null },
     });
-    
+
     const looseTotal = preCheck._sum.amount || 0;
 
     if (looseTotal > 0 && !forceSettle && looseTotal < NANO_BATCH_THRESHOLD_USDC) {
-      return NextResponse.json({
-        success: false,
-        error: `Threshold not reached. ${looseTotal.toFixed(6)}/${NANO_BATCH_THRESHOLD_USDC} USDC.`,
-        unsettledBalance: looseTotal,
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Threshold not reached. ${looseTotal.toFixed(6)}/${NANO_BATCH_THRESHOLD_USDC} USDC.`,
+          unsettledBalance: looseTotal,
+        },
+        { status: 400 }
+      );
     }
 
     const settlement = await settleOnchain(agentSCA, merchantSCA, webhookUrl);
@@ -371,14 +373,18 @@ async function mergedNanoSettleHandler(request: NextRequest) {
       totalSettled: parseFloat(settlement.total.toFixed(6)),
       paymentsCount: settlement.count,
     });
-
   } catch (error: any) {
-    console.error("Nano Settlement Error:", error);
-    return NextResponse.json({ 
-        success: false, 
+    console.error('Nano Settlement Error:', error);
+    return NextResponse.json(
+      {
+        success: false,
         error: error.message,
-        hint: error.message.includes("balance") ? "Fund the Agent SCA wallet with USDC on Arc Testnet." : undefined
-    }, { status: 500 });
+        hint: error.message.includes('balance')
+          ? 'Fund the Agent SCA wallet with USDC on Arc Testnet.'
+          : undefined,
+      },
+      { status: 500 }
+    );
   }
 }
 

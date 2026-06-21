@@ -3,9 +3,9 @@
 // Pairs with a cron job (Render Cron Job or external scheduler) that calls
 // POST /api/payments/scheduled/run on an interval (e.g. every hour).
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
 
 // ── POST /api/payments/scheduled — create a new recurring payment ────────────
 async function createScheduledHandler(request: Request) {
@@ -16,7 +16,7 @@ async function createScheduledHandler(request: Request) {
       receiverSCA,
       amount,
       intervalDays,
-      maxRuns,        // optional — omit for infinite recurring
+      maxRuns, // optional — omit for infinite recurring
       description,
       webhookUrl,
       startImmediately = true,
@@ -26,7 +26,7 @@ async function createScheduledHandler(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "payerSCA, receiverSCA, amount and intervalDays are required.",
+          error: 'payerSCA, receiverSCA, amount and intervalDays are required.',
         },
         { status: 400 }
       );
@@ -50,7 +50,7 @@ async function createScheduledHandler(request: Request) {
         maxRuns: maxRuns ? parseInt(maxRuns) : null,
         description: description || null,
         webhookUrl: webhookUrl || null,
-        status: "ACTIVE",
+        status: 'ACTIVE',
       },
     });
 
@@ -61,11 +61,8 @@ async function createScheduledHandler(request: Request) {
       nextStep: `This will run automatically via the scheduler. To run it manually now, call POST /api/payments/scheduled/run.`,
     });
   } catch (error: any) {
-    console.error("❌ Scheduled payment create error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('❌ Scheduled payment create error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -75,8 +72,8 @@ export const POST = withApiKey(createScheduledHandler);
 async function listScheduledHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const payerSCA = searchParams.get("payerSCA");
-    const status = searchParams.get("status");
+    const payerSCA = searchParams.get('payerSCA');
+    const status = searchParams.get('status');
 
     const where: any = {};
     if (payerSCA) where.payerSCA = payerSCA;
@@ -84,7 +81,7 @@ async function listScheduledHandler(request: Request) {
 
     const schedules = await (prisma as any).scheduledPayment.findMany({
       where,
-      orderBy: { nextRunAt: "asc" },
+      orderBy: { nextRunAt: 'asc' },
     });
 
     return NextResponse.json({
@@ -93,10 +90,7 @@ async function listScheduledHandler(request: Request) {
       scheduledPayments: schedules,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
@@ -109,14 +103,14 @@ async function cancelScheduledHandler(request: Request) {
 
     if (!reference) {
       return NextResponse.json(
-        { success: false, error: "reference is required." },
+        { success: false, error: 'reference is required.' },
         { status: 400 }
       );
     }
 
     const updated = await (prisma as any).scheduledPayment.update({
       where: { reference },
-      data: { status: "CANCELLED" },
+      data: { status: 'CANCELLED' },
     });
 
     return NextResponse.json({
@@ -125,10 +119,7 @@ async function cancelScheduledHandler(request: Request) {
       message: `Scheduled payment ${reference} cancelled.`,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

@@ -13,29 +13,33 @@ export default function DocsPage() {
       <section className="mb-12">
         <h2 className="text-2xl font-bold border-l-4 border-blue-500 pl-4">Overview</h2>
         <p>
-          ArcFlare is a full-stack stablecoin payment infrastructure platform
-          built on the Arc blockchain.
+          ArcFlare is a full-stack stablecoin payment infrastructure platform built on the Arc
+          blockchain.
         </p>
         <p>
-          It enables merchants, developers, and autonomous AI agents to send,
-          receive, escrow, settle, and automate USDC payments through a unified
-          API layer powered by Circle infrastructure and Arc's deterministic
-          finality.
+          It enables merchants, developers, and autonomous AI agents to send, receive, escrow,
+          settle, and automate USDC payments through a unified API layer powered by Circle
+          infrastructure and Arc's deterministic finality.
         </p>
       </section>
 
       <section className="mb-12">
-        <h2 className="text-2xl font-bold border-l-4 border-blue-500 pl-4">Core Value Proposition</h2>
+        <h2 className="text-2xl font-bold border-l-4 border-blue-500 pl-4">
+          Core Value Proposition
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 not-prose">
           {[
-            "Generate shareable USDC checkout links with a single API call",
-            "Deploy ERC-8004 agents with Circle SCA wallets",
-            "Route USDC across chains using Circle CCTP V2",
-            "Create trustless escrows",
-            "Stream payments in real time",
-            "Enable high-frequency nanopayments",
+            'Generate shareable USDC checkout links with a single API call',
+            'Deploy ERC-8004 agents with Circle SCA wallets',
+            'Route USDC across chains using Circle CCTP V2',
+            'Create trustless escrows',
+            'Stream payments in real time',
+            'Enable high-frequency nanopayments',
           ].map((feature, i) => (
-            <div key={i} className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 text-zinc-300 text-sm">
+            <div
+              key={i}
+              className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800 text-zinc-300 text-sm"
+            >
               {feature}
             </div>
           ))}
@@ -61,7 +65,9 @@ export default function DocsPage() {
               </tr>
               <tr>
                 <td className="py-3 font-medium text-zinc-500">RPC</td>
-                <td className="py-3 font-mono text-xs break-all text-zinc-400">https://rpc.testnet.arc.network</td>
+                <td className="py-3 font-mono text-xs break-all text-zinc-400">
+                  https://rpc.testnet.arc.network
+                </td>
               </tr>
             </tbody>
           </table>
@@ -79,12 +85,12 @@ export default function DocsPage() {
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {[
-              { l: "Frontend", t: "Next.js 16" },
-              { l: "Backend", t: "Next.js API Routes" },
-              { l: "Database", t: "PostgreSQL + Prisma" },
-              { l: "Blockchain", t: "Arc Testnet" },
-              { l: "Payments", t: "Circle Developer Platform" },
-              { l: "Contracts", t: "Solidity 0.8.20" },
+              { l: 'Frontend', t: 'Next.js 16' },
+              { l: 'Backend', t: 'Next.js API Routes' },
+              { l: 'Database', t: 'PostgreSQL + Prisma' },
+              { l: 'Blockchain', t: 'Arc Testnet' },
+              { l: 'Payments', t: 'Circle Developer Platform' },
+              { l: 'Contracts', t: 'Solidity 0.8.20' },
             ].map((item, i) => (
               <tr key={i}>
                 <td className="py-3 text-zinc-300 font-medium">{item.l}</td>

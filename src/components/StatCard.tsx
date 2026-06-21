@@ -16,9 +16,7 @@ export default function StatCard({ title, value, icon }: StatCardProps) {
           <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
         </div>
         {/* Changed to a flex div to keep SVGs and emojis uniformly aligned */}
-        <div className="text-3xl flex items-center justify-center text-gray-500">
-          {icon}
-        </div>
+        <div className="text-3xl flex items-center justify-center text-gray-500">{icon}</div>
       </div>
     </div>
   );

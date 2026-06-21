@@ -2,43 +2,41 @@
 // Creates a trustless escrow on Arc Testnet using Circle SCA wallet
 // and the ArcFlareEscrow contract. Funds locked in smart contract.
 
-import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { withApiKey } from "@/src/lib/middleware/withApiKey";
-import {
-  initiateDeveloperControlledWalletsClient,
-} from "@circle-fin/developer-controlled-wallets";
-import { createPublicClient, http, parseUnits, encodeFunctionData } from "viem";
-import { arcTestnet } from "viem/chains";
+import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createPublicClient, http, parseUnits, encodeFunctionData } from 'viem';
+import { arcTestnet } from 'viem/chains';
 
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || "";
-const USDC_ARC = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+const USDC_ARC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
 
 const ESCROW_ABI = [
   {
-    name: "createEscrow",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'createEscrow',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "beneficiary", type: "address" },
-      { name: "amount", type: "uint256" },
-      { name: "deadlineSeconds", type: "uint256" },
-      { name: "reference", type: "string" },
+      { name: 'beneficiary', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'deadlineSeconds', type: 'uint256' },
+      { name: 'reference', type: 'string' },
     ],
-    outputs: [{ name: "escrowId", type: "bytes32" }],
+    outputs: [{ name: 'escrowId', type: 'bytes32' }],
   },
 ] as const;
 
 const ERC20_ABI = [
   {
-    name: "approve",
-    type: "function",
-    stateMutability: "nonpayable",
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
     inputs: [
-      { name: "spender", type: "address" },
-      { name: "amount", type: "uint256" },
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
     ],
-    outputs: [{ name: "", type: "bool" }],
+    outputs: [{ name: '', type: 'bool' }],
   },
 ] as const;
 
@@ -57,38 +55,41 @@ async function waitForCircleTx(
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === "FAILED") {
-      throw new Error("Circle transaction failed onchain.");
+    if (data?.transaction?.state === 'FAILED') {
+      throw new Error('Circle transaction failed onchain.');
     }
   }
-  throw new Error("Circle transaction polling timed out.");
+  throw new Error('Circle transaction polling timed out.');
 }
 
 async function createEscrowHandler(request: Request) {
   try {
     const {
-      depositorSCA,      // Circle SCA wallet address of depositor
+      depositorSCA, // Circle SCA wallet address of depositor
       depositorWalletId, // Circle wallet ID of depositor
-      beneficiarySCA,    // Recipient SCA wallet address
-      amount,            // USDC amount as string e.g. "1.00"
-      deadlineHours,     // Hours until escrow expires e.g. 24
-      condition,         // Human readable condition e.g. "Deliver API data"
+      beneficiarySCA, // Recipient SCA wallet address
+      amount, // USDC amount as string e.g. "1.00"
+      deadlineHours, // Hours until escrow expires e.g. 24
+      condition, // Human readable condition e.g. "Deliver API data"
       webhookUrl,
     } = await request.json();
 
     if (!depositorSCA || !depositorWalletId || !beneficiarySCA || !amount) {
       return NextResponse.json(
-        { success: false, error: "depositorSCA, depositorWalletId, beneficiarySCA and amount are required." },
+        {
+          success: false,
+          error: 'depositorSCA, depositorWalletId, beneficiarySCA and amount are required.',
+        },
         { status: 400 }
       );
     }
 
     if (!ESCROW_CONTRACT) {
       return NextResponse.json(
-        { success: false, error: "ARCFLARE_ESCROW_CONTRACT_ADDRESS not set in environment." },
+        { success: false, error: 'ARCFLARE_ESCROW_CONTRACT_ADDRESS not set in environment.' },
         { status: 500 }
       );
     }
@@ -101,29 +102,29 @@ async function createEscrowHandler(request: Request) {
     // ── Step 1: Approve escrow contract to spend USDC ─────────────────────
     const approveTx = await circleClient.createContractExecutionTransaction({
       walletAddress: depositorSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: USDC_ARC,
-      abiFunctionSignature: "approve(address,uint256)",
+      abiFunctionSignature: 'approve(address,uint256)',
       abiParameters: [ESCROW_CONTRACT, amountWei.toString()],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
     await waitForCircleTx(circleClient, approveTx.data?.id!);
-    console.log("✅ USDC approval confirmed");
+    console.log('✅ USDC approval confirmed');
 
     // ── Step 2: Create escrow on Arc ──────────────────────────────────────
     const escrowTx = await circleClient.createContractExecutionTransaction({
       walletAddress: depositorSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: 'ARC-TESTNET' as any,
       contractAddress: ESCROW_CONTRACT,
-      abiFunctionSignature: "createEscrow(address,uint256,uint256,string)",
+      abiFunctionSignature: 'createEscrow(address,uint256,uint256,string)',
       abiParameters: [
         beneficiarySCA,
         amountWei.toString(),
         deadlineTimestamp.toString(),
         reference,
       ],
-      fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
     const escrowTxHash = await waitForCircleTx(circleClient, escrowTx.data?.id!);
@@ -134,11 +135,11 @@ async function createEscrowHandler(request: Request) {
       data: {
         reference,
         amount: parseFloat(amount),
-        currency: "USDC",
+        currency: 'USDC',
         depositorSCA,
         beneficiarySCA,
         contractAddress: ESCROW_CONTRACT,
-        status: "ACTIVE",
+        status: 'ACTIVE',
         condition: condition || null,
         deadline: new Date(deadlineTimestamp * 1000),
         txHash: escrowTxHash,
@@ -154,11 +155,8 @@ async function createEscrowHandler(request: Request) {
       message: `Escrow created — ${amount} USDC locked in ArcFlareEscrow contract on Arc Testnet.`,
     });
   } catch (error: any) {
-    console.error("Escrow create error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('Escrow create error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 

@@ -1,29 +1,29 @@
-"use client"; //
-import React, { useState, CSSProperties } from "react";
+'use client'; //
+import React, { useState, CSSProperties } from 'react';
 
 interface Category {
-  id: "bug" | "feature" | "ux" | "praise" | "other";
+  id: 'bug' | 'feature' | 'ux' | 'praise' | 'other';
   emoji: string;
   label: string;
 }
 
 const CATEGORIES: Category[] = [
-  { id: "bug",     emoji: "🪲", label: "Bug Report" },
-  { id: "feature", emoji: "💡", label: "Feature Request" },
-  { id: "ux",      emoji: "🎨", label: "UI / UX Feedback" },
-  { id: "praise",  emoji: "⭐", label: "Praise" },
-  { id: "other",   emoji: "💬", label: "Other" },
+  { id: 'bug', emoji: '🪲', label: 'Bug Report' },
+  { id: 'feature', emoji: '💡', label: 'Feature Request' },
+  { id: 'ux', emoji: '🎨', label: 'UI / UX Feedback' },
+  { id: 'praise', emoji: '⭐', label: 'Praise' },
+  { id: 'other', emoji: '💬', label: 'Other' },
 ];
 
 export default function FlowFiFeedback() {
-  const [open, setOpen]         = useState<boolean>(false);
-  const [category, setCategory] = useState<Category["id"]>("feature");
-  const [rating, setRating]     = useState<number>(0);
-  const [hovered, setHovered]   = useState<number>(0);
-  const [message, setMessage]   = useState<string>("");
-  const [email, setEmail]       = useState<string>("");
-  const [sent, setSent]         = useState<boolean>(false);
-  const [sending, setSending]   = useState<boolean>(false);
+  const [open, setOpen] = useState<boolean>(false);
+  const [category, setCategory] = useState<Category['id']>('feature');
+  const [rating, setRating] = useState<number>(0);
+  const [hovered, setHovered] = useState<number>(0);
+  const [message, setMessage] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
+  const [sent, setSent] = useState<boolean>(false);
+  const [sending, setSending] = useState<boolean>(false);
 
   const handleSubmit = async (): Promise<void> => {
     if (!message.trim()) return;
@@ -39,7 +39,7 @@ export default function FlowFiFeedback() {
       await new Promise((r) => setTimeout(r, 900)); // simulates network delay
       setSent(true);
     } catch (error) {
-      console.error("Failed to submit feedback:", error);
+      console.error('Failed to submit feedback:', error);
     } finally {
       setSending(false);
     }
@@ -49,22 +49,18 @@ export default function FlowFiFeedback() {
     setOpen(false);
     setTimeout(() => {
       setSent(false);
-      setCategory("feature");
+      setCategory('feature');
       setRating(0);
       setHovered(0);
-      setMessage("");
-      setEmail("");
+      setMessage('');
+      setEmail('');
     }, 300);
   };
 
   return (
     <>
       {/* ── Floating trigger button ── */}
-      <button
-        onClick={() => setOpen(true)}
-        style={styles.fab}
-        aria-label="Send Feedback"
-      >
+      <button onClick={() => setOpen(true)} style={styles.fab} aria-label="Send Feedback">
         💬
       </button>
 
@@ -101,11 +97,7 @@ export default function FlowFiFeedback() {
                       Send Feedback
                     </h2>
                   </div>
-                  <button
-                    style={styles.xBtn}
-                    onClick={handleClose}
-                    aria-label="Close"
-                  >
+                  <button style={styles.xBtn} onClick={handleClose} aria-label="Close">
                     ×
                   </button>
                 </div>
@@ -138,12 +130,12 @@ export default function FlowFiFeedback() {
                       key={n}
                       style={{
                         ...styles.star,
-                        color: n <= (hovered || rating) ? "#c8f135" : "#3a4a3a",
+                        color: n <= (hovered || rating) ? '#c8f135' : '#3a4a3a',
                       }}
                       onMouseEnter={() => setHovered(n)}
                       onMouseLeave={() => setHovered(0)}
                       onClick={() => setRating(n)}
-                      aria-label={`Rate ${n} star${n > 1 ? "s" : ""}`}
+                      aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`}
                     >
                       ★
                     </button>
@@ -152,21 +144,23 @@ export default function FlowFiFeedback() {
 
                 {/* ── Message Textarea ── */}
                 <label style={styles.label}>
-                  YOUR MESSAGE <span style={{ color: "#c8f135" }}>*</span>
+                  YOUR MESSAGE <span style={{ color: '#c8f135' }}>*</span>
                 </label>
                 <textarea
                   style={styles.textarea}
                   placeholder="Tell us what you think, what broke, or what you wish existed..."
                   maxLength={1000}
                   value={message}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setMessage(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setMessage(e.target.value)
+                  }
                 />
                 <p style={styles.charCount}>{message.length}/1000</p>
 
                 {/* ── Email Field ── */}
                 <label style={styles.label}>
-                  EMAIL{" "}
-                  <span style={{ color: "#5a7a5a", fontWeight: 400 }}>
+                  EMAIL{' '}
+                  <span style={{ color: '#5a7a5a', fontWeight: 400 }}>
                     (optional — for follow-up)
                   </span>
                 </label>
@@ -183,16 +177,12 @@ export default function FlowFiFeedback() {
                   style={{
                     ...styles.submitBtn,
                     opacity: !message.trim() || sending ? 0.5 : 1,
-                    cursor: !message.trim() || sending ? "not-allowed" : "pointer",
+                    cursor: !message.trim() || sending ? 'not-allowed' : 'pointer',
                   }}
                   onClick={handleSubmit}
                   disabled={!message.trim() || sending}
                 >
-                  {sending ? (
-                    <span style={styles.spinner} />
-                  ) : (
-                    <>✈ Send Feedback</>
-                  )}
+                  {sending ? <span style={styles.spinner} /> : <>✈ Send Feedback</>}
                 </button>
               </>
             )}
@@ -217,219 +207,219 @@ export default function FlowFiFeedback() {
 /* ── Inline FlowFi Themed Layout Styles ────────────────────────────────── */
 const styles: Record<string, CSSProperties> = {
   fab: {
-    position: "fixed",
+    position: 'fixed',
     bottom: 24,
     right: 24,
     zIndex: 999999, // Unbreakable z-index layer so it floats above everything
     width: 52,
     height: 52,
-    borderRadius: "50%",
-    background: "linear-gradient(135deg, #c8f135 0%, #7ec800 100%)",
-    border: "none",
-    cursor: "pointer",
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #c8f135 0%, #7ec800 100%)',
+    border: 'none',
+    cursor: 'pointer',
     fontSize: 22,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    boxShadow: "0 0 0 4px rgba(200,241,53,0.15), 0 4px 20px rgba(0,0,0,0.4)",
-    transition: "transform 0.2s ease",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 0 0 4px rgba(200,241,53,0.15), 0 4px 20px rgba(0,0,0,0.4)',
+    transition: 'transform 0.2s ease',
   },
   backdrop: {
-    position: "fixed",
+    position: 'fixed',
     inset: 0,
     zIndex: 1000000, // Sits exactly on top of the button layer when active
-    background: "rgba(0,0,0,0.65)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    background: 'rgba(0,0,0,0.65)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 16,
   },
   modal: {
-    background: "#141f14",
-    border: "1px solid #2a3d2a",
+    background: '#141f14',
+    border: '1px solid #2a3d2a',
     borderRadius: 16,
-    padding: "28px 28px 24px",
-    width: "100%",
+    padding: '28px 28px 24px',
+    width: '100%',
     maxWidth: 460,
-    boxShadow: "0 24px 64px rgba(0,0,0,0.7)",
-    animation: "flowfiFadeIn 0.22s ease",
-    position: "relative",
-    boxSizing: "border-box",
+    boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
+    animation: 'flowfiFadeIn 0.22s ease',
+    position: 'relative',
+    boxSizing: 'border-box',
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 20,
   },
   eyebrow: {
     fontSize: 10,
-    letterSpacing: "0.12em",
-    color: "#5a7a5a",
-    margin: "0 0 4px",
-    fontFamily: "monospace",
+    letterSpacing: '0.12em',
+    color: '#5a7a5a',
+    margin: '0 0 4px',
+    fontFamily: 'monospace',
   },
   title: {
     margin: 0,
     fontSize: 22,
     fontWeight: 700,
-    color: "#e8f5d0",
+    color: '#e8f5d0',
     fontFamily: "'Segoe UI', sans-serif",
   },
   xBtn: {
-    background: "none",
-    border: "1px solid #2a3d2a",
-    color: "#5a7a5a",
+    background: 'none',
+    border: '1px solid #2a3d2a',
+    color: '#5a7a5a',
     borderRadius: 8,
     width: 32,
     height: 32,
-    cursor: "pointer",
+    cursor: 'pointer',
     fontSize: 18,
     lineHeight: 1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   label: {
-    display: "block",
+    display: 'block',
     fontSize: 10,
-    letterSpacing: "0.1em",
-    color: "#5a7a5a",
-    fontFamily: "monospace",
+    letterSpacing: '0.1em',
+    color: '#5a7a5a',
+    fontFamily: 'monospace',
     fontWeight: 600,
     marginBottom: 8,
   },
   pills: {
-    display: "flex",
-    flexWrap: "wrap",
+    display: 'flex',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 20,
   },
   pill: {
-    padding: "6px 12px",
+    padding: '6px 12px',
     borderRadius: 999,
-    border: "1px solid #2a3d2a",
-    background: "#1a2a1a",
-    color: "#8aaa6a",
+    border: '1px solid #2a3d2a',
+    background: '#1a2a1a',
+    color: '#8aaa6a',
     fontSize: 13,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    transition: "all 0.15s ease",
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    transition: 'all 0.15s ease',
   },
   pillActive: {
-    background: "rgba(200,241,53,0.15)",
-    border: "1px solid #c8f135",
-    color: "#c8f135",
+    background: 'rgba(200,241,53,0.15)',
+    border: '1px solid #c8f135',
+    color: '#c8f135',
   },
   stars: {
-    display: "flex",
+    display: 'flex',
     gap: 6,
     marginBottom: 20,
   },
   star: {
-    background: "none",
-    border: "none",
+    background: 'none',
+    border: 'none',
     fontSize: 26,
-    cursor: "pointer",
+    cursor: 'pointer',
     padding: 2,
     lineHeight: 1,
-    transition: "color 0.1s ease",
+    transition: 'color 0.1s ease',
   },
   textarea: {
-    width: "100%",
+    width: '100%',
     minHeight: 100,
-    background: "#1a2a1a",
-    border: "1px solid #2a3d2a",
+    background: '#1a2a1a',
+    border: '1px solid #2a3d2a',
     borderRadius: 10,
-    color: "#e8f5d0",
-    padding: "12px 14px",
+    color: '#e8f5d0',
+    padding: '12px 14px',
     fontSize: 14,
-    resize: "vertical",
-    fontFamily: "inherit",
-    outline: "none",
-    boxSizing: "border-box",
+    resize: 'vertical',
+    fontFamily: 'inherit',
+    outline: 'none',
+    boxSizing: 'border-box',
   },
   charCount: {
-    textAlign: "right",
+    textAlign: 'right',
     fontSize: 11,
-    color: "#3a5a3a",
-    margin: "4px 0 16px",
-    fontFamily: "monospace",
+    color: '#3a5a3a',
+    margin: '4px 0 16px',
+    fontFamily: 'monospace',
   },
   input: {
-    width: "100%",
-    background: "#1a2a1a",
-    border: "1px solid #2a3d2a",
+    width: '100%',
+    background: '#1a2a1a',
+    border: '1px solid #2a3d2a',
     borderRadius: 10,
-    color: "#e8f5d0",
-    padding: "10px 14px",
+    color: '#e8f5d0',
+    padding: '10px 14px',
     fontSize: 14,
-    fontFamily: "inherit",
-    outline: "none",
-    boxSizing: "border-box",
+    fontFamily: 'inherit',
+    outline: 'none',
+    boxSizing: 'border-box',
     marginBottom: 20,
   },
   submitBtn: {
-    width: "100%",
-    padding: "13px",
+    width: '100%',
+    padding: '13px',
     borderRadius: 10,
-    background: "linear-gradient(135deg, #1e3a1e 0%, #2a4a2a 100%)",
-    border: "1px solid #3a6a3a",
-    color: "#c8f135",
+    background: 'linear-gradient(135deg, #1e3a1e 0%, #2a4a2a 100%)',
+    border: '1px solid #3a6a3a',
+    color: '#c8f135',
     fontSize: 14,
     fontWeight: 600,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    fontFamily: "inherit",
-    transition: "opacity 0.2s ease",
+    fontFamily: 'inherit',
+    transition: 'opacity 0.2s ease',
   },
   spinner: {
     width: 16,
     height: 16,
-    border: "2px solid #3a6a3a",
-    borderTopColor: "#c8f135",
-    borderRadius: "50%",
-    display: "inline-block",
-    animation: "flowfiSpin 0.7s linear infinite",
+    border: '2px solid #3a6a3a',
+    borderTopColor: '#c8f135',
+    borderRadius: '50%',
+    display: 'inline-block',
+    animation: 'flowfiSpin 0.7s linear infinite',
   },
   successWrap: {
-    textAlign: "center",
-    padding: "16px 0",
+    textAlign: 'center',
+    padding: '16px 0',
   },
   successIcon: {
     width: 56,
     height: 56,
-    borderRadius: "50%",
-    background: "rgba(200,241,53,0.15)",
-    border: "2px solid #c8f135",
-    color: "#c8f135",
+    borderRadius: '50%',
+    background: 'rgba(200,241,53,0.15)',
+    border: '2px solid #c8f135',
+    color: '#c8f135',
     fontSize: 24,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    margin: "0 auto 16px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: '0 auto 16px',
   },
   successTitle: {
-    color: "#e8f5d0",
+    color: '#e8f5d0',
     fontSize: 20,
     fontWeight: 700,
-    margin: "0 0 8px",
+    margin: '0 0 8px',
   },
   successSub: {
-    color: "#5a7a5a",
+    color: '#5a7a5a',
     fontSize: 14,
-    margin: "0 0 24px",
+    margin: '0 0 24px',
   },
   closeBtn: {
-    padding: "10px 28px",
+    padding: '10px 28px',
     borderRadius: 10,
-    background: "rgba(200,241,53,0.15)",
-    border: "1px solid #c8f135",
-    color: "#c8f135",
+    background: 'rgba(200,241,53,0.15)',
+    border: '1px solid #c8f135',
+    color: '#c8f135',
     fontSize: 14,
-    cursor: "pointer",
-    fontFamily: "inherit",
+    cursor: 'pointer',
+    fontFamily: 'inherit',
   },
 };
