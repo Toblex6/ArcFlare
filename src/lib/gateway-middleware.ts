@@ -39,12 +39,9 @@ export function requireGatewayPayment(
               payTo: options.sellerAddress,
               asset: "USDC",
               facilitator: FACILITATOR_URL,
-              // ✅ EIP-712 domain parameters — required for signing
-              domain: {
-                name: "ArcFlare",
-                version: "1.0.0",
-                chainId: 5042002,
-              },
+              name: "ArcFlare",       // ✅ flat — not nested in domain: {}
+              version: "1.0.0",
+              chainId: 5042002,
             },
           ],
         },
