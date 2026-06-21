@@ -24,6 +24,10 @@ model PaymentLog {
   timestamp      DateTime  @default(now())
   expiresAt      DateTime?
   agentSCA       String?
+  circleTxId     String? // Circle transaction ID for debugging
+  payerSCA       String?   // explicit address of the payer
+  merchantSCA    String?   // explicit address of the merchant
+  updatedAt      DateTime?  @updatedAt   // 👈 ADD THIS LINE
 }
 
 model AgentRegistry {
