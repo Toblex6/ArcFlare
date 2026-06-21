@@ -11,17 +11,19 @@ datasource db {
 
 model PaymentLog {
   id             String    @id @default(uuid())
-  reference      String    @unique // Still serves as the target transaction reference
-  idempotencyKey String?   @unique // 👈 Added: Prevents duplicate raw API retries on initialize
+  reference      String    @unique
+  idempotencyKey String?   @unique
   amount         Float
   currency       String
   chain          String
   senderEmail    String
   merchant       String
-  status         String // PENDING, SETTLED, EXPIRED
+  status         String
   arcTxHash      String?
+  circleTxId     String?
   webhookUrl     String?
   timestamp      DateTime  @default(now())
+  updatedAt      DateTime? @updatedAt
   expiresAt      DateTime?
   agentSCA       String?
 }
@@ -36,7 +38,7 @@ model AgentRegistry {
   metadataURI    String?
   status         String
   createdAt      DateTime @default(now())
-  idempotencyKey String?  @unique // 👈 Added: Prevents duplicate deployments if agent/deploy retries on timeout
+  idempotencyKey String?  @unique // 👈 Prevents duplicate deployments if agent/deploy retries on timeout
 }
 
 model ApiKey {
@@ -60,14 +62,14 @@ model Agent {
   createdAt     DateTime @default(now())
   jobs          Job[]
 
-  // 👈 ADD THIS LINE - connects to Erc8183Job
+  // Connects to Erc8183Job
   erc8183Jobs Erc8183Job[]
 }
 
 model Escrow {
   id              String    @id @default(uuid())
   reference       String    @unique
-  idempotencyKey  String?   @unique // 👈 Added: Guarantees escrow is only provisioned once per payment intent
+  idempotencyKey  String?   @unique // 👈 Guarantees escrow is only provisioned once per payment intent
   amount          Float
   currency        String
   depositorSCA    String
@@ -82,7 +84,7 @@ model Escrow {
 model Stream {
   id               String    @id @default(uuid())
   reference        String    @unique
-  idempotencyKey   String?   @unique // 👈 Added: Protects programmable payment streams from duplicate creation loops
+  idempotencyKey   String?   @unique // 👈 Protects programmable payment streams from duplicate creation loops
   senderSCA        String
   receiverSCA      String
   ratePerSecond    Float
@@ -100,7 +102,7 @@ model Stream {
 
 model NanoPayment {
   id             String    @id @default(uuid())
-  idempotencyKey String?   @unique // 👈 Added & Required: Critical for M2M agent payments to stop double spending on failure retries
+  idempotencyKey String?   @unique // 👈 Critical for M2M agent payments to stop double spending on failure retries
   agentSCA       String
   merchantSCA    String
   amount         Float
@@ -109,7 +111,7 @@ model NanoPayment {
   settled        Boolean   @default(false)
   batchRef       String? // Tracks which block/CCTP sweep this belonged to
   createdAt      DateTime  @default(now())
-  expiresAt      DateTime? // 👈 Added: For micro-authorizations that clear out if not settled quickly
+  expiresAt      DateTime? // 👈 For micro-authorizations that clear out if not settled quickly
 }
 
 model Merchant {
@@ -136,7 +138,7 @@ model Job {
 }
 
 // ============================================
-// NEW: ERC-8183 Job Marketplace Models
+// ERC-8183 Job Marketplace Models
 // ============================================
 
 // ERC-8183 Job - Standard on-chain job marketplace
@@ -218,4 +220,45 @@ model CircleWalletSet {
   wallets CircleWallet[]
 
   @@map("circle_wallet_sets")
+}
+
+// ============================================
+// Recurring Payments + Payroll
+// ============================================
+
+model ScheduledPayment {
+  id             String    @id @default(uuid())
+  reference      String    @unique
+  idempotencyKey String?   @unique
+  payerSCA       String
+  payerWalletId  String?
+  receiverSCA    String
+  amount         Float
+  currency       String    @default("USDC")
+  intervalDays   Int // e.g. 7 for weekly, 30 for monthly
+  nextRunAt      DateTime
+  lastRunAt      DateTime?
+  runCount       Int       @default(0)
+  maxRuns        Int? // null = infinite until cancelled
+  status         String    @default("ACTIVE") // ACTIVE, PAUSED, CANCELLED, COMPLETED
+  description    String?
+  webhookUrl     String?
+  createdAt      DateTime  @default(now())
+}
+
+model PayrollBatch {
+  id             String    @id @default(uuid())
+  batchRef       String    @unique
+  payerSCA       String
+  payerWalletId  String?
+  totalAmount    Float
+  currency       String    @default("USDC")
+  recipientCount Int
+  successCount   Int       @default(0)
+  failedCount    Int       @default(0)
+  status         String    @default("PROCESSING") // PROCESSING, COMPLETED, PARTIAL_FAILURE, FAILED
+  results        Json? // array of { recipientSCA, amount, txHash, status }
+  webhookUrl     String?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
 }
