@@ -1,21 +1,9 @@
 // src/lib/gateway-middleware.ts
 // Circle Gateway Nanopayments — x402 middleware wrapper for ArcFlare endpoints
-// Replaces manual nano recording/batching with Circle's real Gateway product.
-//
-// Install first:
-//   npm install viem
-//
-// This wraps any Next.js API route handler so it requires payment via
-// the x402 protocol before running. Circle's hosted Arc Testnet facilitator
-// verifies the signed payment and queues it for Gateway batch settlement.
 
 import { NextRequest, NextResponse } from "next/server";
 
-// Arc Testnet chain identifier in eip155 format
 const ARC_TESTNET_CHAIN = "eip155:5042002";
-
-// Circle's hosted testnet facilitator — verifies x402 payments and
-// queues them for Gateway batch settlement. No infra to run yourself.
 const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
 
 export interface GatewayPaymentContext {
@@ -27,24 +15,9 @@ export interface GatewayPaymentContext {
 
 interface RequirePaymentOptions {
   sellerAddress: string;
-  priceUSDC: string; // e.g. "0.001"
+  priceUSDC: string;
 }
 
-/**
- * Wraps a Next.js route handler so it requires an x402 USDC payment
- * before executing. Returns 402 Payment Required if no valid payment
- * authorization is present on the request.
- *
- * Usage in a route file:
- *
- *   export const POST = requireGatewayPayment(
- *     { sellerAddress: process.env.SELLER_WALLET_ADDRESS!, priceUSDC: "0.001" },
- *     async (req, payment) => {
- *       // payment.payer, payment.amount, payment.transaction available here
- *       return NextResponse.json({ data: "your paid response" });
- *     }
- *   );
- */
 export function requireGatewayPayment(
   options: RequirePaymentOptions,
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
@@ -66,6 +39,11 @@ export function requireGatewayPayment(
               payTo: options.sellerAddress,
               asset: "USDC",
               facilitator: FACILITATOR_URL,
+              // ✅ EIP-712 domain parameters — required for signing
+              domain: {
+                name: "ArcFlare",
+                version: "1",
+              },
             },
           ],
         },
@@ -73,7 +51,7 @@ export function requireGatewayPayment(
       );
     }
 
-    // ── Verify the payment signature with Circle's facilitator ──────────────
+    // ── Verify the payment signature ──────────────────────────────────────────
     try {
       const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
         method: "POST",
@@ -96,7 +74,7 @@ export function requireGatewayPayment(
         );
       }
 
-      // ── Queue for Gateway batch settlement ─────────────────────────────────
+      // ── Queue for Gateway batch settlement ──────────────────────────────────
       const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -112,7 +90,6 @@ export function requireGatewayPayment(
         transaction: settleData.transaction,
       };
 
-      // ── Payment verified — run the actual handler ────────────────────────
       return await handler(req, paymentContext);
     } catch (error: any) {
       console.error("Gateway payment verification error:", error);
@@ -125,6 +102,5 @@ export function requireGatewayPayment(
 }
 
 function priceToAtomicUnits(priceUSDC: string): string {
-  // USDC has 6 decimals
   return Math.round(parseFloat(priceUSDC) * 1_000_000).toString();
 }
