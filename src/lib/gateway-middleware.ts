@@ -42,7 +42,8 @@ export function requireGatewayPayment(
               // ✅ EIP-712 domain parameters — required for signing
               domain: {
                 name: "ArcFlare",
-                version: "1",
+                version: "1.0.0",
+                chainId: 5042002,
               },
             },
           ],
