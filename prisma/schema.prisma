@@ -24,23 +24,36 @@ model PaymentLog {
   timestamp      DateTime  @default(now())
   expiresAt      DateTime?
   agentSCA       String?
-  circleTxId     String? // Circle transaction ID for debugging
-  payerSCA       String?   // explicit address of the payer
-  merchantSCA    String?   // explicit address of the merchant
-  updatedAt      DateTime?  @updatedAt   // 👈 ADD THIS LINE
+  circleTxId     String?
+  payerSCA       String?
+  merchantSCA    String?
+  updatedAt      DateTime? @updatedAt
 }
 
 model AgentRegistry {
-  id             Int      @id @default(autoincrement())
+  id             Int     @id @default(autoincrement())
   name           String
-  tokenId        String   @unique
-  scaAddress     String   @unique
+  tokenId        String  @unique
+  scaAddress     String  @unique
   circleWalletId String?
   ownerNode      String
   metadataURI    String?
   status         String
-  createdAt      DateTime @default(now())
-  idempotencyKey String?  @unique // 👈 Prevents duplicate deployments if agent/deploy retries on timeout
+
+  description  String?
+  skills       Json?
+  pricing      Json?
+  reputation   Int       @default(50)
+  lastActiveAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  idempotencyKey String? @unique
+
+  // CLEAN RELATIONS
+  agents  Agent[]
+  wallets CircleWallet[]
 }
 
 model ApiKey {
@@ -62,22 +75,24 @@ model Agent {
   capabilities  String[]
   pricePerJob   String
   createdAt     DateTime @default(now())
-  jobs          Job[]
 
-  // Connects to Erc8183Job
+  registryId Int?
+  registry   AgentRegistry? @relation(fields: [registryId], references: [id])
+
+  jobs        Job[]
   erc8183Jobs Erc8183Job[]
 }
 
 model Escrow {
   id              String    @id @default(uuid())
   reference       String    @unique
-  idempotencyKey  String?   @unique // 👈 Guarantees escrow is only provisioned once per payment intent
+  idempotencyKey  String?   @unique
   amount          Float
   currency        String
   depositorSCA    String
   beneficiarySCA  String
   contractAddress String
-  status          String // ACTIVE, RELEASED, DISPUTED
+  status          String
   condition       String?
   deadline        DateTime?
   createdAt       DateTime  @default(now())
@@ -86,34 +101,34 @@ model Escrow {
 model Stream {
   id               String    @id @default(uuid())
   reference        String    @unique
-  idempotencyKey   String?   @unique // 👈 Protects programmable payment streams from duplicate creation loops
+  idempotencyKey   String?   @unique
   senderSCA        String
   receiverSCA      String
   ratePerSecond    Float
   totalDeposited   Float
   totalStreamed    Float     @default(0)
   currency         String    @default("USDC")
-  status           String // ACTIVE, STOPPED, COMPLETED
+  status           String
   contractAddress  String
   txHash           String?
   webhookUrl       String?
   startedAt        DateTime  @default(now())
   stoppedAt        DateTime?
-  contractStreamId String? // bytes32 streamId returned by createStream()
+  contractStreamId String?
 }
 
 model NanoPayment {
   id             String    @id @default(uuid())
-  idempotencyKey String?   @unique // 👈 Critical for M2M agent payments to stop double spending on failure retries
+  idempotencyKey String?   @unique
   agentSCA       String
   merchantSCA    String
   amount         Float
   currency       String    @default("USDC")
   description    String?
   settled        Boolean   @default(false)
-  batchRef       String? // Tracks which block/CCTP sweep this belonged to
+  batchRef       String?
   createdAt      DateTime  @default(now())
-  expiresAt      DateTime? // 👈 For micro-authorizations that clear out if not settled quickly
+  expiresAt      DateTime?
 }
 
 model Merchant {
@@ -126,24 +141,17 @@ model Merchant {
   createdAt    DateTime @default(now())
 }
 
-// Your existing Job model (keep as is)
 model Job {
   id          String   @id @default(uuid())
   description String
   amount      Float
-  status      String // PENDING, COMPLETED, FAILED
+  status      String
   createdAt   DateTime @default(now())
 
-  // The relation linking this job back to a specific Agent
   agentId String
   agent   Agent  @relation(fields: [agentId], references: [id])
 }
 
-// ============================================
-// ERC-8183 Job Marketplace Models
-// ============================================
-
-// ERC-8183 Job - Standard on-chain job marketplace
 model Erc8183Job {
   id              String   @id @default(uuid())
   jobId           BigInt   @unique
@@ -161,7 +169,6 @@ model Erc8183Job {
   updatedAt       DateTime @updatedAt
   expiredAt       DateTime
 
-  // Foreign key to Agent (optional)
   agentId String?
   agent   Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
@@ -173,15 +180,14 @@ model Erc8183Job {
   @@map("erc8183_jobs")
 }
 
-// ERC-8183 Job Events - For audit trail
 model Erc8183JobEvent {
   id          String   @id @default(uuid())
-  jobId       BigInt // Reference to the job
-  eventType   String // JobCreated, JobFunded, JobSubmitted, JobCompleted, JobRejected
-  txHash      String // Transaction hash
-  blockNumber BigInt? // Block number
+  jobId       BigInt
+  eventType   String
+  txHash      String
+  blockNumber BigInt?
   timestamp   DateTime @default(now())
-  data        Json? // Additional event data (amount, deliverable, reason, etc.)
+  data        Json?
 
   @@index([jobId])
   @@index([eventType])
@@ -189,7 +195,6 @@ model Erc8183JobEvent {
   @@map("erc8183_job_events")
 }
 
-// Circle Wallet - Track developer-controlled wallets
 model CircleWallet {
   id          String    @id @default(uuid())
   walletId    String    @unique
@@ -202,8 +207,9 @@ model CircleWallet {
   createdAt   DateTime  @default(now())
   lastUsedAt  DateTime?
 
-  // Relation to WalletSet
-  walletSet CircleWalletSet? @relation(fields: [walletSetId], references: [walletSetId])
+  walletSet       CircleWalletSet? @relation(fields: [walletSetId], references: [walletSetId])
+  AgentRegistry   AgentRegistry?   @relation(fields: [agentRegistryId], references: [id])
+  agentRegistryId Int?
 
   @@index([address])
   @@index([walletSetId])
@@ -211,22 +217,16 @@ model CircleWallet {
   @@map("circle_wallets")
 }
 
-// Wallet Set - Group of wallets (for agent owner+validator pairs)
 model CircleWalletSet {
   id          String   @id @default(uuid())
   walletSetId String   @unique
   name        String
   createdAt   DateTime @default(now())
 
-  // Relation to CircleWallet
   wallets CircleWallet[]
 
   @@map("circle_wallet_sets")
 }
-
-// ============================================
-// Recurring Payments + Payroll
-// ============================================
 
 model ScheduledPayment {
   id             String    @id @default(uuid())
@@ -237,12 +237,12 @@ model ScheduledPayment {
   receiverSCA    String
   amount         Float
   currency       String    @default("USDC")
-  intervalDays   Int // e.g. 7 for weekly, 30 for monthly
+  intervalDays   Int
   nextRunAt      DateTime
   lastRunAt      DateTime?
   runCount       Int       @default(0)
-  maxRuns        Int? // null = infinite until cancelled
-  status         String    @default("ACTIVE") // ACTIVE, PAUSED, CANCELLED, COMPLETED
+  maxRuns        Int?
+  status         String    @default("ACTIVE")
   description    String?
   webhookUrl     String?
   createdAt      DateTime  @default(now())
@@ -258,8 +258,8 @@ model PayrollBatch {
   recipientCount Int
   successCount   Int       @default(0)
   failedCount    Int       @default(0)
-  status         String    @default("PROCESSING") // PROCESSING, COMPLETED, PARTIAL_FAILURE, FAILED
-  results        Json? // array of { recipientSCA, amount, txHash, status }
+  status         String    @default("PROCESSING")
+  results        Json?
   webhookUrl     String?
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
