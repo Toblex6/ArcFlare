@@ -1,4 +1,6 @@
 // src/lib/gateway-middleware.ts
+// Custom x402 middleware using Circle's Gateway API directly.
+
 import { NextRequest, NextResponse } from "next/server";
 
 const ARC_TESTNET_CHAIN = "eip155:5042002";
@@ -22,23 +24,28 @@ export function requireGatewayPayment(
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
 ) {
   return async function wrappedHandler(req: NextRequest): Promise<NextResponse> {
+    // Read the raw header (base64-encoded)
     const rawHeader = req.headers.get("x-payment") || req.headers.get("payment-signature");
     let paymentPayload: any = null;
 
     if (rawHeader) {
       try {
+        // 1. Decode base64
         const decoded = Buffer.from(rawHeader, "base64").toString("utf-8");
+        // 2. Parse JSON
         paymentPayload = JSON.parse(decoded);
       } catch (err) {
         console.error("Failed to decode/parse payment header:", err);
+        // Fallback: treat as raw JSON (if not base64)
         try {
           paymentPayload = JSON.parse(rawHeader);
         } catch {
-          paymentPayload = rawHeader;
+          paymentPayload = rawHeader; // keep as string
         }
       }
     }
 
+    // If no payment, return 402 with payment requirements
     if (!paymentPayload) {
       const priceAtomic = priceToAtomicUnits(options.priceUSDC);
       return NextResponse.json(
@@ -61,6 +68,7 @@ export function requireGatewayPayment(
               extra: {
                 name: "USDC",
                 version: "2",
+                verifyingContract: USDC_ARC_TESTNET, // ✅ required for EIP-712
               },
             },
           ],
@@ -69,12 +77,13 @@ export function requireGatewayPayment(
       );
     }
 
+    // Verify the signature with Circle's Gateway
     try {
       console.log("🔄 Verifying payment signature...");
 
-      // Build the verification request
-      const verificationRequest = {
-        paymentPayload: paymentPayload,
+      // Build the request body
+      const requestBody = {
+        paymentPayload: paymentPayload, // now an object (decoded from base64)
         paymentRequirements: {
           scheme: "exact",
           network: ARC_TESTNET_CHAIN,
@@ -82,26 +91,26 @@ export function requireGatewayPayment(
           asset: USDC_ARC_TESTNET,
           payTo: options.sellerAddress,
           maxTimeoutSeconds: 300,
-          extra: { name: "USDC", version: "2" },
+          extra: {
+            name: "USDC",
+            version: "2",
+            verifyingContract: USDC_ARC_TESTNET,
+          },
         },
       };
 
-      // Log what we're sending (for debugging)
-      console.log("🔍 Sending to Gateway:", JSON.stringify(verificationRequest, null, 2));
+      console.log("🔍 Sending to Gateway:", JSON.stringify(requestBody, null, 2));
 
       const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(verificationRequest),
+        body: JSON.stringify(requestBody),
       });
 
       const verifyData = await verifyRes.json();
+      console.log("🔍 Gateway response:", JSON.stringify(verifyData, null, 2));
 
-      // 🔍 FULL DETAILED LOGGING
-      console.log("🔍 Gateway response status:", verifyRes.status);
-      console.log("🔍 Gateway response body:", JSON.stringify(verifyData, null, 2));
-
-      if (!verifyRes.ok || !verifyData.success) {
+      if (!verifyRes.ok || !verifyData.valid) {
         console.error("❌ Invalid signature:", verifyData);
         return NextResponse.json(
           { error: "Invalid or expired payment signature.", details: verifyData },
@@ -109,7 +118,7 @@ export function requireGatewayPayment(
         );
       }
 
-      // Settle (optional)
+      // (Optional) settle – Gateway batches automatically
       let settleData = {};
       try {
         const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
@@ -124,7 +133,11 @@ export function requireGatewayPayment(
               asset: USDC_ARC_TESTNET,
               payTo: options.sellerAddress,
               maxTimeoutSeconds: 300,
-              extra: { name: "USDC", version: "2" },
+              extra: {
+                name: "USDC",
+                version: "2",
+                verifyingContract: USDC_ARC_TESTNET,
+              },
             },
           }),
         });
