@@ -1,0 +1,19 @@
+Error: Could not reach the endpoint.
+  Hint: Failed during initial request to check payment requirements.
+⚠️  No funds were moved - error occurred before payment authorization.
+
+Technical details: TypeError: fetch failed
+Underlying cause: Error: AC420000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:openssl\ssl\record\methods\tls_common.c:874:
+
+
+Common causes:
+  • Network connectivity issues
+  • TLS certificate validation failure
+  • Endpoint is unreachable or down
+{
+  "error": {
+    "code": "INTERNAL",
+    "message": "Could not reach the endpoint.",
+    "hint": "Failed during initial request to check payment requirements.\n⚠️  No funds were moved - error occurred before payment authorization.\n\nTechnical details: TypeError: fetch failed\nUnderlying cause: Error: AC420000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:openssl\\ssl\\record\\methods\\tls_common.c:874:\n\n\nCommon causes:\n  • Network connectivity issues\n  • TLS certificate validation failure\n  • Endpoint is unreachable or down"
+  }
+}
