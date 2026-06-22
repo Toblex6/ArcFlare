@@ -27,22 +27,18 @@ export function requireGatewayPayment(
 
     if (rawHeader) {
       try {
-        // 1. Decode base64
         const decoded = Buffer.from(rawHeader, "base64").toString("utf-8");
-        // 2. Parse JSON
         paymentPayload = JSON.parse(decoded);
       } catch (err) {
         console.error("Failed to decode/parse payment header:", err);
-        // Fallback: try parsing as JSON directly (if not base64)
         try {
           paymentPayload = JSON.parse(rawHeader);
         } catch {
-          paymentPayload = rawHeader; // Keep as string (will fail later)
+          paymentPayload = rawHeader;
         }
       }
     }
 
-    // No payment → return 402
     if (!paymentPayload) {
       const priceAtomic = priceToAtomicUnits(options.priceUSDC);
       return NextResponse.json(
@@ -73,28 +69,37 @@ export function requireGatewayPayment(
       );
     }
 
-    // Verify signature
     try {
       console.log("🔄 Verifying payment signature...");
+
+      // Build the verification request
+      const verificationRequest = {
+        paymentPayload: paymentPayload,
+        paymentRequirements: {
+          scheme: "exact",
+          network: ARC_TESTNET_CHAIN,
+          amount: priceToAtomicUnits(options.priceUSDC),
+          asset: USDC_ARC_TESTNET,
+          payTo: options.sellerAddress,
+          maxTimeoutSeconds: 300,
+          extra: { name: "USDC", version: "2" },
+        },
+      };
+
+      // Log what we're sending (for debugging)
+      console.log("🔍 Sending to Gateway:", JSON.stringify(verificationRequest, null, 2));
+
       const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paymentPayload: paymentPayload,
-          paymentRequirements: {
-            scheme: "exact",
-            network: ARC_TESTNET_CHAIN,
-            amount: priceToAtomicUnits(options.priceUSDC),
-            asset: USDC_ARC_TESTNET,
-            payTo: options.sellerAddress,
-            maxTimeoutSeconds: 300,
-            extra: { name: "USDC", version: "2" },
-          },
-        }),
+        body: JSON.stringify(verificationRequest),
       });
 
       const verifyData = await verifyRes.json();
-      console.log("✅ Verification response:", verifyData);
+
+      // 🔍 FULL DETAILED LOGGING
+      console.log("🔍 Gateway response status:", verifyRes.status);
+      console.log("🔍 Gateway response body:", JSON.stringify(verifyData, null, 2));
 
       if (!verifyRes.ok || !verifyData.success) {
         console.error("❌ Invalid signature:", verifyData);
