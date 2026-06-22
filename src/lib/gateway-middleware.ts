@@ -63,7 +63,7 @@ export function requireGatewayPayment(
     // 3. Verify the signature with Circle's Gateway
     try {
       console.log("🔄 Verifying payment signature...");
-      const verifyRes = await fetch(`${FACILITATOR_URL}/v1/payment/verify`, {
+      const verifyRes = await fetch(`${FACILITATOR_URL}/v1/x402/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -94,7 +94,7 @@ export function requireGatewayPayment(
       // We can call /settle to queue it, but it's not required for immediate response.
       let settleData = {};
       try {
-        const settleRes = await fetch(`${FACILITATOR_URL}/v1/payment/settle`, {
+        const settleRes = await fetch(`${FACILITATOR_URL}/v1/x402/settle`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
