@@ -68,7 +68,8 @@ export function requireGatewayPayment(
               extra: {
                 name: "USDC",
                 version: "2",
-                verifyingContract: USDC_ARC_TESTNET, // ✅ required for EIP-712
+                chainId: 5042002,        // ✅ required for EIP-712 domain
+                verifyingContract: USDC_ARC_TESTNET,
               },
             },
           ],
@@ -94,6 +95,7 @@ export function requireGatewayPayment(
           extra: {
             name: "USDC",
             version: "2",
+            chainId: 5042002,
             verifyingContract: USDC_ARC_TESTNET,
           },
         },
@@ -136,6 +138,7 @@ export function requireGatewayPayment(
               extra: {
                 name: "USDC",
                 version: "2",
+                chainId: 5042002,
                 verifyingContract: USDC_ARC_TESTNET,
               },
             },
