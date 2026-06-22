@@ -1,14 +1,14 @@
 // src/lib/gateway-middleware.ts
 // Circle Gateway Nanopayments — x402 middleware wrapper for ArcFlare endpoints
-// FIXED: corrected payment requirements to match real x402 spec.
-// Previous version used "domain"/"maxAmountRequired" — wrong field names.
-// Real spec uses "extra" (EIP-712 domain of the USDC token itself, not your
-// app) and "amount". Source: x402 spec + Circle's own x402 blog post.
+// FIXED: corrected base URL to include /v1 and adjusted payment requirements to match real x402 spec.
+// Real spec uses "extra" (EIP-712 domain of the USDC token itself) and "amount".
+// Source: x402 spec + Circle's own x402 blog post.
 
 import { NextRequest, NextResponse } from "next/server";
 
 const ARC_TESTNET_CHAIN = "eip155:5042002";
-const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
+// ✅ Correct base URL: includes /v1
+const FACILITATOR_URL = "https://gateway-api-testnet.circle.com/v1";
 
 // USDC on Arc Testnet — same address used everywhere else in ArcFlare
 const USDC_ARC_TESTNET = "0x3600000000000000000000000000000000000000";
@@ -30,7 +30,7 @@ export function requireGatewayPayment(
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
 ) {
   return async function wrappedHandler(req: NextRequest): Promise<NextResponse> {
-    // Circle/x402 clients send the signed payload as X-PAYMENT, not "payment-signature"
+    // Circle/x402 clients send the signed payload as X-PAYMENT or payment-signature
     const paymentHeader = req.headers.get("x-payment") || req.headers.get("payment-signature");
 
     // ── No payment provided — return 402 with CORRECT payment requirements ──
