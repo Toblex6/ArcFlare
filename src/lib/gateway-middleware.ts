@@ -1,12 +1,9 @@
 // src/lib/gateway-middleware.ts
-// Custom x402 middleware using Circle's Gateway API directly.
-// No external dependencies beyond `fetch`.
-
 import { NextRequest, NextResponse } from "next/server";
 
 const ARC_TESTNET_CHAIN = "eip155:5042002";
 const USDC_ARC_TESTNET = "0x3600000000000000000000000000000000000000";
-const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
+const FACILITATOR_URL = "https://gateway-api-testnet.circle.com/v1/x402";
 
 export interface GatewayPaymentContext {
   payer: string;
@@ -17,7 +14,7 @@ export interface GatewayPaymentContext {
 
 interface RequirePaymentOptions {
   sellerAddress: string;
-  priceUSDC: string; // e.g. "0.001"
+  priceUSDC: string;
 }
 
 export function requireGatewayPayment(
@@ -25,12 +22,22 @@ export function requireGatewayPayment(
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
 ) {
   return async function wrappedHandler(req: NextRequest): Promise<NextResponse> {
-    // 1. Look for the payment header (CLI sends 'x-payment' or 'payment-signature')
-    const paymentHeader =
-      req.headers.get("x-payment") || req.headers.get("payment-signature");
+    // Read raw header value
+    const rawHeader = req.headers.get("x-payment") || req.headers.get("payment-signature");
+    let paymentPayload: any = null;
 
-    // 2. If no payment, return 402 with payment requirements
-    if (!paymentHeader) {
+    if (rawHeader) {
+      try {
+        // The header is JSON – parse it
+        paymentPayload = JSON.parse(rawHeader);
+      } catch {
+        // If parsing fails, keep as string (fallback, but we'll try to use it as-is)
+        paymentPayload = rawHeader;
+      }
+    }
+
+    // No payment → return 402
+    if (!paymentPayload) {
       const priceAtomic = priceToAtomicUnits(options.priceUSDC);
       return NextResponse.json(
         {
@@ -60,20 +67,22 @@ export function requireGatewayPayment(
       );
     }
 
-    // 3. Verify the signature with Circle's Gateway
+    // Verify signature
     try {
       console.log("🔄 Verifying payment signature...");
-      const verifyRes = await fetch(`${FACILITATOR_URL}/v1/x402/verify`, {
+      const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          paymentPayload: paymentHeader,
+          // Ensure payload is an object; if it's a string, parse it
+          paymentPayload: typeof paymentPayload === "string" ? JSON.parse(paymentPayload) : paymentPayload,
           paymentRequirements: {
             scheme: "exact",
             network: ARC_TESTNET_CHAIN,
             amount: priceToAtomicUnits(options.priceUSDC),
             asset: USDC_ARC_TESTNET,
             payTo: options.sellerAddress,
+            maxTimeoutSeconds: 300,   // ✅ Required field added
             extra: { name: "USDC", version: "2" },
           },
         }),
@@ -82,7 +91,7 @@ export function requireGatewayPayment(
       const verifyData = await verifyRes.json();
       console.log("✅ Verification response:", verifyData);
 
-      if (!verifyRes.ok || !verifyData.valid) {
+      if (!verifyRes.ok || !verifyData.success) {
         console.error("❌ Invalid signature:", verifyData);
         return NextResponse.json(
           { error: "Invalid or expired payment signature.", details: verifyData },
@@ -90,21 +99,21 @@ export function requireGatewayPayment(
         );
       }
 
-      // 4. (Optional) settle the payment – Gateway will batch settle anyway
-      // We can call /settle to queue it, but it's not required for immediate response.
+      // Settle (optional, will be batched)
       let settleData = {};
       try {
-        const settleRes = await fetch(`${FACILITATOR_URL}/v1/x402/settle`, {
+        const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            paymentPayload: paymentHeader,
+            paymentPayload: typeof paymentPayload === "string" ? JSON.parse(paymentPayload) : paymentPayload,
             paymentRequirements: {
               scheme: "exact",
               network: ARC_TESTNET_CHAIN,
               amount: priceToAtomicUnits(options.priceUSDC),
               asset: USDC_ARC_TESTNET,
               payTo: options.sellerAddress,
+              maxTimeoutSeconds: 300,
               extra: { name: "USDC", version: "2" },
             },
           }),
@@ -114,7 +123,6 @@ export function requireGatewayPayment(
         console.warn("⚠️ Settlement call failed (will be batched):", settleError);
       }
 
-      // 5. Build the payment context
       const payment: GatewayPaymentContext = {
         payer: verifyData.payer || "unknown",
         amount: priceToAtomicUnits(options.priceUSDC),
@@ -122,7 +130,6 @@ export function requireGatewayPayment(
         transaction: settleData.transaction,
       };
 
-      // 6. Execute the actual handler
       return await handler(req, payment);
     } catch (error: any) {
       console.error("❌ Gateway error:", error);
