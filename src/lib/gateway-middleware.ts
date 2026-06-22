@@ -22,17 +22,23 @@ export function requireGatewayPayment(
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
 ) {
   return async function wrappedHandler(req: NextRequest): Promise<NextResponse> {
-    // Read raw header value
     const rawHeader = req.headers.get("x-payment") || req.headers.get("payment-signature");
     let paymentPayload: any = null;
 
     if (rawHeader) {
       try {
-        // The header is JSON – parse it
-        paymentPayload = JSON.parse(rawHeader);
-      } catch {
-        // If parsing fails, keep as string (fallback, but we'll try to use it as-is)
-        paymentPayload = rawHeader;
+        // 1. Decode base64
+        const decoded = Buffer.from(rawHeader, "base64").toString("utf-8");
+        // 2. Parse JSON
+        paymentPayload = JSON.parse(decoded);
+      } catch (err) {
+        console.error("Failed to decode/parse payment header:", err);
+        // Fallback: try parsing as JSON directly (if not base64)
+        try {
+          paymentPayload = JSON.parse(rawHeader);
+        } catch {
+          paymentPayload = rawHeader; // Keep as string (will fail later)
+        }
       }
     }
 
@@ -74,15 +80,14 @@ export function requireGatewayPayment(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Ensure payload is an object; if it's a string, parse it
-          paymentPayload: typeof paymentPayload === "string" ? JSON.parse(paymentPayload) : paymentPayload,
+          paymentPayload: paymentPayload,
           paymentRequirements: {
             scheme: "exact",
             network: ARC_TESTNET_CHAIN,
             amount: priceToAtomicUnits(options.priceUSDC),
             asset: USDC_ARC_TESTNET,
             payTo: options.sellerAddress,
-            maxTimeoutSeconds: 300,   // ✅ Required field added
+            maxTimeoutSeconds: 300,
             extra: { name: "USDC", version: "2" },
           },
         }),
@@ -99,14 +104,14 @@ export function requireGatewayPayment(
         );
       }
 
-      // Settle (optional, will be batched)
+      // Settle (optional)
       let settleData = {};
       try {
         const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            paymentPayload: typeof paymentPayload === "string" ? JSON.parse(paymentPayload) : paymentPayload,
+            paymentPayload: paymentPayload,
             paymentRequirements: {
               scheme: "exact",
               network: ARC_TESTNET_CHAIN,
