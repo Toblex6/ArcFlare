@@ -1,10 +1,12 @@
+// src/lib/gateway-middleware.ts
+// Custom x402 middleware using Circle's Gateway API directly.
+// No external dependencies beyond `fetch`.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createGatewayMiddleware } from "@circle-fin/x402-batching/server";
-import { formatUnits } from "viem";
 
-const ARC_TESTNET_NETWORK = "eip155:5042002";
-const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
+const ARC_TESTNET_CHAIN = "eip155:5042002";
+const USDC_ARC_TESTNET = "0x3600000000000000000000000000000000000000";
+const FACILITATOR_URL = "https://gateway-api-testnet.circle.com/v1";
 
 export interface GatewayPaymentContext {
   payer: string;
@@ -15,71 +17,120 @@ export interface GatewayPaymentContext {
 
 interface RequirePaymentOptions {
   sellerAddress: string;
-  priceUSDC: string; // e.g. "0.001" — formatted as "$0.001" internally
+  priceUSDC: string; // e.g. "0.001"
 }
 
-/**
- * Wraps a Next.js route handler with Circle's official Gateway x402
- * middleware. Returns 402 Payment Required if no valid payment is
- * present; calls the handler with payment details once verified.
- */
 export function requireGatewayPayment(
   options: RequirePaymentOptions,
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
 ) {
-  const gateway = createGatewayMiddleware({
-    sellerAddress: options.sellerAddress,
-    facilitatorUrl: FACILITATOR_URL,
-    networks: [ARC_TESTNET_NETWORK],
-  });
-
-  const priceTag = `$${options.priceUSDC}`;
-
   return async function wrappedHandler(req: NextRequest): Promise<NextResponse> {
-    // Adapt the official Express-style middleware to a Next.js route.
-    // gateway.require() expects (req, res, next) — we simulate that
-    // contract using a lightweight shim since Next.js route handlers
-    // don't have res/next.
-    return new Promise<NextResponse>((resolve) => {
-      const fakeReq: any = {
-        headers: Object.fromEntries(req.headers.entries()),
-        method: req.method,
-        url: req.nextUrl.pathname + req.nextUrl.search,
-        body: undefined,
-      };
+    // 1. Look for the payment header (CLI sends 'x-payment' or 'payment-signature')
+    const paymentHeader =
+      req.headers.get("x-payment") || req.headers.get("payment-signature");
 
-      const fakeRes: any = {
-        statusCode: 200,
-        _headers: {} as Record<string, string>,
-        setHeader(key: string, value: string) {
-          this._headers[key] = value;
+    // 2. If no payment, return 402 with payment requirements
+    if (!paymentHeader) {
+      const priceAtomic = priceToAtomicUnits(options.priceUSDC);
+      return NextResponse.json(
+        {
+          x402Version: 2,
+          error: "Payment required",
+          resource: {
+            url: req.nextUrl.pathname,
+            description: `ArcFlare paid resource: ${req.nextUrl.pathname}`,
+            mimeType: "application/json",
+          },
+          accepts: [
+            {
+              scheme: "exact",
+              network: ARC_TESTNET_CHAIN,
+              amount: priceAtomic,
+              asset: USDC_ARC_TESTNET,
+              payTo: options.sellerAddress,
+              maxTimeoutSeconds: 300,
+              extra: {
+                name: "USDC",
+                version: "2",
+              },
+            },
+          ],
         },
-        status(code: number) {
-          this.statusCode = code;
-          return this;
-        },
-        json(payload: any) {
-          resolve(
-            NextResponse.json(payload, {
-              status: this.statusCode,
-              headers: this._headers,
-            })
-          );
-        },
-      };
+        { status: 402 }
+      );
+    }
 
-      gateway.require(priceTag)(fakeReq, fakeRes, async () => {
-        // Payment verified — fakeReq.payment is populated by the middleware
-        const payment: GatewayPaymentContext = fakeReq.payment || {
-          payer: "unknown",
-          amount: priceToAtomicUnits(options.priceUSDC),
-          network: ARC_TESTNET_NETWORK,
-        };
-
-        const result = await handler(req, payment);
-        resolve(result);
+    // 3. Verify the signature with Circle's Gateway
+    try {
+      console.log("🔄 Verifying payment signature...");
+      const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentPayload: paymentHeader,
+          paymentRequirements: {
+            scheme: "exact",
+            network: ARC_TESTNET_CHAIN,
+            amount: priceToAtomicUnits(options.priceUSDC),
+            asset: USDC_ARC_TESTNET,
+            payTo: options.sellerAddress,
+            extra: { name: "USDC", version: "2" },
+          },
+        }),
       });
-    });
+
+      const verifyData = await verifyRes.json();
+      console.log("✅ Verification response:", verifyData);
+
+      if (!verifyRes.ok || !verifyData.valid) {
+        console.error("❌ Invalid signature:", verifyData);
+        return NextResponse.json(
+          { error: "Invalid or expired payment signature.", details: verifyData },
+          { status: 402 }
+        );
+      }
+
+      // 4. (Optional) settle the payment – Gateway will batch settle anyway
+      // We can call /settle to queue it, but it's not required for immediate response.
+      let settleData = {};
+      try {
+        const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            paymentPayload: paymentHeader,
+            paymentRequirements: {
+              scheme: "exact",
+              network: ARC_TESTNET_CHAIN,
+              amount: priceToAtomicUnits(options.priceUSDC),
+              asset: USDC_ARC_TESTNET,
+              payTo: options.sellerAddress,
+              extra: { name: "USDC", version: "2" },
+            },
+          }),
+        });
+        settleData = await settleRes.json();
+      } catch (settleError) {
+        console.warn("⚠️ Settlement call failed (will be batched):", settleError);
+      }
+
+      // 5. Build the payment context
+      const payment: GatewayPaymentContext = {
+        payer: verifyData.payer || "unknown",
+        amount: priceToAtomicUnits(options.priceUSDC),
+        network: ARC_TESTNET_CHAIN,
+        transaction: settleData.transaction,
+      };
+
+      // 6. Execute the actual handler
+      return await handler(req, payment);
+    } catch (error: any) {
+      console.error("❌ Gateway error:", error);
+      return NextResponse.json(
+        { error: "Payment verification failed.", message: error.message },
+        { status: 500 }
+      );
+    }
   };
 }
 
