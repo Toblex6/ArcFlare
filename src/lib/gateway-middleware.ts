@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const ARC_TESTNET_CHAIN = "eip155:5042002";
 const USDC_ARC_TESTNET = "0x3600000000000000000000000000000000000000";
-const FACILITATOR_URL = "https://gateway-api-testnet.circle.com/v1";
+const FACILITATOR_URL = "https://gateway-api-testnet.circle.com";
 
 export interface GatewayPaymentContext {
   payer: string;
@@ -63,7 +63,7 @@ export function requireGatewayPayment(
     // 3. Verify the signature with Circle's Gateway
     try {
       console.log("🔄 Verifying payment signature...");
-      const verifyRes = await fetch(`${FACILITATOR_URL}/verify`, {
+      const verifyRes = await fetch(`${FACILITATOR_URL}/v1/payment/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -94,7 +94,7 @@ export function requireGatewayPayment(
       // We can call /settle to queue it, but it's not required for immediate response.
       let settleData = {};
       try {
-        const settleRes = await fetch(`${FACILITATOR_URL}/settle`, {
+        const settleRes = await fetch(`${FACILITATOR_URL}/v1/payment/settle`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
