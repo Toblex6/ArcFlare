@@ -132,11 +132,42 @@ async function handlePaidResource(
   return NextResponse.json({ success: false, error: `Unknown resource: ${endpoint}` }, { status: 404 });
 }
 
+// ── NEW: GET handler for Circle service payment discovery ──────────────────
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ endpoint: string }> }
+) {
+  const { endpoint } = await params;
+
+  // Check if the requested resource exists in the price table
+  const priceUSDC = PRICE_TABLE[endpoint];
+  if (!priceUSDC) {
+    return NextResponse.json(
+      { error: `Unknown paid resource: ${endpoint}` },
+      { status: 404 }
+    );
+  }
+
+  // Return the payment request as Circle expects
+  return NextResponse.json({
+    payment: {
+      amount: priceUSDC,
+      currency: "USDC",               // or "USD" if you use fiat
+      chain: "ARC-TESTNET",           // must match your chain
+      destinationAddress: SELLER_WALLET_ADDRESS,
+      // Optional fields:
+      // memo: endpoint,             // helpful for tracking
+      // expiresIn: 600,            // seconds
+    },
+  });
+}
+
+// ── Existing POST handler ──────────────────────────────────────────────────
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ endpoint: string }> }
 ) {
-  const { endpoint } = await params;   // ✅ unwrap the Promise
+  const { endpoint } = await params;
   const priceUSDC = PRICE_TABLE[endpoint];
 
   if (!priceUSDC) {
