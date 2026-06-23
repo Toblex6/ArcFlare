@@ -1,14 +1,4 @@
 // src/lib/gateway-middleware.ts
-// OFFICIAL Circle Gateway x402 middleware — uses Circle's maintained
-// @circle-fin/x402-batching package. This REPLACES every prior hand-rolled
-// version that guessed at /verify, /settle, /v1/payment/verify, /v1/x402/verify
-// paths — none of those exist. This package is the only supported integration.
-//
-// Source: https://www.circle.com/blog/turn-your-api-into-a-storefront-for-agents
-//
-// Install first:
-//   npm install @circle-fin/x402-batching viem
-
 import { NextRequest, NextResponse } from "next/server";
 import { createGatewayMiddleware } from "@circle-fin/x402-batching/server";
 
@@ -23,10 +13,9 @@ export interface GatewayPaymentContext {
 
 interface RequirePaymentOptions {
   sellerAddress: string;
-  priceUSDC: string; // e.g. "0.001"
+  priceUSDC: string;
 }
 
-// Single shared gateway instance — created once per process, not per request
 let gatewaySingleton: ReturnType<typeof createGatewayMiddleware> | null = null;
 
 function getGateway(sellerAddress: string) {
@@ -40,11 +29,6 @@ function getGateway(sellerAddress: string) {
   return gatewaySingleton;
 }
 
-/**
- * Wraps a Next.js route handler with Circle's official Gateway middleware.
- * The underlying package is built for Express (req, res, next) — this
- * adapter bridges that contract to a Next.js Request/Response cycle.
- */
 export function requireGatewayPayment(
   options: RequirePaymentOptions,
   handler: (req: NextRequest, payment: GatewayPaymentContext) => Promise<NextResponse>
@@ -54,8 +38,7 @@ export function requireGatewayPayment(
   const middleware = gateway.require(priceTag);
 
   return function wrappedHandler(req: NextRequest): Promise<NextResponse> {
-    return new Promise<NextResponse>((resolve, reject) => {
-      // Minimal Express-compatible req/res shim
+    return new Promise<NextResponse>((resolve) => {
       const expressLikeReq: any = {
         headers: Object.fromEntries(req.headers.entries()),
         method: req.method,
@@ -65,6 +48,7 @@ export function requireGatewayPayment(
       };
 
       let statusCode = 200;
+      let responseBody: any = null;
       const responseHeaders: Record<string, string> = {};
 
       const expressLikeRes: any = {
@@ -76,32 +60,52 @@ export function requireGatewayPayment(
           responseHeaders[key] = value;
           return this;
         },
-        json(payload: any) {
-          resolve(NextResponse.json(payload, { status: statusCode, headers: responseHeaders }));
+        // ✅ Add missing end(), send(), json(), getHeader(), removeHeader()
+        end() {
+          if (responseBody === null) {
+            resolve(new NextResponse(null, { status: statusCode, headers: responseHeaders }));
+          }
         },
-        send(payload: any) {
-          resolve(new NextResponse(payload, { status: statusCode, headers: responseHeaders }));
+        send(body: any) {
+          responseBody = body;
+          if (typeof body === 'string') {
+            resolve(new NextResponse(body, { status: statusCode, headers: responseHeaders }));
+          } else {
+            resolve(NextResponse.json(body, { status: statusCode, headers: responseHeaders }));
+          }
+        },
+        json(body: any) {
+          responseBody = body;
+          resolve(NextResponse.json(body, { status: statusCode, headers: responseHeaders }));
+        },
+        getHeader(key: string) {
+          return responseHeaders[key];
+        },
+        removeHeader(key: string) {
+          delete responseHeaders[key];
         },
       };
 
       try {
         middleware(expressLikeReq, expressLikeRes, async () => {
-          // Payment verified by the official package — proceed to handler.
           const payment: GatewayPaymentContext = expressLikeReq.payment || {
             payer: "unknown",
             amount: priceToAtomicUnits(options.priceUSDC),
             network: ARC_TESTNET_NETWORK,
           };
-
           try {
             const result = await handler(req, payment);
-            resolve(result);
+            if (result) {
+              resolve(result);
+            } else {
+              resolve(NextResponse.json({ success: true, payment }, { status: 200 }));
+            }
           } catch (handlerErr) {
-            reject(handlerErr);
+            resolve(NextResponse.json({ error: String(handlerErr) }, { status: 500 }));
           }
         });
       } catch (middlewareErr) {
-        reject(middlewareErr);
+        resolve(NextResponse.json({ error: String(middlewareErr) }, { status: 500 }));
       }
     });
   };
