@@ -66,6 +66,13 @@ export function requireGatewayPayment(
               asset: USDC_ARC_TESTNET,
               payTo: options.sellerAddress,
               maxTimeoutSeconds: 300,
+              // Required by the Circle Client/CLI to build and sign off-chain EIP-712 messages
+              domain: {
+                name: "USDC", // Note: Ensure this matches the string returned by your contract's name() method (e.g., "USD Coin" vs "USDC")
+                version: "2",
+                chainId: 5042002,
+                verifyingContract: USDC_ARC_TESTNET,
+              },
               extra: {
                 name: "USDC",
                 version: "2",
@@ -92,6 +99,12 @@ export function requireGatewayPayment(
           asset: USDC_ARC_TESTNET,
           payTo: options.sellerAddress,
           maxTimeoutSeconds: 300,
+          domain: {
+            name: "USDC",
+            version: "2",
+            chainId: 5042002,
+            verifyingContract: USDC_ARC_TESTNET,
+          },
           extra: {
             name: "USDC",
             version: "2",
@@ -101,9 +114,6 @@ export function requireGatewayPayment(
         },
       };
 
-      // Optional: call /v1/x402/verify for debugging (but skip in production)
-      // const verifyRes = await fetch(`${FACILITATOR_URL}/v1/x402/verify`, ...);
-      // For production, we call settle directly.
       const settleRes = await fetch(`${FACILITATOR_URL}/v1/x402/settle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
