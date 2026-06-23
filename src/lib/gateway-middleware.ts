@@ -60,7 +60,6 @@ export function requireGatewayPayment(
           responseHeaders[key] = value;
           return this;
         },
-        // ✅ Add missing end(), send(), json(), getHeader(), removeHeader()
         end() {
           if (responseBody === null) {
             resolve(new NextResponse(null, { status: statusCode, headers: responseHeaders }));
@@ -68,6 +67,20 @@ export function requireGatewayPayment(
         },
         send(body: any) {
           responseBody = body;
+          // ✅ Intercept: if payment-required header exists and status is 200, convert to 402
+          if (responseHeaders['payment-required'] && statusCode === 200) {
+            const base64 = responseHeaders['payment-required'];
+            try {
+              const decoded = Buffer.from(base64, 'base64').toString('utf-8');
+              const json = JSON.parse(decoded);
+              // Set status to 402 and return the JSON as body
+              resolve(NextResponse.json(json, { status: 402, headers: responseHeaders }));
+              return;
+            } catch (e) {
+              // fallback: keep as is
+            }
+          }
+          // If it's a string, send as text; else as JSON
           if (typeof body === 'string') {
             resolve(new NextResponse(body, { status: statusCode, headers: responseHeaders }));
           } else {
@@ -76,6 +89,18 @@ export function requireGatewayPayment(
         },
         json(body: any) {
           responseBody = body;
+          // Same interception
+          if (responseHeaders['payment-required'] && statusCode === 200) {
+            const base64 = responseHeaders['payment-required'];
+            try {
+              const decoded = Buffer.from(base64, 'base64').toString('utf-8');
+              const json = JSON.parse(decoded);
+              resolve(NextResponse.json(json, { status: 402, headers: responseHeaders }));
+              return;
+            } catch (e) {
+              // fallback
+            }
+          }
           resolve(NextResponse.json(body, { status: statusCode, headers: responseHeaders }));
         },
         getHeader(key: string) {
