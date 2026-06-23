@@ -6,6 +6,7 @@
 // with view-switching, per the agreed approach — no route changes.
 
 import React, { useState, useEffect } from "react";
+import Image from "next/image";  // 👈 added for logo
 
 const API_BASE = process.env.NEXT_PUBLIC_ARCFLARE_API_BASE || "https://arcflare-gateway.onrender.com";
 const API_KEY = process.env.NEXT_PUBLIC_ARCFLARE_API_KEY || "";
@@ -73,9 +74,6 @@ export default function ConsumerApp() {
   };
 
   // ── Onboarding: create a new wallet via ArcFlare's agent deploy route ──────
-  // Reuses /api/agent/deploy, which provisions a real Circle SCA wallet —
-  // simplest path to a working address without building separate consumer
-  // wallet infrastructure.
   const createNewWallet = async () => {
     setCreatingWallet(true);
     setOnboardingError(null);
@@ -114,7 +112,7 @@ export default function ConsumerApp() {
     setView(v);
   };
 
-  // ── Actions (unchanged logic from v1) ──────────────────────────────────────
+  // ── Actions (unchanged logic) ──────────────────────────────────────────────
   const handleSend = async () => {
     setLoading(true);
     setResult(null);
@@ -190,6 +188,13 @@ export default function ConsumerApp() {
         <style>{FONT_IMPORT}</style>
         <div style={S.onboardingWrap}>
           <div style={S.logoMark}>
+            <Image
+              src="/arcflare-logo.png.png"
+              alt="ArcFlare"
+              width={32}
+              height={32}
+              style={{ borderRadius: 6, objectFit: "contain" }}
+            />
             <span style={S.logoFlow}>＿╱</span>
             <span style={S.logoText}>Flow</span>
           </div>
@@ -223,6 +228,13 @@ export default function ConsumerApp() {
 
       <header style={S.header}>
         <div style={S.logoMark}>
+          <Image
+            src="/arcflare-logo.png.png"
+            alt="ArcFlare"
+            width={32}
+            height={32}
+            style={{ borderRadius: 6, objectFit: "contain" }}
+          />
           <span style={S.logoFlow}>＿╱</span>
           <span style={S.logoText}>Flow</span>
         </div>
@@ -353,7 +365,7 @@ const S: Record<string, React.CSSProperties> = {
     display: "flex", flexDirection: "column",
   },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "24px 24px 8px" },
-  logoMark: { display: "flex", alignItems: "baseline", gap: 6 },
+  logoMark: { display: "flex", alignItems: "center", gap: 8 }, // 👈 changed to center-align with image
   logoFlow: { fontFamily: "'Fraunces', serif", fontSize: 20, color: "#E8714A" },
   logoText: { fontFamily: "'Fraunces', serif", fontSize: 20, fontWeight: 600, letterSpacing: -0.3 },
   walletPill: {
