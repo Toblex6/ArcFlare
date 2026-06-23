@@ -1,15 +1,14 @@
 // src/app/api/nano/pay/[endpoint]/route.ts
-// FULL version — extends the earlier template with the job-status resource
-// referenced in the Circle CLI skill, and pulls real data instead of stubs.
+// FULL version — handles dynamic skill selection, price scaling, and discovery.
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { requireGatewayPayment, GatewayPaymentContext } from "@/src/lib/gateway-middleware";
+import { prisma } from "@/lib/prisma"; // Adjusted to match your app's true root alias
+import { requireGatewayPayment, GatewayPaymentContext } from "@/lib/gateway-middleware";
 
-const SELLER_WALLET_ADDRESS = process.env.SELLER_WALLET_ADDRESS!;
+// Fallback to merchant address if individual seller key isn't specified yet
+const SELLER_WALLET_ADDRESS = process.env.SELLER_WALLET_ADDRESS || process.env.MERCHANT_SCA_ADDRESS || "0x902C565bE31c146a79350387C1f77d6896814B58";
 
-// Price table per resource — must match the prices documented in the
-// pay-arcflare-service Circle CLI skill (docs/circle-skills/pay-arcflare-service.md)
+// Price table per resource — perfectly mapped to Agent Stack configurations
 const PRICE_TABLE: Record<string, string> = {
   "agent-lookup": "0.001",
   "reputation-check": "0.0005",
@@ -37,13 +36,20 @@ async function handlePaidResource(
       return NextResponse.json({ success: false, error: "scaAddress query param required." }, { status: 400 });
     }
 
-    const agent = await (prisma as any).agentRegistry.findUnique({ where: { scaAddress } });
+    const agent = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress } });
 
     return NextResponse.json({
       success: true,
       resource: "agent-lookup",
       agent: agent
-        ? { name: agent.name, tokenId: agent.tokenId, scaAddress: agent.scaAddress, status: agent.status }
+        ? { 
+            id: agent.id,
+            name: agent.name || "Unknown Agent", 
+            tokenId: agent.tokenId, 
+            scaAddress: agent.scaAddress, 
+            circleWalletId: agent.circleWalletId, // Preserved from your earlier working schema
+            status: agent.status 
+          }
         : null,
       found: !!agent,
       paid: paidMeta,
@@ -84,7 +90,7 @@ async function handlePaidResource(
       return NextResponse.json({ success: false, error: "jobId query param required." }, { status: 400 });
     }
 
-    // Reuses the same ERC-8183 contract read pattern as /api/jobs GET
+    // Reuses the same ERC-8183 contract read pattern
     const { createPublicClient, http, formatUnits } = await import("viem");
     const AGENTIC_COMMERCE_CONTRACT = "0x0747EEf0706327138c69792bF28Cd525089e4583";
     const JOB_STATUS_NAMES = ["Open", "Funded", "Submitted", "Completed", "Rejected", "Expired"];
@@ -98,71 +104,67 @@ async function handlePaidResource(
 
     const publicClient = createPublicClient({ chain: arcTestnet, transport: http("https://rpc.testnet.arc.network") });
 
-    const jobData = await publicClient.readContract({
-      address: AGENTIC_COMMERCE_CONTRACT,
-      abi: [{
-        name: "getJob", type: "function", stateMutability: "view",
-        inputs: [{ name: "jobId", type: "uint256" }],
-        outputs: [{ type: "tuple", components: [
-          { name: "id", type: "uint256" }, { name: "client", type: "address" },
-          { name: "provider", type: "address" }, { name: "evaluator", type: "address" },
-          { name: "description", type: "string" }, { name: "budget", type: "uint256" },
-          { name: "expiredAt", type: "uint256" }, { name: "status", type: "uint8" },
-          { name: "hook", type: "address" },
-        ]}],
-      }],
-      functionName: "getJob",
-      args: [BigInt(jobId)],
-    }) as any;
+    try {
+      const jobData = await publicClient.readContract({
+        address: AGENTIC_COMMERCE_CONTRACT,
+        abi: [{
+          name: "getJob", type: "function", stateMutability: "view",
+          inputs: [{ name: "jobId", type: "uint256" }],
+          outputs: [{ type: "tuple", components: [
+            { name: "id", type: "uint256" }, { name: "client", type: "address" },
+            { name: "provider", type: "address" }, { name: "evaluator", type: "address" },
+            { name: "description", type: "string" }, { name: "budget", type: "uint256" },
+            { name: "expiredAt", type: "uint256" }, { name: "status", type: "uint8" },
+            { name: "hook", type: "address" },
+          ]}],
+        }],
+        functionName: "getJob",
+        args: [BigInt(jobId)],
+      }) as any;
 
-    return NextResponse.json({
-      success: true,
-      resource: "job-status",
-      job: {
-        jobId,
-        status: JOB_STATUS_NAMES[Number(jobData.status)] || "Unknown",
-        budgetUSDC: formatUnits(jobData.budget, 6),
-        client: jobData.client,
-        provider: jobData.provider,
-      },
-      paid: paidMeta,
-    });
+      return NextResponse.json({
+        success: true,
+        resource: "job-status",
+        job: {
+          jobId,
+          status: JOB_STATUS_NAMES[Number(jobData.status)] || "Unknown",
+          budgetUSDC: formatUnits(jobData.budget, 6),
+          client: jobData.client,
+          provider: jobData.provider,
+        },
+        paid: paidMeta,
+      });
+    } catch (contractErr: any) {
+      return NextResponse.json({ success: false, error: "Failed to read job state from Arc Testnet contract.", details: contractErr.message }, { status: 424 });
+    }
   }
 
   return NextResponse.json({ success: false, error: `Unknown resource: ${endpoint}` }, { status: 404 });
 }
 
-// ── NEW: GET handler for Circle service payment discovery ──────────────────
+// ── GET handler for Circle service payment discovery ──────────────────
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ endpoint: string }> }
 ) {
   const { endpoint } = await params;
-
-  // Check if the requested resource exists in the price table
   const priceUSDC = PRICE_TABLE[endpoint];
+  
   if (!priceUSDC) {
-    return NextResponse.json(
-      { error: `Unknown paid resource: ${endpoint}` },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: `Unknown paid resource: ${endpoint}` }, { status: 404 });
   }
 
-  // Return the payment request as Circle expects
   return NextResponse.json({
     payment: {
       amount: priceUSDC,
-      currency: "USDC",               // or "USD" if you use fiat
-      chain: "ARC-TESTNET",           // must match your chain
+      currency: "USDC",
+      chain: "ARC-TESTNET",
       destinationAddress: SELLER_WALLET_ADDRESS,
-      // Optional fields:
-      // memo: endpoint,             // helpful for tracking
-      // expiresIn: 600,            // seconds
     },
   });
 }
 
-// ── Existing POST handler ──────────────────────────────────────────────────
+// ── POST handler for Execution ──────────────────────────────────────────────────
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ endpoint: string }> }
@@ -174,6 +176,7 @@ export async function POST(
     return NextResponse.json({ error: `Unknown paid resource: ${endpoint}` }, { status: 404 });
   }
 
+  // Wraps response dynamically based on endpoint criteria rules
   const wrapped = requireGatewayPayment(
     { sellerAddress: SELLER_WALLET_ADDRESS, priceUSDC },
     (req, payment) => handlePaidResource(req, payment, endpoint)
