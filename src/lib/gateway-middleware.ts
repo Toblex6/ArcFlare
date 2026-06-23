@@ -1,10 +1,4 @@
 // src/lib/gateway-middleware.ts
-// Pure REST implementation for x402 payments using Circle's Gateway API.
-// Confirmed endpoints from Circle docs:
-//   POST /v1/x402/verify  (optional, read-only checks)
-//   POST /v1/x402/settle  (recommended for production, optimised)
-// Base URL: https://gateway-api-testnet.circle.com
-
 import { NextRequest, NextResponse } from "next/server";
 
 const ARC_TESTNET_CHAIN = "eip155:5042002";
@@ -20,7 +14,7 @@ export interface GatewayPaymentContext {
 
 interface RequirePaymentOptions {
   sellerAddress: string;
-  priceUSDC: string; // e.g. "0.001"
+  priceUSDC: string;
 }
 
 export function requireGatewayPayment(
@@ -37,11 +31,10 @@ export function requireGatewayPayment(
         const decoded = Buffer.from(rawHeader, "base64").toString("utf-8");
         paymentPayload = JSON.parse(decoded);
       } catch {
-        // Fallback: try parsing as raw JSON (if not base64)
         try {
           paymentPayload = JSON.parse(rawHeader);
         } catch {
-          paymentPayload = rawHeader; // keep as string (will fail later)
+          paymentPayload = rawHeader;
         }
       }
     }
@@ -66,13 +59,6 @@ export function requireGatewayPayment(
               asset: USDC_ARC_TESTNET,
               payTo: options.sellerAddress,
               maxTimeoutSeconds: 300,
-              // Required by the Circle Client/CLI to build and sign off-chain EIP-712 messages
-              domain: {
-                name: "USDC", // Note: Ensure this matches the string returned by your contract's name() method (e.g., "USD Coin" vs "USDC")
-                version: "2",
-                chainId: 5042002,
-                verifyingContract: USDC_ARC_TESTNET,
-              },
               extra: {
                 name: "USDC",
                 version: "2",
@@ -86,7 +72,7 @@ export function requireGatewayPayment(
       );
     }
 
-    // 3. Payment provided → call Circle's settle endpoint directly (recommended)
+    // 3. Payment provided → call Circle's settle endpoint directly
     try {
       console.log("💳 Settling x402 payment via Circle Gateway...");
 
@@ -99,12 +85,6 @@ export function requireGatewayPayment(
           asset: USDC_ARC_TESTNET,
           payTo: options.sellerAddress,
           maxTimeoutSeconds: 300,
-          domain: {
-            name: "USDC",
-            version: "2",
-            chainId: 5042002,
-            verifyingContract: USDC_ARC_TESTNET,
-          },
           extra: {
             name: "USDC",
             version: "2",
@@ -130,7 +110,6 @@ export function requireGatewayPayment(
         );
       }
 
-      // Build payment context
       const payment: GatewayPaymentContext = {
         payer: settleData.payer || "unknown",
         amount: priceToAtomicUnits(options.priceUSDC),
@@ -138,7 +117,6 @@ export function requireGatewayPayment(
         transaction: settleData.transaction,
       };
 
-      // 4. Execute the actual handler
       return await handler(req, payment);
     } catch (error: any) {
       console.error("❌ Gateway error:", error);
