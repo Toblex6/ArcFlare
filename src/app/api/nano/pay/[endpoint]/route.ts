@@ -134,9 +134,9 @@ const RESOURCE_HANDLERS: Record<string, (req: NextRequest) => Promise<NextRespon
 // ── Dynamic route: /api/nano/pay/agent-lookup, /api/nano/pay/reputation-check, etc ──
 export async function POST(
   req: NextRequest,
-  { params }: { params: { endpoint: string } }
+  { params }: { params: Promise<{ endpoint: string }> } // ✅ params is a Promise
 ) {
-  const endpoint = params.endpoint;
+  const { endpoint } = await params; // ✅ await the Promise
   const price = PRICE_TABLE[endpoint];
   const resourceHandler = RESOURCE_HANDLERS[endpoint];
 
