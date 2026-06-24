@@ -208,7 +208,7 @@ model CircleWallet {
   lastUsedAt  DateTime?
 
   walletSet       CircleWalletSet? @relation(fields: [walletSetId], references: [walletSetId])
-  AgentRegistry   AgentRegistry?   @relation(fields: [agentRegistryId], references: [id])
+  agentRegistry   AgentRegistry?   @relation(fields: [agentRegistryId], references: [id])
   agentRegistryId Int?
 
   @@index([address])
@@ -263,4 +263,4 @@ model PayrollBatch {
   webhookUrl     String?
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
-}
+  }
