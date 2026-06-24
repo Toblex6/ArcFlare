@@ -53,7 +53,7 @@ export default function ConsumerApp() {
     setWalletAddress(address);
     try {
       window.localStorage?.setItem(WALLET_STORAGE_KEY, address);
-    } catch {}
+    } catch { }
     setView("home");
   };
 
@@ -90,7 +90,7 @@ export default function ConsumerApp() {
   const disconnectWallet = () => {
     try {
       window.localStorage?.removeItem(WALLET_STORAGE_KEY);
-    } catch {}
+    } catch { }
     setWalletAddress("");
     setView("onboarding");
   };

@@ -51,7 +51,6 @@ model AgentRegistry {
 
   idempotencyKey String? @unique
 
-  // CLEAN RELATIONS
   agents  Agent[]
   wallets CircleWallet[]
 }
@@ -263,4 +262,4 @@ model PayrollBatch {
   webhookUrl     String?
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
-  }
+}
