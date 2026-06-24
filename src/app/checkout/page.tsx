@@ -25,7 +25,7 @@ function CheckoutHubPageContent() {
         body: JSON.stringify({
           amount: 0.1,
           currency: 'USDC',
-          email: 'demo-user@arcflare.network',
+          email: '0x7a8214dad7630a7a39054e0121acdbc7a65821c9',
           merchant: 'Dispatch Marketplace',
         }),
       });
