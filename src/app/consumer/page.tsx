@@ -1,17 +1,13 @@
+// src/app/consumer/page.tsx
 "use client";
 
-// consumer-app/src/app/page.tsx
-// ArcFlare Consumer App ("Flow") — v2: adds persistent bottom nav + wallet
-// onboarding screen, closing the gap flagged earlier. Still single-page
-// with view-switching, per the agreed approach — no route changes.
+// ArcFlare Consumer App ("Flow") — v2
+// Integrated directly inside the primary ArcFlare Next.js app layout.
+// Uses relative routing to seamlessly leverage existing local API endpoints.
 
 import React, { useState, useEffect } from "react";
-import Image from "next/image";  // 👈 added for logo
 
-const API_BASE = process.env.NEXT_PUBLIC_ARCFLARE_API_BASE || "https://arcflare-gateway.onrender.com";
-const API_KEY = process.env.NEXT_PUBLIC_ARCFLARE_API_KEY || "";
 const WALLET_STORAGE_KEY = "flow_wallet_address";
-
 type View = "onboarding" | "home" | "send" | "save" | "request";
 
 interface ActionResult {
@@ -36,7 +32,6 @@ export default function ConsumerApp() {
   const [onboardingInput, setOnboardingInput] = useState("");
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [creatingWallet, setCreatingWallet] = useState(false);
-
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [frequency, setFrequency] = useState("7");
@@ -73,19 +68,18 @@ export default function ConsumerApp() {
     saveWallet(trimmed);
   };
 
-  // ── Onboarding: create a new wallet via ArcFlare's agent deploy route ──────
+  // ── Onboarding: create a new wallet via dedicated consumer endpoint ──────────
   const createNewWallet = async () => {
     setCreatingWallet(true);
     setOnboardingError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/agent/deploy`, {
+      const res = await fetch(`/api/consumer/wallet`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ agentName: "Flow user wallet" }),
+        headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not create a wallet right now.");
-      saveWallet(data.agent.scaAddress);
+      saveWallet(data.walletAddress);
     } catch (e: any) {
       setOnboardingError(e.message);
     } finally {
@@ -112,22 +106,22 @@ export default function ConsumerApp() {
     setView(v);
   };
 
-  // ── Actions (unchanged logic) ──────────────────────────────────────────────
+  // ── Action Request Handlers ────────────────────────────────────────────────
   const handleSend = async () => {
     setLoading(true);
     setResult(null);
     try {
-      const initRes = await fetch(`${API_BASE}/api/payments/initialize`, {
+      const initRes = await fetch(`/api/payments/initialize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount, currency: "USDC", agentSCA: walletAddress || undefined, merchant: recipient }),
       });
       const initData = await initRes.json();
       if (!initData.success) throw new Error(initData.error || "Could not start payment.");
 
-      const settleRes = await fetch(`${API_BASE}/api/payments/settle`, {
+      const settleRes = await fetch(`/api/payments/settle`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reference: initData.reference }),
       });
       const settleData = await settleRes.json();
@@ -145,9 +139,9 @@ export default function ConsumerApp() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch(`${API_BASE}/api/payments/scheduled`, {
+      const res = await fetch(`/api/payments/scheduled`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payerSCA: walletAddress, receiverSCA: walletAddress, amount, intervalDays: parseInt(frequency), description: "Automatic savings" }),
       });
       const data = await res.json();
@@ -164,9 +158,9 @@ export default function ConsumerApp() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch(`${API_BASE}/api/payments/initialize`, {
+      const res = await fetch(`/api/payments/initialize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount, currency: "USDC", merchant: "Payment request" }),
       });
       const data = await res.json();
@@ -181,60 +175,40 @@ export default function ConsumerApp() {
 
   const submitHandlers: Record<string, () => void> = { send: handleSend, save: handleSave, request: handleRequest };
 
-  // ── Render: Onboarding ──────────────────────────────────────────────────────
+  // ── Render: Onboarding View ────────────────────────────────────────────────
   if (view === "onboarding") {
     return (
       <main style={S.page}>
         <style>{FONT_IMPORT}</style>
         <div style={S.onboardingWrap}>
           <div style={S.logoMark}>
-            <Image
-              src="/arcflare-logo.png.png"
-              alt="ArcFlare"
-              width={32}
-              height={32}
-              style={{ borderRadius: 6, objectFit: "contain" }}
-            />
             <span style={S.logoFlow}>＿╱</span>
             <span style={S.logoText}>Flow</span>
           </div>
           <h1 style={S.onboardingTitle}>Let's get you set up</h1>
           <p style={S.onboardingSub}>You'll need a wallet to send, save, and request money. Takes a few seconds.</p>
-
           <button style={S.primaryButton} disabled={creatingWallet} onClick={createNewWallet}>
             {creatingWallet ? "Setting things up..." : "Create my wallet"}
           </button>
-
           <div style={S.orDivider}><span>or</span></div>
-
           <div style={S.field}>
             <label style={S.label}>I already have a wallet address</label>
             <input style={S.input} value={onboardingInput} onChange={(e) => setOnboardingInput(e.target.value)} placeholder="0x..." />
           </div>
           <button style={S.secondaryButton} onClick={connectExisting}>Use this wallet</button>
-
           {onboardingError && <p style={S.onboardingError}>{onboardingError}</p>}
-
           <p style={S.footnote}>Built on Arc · Your money is always yours</p>
         </div>
       </main>
     );
   }
 
-  // ── Render: Home + Action views, with bottom nav ───────────────────────────
+  // ── Render: Main Dashboard & Form Interfaces ──────────────────────────────
   return (
     <main style={S.page}>
       <style>{FONT_IMPORT}</style>
-
       <header style={S.header}>
         <div style={S.logoMark}>
-          <Image
-            src="/arcflare-logo.png.png"
-            alt="ArcFlare"
-            width={32}
-            height={32}
-            style={{ borderRadius: 6, objectFit: "contain" }}
-          />
           <span style={S.logoFlow}>＿╱</span>
           <span style={S.logoText}>Flow</span>
         </div>
@@ -251,7 +225,6 @@ export default function ConsumerApp() {
               <h1 style={S.heroTitle}>Your money,<br />moving on its own.</h1>
               <p style={S.heroSub}>Send to anyone. Save without thinking. Get paid in seconds.</p>
             </section>
-
             <section style={S.actionsGrid}>
               <button style={S.actionCard} onClick={() => goTo("send")}>
                 <span style={S.actionIcon}>→</span>
@@ -269,7 +242,6 @@ export default function ConsumerApp() {
                 <span style={S.actionSub}>Get a link to share</span>
               </button>
             </section>
-
             <p style={S.footnote}>Built on Arc · Settled in USDC · Every transfer is real and onchain</p>
           </>
         )}
@@ -281,7 +253,6 @@ export default function ConsumerApp() {
               {view === "save" && "Set up automatic saving"}
               {view === "request" && "Request a payment"}
             </h2>
-
             <div style={S.flowLine}>
               <span style={S.flowDot} />
               <span style={S.flowStroke} />
@@ -337,7 +308,7 @@ export default function ConsumerApp() {
         )}
       </div>
 
-      {/* ── Persistent bottom nav ── */}
+      {/* ── Persistent Bottom Navigation ── */}
       <nav style={S.bottomNav}>
         {NAV_ITEMS.map((item) => (
           <button
@@ -362,10 +333,10 @@ const S: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh", background: "#FBF8F3", color: "#1C1B19",
     fontFamily: "'Inter', system-ui, sans-serif", maxWidth: 560, margin: "0 auto",
-    display: "flex", flexDirection: "column",
+    display: "flex", flexDirection: "column", boxSizing: "border-box"
   },
-  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "24px 24px 8px" },
-  logoMark: { display: "flex", alignItems: "center", gap: 8 }, // 👈 changed to center-align with image
+  header: { display: "flex", alignItems: "center", justifyBetween: "space-between", justifyContent: "space-between", padding: "24px 24px 8px" },
+  logoMark: { display: "flex", alignItems: "baseline", gap: 6 },
   logoFlow: { fontFamily: "'Fraunces', serif", fontSize: 20, color: "#E8714A" },
   logoText: { fontFamily: "'Fraunces', serif", fontSize: 20, fontWeight: 600, letterSpacing: -0.3 },
   walletPill: {
@@ -387,7 +358,6 @@ const S: Record<string, React.CSSProperties> = {
   actionLabel: { fontSize: 17, fontWeight: 600 },
   actionSub: { fontSize: 13.5, color: "#8A8275" },
   footnote: { textAlign: "center", fontSize: 12, color: "#A39C8C", margin: "8px 0" },
-
   flowCard: { paddingTop: 20 },
   flowTitle: { fontFamily: "'Fraunces', serif", fontSize: 26, fontWeight: 500, margin: "0 0 24px" },
   flowLine: { display: "flex", alignItems: "center", gap: 0, marginBottom: 28 },
@@ -411,8 +381,6 @@ const S: Record<string, React.CSSProperties> = {
   resultLink: { fontSize: 13, color: "#E8714A", fontWeight: 600 },
   linkBox: { fontSize: 12, fontFamily: "monospace", background: "#EDE6D8", padding: "10px 14px", borderRadius: 10, wordBreak: "break-all", margin: "0 0 16px" },
   doneButton: { marginTop: 12, padding: "12px 28px", borderRadius: 12, border: "1px solid #1C1B19", background: "transparent", color: "#1C1B19", fontSize: 14, fontWeight: 600, cursor: "pointer" },
-
-  // Onboarding
   onboardingWrap: { padding: "60px 24px", display: "flex", flexDirection: "column", alignItems: "stretch", flex: 1 },
   onboardingTitle: { fontFamily: "'Fraunces', serif", fontSize: 30, fontWeight: 500, margin: "28px 0 10px" },
   onboardingSub: { fontSize: 15, color: "#5C5850", lineHeight: 1.5, margin: "0 0 28px" },
@@ -420,8 +388,6 @@ const S: Record<string, React.CSSProperties> = {
   secondaryButton: { padding: "16px 0", borderRadius: 14, border: "1px solid #1C1B19", background: "transparent", color: "#1C1B19", fontSize: 16, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginTop: 14 },
   orDivider: { textAlign: "center", color: "#A39C8C", fontSize: 13, margin: "24px 0", position: "relative" },
   onboardingError: { color: "#C0563A", fontSize: 13, marginTop: 10 },
-
-  // Bottom nav
   bottomNav: {
     position: "sticky", bottom: 0, display: "flex", justifyContent: "space-around",
     background: "#FFFFFF", borderTop: "1px solid #E5DDC9", padding: "12px 8px 16px",
