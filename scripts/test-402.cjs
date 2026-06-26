@@ -1,0 +1,19 @@
+// test-402.cjs
+async function test() {
+  const res = await fetch("https://arcflare-gateway.onrender.com/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}"
+  });
+  console.log("Status:", res.status);
+  const text = await res.text();
+  console.log("Body:", text);
+  // Parse and look for network
+  try {
+    const json = JSON.parse(text);
+    if (json.accepts && json.accepts.length > 0) {
+      console.log("Network:", json.accepts[0].network);
+    }
+  } catch (e) {}
+}
+test();
