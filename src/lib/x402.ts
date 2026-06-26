@@ -1,4 +1,3 @@
-
 /**
  * src/lib/x402.ts
  *
@@ -102,6 +101,11 @@ export function withGateway(
       const paymentPayload: PaymentPayload = JSON.parse(
         Buffer.from(paymentSignature, "base64").toString("utf-8"),
       );
+
+      // === DEBUG: log the actual network values ===
+      console.log("[x402] Buyer's accepted network:", paymentPayload.accepted?.network);
+      console.log("[x402] Seller requirements network:", requirements.network);
+      // =============================================
 
       const verifyResult = await facilitator.verify(paymentPayload, requirements);
 
