@@ -26,7 +26,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 // Arc Testnet contract addresses — confirmed from Circle's own reference repo
-const ARC_TESTNET_NETWORK = "ARC-TESTNET";
+const ARC_TESTNET_NETWORK = "arcTestnet";
 const ARC_TESTNET_USDC = "0x3600000000000000000000000000000000000000";
 const ARC_TESTNET_GATEWAY_WALLET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 
