@@ -8,7 +8,7 @@ async function main() {
   console.log("🔑 Private key loaded");
 
   const client = new GatewayClient({
-    chain: "arcTestnet",
+    chain: "ARC-TESTNET",
     privateKey: PRIVATE_KEY,
   });
   console.log("✅ GatewayClient created");
