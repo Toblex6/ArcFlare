@@ -1,14 +1,11 @@
 // src/app/consumer/page.tsx
 "use client";
 
-// ArcFlare Consumer App ("Flow") — v2
-// Integrated directly inside the primary ArcFlare Next.js app layout.
-// Uses relative routing to seamlessly leverage existing local API endpoints.
-
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 const WALLET_STORAGE_KEY = "flow_wallet_address";
-type View = "onboarding" | "home" | "send" | "save" | "request";
+type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat";
 
 interface ActionResult {
   success: boolean;
@@ -24,9 +21,12 @@ const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "send", label: "Send", icon: "→" },
   { id: "save", label: "Save", icon: "◷" },
   { id: "request", label: "Request", icon: "←" },
+  // 👇 NEW: Payroll Chat
+  { id: "payroll-chat", label: "Payroll Chat", icon: "💬" },
 ];
 
 export default function ConsumerApp() {
+  const router = useRouter();
   const [view, setView] = useState<View>("home");
   const [walletAddress, setWalletAddress] = useState("");
   const [onboardingInput, setOnboardingInput] = useState("");
@@ -53,7 +53,7 @@ export default function ConsumerApp() {
     setWalletAddress(address);
     try {
       window.localStorage?.setItem(WALLET_STORAGE_KEY, address);
-    } catch { }
+    } catch {}
     setView("home");
   };
 
@@ -90,7 +90,7 @@ export default function ConsumerApp() {
   const disconnectWallet = () => {
     try {
       window.localStorage?.removeItem(WALLET_STORAGE_KEY);
-    } catch { }
+    } catch {}
     setWalletAddress("");
     setView("onboarding");
   };
@@ -103,6 +103,11 @@ export default function ConsumerApp() {
 
   const goTo = (v: View) => {
     resetActionState();
+    // If navigating to payroll-chat, redirect to the dedicated page
+    if (v === "payroll-chat") {
+      router.push("/payroll-chat");
+      return;
+    }
     setView(v);
   };
 
@@ -241,6 +246,12 @@ export default function ConsumerApp() {
                 <span style={S.actionLabel}>Request payment</span>
                 <span style={S.actionSub}>Get a link to share</span>
               </button>
+              {/* 👇 New: Payroll Chat button */}
+              <button style={S.actionCard} onClick={() => goTo("payroll-chat")}>
+                <span style={S.actionIcon}>💬</span>
+                <span style={S.actionLabel}>Payroll Chat</span>
+                <span style={S.actionSub}>Manage payroll with natural language</span>
+              </button>
             </section>
             <p style={S.footnote}>Built on Arc · Settled in USDC · Every transfer is real and onchain</p>
           </>
@@ -335,7 +346,7 @@ const S: Record<string, React.CSSProperties> = {
     fontFamily: "'Inter', system-ui, sans-serif", maxWidth: 560, margin: "0 auto",
     display: "flex", flexDirection: "column", boxSizing: "border-box"
   },
-  header: { display: "flex", alignItems: "center", justifyBetween: "space-between", justifyContent: "space-between", padding: "24px 24px 8px" },
+  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "24px 24px 8px" },
   logoMark: { display: "flex", alignItems: "baseline", gap: 6 },
   logoFlow: { fontFamily: "'Fraunces', serif", fontSize: 20, color: "#E8714A" },
   logoText: { fontFamily: "'Fraunces', serif", fontSize: 20, fontWeight: 600, letterSpacing: -0.3 },
@@ -396,4 +407,4 @@ const S: Record<string, React.CSSProperties> = {
   navItemActive: { display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: "pointer", color: "#1C1B19", padding: "4px 12px" },
   navIcon: { fontSize: 16, fontFamily: "'Fraunces', serif" },
   navLabel: { fontSize: 11, fontWeight: 600 },
-};
+}
