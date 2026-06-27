@@ -263,3 +263,19 @@ model PayrollBatch {
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
 }
+// ── x402 EOA Wallets ──────────────────────────────────────────────────────
+// These are plain Externally Owned Accounts (EOA) used exclusively for
+// x402 nanopayments. Circle's Gateway requires ECDSA signatures from EOAs,
+// not EIP-1271 contract signatures from SCAs.
+//
+// SECURITY: Private keys are stored in plaintext. For testnet/demo only.
+// Production should use a secrets manager (AWS Secrets Manager, Vault, etc.).
+model X402EoaWallet {
+  id          String   @id @default(uuid())
+  address     String   @unique
+  privateKey  String   // ⚠️ plaintext – testnet only
+  label       String?
+  createdAt   DateTime @default(now())
+
+  @@map("x402_eoa_wallets")
+}
