@@ -24,7 +24,7 @@ function buildAuthorizationTypedData(params: {
 }) {
   return {
     domain: {
-      name: "USD Coin",      // ✅ Verify this with `cast call` – may be "USDC" on testnet
+      name: "USDC",                // ✅ Arc Testnet USDC
       version: "2",
       chainId: 5042002,
       verifyingContract: ARC_TESTNET_USDC as `0x${string}`,
@@ -61,7 +61,6 @@ async function payWithEoaHandler(request: Request) {
       );
     }
 
-    // Load the EOA private key
     const walletRecord = await prisma.x402EoaWallet.findUnique({ where: { address: eoaAddress } });
     if (!walletRecord) {
       return NextResponse.json(
@@ -73,7 +72,7 @@ async function payWithEoaHandler(request: Request) {
     const account = privateKeyToAccount(walletRecord.privateKey as `0x${string}`);
     const walletClient = createWalletClient({ account, chain: arcTestnet, transport: http("https://rpc.testnet.arc.network") });
 
-    // 1. Probe the resource – get the 402 challenge
+    // 1. Probe the resource
     const probeRes = await fetch(resourceUrl, { method: "POST" });
 
     if (probeRes.status !== 402) {
@@ -83,22 +82,40 @@ async function payWithEoaHandler(request: Request) {
       );
     }
 
-    const probeBody = await probeRes.json();
-    const requirements = probeBody.accepts?.[0];
-
-    if (!requirements) {
+    // 2. Read PAYMENT-REQUIRED header
+    const paymentRequiredHeader = probeRes.headers.get("payment-required");
+    if (!paymentRequiredHeader) {
       return NextResponse.json(
-        { success: false, error: "No payment requirements found." },
+        { success: false, error: "Missing PAYMENT-REQUIRED header." },
         { status: 502 }
       );
     }
 
-    // 2. Sign the EIP-3009 authorization
+    let paymentRequirements;
+    try {
+      const decoded = Buffer.from(paymentRequiredHeader, "base64").toString("utf-8");
+      const parsed = JSON.parse(decoded);
+      paymentRequirements = parsed.accepts?.[0];
+    } catch (e) {
+      return NextResponse.json(
+        { success: false, error: "Failed to parse PAYMENT-REQUIRED header." },
+        { status: 502 }
+      );
+    }
+
+    if (!paymentRequirements) {
+      return NextResponse.json(
+        { success: false, error: "No payment requirements found in PAYMENT-REQUIRED header." },
+        { status: 502 }
+      );
+    }
+
+    // 3. Sign authorization
     const now = Math.floor(Date.now() / 1000);
     const authParams = {
       from: account.address,
-      to: requirements.payTo as `0x${string}`,
-      value: requirements.amount,
+      to: paymentRequirements.payTo as `0x${string}`,
+      value: paymentRequirements.amount,
       validAfter: now.toString(),
       validBefore: (now + 300).toString(),
       nonce: randomNonce(),
@@ -113,17 +130,17 @@ async function payWithEoaHandler(request: Request) {
       message: typedData.message,
     });
 
-    // 3. Build and encode the x402 payload
+    // 4. Build and encode payment payload
     const paymentPayload = {
       x402Version: 2,
       payload: { authorization: authParams, signature },
-      accepted: requirements,
-      resource: probeBody.resource,
+      accepted: paymentRequirements,
+      resource: { url: resourceUrl },
     };
 
     const encodedSignature = Buffer.from(JSON.stringify(paymentPayload)).toString("base64");
 
-    // 4. Retry the request with the signed payment
+    // 5. Retry request with signed header
     const payRes = await fetch(resourceUrl, {
       method: "POST",
       headers: { "payment-signature": encodedSignature },
@@ -141,9 +158,9 @@ async function payWithEoaHandler(request: Request) {
     return NextResponse.json({
       success: true,
       paidWith: account.address,
-      amountUSDC: (parseInt(requirements.amount) / 1_000_000).toFixed(6),
+      amountUSDC: (parseInt(paymentRequirements.amount) / 1_000_000).toFixed(6),
       resourceData: payData,
-      message: `Paid ${(parseInt(requirements.amount) / 1_000_000).toFixed(6)} USDC for ${resourceUrl}`,
+      message: `Paid ${(parseInt(paymentRequirements.amount) / 1_000_000).toFixed(6)} USDC for ${resourceUrl}`,
     });
   } catch (error: any) {
     console.error("❌ x402 payment error:", error);
