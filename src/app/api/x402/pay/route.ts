@@ -92,10 +92,16 @@ async function payWithEoaHandler(request: Request) {
     }
 
     let paymentRequirements;
+    let resourceFromHeader;
     try {
       const decoded = Buffer.from(paymentRequiredHeader, "base64").toString("utf-8");
       const parsed = JSON.parse(decoded);
       paymentRequirements = parsed.accepts?.[0];
+      resourceFromHeader = parsed.resource;   // ✅ Capture resource from header
+      if (!resourceFromHeader) {
+        // fallback
+        resourceFromHeader = { url: resourceUrl, description: `Paid resource`, mimeType: "application/json" };
+      }
     } catch (e) {
       return NextResponse.json(
         { success: false, error: "Failed to parse PAYMENT-REQUIRED header." },
@@ -130,12 +136,12 @@ async function payWithEoaHandler(request: Request) {
       message: typedData.message,
     });
 
-    // 4. Build and encode payment payload
+    // 4. Build payment payload with resource
     const paymentPayload = {
       x402Version: 2,
       payload: { authorization: authParams, signature },
       accepted: paymentRequirements,
-      resource: { url: resourceUrl },
+      resource: resourceFromHeader,   // ✅ Include full resource
     };
 
     const encodedSignature = Buffer.from(JSON.stringify(paymentPayload)).toString("base64");
