@@ -49,3 +49,4 @@ yarn-error.log*
 .env.sentry-build-plugin
 dev.db
 cloudflared.exe
+arc-nanopayments/

@@ -1,58 +1,29 @@
-// src/app/api/x402/pay/route.ts
+/**
+ * src/app/api/x402/pay/route.ts
+ *
+ * REBUILT using the ACTUAL @circle-fin/x402-batching SDK's GatewayClient,
+ * per the official SDK Reference. Replaces the hand-rolled EIP-3009
+ * signing code from earlier today.
+ *
+ * GatewayClient.pay(url, options) "handles the full 402 negotiation flow
+ * automatically: sends the request, receives payment requirements, signs
+ * the authorization, and retries with the payment header." — straight
+ * from the SDK docs. No manual typed-data construction needed at all.
+ */
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKey } from "@/lib/middleware/withApiKey";
-import { privateKeyToAccount } from "viem/accounts";
-import { createWalletClient, http } from "viem";
+import { GatewayClient } from "@circle-fin/x402-batching/client";
 
-const ARC_TESTNET_USDC = "0x3600000000000000000000000000000000000000";
-
-const arcTestnet = {
-  id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] } },
-} as const;
-
-function buildAuthorizationTypedData(params: {
-  from: `0x${string}`;
-  to: `0x${string}`;
-  value: string;
-  validAfter: string;
-  validBefore: string;
-  nonce: `0x${string}`;
-}) {
-  return {
-    domain: {
-      name: "USDC",                // ✅ Arc Testnet USDC
-      version: "2",
-      chainId: 5042002,
-      verifyingContract: ARC_TESTNET_USDC as `0x${string}`,
-    },
-    types: {
-      TransferWithAuthorization: [
-        { name: "from", type: "address" },
-        { name: "to", type: "address" },
-        { name: "value", type: "uint256" },
-        { name: "validAfter", type: "uint256" },
-        { name: "validBefore", type: "uint256" },
-        { name: "nonce", type: "bytes32" },
-      ],
-    },
-    primaryType: "TransferWithAuthorization" as const,
-    message: params,
-  };
-}
-
-function randomNonce(): `0x${string}` {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return `0x${Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("")}` as `0x${string}`;
+interface PayRequest {
+  resourceUrl: string;
+  eoaAddress: string;
 }
 
 async function payWithEoaHandler(request: Request) {
   try {
-    const { resourceUrl, eoaAddress } = await request.json();
+    const { resourceUrl, eoaAddress }: PayRequest = await request.json();
 
     if (!resourceUrl || !eoaAddress) {
       return NextResponse.json(
@@ -61,7 +32,7 @@ async function payWithEoaHandler(request: Request) {
       );
     }
 
-    const walletRecord = await prisma.x402EoaWallet.findUnique({ where: { address: eoaAddress } });
+    const walletRecord = await (prisma as any).x402EoaWallet.findUnique({ where: { address: eoaAddress } });
     if (!walletRecord) {
       return NextResponse.json(
         { success: false, error: `No stored EOA wallet for ${eoaAddress}.` },
@@ -69,104 +40,44 @@ async function payWithEoaHandler(request: Request) {
       );
     }
 
-    const account = privateKeyToAccount(walletRecord.privateKey as `0x${string}`);
-    const walletClient = createWalletClient({ account, chain: arcTestnet, transport: http("https://rpc.testnet.arc.network") });
-
-    // 1. Probe the resource
-    const probeRes = await fetch(resourceUrl, { method: "POST" });
-
-    if (probeRes.status !== 402) {
-      return NextResponse.json(
-        { success: false, error: `Expected 402, got ${probeRes.status}` },
-        { status: 502 }
-      );
-    }
-
-    // 2. Read PAYMENT-REQUIRED header
-    const paymentRequiredHeader = probeRes.headers.get("payment-required");
-    if (!paymentRequiredHeader) {
-      return NextResponse.json(
-        { success: false, error: "Missing PAYMENT-REQUIRED header." },
-        { status: 502 }
-      );
-    }
-
-    let paymentRequirements;
-    let resourceFromHeader;
-    try {
-      const decoded = Buffer.from(paymentRequiredHeader, "base64").toString("utf-8");
-      const parsed = JSON.parse(decoded);
-      paymentRequirements = parsed.accepts?.[0];
-      resourceFromHeader = parsed.resource;   // ✅ Capture resource from header
-      if (!resourceFromHeader) {
-        // fallback
-        resourceFromHeader = { url: resourceUrl, description: `Paid resource`, mimeType: "application/json" };
-      }
-    } catch (e) {
-      return NextResponse.json(
-        { success: false, error: "Failed to parse PAYMENT-REQUIRED header." },
-        { status: 502 }
-      );
-    }
-
-    if (!paymentRequirements) {
-      return NextResponse.json(
-        { success: false, error: "No payment requirements found in PAYMENT-REQUIRED header." },
-        { status: 502 }
-      );
-    }
-
-    // 3. Sign authorization
-    const now = Math.floor(Date.now() / 1000);
-    const authParams = {
-      from: account.address,
-      to: paymentRequirements.payTo as `0x${string}`,
-      value: paymentRequirements.amount,
-      validAfter: now.toString(),
-      validBefore: (now + 300).toString(),
-      nonce: randomNonce(),
-    };
-
-    const typedData = buildAuthorizationTypedData(authParams);
-    const signature = await walletClient.signTypedData({
-      account,
-      domain: typedData.domain,
-      types: typedData.types,
-      primaryType: typedData.primaryType,
-      message: typedData.message,
+    // Per SDK docs: config.chain uses SupportedChainName values like
+    // 'arcTestnet' — this is the CLIENT constructor's chain selector,
+    // distinct from the eip155:5042002 CAIP-2 network format used inside
+    // payment requirements JSON. Both are correct; they serve different roles.
+    const client = new GatewayClient({
+      chain: "arcTestnet",
+      privateKey: walletRecord.privateKey as `0x${string}`,
     });
 
-    // 4. Build payment payload with resource
-    const paymentPayload = {
-      x402Version: 2,
-      payload: { authorization: authParams, signature },
-      accepted: paymentRequirements,
-      resource: resourceFromHeader,   // ✅ Include full resource
-    };
+    // Check Gateway balance first — nanopayments require a Gateway deposit,
+    // not just a wallet balance (per SDK: "Buyers fund their payments from
+    // a Gateway Wallet balance (deposited once onchain)").
+    const balances = await client.getBalances();
 
-    const encodedSignature = Buffer.from(JSON.stringify(paymentPayload)).toString("base64");
-
-    // 5. Retry request with signed header
-    const payRes = await fetch(resourceUrl, {
-      method: "POST",
-      headers: { "payment-signature": encodedSignature },
-    });
-
-    const payData = await payRes.json();
-
-    if (!payRes.ok) {
+    if (parseFloat(balances.gateway.formattedAvailable) <= 0) {
       return NextResponse.json(
-        { success: false, error: "Payment rejected.", details: payData },
-        { status: payRes.status }
+        {
+          success: false,
+          error: "No Gateway balance available. Deposit USDC into Gateway first.",
+          walletBalance: balances.wallet.formatted,
+          gatewayBalance: balances.gateway.formattedAvailable,
+          nextStep: `POST /api/x402/eoa-wallet/deposit { "eoaAddress": "${eoaAddress}", "amount": "10" }`,
+        },
+        { status: 400 }
       );
     }
+
+    // The SDK's pay() does everything: probe, sign, retry. No manual
+    // EIP-712 construction, no manual base64 encoding.
+    const result = await client.pay(resourceUrl, { method: "POST" });
 
     return NextResponse.json({
       success: true,
-      paidWith: account.address,
-      amountUSDC: (parseInt(paymentRequirements.amount) / 1_000_000).toFixed(6),
-      resourceData: payData,
-      message: `Paid ${(parseInt(paymentRequirements.amount) / 1_000_000).toFixed(6)} USDC for ${resourceUrl}`,
+      paidWith: client.address,
+      amountUSDC: result.formattedAmount,
+      transaction: result.transaction,
+      resourceData: result.data,
+      message: `Paid ${result.formattedAmount} USDC from EOA ${client.address} for ${resourceUrl}`,
     });
   } catch (error: any) {
     console.error("❌ x402 payment error:", error);
