@@ -14,7 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { x402ResourceServer } from "@x402/express"; // per SDK docs' own import path
+import { x402ResourceServer } from "@x402/core/server"; // confirmed correct path from Circle's own npm package page
 import { BatchFacilitatorClient, GatewayEvmScheme } from "@circle-fin/x402-batching/server";
 import { prisma } from "@/lib/prisma";
 
