@@ -34,6 +34,19 @@ async function getServer() {
   return serverInstance;
 }
 
+// NextResponse.json() calls JSON.stringify() internally, which cannot
+// serialize BigInt values natively. The SDK's responseBody may contain
+// BigInt amounts (e.g. atomic USDC units) — recursively convert any
+// BigInt to a string before handing the object to NextResponse.json().
+function sanitizeBigInts(obj: any): any {
+  if (typeof obj === "bigint") return obj.toString();
+  if (Array.isArray(obj)) return obj.map(sanitizeBigInts);
+  if (obj && typeof obj === "object") {
+    return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, sanitizeBigInts(v)]));
+  }
+  return obj;
+}
+
 /**
  * Wraps a Next.js route handler with Circle Gateway payment verification,
  * using the REAL SDK server (not hand-rolled fetch calls).
@@ -55,7 +68,7 @@ export function withGateway(
 
     if (!result.isValid) {
       console.log(`[x402] 402 Payment Required: ${endpoint}`);
-      return NextResponse.json(result.responseBody, {
+      return NextResponse.json(sanitizeBigInts(result.responseBody), {
         status: 402,
         headers: result.responseHeaders || {},
       });
@@ -66,7 +79,7 @@ export function withGateway(
     if (!settleResult.success) {
       console.error(`[x402] Settlement failed for ${endpoint}: ${settleResult.errorReason}`);
       return NextResponse.json(
-        { error: "Payment settlement failed", reason: settleResult.errorReason },
+        sanitizeBigInts({ error: "Payment settlement failed", reason: settleResult.errorReason }),
         { status: 402 },
       );
     }
