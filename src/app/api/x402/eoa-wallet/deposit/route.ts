@@ -9,6 +9,18 @@ import { prisma } from "@/lib/prisma";
 import { withApiKey } from "@/lib/middleware/withApiKey";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 
+// NextResponse.json() cannot serialize BigInt — the SDK's Balances type
+// declares `balance: bigint` on both wallet and gateway objects. Recursively
+// stringify any BigInt before responding.
+function sanitizeBigInts(obj: any): any {
+  if (typeof obj === "bigint") return obj.toString();
+  if (Array.isArray(obj)) return obj.map(sanitizeBigInts);
+  if (obj && typeof obj === "object") {
+    return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, sanitizeBigInts(v)]));
+  }
+  return obj;
+}
+
 async function depositHandler(request: Request) {
   try {
     const { eoaAddress, amount } = await request.json();
@@ -32,14 +44,14 @@ async function depositHandler(request: Request) {
 
     const result = await client.deposit(amount.toString());
 
-    return NextResponse.json({
+    return NextResponse.json(sanitizeBigInts({
       success: true,
       depositTxHash: result.depositTxHash,
       approvalTxHash: result.approvalTxHash || null,
       amountDeposited: result.formattedAmount,
       explorerUrl: `https://testnet.arcscan.app/tx/${result.depositTxHash}`,
       message: `Deposited ${result.formattedAmount} USDC into Gateway for ${eoaAddress}.`,
-    });
+    }));
   } catch (error: any) {
     console.error("❌ Gateway deposit error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -70,7 +82,7 @@ async function getBalancesHandler(request: Request) {
 
     const balances = await client.getBalances();
 
-    return NextResponse.json({ success: true, balances });
+    return NextResponse.json(sanitizeBigInts({ success: true, balances }));
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
