@@ -1,25 +1,20 @@
 // src/app/api/nano/pay/[endpoint]/route.ts
-// Gateway-Nanopayments-protected endpoint on ArcFlare, using the VERIFIED
-// withGateway() wrapper from src/lib/x402.ts (Circle's own reference
-// pattern). Duplicate this file's resource logic per paid endpoint, or
-// keep as one dynamic catch-all as shown here.
-
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withGateway } from "@/lib/x402";
 
-// Price table per resource — values in dollars, matching withGateway's
-// expected "$X.XX" format
+// Price table – amounts in dollars (withGateway expects "$X.XX" format)
 const PRICE_TABLE: Record<string, string> = {
   "agent-lookup": "$0.001",
   "reputation-check": "$0.0005",
   "job-status": "$0.0001",
 };
 
+// ── Resource handlers ────────────────────────────────────────────────────
+
 async function handleAgentLookup(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(req.url);
   const scaAddress = searchParams.get("scaAddress");
-
   if (!scaAddress) {
     return NextResponse.json(
       { success: false, error: "scaAddress query param required." },
@@ -42,7 +37,6 @@ async function handleAgentLookup(req: NextRequest): Promise<NextResponse> {
 async function handleReputationCheck(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(req.url);
   const agentId = searchParams.get("agentId");
-
   if (!agentId) {
     return NextResponse.json(
       { success: false, error: "agentId query param required." },
@@ -72,7 +66,6 @@ async function handleReputationCheck(req: NextRequest): Promise<NextResponse> {
 async function handleJobStatus(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(req.url);
   const jobId = searchParams.get("jobId");
-
   if (!jobId) {
     return NextResponse.json(
       { success: false, error: "jobId query param required." },
@@ -131,12 +124,12 @@ const RESOURCE_HANDLERS: Record<string, (req: NextRequest) => Promise<NextRespon
   "job-status": handleJobStatus,
 };
 
-// ── Dynamic route: /api/nano/pay/agent-lookup, /api/nano/pay/reputation-check, etc ──
+// ── Dynamic route ──────────────────────────────────────────────────────
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ endpoint: string }> } // ✅ params is a Promise
+  { params }: { params: Promise<{ endpoint: string }> }
 ) {
-  const { endpoint } = await params; // ✅ await the Promise
+  const { endpoint } = await params;
   const price = PRICE_TABLE[endpoint];
   const resourceHandler = RESOURCE_HANDLERS[endpoint];
 
@@ -147,8 +140,6 @@ export async function POST(
     );
   }
 
-  // withGateway's call signature, confirmed from Circle's own source:
-  //   withGateway(handler, price, endpointPath) -> (req) => Promise<NextResponse>
   const protectedHandler = withGateway(
     resourceHandler,
     price,

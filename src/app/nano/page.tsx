@@ -361,17 +361,24 @@ export default function NanoPaymentsPage() {
     setX402Loading(true);
     setError(null);
     try {
+      // 1. Fetch balances – required
       const balanceRes = await fetch("/api/x402/seller/balance", {
         headers: { "x-api-key": API_KEY },
       });
       const balanceData = await balanceRes.json();
       if (balanceData.success) setX402Balances(balanceData);
 
-      const paymentsRes = await fetch("/api/payments/all?chain=x402", {
-        headers: { "x-api-key": API_KEY },
-      });
-      const paymentsData = await paymentsRes.json();
-      if (paymentsData.success) setX402Payments(paymentsData.data || []);
+      // 2. Fetch payment history – optional, fallback on error
+      try {
+        const paymentsRes = await fetch("/api/payments/all?chain=x402", {
+          headers: { "x-api-key": API_KEY },
+        });
+        const paymentsData = await paymentsRes.json();
+        if (paymentsData.success) setX402Payments(paymentsData.data || []);
+      } catch {
+        // If history fetch fails, just use an empty array
+        setX402Payments([]);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {

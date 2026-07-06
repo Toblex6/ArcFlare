@@ -1,88 +1,56 @@
-/**
- * src/app/api/x402/pay/route.ts
- *
- * REBUILT using the ACTUAL @circle-fin/x402-batching SDK's GatewayClient,
- * per the official SDK Reference. Replaces the hand-rolled EIP-3009
- * signing code from earlier today.
- *
- * GatewayClient.pay(url, options) "handles the full 402 negotiation flow
- * automatically: sends the request, receives payment requirements, signs
- * the authorization, and retries with the payment header." — straight
- * from the SDK docs. No manual typed-data construction needed at all.
- */
-
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+// src/app/api/x402/pay/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 
-interface PayRequest {
-  resourceUrl: string;
-  eoaAddress: string;
-}
-
-async function payWithEoaHandler(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { resourceUrl, eoaAddress }: PayRequest = await request.json();
-
+    const { resourceUrl, eoaAddress } = await req.json();
     if (!resourceUrl || !eoaAddress) {
       return NextResponse.json(
-        { success: false, error: "resourceUrl and eoaAddress are required." },
+        { success: false, error: "Missing resourceUrl or eoaAddress" },
         { status: 400 }
       );
     }
 
-    const walletRecord = await (prisma as any).x402EoaWallet.findUnique({ where: { address: eoaAddress } });
-    if (!walletRecord) {
+    // Use EOA_PRIVATE_KEY (set in .env) – this should be the key for the address with Gateway balance
+    const PRIVATE_KEY = process.env.EOA_PRIVATE_KEY as `0x${string}`;
+    if (!PRIVATE_KEY) {
       return NextResponse.json(
-        { success: false, error: `No stored EOA wallet for ${eoaAddress}.` },
-        { status: 404 }
+        { success: false, error: "EOA_PRIVATE_KEY not set" },
+        { status: 500 }
       );
     }
 
-    // Per SDK docs: config.chain uses SupportedChainName values like
-    // 'arcTestnet' — this is the CLIENT constructor's chain selector,
-    // distinct from the eip155:5042002 CAIP-2 network format used inside
-    // payment requirements JSON. Both are correct; they serve different roles.
+    console.log(`[x402 pay] Using EOA: ${eoaAddress}`);
+    console.log(`[x402 pay] Resource URL: ${resourceUrl}`);
+
     const client = new GatewayClient({
-      chain: "arcTestnet",
-      privateKey: walletRecord.privateKey as `0x${string}`,
+      chain: "arcTestnet",        // ✅ buyer uses "arcTestnet"
+      privateKey: PRIVATE_KEY,
     });
 
-    // Check Gateway balance first — nanopayments require a Gateway deposit,
-    // not just a wallet balance (per SDK: "Buyers fund their payments from
-    // a Gateway Wallet balance (deposited once onchain)").
-    const balances = await client.getBalances();
+    const response = await client.pay(resourceUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
 
-    if (parseFloat(balances.gateway.formattedAvailable) <= 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "No Gateway balance available. Deposit USDC into Gateway first.",
-          walletBalance: balances.wallet.formatted,
-          gatewayBalance: balances.gateway.formattedAvailable,
-          nextStep: `POST /api/x402/eoa-wallet/deposit { "eoaAddress": "${eoaAddress}", "amount": "10" }`,
-        },
-        { status: 400 }
-      );
-    }
-
-    // The SDK's pay() does everything: probe, sign, retry. No manual
-    // EIP-712 construction, no manual base64 encoding.
-    const result = await client.pay(resourceUrl, { method: "POST" });
+    console.log(`[x402 pay] Payment successful: ${response.transaction}`);
 
     return NextResponse.json({
       success: true,
-      paidWith: client.address,
-      amountUSDC: result.formattedAmount,
-      transaction: result.transaction,
-      resourceData: result.data,
-      message: `Paid ${result.formattedAmount} USDC from EOA ${client.address} for ${resourceUrl}`,
+      amountUSDC: response.amount ? (Number(response.amount) / 1e6).toString() : undefined,
+      transaction: response.transaction,
+      paidWith: eoaAddress,
+      resourceData: response.data,
     });
   } catch (error: any) {
-    console.error("❌ x402 payment error:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error("[x402 pay] Error:", error.message);
+    // If there's a response from the Gateway, include it
+    const details = error.response?.data || error;
+    return NextResponse.json(
+      { success: false, error: error.message, details },
+      { status: 500 }
+    );
   }
 }
-
-export const POST = withApiKey(payWithEoaHandler);
