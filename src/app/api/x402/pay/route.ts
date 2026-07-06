@@ -12,7 +12,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Use EOA_PRIVATE_KEY (set in .env) – this should be the key for the address with Gateway balance
     const PRIVATE_KEY = process.env.EOA_PRIVATE_KEY as `0x${string}`;
     if (!PRIVATE_KEY) {
       return NextResponse.json(
@@ -25,7 +24,7 @@ export async function POST(req: NextRequest) {
     console.log(`[x402 pay] Resource URL: ${resourceUrl}`);
 
     const client = new GatewayClient({
-      chain: "arcTestnet",        // ✅ buyer uses "arcTestnet"
+      chain: "arcTestnet",
       privateKey: PRIVATE_KEY,
     });
 
@@ -33,6 +32,9 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
+      validity: {
+        maxSeconds: 604800,   // ✅ match seller's maxTimeoutSeconds
+      },
     });
 
     console.log(`[x402 pay] Payment successful: ${response.transaction}`);
@@ -46,7 +48,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("[x402 pay] Error:", error.message);
-    // If there's a response from the Gateway, include it
     const details = error.response?.data || error;
     return NextResponse.json(
       { success: false, error: error.message, details },
