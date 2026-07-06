@@ -24,7 +24,7 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
       validity: {
-        maxSeconds: 604800,   // ✅ match seller's maxTimeoutSeconds
+        maxSeconds: 604799,   // ✅ match seller's maxTimeoutSeconds
       },
     });
 
