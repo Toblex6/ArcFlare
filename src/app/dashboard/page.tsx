@@ -56,7 +56,12 @@ export default function MerchantDashboard() {
 
   const fetchLiveDatabaseState = async (isSilentUpdate = false) => {
     try {
-      const res = await fetch("/api/payments/all");
+      // ✅ Send the API key in the headers
+      const res = await fetch("/api/payments/all", {
+        headers: {
+          "x-api-key": INTERNAL_API_KEY,
+        },
+      });
       const json = await res.json();
       if (json.status) {
         setPayments(json.data);
