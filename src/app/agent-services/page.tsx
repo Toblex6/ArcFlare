@@ -1,3 +1,4 @@
+"use client";
 import React, { useState, useEffect } from "react";
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
