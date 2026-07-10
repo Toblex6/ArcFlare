@@ -1,0 +1,677 @@
+
+// src/app/api/agent/brain/route.ts
+// ArcFlare Autonomous Agent Brain — COMPLETE VERSION
+//
+// Capabilities for AGENTS specifically (separate from merchant/consumer flows):
+//   1. A2A Payments          → agent pays another agent directly
+//   2. Agent Escrow          → ERC-8183 job lifecycle (create/fund/submit/complete)
+//   3. Agent Payroll         → agent autonomously pays a team of sub-agents
+//   4. Agent Subscriptions   → agent sets up recurring payments to services
+//   5. Invoice Generation    → agent generates payment requests for work done
+//   6. Cross-chain Routing   → agent moves USDC across chains via CCTP V2
+//   7. Hire another Agent    → ERC-8183 job with onchain escrow + evaluation
+//   8. Real-world API calls  → agent fetches external data autonomously
+//   9. ERC-8004 Reputation   → agent records reputation after job completion
+//  10. Memory                → agent remembers context across calls
+//
+// Protected by x402 — $0.002 per brain call
+
+import { NextRequest, NextResponse } from "next/server";
+import { withGateway } from "@/lib/x402";
+import { prisma } from "@/lib/prisma";
+import {
+  initiateDeveloperControlledWalletsClient,
+} from "@circle-fin/developer-controlled-wallets";
+import { createPublicClient, http, keccak256, toHex, parseUnits } from "viem";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
+const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY!;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY!;
+
+// ERC-8004 registries
+const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
+
+// ERC-8183 AgenticCommerce contract on Arc Testnet
+const AGENTIC_COMMERCE = "0x0747EEf0706327138c69792bF28Cd525089e4583";
+const USDC_ARC = "0x3600000000000000000000000000000000000000";
+
+const arcTestnet = {
+  id: 5042002,
+  name: "Arc Testnet",
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
+  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] } },
+} as const;
+
+const publicClient = createPublicClient({
+  chain: arcTestnet,
+  transport: http("https://rpc.testnet.arc.network"),
+});
+
+function getCircle() {
+  return initiateDeveloperControlledWalletsClient({
+    apiKey: process.env.CIRCLE_API_KEY!,
+    entitySecret: process.env.CIRCLE_ENTITY_SECRET!,
+  });
+}
+
+async function waitForCircleTx(txId: string): Promise<string> {
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const { data } = await getCircle().getTransaction({ id: txId });
+    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+      return data.transaction.txHash;
+    }
+    if (data?.transaction?.state === "FAILED")
+      throw new Error("Transaction failed onchain");
+  }
+  throw new Error("Transaction timed out");
+}
+
+// ── TOOL DEFINITIONS (what the agent brain can do) ────────────────────────────
+const AGENT_TOOLS = [
+  {
+    name: "agent_pay_agent",
+    description:
+      "Agent A pays Agent B directly for a service. Use for immediate, synchronous payments between agents. This is A2A payment via ArcFlare M2M settlement.",
+    input_schema: {
+      type: "object",
+      properties: {
+        amount: { type: "string", description: "Amount in USDC" },
+        payerAgentSCA: { type: "string", description: "Payer agent SCA address" },
+        receiverAgentSCA: { type: "string", description: "Receiver agent SCA address" },
+        description: { type: "string", description: "What this payment is for" },
+      },
+      required: ["amount", "receiverAgentSCA"],
+    },
+  },
+  {
+    name: "create_agent_job",
+    description:
+      "Create an ERC-8183 job to hire another agent for async work with onchain escrow. Use when work takes time and needs verification before payment. Client creates job → funds escrow → provider submits work → evaluator releases payment.",
+    input_schema: {
+      type: "object",
+      properties: {
+        clientSCA: { type: "string" },
+        clientWalletId: { type: "string" },
+        providerSCA: { type: "string", description: "Agent being hired" },
+        evaluatorSCA: { type: "string", description: "Who judges the work (can be same as client)" },
+        amountUSDC: { type: "string" },
+        description: { type: "string", description: "What the hired agent must deliver" },
+        deadlineHours: { type: "number", default: 24 },
+      },
+      required: ["providerSCA", "amountUSDC", "description"],
+    },
+  },
+  {
+    name: "submit_job_deliverable",
+    description:
+      "Provider agent submits completed work for an ERC-8183 job. Include the deliverable description/hash.",
+    input_schema: {
+      type: "object",
+      properties: {
+        jobId: { type: "string" },
+        providerSCA: { type: "string" },
+        deliverable: { type: "string", description: "Description or hash of delivered work" },
+      },
+      required: ["jobId", "providerSCA", "deliverable"],
+    },
+  },
+  {
+    name: "complete_or_reject_job",
+    description:
+      "Evaluator agent marks a submitted ERC-8183 job as completed (releases payment) or rejected (refunds client).",
+    input_schema: {
+      type: "object",
+      properties: {
+        jobId: { type: "string" },
+        evaluatorSCA: { type: "string" },
+        evaluatorWalletId: { type: "string" },
+        verdict: { type: "string", enum: ["complete", "reject"] },
+        reason: { type: "string" },
+      },
+      required: ["jobId", "evaluatorSCA", "verdict"],
+    },
+  },
+  {
+    name: "run_agent_payroll",
+    description:
+      "Agent autonomously pays a team of sub-agents or workers in one batch. Use when an orchestrator agent needs to pay multiple agents for completed work.",
+    input_schema: {
+      type: "object",
+      properties: {
+        payerSCA: { type: "string" },
+        payerWalletId: { type: "string" },
+        recipients: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              recipientSCA: { type: "string" },
+              amount: { type: "string" },
+              label: { type: "string", description: "Agent name or ID" },
+            },
+          },
+        },
+      },
+      required: ["recipients"],
+    },
+  },
+  {
+    name: "setup_agent_subscription",
+    description:
+      "Agent sets up a recurring automatic payment to a service or another agent. Use for ongoing subscriptions, regular data feed purchases, or periodic agent hiring.",
+    input_schema: {
+      type: "object",
+      properties: {
+        payerSCA: { type: "string" },
+        serviceAgentSCA: { type: "string", description: "Agent/service being subscribed to" },
+        amountUSDC: { type: "string" },
+        intervalDays: { type: "number", description: "1=daily, 7=weekly, 30=monthly" },
+        description: { type: "string" },
+        maxRuns: { type: "number", description: "Leave empty for indefinite" },
+      },
+      required: ["serviceAgentSCA", "amountUSDC", "intervalDays"],
+    },
+  },
+  {
+    name: "generate_agent_invoice",
+    description:
+      "Agent generates an invoice/payment request for work it has completed. Returns a payment link the client can use to pay.",
+    input_schema: {
+      type: "object",
+      properties: {
+        amount: { type: "string" },
+        description: { type: "string", description: "What was delivered" },
+        clientIdentifier: { type: "string", description: "Client name, address, or ID" },
+      },
+      required: ["amount", "description"],
+    },
+  },
+  {
+    name: "route_cross_chain",
+    description:
+      "Agent routes USDC across chains via Circle CCTP V2. Use when an agent needs to receive or send payment on a different chain.",
+    input_schema: {
+      type: "object",
+      properties: {
+        senderSCA: { type: "string" },
+        senderWalletId: { type: "string" },
+        destinationAddress: { type: "string" },
+        amount: { type: "string" },
+        sourceChain: { type: "string", default: "ARC-TESTNET" },
+        destinationChain: { type: "string", description: "e.g. ETH-SEPOLIA, ARB-SEPOLIA" },
+      },
+      required: ["destinationAddress", "amount", "destinationChain"],
+    },
+  },
+  {
+    name: "record_agent_reputation",
+    description:
+      "Record reputation feedback for an agent on ERC-8004 after a job is completed. Always call this after completing or rejecting a job to build the agent's onchain reputation trail.",
+    input_schema: {
+      type: "object",
+      properties: {
+        agentTokenId: { type: "string" },
+        validatorWalletAddress: { type: "string" },
+        validatorWalletId: { type: "string" },
+        score: { type: "number", description: "0-100 reputation score" },
+        tag: { type: "string", description: "e.g. successful_delivery, late_delivery, rejected_work" },
+      },
+      required: ["agentTokenId", "score", "tag"],
+    },
+  },
+  {
+    name: "fetch_agent_data",
+    description:
+      "Agent fetches real-world data from a public API for autonomous decision making. Use for price feeds, news, weather, exchange rates, or any external data source.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        purpose: { type: "string" },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "check_agent_status",
+    description:
+      "Check the status of a payment, ERC-8183 job, recurring subscription, or agent reputation score.",
+    input_schema: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["payment", "job", "subscription", "reputation"] },
+        reference: { type: "string" },
+      },
+      required: ["type", "reference"],
+    },
+  },
+];
+
+// ── TOOL EXECUTORS ────────────────────────────────────────────────────────────
+async function executeTool(name: string, input: any): Promise<any> {
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-key": INTERNAL_API_KEY,
+  };
+
+  switch (name) {
+    // ── 1. A2A Direct Payment ─────────────────────────────────────────────────
+    case "agent_pay_agent": {
+      const initRes = await fetch(`${API_BASE}/api/payments/initialize`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          amount: input.amount,
+          currency: "USDC",
+          agentSCA: input.payerAgentSCA,
+          merchant: input.receiverAgentSCA,
+        }),
+      });
+      const initData = await initRes.json();
+      if (!initData.success) return { error: initData.error };
+
+      const settleRes = await fetch(`${API_BASE}/api/payments/settle`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ reference: initData.reference }),
+      });
+      const settleData = await settleRes.json();
+      return {
+        success: settleData.success,
+        txHash: settleData.arcTxHash,
+        explorerUrl: settleData.explorerUrl,
+        amount: input.amount,
+        from: input.payerAgentSCA,
+        to: input.receiverAgentSCA,
+      };
+    }
+
+    // ── 2. Create ERC-8183 Job ────────────────────────────────────────────────
+    case "create_agent_job": {
+      const res = await fetch(`${API_BASE}/api/jobs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "create",
+          clientSCA: input.clientSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
+          clientWalletId: input.clientWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          providerSCA: input.providerSCA,
+          evaluatorSCA: input.evaluatorSCA || input.clientSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
+          amountUSDC: input.amountUSDC,
+          description: input.description,
+          deadlineHours: input.deadlineHours || 24,
+        }),
+      });
+      return res.json();
+    }
+
+    // ── 3. Submit Job Deliverable ─────────────────────────────────────────────
+    case "submit_job_deliverable": {
+      const res = await fetch(`${API_BASE}/api/jobs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "submit",
+          jobId: input.jobId,
+          providerSCA: input.providerSCA,
+          deliverable: input.deliverable,
+        }),
+      });
+      return res.json();
+    }
+
+    // ── 4. Complete or Reject Job ─────────────────────────────────────────────
+    case "complete_or_reject_job": {
+      const res = await fetch(`${API_BASE}/api/jobs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: input.verdict === "complete" ? "complete" : "reject",
+          jobId: input.jobId,
+          evaluatorSCA: input.evaluatorSCA,
+          evaluatorWalletId: input.evaluatorWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          reason: input.reason,
+        }),
+      });
+      return res.json();
+    }
+
+    // ── 5. Agent Payroll ──────────────────────────────────────────────────────
+    case "run_agent_payroll": {
+      const res = await fetch(`${API_BASE}/api/payroll/run`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          payerSCA: input.payerSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
+          payerWalletId: input.payerWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          recipients: input.recipients,
+        }),
+      });
+      return res.json();
+    }
+
+    // ── 6. Agent Subscription ─────────────────────────────────────────────────
+    case "setup_agent_subscription": {
+      const res = await fetch(`${API_BASE}/api/payments/scheduled`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          payerSCA: input.payerSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
+          receiverSCA: input.serviceAgentSCA,
+          amount: input.amountUSDC,
+          intervalDays: input.intervalDays,
+          description: input.description || `Agent subscription to ${input.serviceAgentSCA}`,
+          maxRuns: input.maxRuns || null,
+        }),
+      });
+      return res.json();
+    }
+
+    // ── 7. Generate Invoice ───────────────────────────────────────────────────
+    case "generate_agent_invoice": {
+      const res = await fetch(`${API_BASE}/api/payments/initialize`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          amount: input.amount,
+          currency: "USDC",
+          merchant: `ArcFlare Agent Invoice — ${input.description}`,
+          agentSCA: process.env.AGENT_OWNER_WALLET_ADDRESS,
+        }),
+      });
+      const data = await res.json();
+      return {
+        success: data.success,
+        invoiceReference: data.reference,
+        paymentLink: data.checkoutUrl,
+        amount: input.amount,
+        description: input.description,
+        client: input.clientIdentifier,
+        message: `Invoice generated. Share this link with your client: ${data.checkoutUrl}`,
+      };
+    }
+
+    // ── 8. Cross-chain Routing ────────────────────────────────────────────────
+    case "route_cross_chain": {
+      const res = await fetch(`${API_BASE}/api/cctp/transfer`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          senderSCA: input.senderSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
+          senderWalletId: input.senderWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          destinationAddress: input.destinationAddress,
+          amount: input.amount,
+          sourceChain: input.sourceChain || "ARC-TESTNET",
+          destinationChain: input.destinationChain,
+        }),
+      });
+      return res.json();
+    }
+
+    // ── 9. Record ERC-8004 Reputation ─────────────────────────────────────────
+    case "record_agent_reputation": {
+      const circle = getCircle();
+      const feedbackHash = keccak256(toHex(input.tag));
+      const score = Math.max(0, Math.min(100, input.score));
+
+      const validatorAddress = input.validatorWalletAddress ||
+        process.env.AGENT_VALIDATOR_WALLET_ADDRESS;
+      const validatorId = input.validatorWalletId ||
+        process.env.AGENT_VALIDATOR_WALLET_ID;
+
+      if (!validatorAddress || !validatorId) {
+        return { error: "Validator wallet not configured. Run setup script first." };
+      }
+
+      const tx = await circle.createContractExecutionTransaction({
+        walletAddress: validatorAddress,
+        blockchain: "ARC-TESTNET" as any,
+        contractAddress: REPUTATION_REGISTRY,
+        abiFunctionSignature:
+          "giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)",
+        abiParameters: [
+          input.agentTokenId,
+          score.toString(),
+          "0",
+          input.tag,
+          "",
+          "",
+          "",
+          feedbackHash,
+        ],
+        fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+      });
+
+      if (!tx.data?.id) return { error: "No transaction ID returned" };
+      const txHash = await waitForCircleTx(tx.data.id);
+
+      return {
+        success: true,
+        txHash,
+        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        agentTokenId: input.agentTokenId,
+        score,
+        tag: input.tag,
+        message: `Reputation recorded onchain for agent #${input.agentTokenId}`,
+      };
+    }
+
+    // ── 10. Fetch External Data ───────────────────────────────────────────────
+    case "fetch_agent_data": {
+      try {
+        const res = await fetch(input.url, {
+          headers: { "Accept": "application/json" },
+        });
+        const text = await res.text();
+        let parsed: any;
+        try { parsed = JSON.parse(text); }
+        catch { parsed = text.slice(0, 1000); }
+        return { success: true, data: parsed, url: input.url, purpose: input.purpose };
+      } catch (e: any) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    // ── 11. Check Status ──────────────────────────────────────────────────────
+    case "check_agent_status": {
+      if (input.type === "payment") {
+        const res = await fetch(
+          `${API_BASE}/api/payments/verify/${input.reference}`,
+          { headers }
+        );
+        return res.json();
+      }
+      if (input.type === "job") {
+        const res = await fetch(
+          `${API_BASE}/api/jobs?jobId=${input.reference}`,
+          { headers }
+        );
+        return res.json();
+      }
+      if (input.type === "subscription") {
+        const res = await fetch(
+          `${API_BASE}/api/payments/scheduled?reference=${input.reference}`,
+          { headers }
+        );
+        return res.json();
+      }
+      if (input.type === "reputation") {
+        try {
+          const score = await publicClient.readContract({
+            address: REPUTATION_REGISTRY,
+            abi: [{ name: "getReputation", type: "function", stateMutability: "view", inputs: [{ name: "tokenId", type: "uint256" }], outputs: [{ name: "", type: "int128" }] }],
+            functionName: "getReputation",
+            args: [BigInt(input.reference)],
+          });
+          return { success: true, agentTokenId: input.reference, reputationScore: Number(score) };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      }
+      return { error: "Unknown status type" };
+    }
+
+    default:
+      return { error: `Unknown tool: ${name}` };
+  }
+}
+
+// ── Agent Memory (Postgres) ───────────────────────────────────────────────────
+async function getMemory(sessionId: string): Promise<any[]> {
+  try {
+    const rows = await (prisma as any).agentBrainMemory?.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: "asc" },
+      take: 20,
+    }) ?? [];
+    return rows.map((r: any) => r.message);
+  } catch { return []; }
+}
+
+async function saveMemory(sessionId: string, role: string, content: any) {
+  try {
+    await (prisma as any).agentBrainMemory?.create({
+      data: { sessionId, message: { role, content } },
+    });
+  } catch {}
+}
+
+// ── Agent Loop ────────────────────────────────────────────────────────────────
+async function runBrain(
+  userMessage: string,
+  sessionId: string,
+  agentContext: string
+): Promise<{ response: string; toolsUsed: string[]; results: any[] }> {
+  const toolsUsed: string[] = [];
+  const results: any[] = [];
+  const memory = await getMemory(sessionId);
+  const messages: any[] = [...memory, { role: "user", content: userMessage }];
+
+  const system = `You are ArcFlare's autonomous AI agent — a fully autonomous financial and commerce agent 
+registered on Arc Testnet with ERC-8004 identity (Token #${process.env.AGENT_TOKEN_ID || "847277"}).
+
+Your owner wallet: ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"}
+Your validator wallet: ${process.env.AGENT_VALIDATOR_WALLET_ADDRESS || "not set"}
+
+${agentContext ? `Additional context: ${agentContext}` : ""}
+
+You can:
+- Pay other agents directly (A2A via M2M settlement)
+- Hire agents via ERC-8183 jobs with onchain escrow
+- Run payroll for teams of agents
+- Set up recurring subscriptions to agent services
+- Generate invoices for completed work
+- Route USDC cross-chain via Circle CCTP V2
+- Record reputation on ERC-8004 after job completion
+- Fetch real-world data autonomously
+- Check status of any payment, job, or reputation
+
+IMPORTANT:
+- For immediate services: use agent_pay_agent (x402/M2M) 
+- For async work that needs verification: use create_agent_job (ERC-8183)
+- Always record_agent_reputation after completing or rejecting a job
+- For teams: use run_agent_payroll for efficiency
+- After completing tasks, summarize what was done with transaction links`;
+
+  let loop = true;
+  let iters = 0;
+
+  while (loop && iters < 8) {
+    iters++;
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2048,
+        system,
+        tools: AGENT_TOOLS,
+        messages,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Claude: ${res.status} ${await res.text()}`);
+    const data = await res.json();
+
+    if (data.stop_reason === "end_turn") {
+      const text = data.content.find((c: any) => c.type === "text")?.text || "Done.";
+      await saveMemory(sessionId, "user", userMessage);
+      await saveMemory(sessionId, "assistant", text);
+      return { response: text, toolsUsed, results };
+    }
+
+    if (data.stop_reason === "tool_use") {
+      const toolBlocks = data.content.filter((c: any) => c.type === "tool_use");
+      messages.push({ role: "assistant", content: data.content });
+      const toolResults: any[] = [];
+
+      for (const tb of toolBlocks) {
+        console.log(`[brain] Tool: ${tb.name}`, JSON.stringify(tb.input).slice(0, 100));
+        toolsUsed.push(tb.name);
+        const result = await executeTool(tb.name, tb.input);
+        results.push({ tool: tb.name, result });
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tb.id,
+          content: JSON.stringify(result),
+        });
+      }
+      messages.push({ role: "user", content: toolResults });
+    } else {
+      loop = false;
+    }
+  }
+
+  return { response: "Agent completed.", toolsUsed, results };
+}
+
+// ── Route Handler ─────────────────────────────────────────────────────────────
+const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
+  const body = await req.json().catch(() => ({}));
+  const { message, sessionId = `session_${Date.now()}`, context = "" } = body;
+
+  if (!message) {
+    return NextResponse.json({ success: false, error: "message is required" }, { status: 400 });
+  }
+  if (!ANTHROPIC_API_KEY) {
+    return NextResponse.json({ success: false, error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
+  }
+
+  console.log(`[brain] ${sessionId}: ${message.slice(0, 80)}`);
+  const { response, toolsUsed, results } = await runBrain(message, sessionId, context);
+
+  return NextResponse.json({
+    success: true,
+    response,
+    toolsUsed,
+    results,
+    sessionId,
+    agent: {
+      tokenId: process.env.AGENT_TOKEN_ID || "847277",
+      address: process.env.AGENT_OWNER_WALLET_ADDRESS,
+      standard: "ERC-8004",
+      network: "Arc Testnet",
+    },
+  });
+};
+
+export const POST = withGateway(brainHandler, "$0.002", "/api/agent/brain");
+
+export async function GET() {
+  return NextResponse.json({
+    agent: "ArcFlare Autonomous Agent Brain",
+    tokenId: process.env.AGENT_TOKEN_ID || "847277",
+    capabilities: AGENT_TOOLS.map((t) => ({
+      name: t.name,
+      description: t.description,
+    })),
+    protocols: ["ERC-8004", "ERC-8183", "x402", "Circle CCTP V2"],
+    pricing: { perCall: "$0.002 USDC via x402" },
+  });
+}
