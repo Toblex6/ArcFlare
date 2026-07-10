@@ -1,4 +1,6 @@
 "use client";
+
+import Image from "next/image";   // ✅ add this import
 import React, { useState, useEffect } from "react";
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
@@ -177,12 +179,20 @@ export default function AgentServicePage() {
       {/* Sidebar */}
       <aside style={styles.aside}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 32 }}>
-          <div style={{ width: 36, height: 36, background: "#c8975a", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>⟡</div>
+          {/* ─── Logo replaced with Image ─── */}
+          <Image
+            src="/arcflare-logo.png"
+            alt="ArcFlare"
+            width={36}
+            height={36}
+            style={{ borderRadius: 8, objectFit: "contain" }}
+          />
           <div>
             <p style={{ color: "#f0ece6", fontSize: 14, fontWeight: 700, margin: 0 }}>ArcFlare</p>
             <p style={{ color: "#6b5a45", fontSize: 9, margin: 0 }}>Stablecoin Payment Infrastructure</p>
           </div>
         </div>
+
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
           {NAV.map((section) => (
             <div key={section.group || "other"} style={{ marginBottom: 8 }}>
@@ -201,7 +211,7 @@ export default function AgentServicePage() {
         </div>
       </aside>
 
-      {/* Main */}
+      {/* Main (unchanged) */}
       <main style={styles.main}>
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
