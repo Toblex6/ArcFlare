@@ -56,7 +56,11 @@ export default function MerchantDashboard() {
 
   const fetchLiveDatabaseState = async (isSilentUpdate = false) => {
     try {
-      const res = await fetch("/api/payments/all");
+      const res = await fetch("/api/payments/all", {
+        headers: {
+          "x-api-key": INTERNAL_API_KEY,
+        },
+      });
       const json = await res.json();
       if (json.status) {
         setPayments(json.data);
@@ -231,6 +235,8 @@ export default function MerchantDashboard() {
               group: "AGENTS & COMMERCE",
               items: [
                 { label: "Agents", href: "/agents", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /><line x1="12" y1="11" x2="12" y2="15" /></svg> },
+                // ─── NEW AI AGENT ITEM ───
+                { label: "AI Agent", href: "/agent-services", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg> },
                 { label: "Agent Wallets", href: "/agent-wallets", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="7" cy="15" r="1.5" /></svg> },
                 { label: "Jobs", href: "/jobs", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg> },
                 { label: "Nanopayments", href: "/nano", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /><path d="M12 8v8" /></svg> },
@@ -370,9 +376,8 @@ export default function MerchantDashboard() {
         </div>
       </aside>
 
-      {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
+      {/* ── MAIN CONTENT (unchanged) ──────────────────────────────────── */}
       <main style={{ flex: 1, padding: "32px 32px", overflowX: "hidden", background: "#f8fafc" }}>
-        {/* Header */}
         <div
           style={{
             display: "flex",
@@ -448,7 +453,6 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* Warning Banner */}
         <div
           style={{
             marginBottom: 24,
@@ -475,7 +479,7 @@ export default function MerchantDashboard() {
           </p>
         </div>
 
-        {/* METRIC CARDS — 4 cards matching the screenshot */}
+        {/* METRIC CARDS */}
         <div
           style={{
             display: "grid",
