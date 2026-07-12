@@ -1,3 +1,18 @@
+/**
+ * src/lib/x402.ts — WORKING FINAL
+ *
+ * Calls BatchFacilitatorClient.verify() and .settle() DIRECTLY.
+ * Does NOT use x402ResourceServer — that abstraction was incorrectly
+ * building the verify payload, causing Circle Gateway to return 400
+ * with "paymentPayload.x402Version: Required" etc.
+ *
+ * Confirmed working fields (from cast call + circlefin/arc-nanopayments):
+ *   network:           "eip155:5042002"
+ *   maxTimeoutSeconds: 604800
+ *   extra.name:        "GatewayWalletBatched"
+ *   extra.version:     "1"
+ *   verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+ */
 
 import { NextRequest, NextResponse } from "next/server";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";

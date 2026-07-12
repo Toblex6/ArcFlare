@@ -1,4 +1,3 @@
-
 // src/app/api/agent/brain/route.ts
 // ArcFlare Autonomous Agent Brain — COMPLETE VERSION
 //

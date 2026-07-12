@@ -1,3 +1,10 @@
+// src/app/api/agent/service/route.ts
+// ArcFlare AI Agent — x402-protected endpoint that:
+//   1. Charges per request via Circle Gateway Nanopayments
+//   2. Does real AI work via Claude API
+//   3. Records reputation on ERC-8004 after successful delivery
+//   4. Logs the job for ERC-8183 lifecycle tracking
+
 import { NextRequest, NextResponse } from "next/server";
 import { withGateway } from "@/lib/x402";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";

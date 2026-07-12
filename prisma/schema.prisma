@@ -279,3 +279,11 @@ model X402EoaWallet {
 
   @@map("x402_eoa_wallets")
 }
+model AgentBrainMemory {
+  id        String   @id @default(uuid())
+  sessionId String
+  message   Json
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+}
