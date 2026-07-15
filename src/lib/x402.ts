@@ -8,7 +8,7 @@
  *
  * Confirmed working fields (from cast call + circlefin/arc-nanopayments):
  *   network:           "eip155:5042002"
- *   maxTimeoutSeconds: 6307200
+ *   maxTimeoutSeconds: 604800,
  *   extra.name:        "GatewayWalletBatched"
  *   extra.version:     "1"
  *   verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
@@ -56,6 +56,8 @@ export function withGateway(
   endpoint: string,
 ) {
   const requirements = buildRequirements(price);
+  // Inside withGateway, before returning 402:
+  console.log(`[x402] SELLER maxTimeoutSeconds: ${requirements.maxTimeoutSeconds}`);
 
   return async (req: NextRequest): Promise<NextResponse> => {
     const paymentSignatureHeader = req.headers.get("payment-signature");

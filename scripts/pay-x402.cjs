@@ -37,6 +37,7 @@ async function main() {
         message: "Pay 0.1 USDC to 0x954ebd124aedf03b784fcf2cb067de98f04bfa3a as a test A2A payment",
         sessionId: "a2a-test-1",
       }),
+       validity: { maxSeconds: 300 },  // ✅ 5 min — well under seller's 604800
     }
   );
 
