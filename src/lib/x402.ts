@@ -8,7 +8,7 @@
  *
  * Confirmed working fields (from cast call + circlefin/arc-nanopayments):
  *   network:           "eip155:5042002"
- *   maxTimeoutSeconds: 604800
+ *   maxTimeoutSeconds: 6307200
  *   extra.name:        "GatewayWalletBatched"
  *   extra.version:     "1"
  *   verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"

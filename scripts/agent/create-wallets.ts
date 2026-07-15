@@ -1,3 +1,4 @@
+// scripts/agent/create-wallets.ts
 import { getCircleClient, createWallets } from '../src/lib/circle/client';
 
 async function main() {

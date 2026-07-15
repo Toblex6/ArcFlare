@@ -18,25 +18,27 @@ async function main() {
     privateKey: PRIVATE_KEY,
   });
 
-  // Check Gateway balance first
+  // Check balance first
   const balances = await client.getBalances();
-  const available = balances?.gateway?.formattedAvailable ?? "0";
-  console.log(`💰 Gateway balance: ${available} USDC`);
-
-  if (parseFloat(available) <= 0) {
-    console.error("❌ No Gateway balance. Run:");
-    console.error(`   circle gateway deposit --address ${BUYER_ADDRESS} --chain ARC-TESTNET --amount 10 --method direct`);
+  console.log(`💰 Gateway balance: ${balances.gateway.formattedAvailable} USDC`);
+  if (parseFloat(balances.gateway.formattedAvailable) <= 0) {
+    console.error("❌ No Gateway balance. Run: node scripts/deposit-x402.cjs");
     process.exit(1);
   }
 
-  const url = "https://arcflare-gateway.onrender.com/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9";
-  console.log("📡 Paying...");
+  console.log("📡 Calling agent brain...");
 
-  const response = await client.pay(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
+  const response = await client.pay(
+    "https://arcflare-gateway.onrender.com/api/agent/brain",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "Pay 0.1 USDC to 0x954ebd124aedf03b784fcf2cb067de98f04bfa3a as a test A2A payment",
+        sessionId: "a2a-test-1",
+      }),
+    }
+  );
 
   console.log("✅ Payment successful!");
   console.log("Transaction:", response.transaction);
@@ -47,3 +49,4 @@ main().catch((err) => {
   console.error("❌ Error:", err.message);
   if (err.cause) console.error("Cause:", err.cause);
 });
+ 
