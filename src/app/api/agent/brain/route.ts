@@ -615,6 +615,10 @@ IMPORTANT:
       }
     );
 
+    const responseBody = await res.clone().text();
+    console.log(`[brain] Gemini response status: ${res.status}`);
+    console.log(`[brain] Gemini response body: ${responseBody.slice(0, 500)}`);
+
     if (!res.ok) throw new Error(`Gemini: ${res.status} ${await res.text()}`);
     const data = await res.json();
 
