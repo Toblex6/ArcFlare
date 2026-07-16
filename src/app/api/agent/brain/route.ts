@@ -1,5 +1,5 @@
 // src/app/api/agent/brain/route.ts
-// ArcFlare Autonomous Agent Brain — COMPLETE VERSION (Gemini-powered)
+// ArcFlare Autonomous Agent Brain — COMPLETE VERSION (Groq-powered)
 //
 // Capabilities for AGENTS specifically (separate from merchant/consumer flows):
 //   1. A2A Payments          → agent pays another agent directly
@@ -26,8 +26,8 @@ import { createPublicClient, http, keccak256, toHex, parseUnits } from "viem";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
 const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY!;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+const GROQ_API_KEY = process.env.GROQ_API_KEY!;
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 
 // ERC-8004 registries
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
@@ -69,8 +69,8 @@ async function waitForCircleTx(txId: string): Promise<string> {
 }
 
 // ── TOOL DEFINITIONS (what the agent brain can do) ────────────────────────────
-// NOTE: kept as "input_schema" here for readability/reuse; converted to
-// Gemini's "parameters" shape in GEMINI_TOOLS below.
+// Kept as "input_schema" for readability; converted to OpenAI/Groq's
+// {type:"function", function:{...parameters}} shape in GROQ_TOOLS below.
 const AGENT_TOOLS = [
   {
     name: "agent_pay_agent",
@@ -251,20 +251,16 @@ const AGENT_TOOLS = [
   },
 ];
 
-// Gemini wants "parameters" instead of "input_schema" — same JSON Schema body.
-// Note: Gemini's schema parser doesn't like a bare "default" key inside
-// properties (harmless here since none of the tools above use one), and
-// doesn't support every JSON Schema keyword — keep tool schemas simple
-// (type/properties/required/description/enum/items) as done above.
-const GEMINI_TOOLS = [
-  {
-    functionDeclarations: AGENT_TOOLS.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.input_schema,
-    })),
+// Groq's API is OpenAI-compatible: tools are wrapped as
+// { type: "function", function: { name, description, parameters } }
+const GROQ_TOOLS = AGENT_TOOLS.map((t) => ({
+  type: "function",
+  function: {
+    name: t.name,
+    description: t.description,
+    parameters: t.input_schema,
   },
-];
+}));
 
 // ── TOOL EXECUTORS ────────────────────────────────────────────────────────────
 async function executeTool(name: string, input: any): Promise<any> {
@@ -536,8 +532,8 @@ async function executeTool(name: string, input: any): Promise<any> {
 }
 
 // ── Agent Memory (Postgres) ───────────────────────────────────────────────────
-// Stored shape is now Gemini's { role: "user"|"model", parts: [...] } instead
-// of Anthropic's { role: "user"|"assistant", content: [...] }.
+// Stored shape is now OpenAI/Groq-style chat messages:
+// { role: "user"|"assistant"|"tool", content, tool_calls?, tool_call_id? }
 async function getMemory(sessionId: string): Promise<any[]> {
   try {
     const rows = await (prisma as any).agentBrainMemory?.findMany({
@@ -549,10 +545,10 @@ async function getMemory(sessionId: string): Promise<any[]> {
   } catch { return []; }
 }
 
-async function saveMemory(sessionId: string, role: "user" | "model", parts: any[]) {
+async function saveMemory(sessionId: string, message: any) {
   try {
     await (prisma as any).agentBrainMemory?.create({
-      data: { sessionId, message: { role, parts } },
+      data: { sessionId, message },
     });
   } catch {}
 }
@@ -566,10 +562,6 @@ async function runBrain(
   const toolsUsed: string[] = [];
   const results: any[] = [];
   const memory = await getMemory(sessionId);
-  const contents: any[] = [
-    ...memory,
-    { role: "user", parts: [{ text: userMessage }] },
-  ];
 
   const system = `You are ArcFlare's autonomous AI agent — a fully autonomous financial and commerce agent 
 registered on Arc Testnet with ERC-8004 identity (Token #${process.env.AGENT_TOKEN_ID || "847277"}).
@@ -597,63 +589,76 @@ IMPORTANT:
 - For teams: use run_agent_payroll for efficiency
 - After completing tasks, summarize what was done with transaction links`;
 
+  const messages: any[] = [
+    { role: "system", content: system },
+    ...memory,
+    { role: "user", content: userMessage },
+  ];
+
   let loop = true;
   let iters = 0;
 
   while (loop && iters < 8) {
     iters++;
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: system }] },
-          tools: GEMINI_TOOLS,
-          contents,
-        }),
-      }
-    );
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: 2048,
+        messages,
+        tools: GROQ_TOOLS,
+        tool_choice: "auto",
+      }),
+    });
 
-    const responseBody = await res.clone().text();
-    console.log(`[brain] Gemini response status: ${res.status}`);
-    console.log(`[brain] Gemini response body: ${responseBody.slice(0, 500)}`);
-
-    if (!res.ok) throw new Error(`Gemini: ${res.status} ${await res.text()}`);
+    if (!res.ok) throw new Error(`Groq: ${res.status} ${await res.text()}`);
     const data = await res.json();
 
-    const candidate = data.candidates?.[0];
-    if (!candidate) throw new Error(`Gemini returned no candidates: ${JSON.stringify(data)}`);
+    const choice = data.choices?.[0];
+    if (!choice) throw new Error(`Groq returned no choices: ${JSON.stringify(data)}`);
 
-    const parts = candidate.content?.parts || [];
-    const functionCalls = parts.filter((p: any) => p.functionCall);
+    const msg = choice.message;
+    const toolCalls = msg.tool_calls || [];
 
-    if (functionCalls.length === 0) {
+    if (toolCalls.length === 0) {
       // No tool calls → model produced its final text answer
-      const text = parts.find((p: any) => p.text)?.text || "Done.";
-      await saveMemory(sessionId, "user", [{ text: userMessage }]);
-      await saveMemory(sessionId, "model", parts);
+      const text = msg.content || "Done.";
+      await saveMemory(sessionId, { role: "user", content: userMessage });
+      await saveMemory(sessionId, { role: "assistant", content: text });
       return { response: text, toolsUsed, results };
     }
 
     // Model wants to call one or more tools
-    contents.push({ role: "model", parts });
-    const functionResponseParts: any[] = [];
+    messages.push({
+      role: "assistant",
+      content: msg.content || null,
+      tool_calls: toolCalls,
+    });
 
-    for (const fc of functionCalls) {
-      const { name, args } = fc.functionCall;
+    for (const tc of toolCalls) {
+      const name = tc.function.name;
+      let args: any = {};
+      try { args = JSON.parse(tc.function.arguments || "{}"); }
+      catch { args = {}; }
+
       console.log(`[brain] Tool: ${name}`, JSON.stringify(args).slice(0, 100));
       toolsUsed.push(name);
       const result = await executeTool(name, args);
       results.push({ tool: name, result });
-      functionResponseParts.push({
-        functionResponse: { name, response: result },
+
+      messages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(result),
       });
     }
-    contents.push({ role: "user", parts: functionResponseParts });
 
-    if (candidate.finishReason && candidate.finishReason !== "STOP") {
-      // e.g. MAX_TOKENS, SAFETY — stop looping and report what we have
+    if (choice.finish_reason && choice.finish_reason !== "tool_calls" && choice.finish_reason !== "stop") {
+      // e.g. length, content_filter — stop looping and report what we have
       loop = false;
     }
   }
@@ -669,8 +674,8 @@ const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
   if (!message) {
     return NextResponse.json({ success: false, error: "message is required" }, { status: 400 });
   }
-  if (!GEMINI_API_KEY) {
-    return NextResponse.json({ success: false, error: "GEMINI_API_KEY not configured" }, { status: 500 });
+  if (!GROQ_API_KEY) {
+    return NextResponse.json({ success: false, error: "GROQ_API_KEY not configured" }, { status: 500 });
   }
 
   console.log(`[brain] ${sessionId}: ${message.slice(0, 80)}`);
