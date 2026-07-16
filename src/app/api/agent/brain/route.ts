@@ -27,7 +27,7 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
 const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY!;
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
-const GROQ_MODEL = process.env.GROQ_MODEL || "mixtral-8x7b-32768";
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 // ERC-8004 registries
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
