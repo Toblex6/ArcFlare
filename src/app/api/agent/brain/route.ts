@@ -1,5 +1,5 @@
 // src/app/api/agent/brain/route.ts
-// ArcFlare Autonomous Agent Brain — COMPLETE VERSION
+// ArcFlare Autonomous Agent Brain — COMPLETE VERSION (Gemini-powered)
 //
 // Capabilities for AGENTS specifically (separate from merchant/consumer flows):
 //   1. A2A Payments          → agent pays another agent directly
@@ -26,7 +26,8 @@ import { createPublicClient, http, keccak256, toHex, parseUnits } from "viem";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
 const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY!;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY!;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 // ERC-8004 registries
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
@@ -68,6 +69,8 @@ async function waitForCircleTx(txId: string): Promise<string> {
 }
 
 // ── TOOL DEFINITIONS (what the agent brain can do) ────────────────────────────
+// NOTE: kept as "input_schema" here for readability/reuse; converted to
+// Gemini's "parameters" shape in GEMINI_TOOLS below.
 const AGENT_TOOLS = [
   {
     name: "agent_pay_agent",
@@ -97,7 +100,7 @@ const AGENT_TOOLS = [
         evaluatorSCA: { type: "string", description: "Who judges the work (can be same as client)" },
         amountUSDC: { type: "string" },
         description: { type: "string", description: "What the hired agent must deliver" },
-        deadlineHours: { type: "number", default: 24 },
+        deadlineHours: { type: "number" },
       },
       required: ["providerSCA", "amountUSDC", "description"],
     },
@@ -198,7 +201,7 @@ const AGENT_TOOLS = [
         senderWalletId: { type: "string" },
         destinationAddress: { type: "string" },
         amount: { type: "string" },
-        sourceChain: { type: "string", default: "ARC-TESTNET" },
+        sourceChain: { type: "string" },
         destinationChain: { type: "string", description: "e.g. ETH-SEPOLIA, ARB-SEPOLIA" },
       },
       required: ["destinationAddress", "amount", "destinationChain"],
@@ -245,6 +248,21 @@ const AGENT_TOOLS = [
       },
       required: ["type", "reference"],
     },
+  },
+];
+
+// Gemini wants "parameters" instead of "input_schema" — same JSON Schema body.
+// Note: Gemini's schema parser doesn't like a bare "default" key inside
+// properties (harmless here since none of the tools above use one), and
+// doesn't support every JSON Schema keyword — keep tool schemas simple
+// (type/properties/required/description/enum/items) as done above.
+const GEMINI_TOOLS = [
+  {
+    functionDeclarations: AGENT_TOOLS.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
+    })),
   },
 ];
 
@@ -518,6 +536,8 @@ async function executeTool(name: string, input: any): Promise<any> {
 }
 
 // ── Agent Memory (Postgres) ───────────────────────────────────────────────────
+// Stored shape is now Gemini's { role: "user"|"model", parts: [...] } instead
+// of Anthropic's { role: "user"|"assistant", content: [...] }.
 async function getMemory(sessionId: string): Promise<any[]> {
   try {
     const rows = await (prisma as any).agentBrainMemory?.findMany({
@@ -529,10 +549,10 @@ async function getMemory(sessionId: string): Promise<any[]> {
   } catch { return []; }
 }
 
-async function saveMemory(sessionId: string, role: string, content: any) {
+async function saveMemory(sessionId: string, role: "user" | "model", parts: any[]) {
   try {
     await (prisma as any).agentBrainMemory?.create({
-      data: { sessionId, message: { role, content } },
+      data: { sessionId, message: { role, parts } },
     });
   } catch {}
 }
@@ -546,7 +566,10 @@ async function runBrain(
   const toolsUsed: string[] = [];
   const results: any[] = [];
   const memory = await getMemory(sessionId);
-  const messages: any[] = [...memory, { role: "user", content: userMessage }];
+  const contents: any[] = [
+    ...memory,
+    { role: "user", parts: [{ text: userMessage }] },
+  ];
 
   const system = `You are ArcFlare's autonomous AI agent — a fully autonomous financial and commerce agent 
 registered on Arc Testnet with ERC-8004 identity (Token #${process.env.AGENT_TOKEN_ID || "847277"}).
@@ -579,50 +602,54 @@ IMPORTANT:
 
   while (loop && iters < 8) {
     iters++;
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2048,
-        system,
-        tools: AGENT_TOOLS,
-        messages,
-      }),
-    });
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          tools: GEMINI_TOOLS,
+          contents,
+        }),
+      }
+    );
 
-    if (!res.ok) throw new Error(`Claude: ${res.status} ${await res.text()}`);
+    if (!res.ok) throw new Error(`Gemini: ${res.status} ${await res.text()}`);
     const data = await res.json();
 
-    if (data.stop_reason === "end_turn") {
-      const text = data.content.find((c: any) => c.type === "text")?.text || "Done.";
-      await saveMemory(sessionId, "user", userMessage);
-      await saveMemory(sessionId, "assistant", text);
+    const candidate = data.candidates?.[0];
+    if (!candidate) throw new Error(`Gemini returned no candidates: ${JSON.stringify(data)}`);
+
+    const parts = candidate.content?.parts || [];
+    const functionCalls = parts.filter((p: any) => p.functionCall);
+
+    if (functionCalls.length === 0) {
+      // No tool calls → model produced its final text answer
+      const text = parts.find((p: any) => p.text)?.text || "Done.";
+      await saveMemory(sessionId, "user", [{ text: userMessage }]);
+      await saveMemory(sessionId, "model", parts);
       return { response: text, toolsUsed, results };
     }
 
-    if (data.stop_reason === "tool_use") {
-      const toolBlocks = data.content.filter((c: any) => c.type === "tool_use");
-      messages.push({ role: "assistant", content: data.content });
-      const toolResults: any[] = [];
+    // Model wants to call one or more tools
+    contents.push({ role: "model", parts });
+    const functionResponseParts: any[] = [];
 
-      for (const tb of toolBlocks) {
-        console.log(`[brain] Tool: ${tb.name}`, JSON.stringify(tb.input).slice(0, 100));
-        toolsUsed.push(tb.name);
-        const result = await executeTool(tb.name, tb.input);
-        results.push({ tool: tb.name, result });
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: tb.id,
-          content: JSON.stringify(result),
-        });
-      }
-      messages.push({ role: "user", content: toolResults });
-    } else {
+    for (const fc of functionCalls) {
+      const { name, args } = fc.functionCall;
+      console.log(`[brain] Tool: ${name}`, JSON.stringify(args).slice(0, 100));
+      toolsUsed.push(name);
+      const result = await executeTool(name, args);
+      results.push({ tool: name, result });
+      functionResponseParts.push({
+        functionResponse: { name, response: result },
+      });
+    }
+    contents.push({ role: "user", parts: functionResponseParts });
+
+    if (candidate.finishReason && candidate.finishReason !== "STOP") {
+      // e.g. MAX_TOKENS, SAFETY — stop looping and report what we have
       loop = false;
     }
   }
@@ -638,8 +665,8 @@ const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
   if (!message) {
     return NextResponse.json({ success: false, error: "message is required" }, { status: 400 });
   }
-  if (!ANTHROPIC_API_KEY) {
-    return NextResponse.json({ success: false, error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
+  if (!GEMINI_API_KEY) {
+    return NextResponse.json({ success: false, error: "GEMINI_API_KEY not configured" }, { status: 500 });
   }
 
   console.log(`[brain] ${sessionId}: ${message.slice(0, 80)}`);
