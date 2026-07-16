@@ -80,7 +80,7 @@ const AGENT_TOOLS = [
       type: "object",
       properties: {
         amount: { type: "string", description: "Amount in USDC" },
-        payerAgentSCA: { type: "string", description: "Payer agent SCA address" },
+        payerAgentSCA: { type: "string", description: "Payer agent SCA address. Omit this field entirely if unknown — the system will use the agent's own wallet automatically." },
         receiverAgentSCA: { type: "string", description: "Receiver agent SCA address" },
         description: { type: "string", description: "What this payment is for" },
       },
@@ -272,13 +272,14 @@ async function executeTool(name: string, input: any): Promise<any> {
   switch (name) {
     // ── 1. A2A Direct Payment ─────────────────────────────────────────────────
     case "agent_pay_agent": {
+      const payerAgentSCA = input.payerAgentSCA || process.env.AGENT_OWNER_WALLET_ADDRESS;
       const initRes = await fetch(`${API_BASE}/api/payments/initialize`, {
         method: "POST",
         headers,
         body: JSON.stringify({
           amount: input.amount,
           currency: "USDC",
-          agentSCA: input.payerAgentSCA,
+          agentSCA: payerAgentSCA,
           merchant: input.receiverAgentSCA,
         }),
       });
@@ -296,7 +297,7 @@ async function executeTool(name: string, input: any): Promise<any> {
         txHash: settleData.arcTxHash,
         explorerUrl: settleData.explorerUrl,
         amount: input.amount,
-        from: input.payerAgentSCA,
+        from: payerAgentSCA,
         to: input.receiverAgentSCA,
       };
     }
@@ -550,7 +551,7 @@ async function saveMemory(sessionId: string, message: any) {
     await (prisma as any).agentBrainMemory?.create({
       data: { sessionId, message },
     });
-  } catch {}
+  } catch { }
 }
 
 async function runBrain(
@@ -558,99 +559,101 @@ async function runBrain(
   sessionId: string,
   agentContext: string
 ): Promise<{ response: string; toolsUsed: string[]; results: any[] }> {
-  console.log(`[brain] runBrain starting with message: ${userMessage.slice(0, 50)}`);
-  console.log(`[brain] GROQ_API_KEY exists: ${!!GROQ_API_KEY}, GROQ_MODEL: ${GROQ_MODEL}`);
-
   const toolsUsed: string[] = [];
   const results: any[] = [];
+  const seenCalls = new Set<string>(); // NEW: dedupe identical tool calls
   const memory = await getMemory(sessionId);
-  console.log(`[brain] memory retrieved: ${memory.length} messages`);
 
-  const system = `You are ArcFlare's autonomous AI agent...`; // (keep the existing system string)
+  const system = `...same as before...
+  
+IMPORTANT:
+- Your own wallet address is ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"} — use this automatically as the payer/sender for any tool that needs it, unless the user specifies a different one. Do not invent placeholder addresses.
+- Once a tool call returns success: true, the task is DONE. Immediately respond with a final text summary. Do NOT call the same tool again.
+- Never call the exact same tool with the exact same arguments twice.`;
 
   const messages: any[] = [
     { role: "system", content: system },
     ...memory,
     { role: "user", content: userMessage },
   ];
-  console.log(`[brain] messages length: ${messages.length}, tools count: ${GROQ_TOOLS.length}`);
 
   let loop = true;
   let iters = 0;
 
-  while (loop && iters < 8) {
+  while (loop && iters < 4) { // lowered from 8 — saves rate-limit budget
     iters++;
-    console.log(`[brain] iteration ${iters}, calling Groq with model: ${GROQ_MODEL}`);
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: 512,
+        temperature: 0.1,
+        messages,
+        tools: GROQ_TOOLS,
+        tool_choice: "auto",
+      }),
+    });
 
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${GROQ_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          max_tokens: 1024, // reduced from 2048 to avoid token limits
-          messages,
-          tools: GROQ_TOOLS,
-          tool_choice: "auto",
-        }),
-      });
+    if (!res.ok) throw new Error(`Groq: ${res.status} ${await res.text()}`);
+    const data = await res.json();
+    const choice = data.choices?.[0];
+    if (!choice) throw new Error(`Groq returned no choices: ${JSON.stringify(data)}`);
 
-      const responseText = await res.text();
-      console.log(`[brain] Groq response status: ${res.status}`);
-      console.log(`[brain] Groq response body (first 500): ${responseText.slice(0, 500)}`);
+    const msg = choice.message;
+    const toolCalls = msg.tool_calls || [];
 
-      if (!res.ok) {
-        console.error(`[brain] Groq error: ${res.status} ${responseText}`);
-        throw new Error(`Groq: ${res.status} ${responseText}`);
-      }
+    if (toolCalls.length === 0) {
+      const text = msg.content || "Done.";
+      await saveMemory(sessionId, { role: "user", content: userMessage });
+      await saveMemory(sessionId, { role: "assistant", content: text });
+      return { response: text, toolsUsed, results };
+    }
 
-      const data = JSON.parse(responseText);
-      const choice = data.choices?.[0];
-      if (!choice) throw new Error(`Groq returned no choices: ${JSON.stringify(data)}`);
+    messages.push({ role: "assistant", content: msg.content || null, tool_calls: toolCalls });
 
-      const msg = choice.message;
-      const toolCalls = msg.tool_calls || [];
+    let allDuplicates = true; // NEW
 
-      if (toolCalls.length === 0) {
-        const text = msg.content || "Done.";
-        await saveMemory(sessionId, { role: "user", content: userMessage });
-        await saveMemory(sessionId, { role: "assistant", content: text });
-        return { response: text, toolsUsed, results };
-      }
+    for (const tc of toolCalls) {
+      const name = tc.function.name;
+      let args: any = {};
+      try { args = JSON.parse(tc.function.arguments || "{}"); } catch { args = {}; }
 
-      messages.push({
-        role: "assistant",
-        content: msg.content || null,
-        tool_calls: toolCalls,
-      });
+      const callKey = `${name}:${JSON.stringify(args)}`; // NEW
 
-      for (const tc of toolCalls) {
-        const name = tc.function.name;
-        let args: any = {};
-        try { args = JSON.parse(tc.function.arguments || "{}"); }
-        catch { args = {}; }
-
-        console.log(`[brain] Tool: ${name}`, JSON.stringify(args).slice(0, 100));
-        toolsUsed.push(name);
-        const result = await executeTool(name, args);
-        results.push({ tool: name, result });
-
+      if (seenCalls.has(callKey)) { // NEW — dedupe guard
         messages.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: JSON.stringify(result),
+          content: JSON.stringify({ error: "Duplicate call blocked — this exact call already succeeded. Summarize and stop." }),
         });
+        continue;
       }
+      seenCalls.add(callKey);
+      allDuplicates = false;
 
-      if (choice.finish_reason && choice.finish_reason !== "tool_calls" && choice.finish_reason !== "stop") {
-        loop = false;
-      }
-    } catch (err) {
-      console.error(`[brain] Error in iteration ${iters}:`, err);
-      throw err;
+      toolsUsed.push(name);
+      const result = await executeTool(name, args);
+      results.push({ tool: name, result });
+
+      messages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(result),
+      });
+    }
+
+    if (allDuplicates) { // NEW — everything this round was a repeat, force stop
+      loop = false;
+      const lastResult = results[results.length - 1];
+      return {
+        response: `Task completed. ${lastResult ? JSON.stringify(lastResult.result) : ""}`,
+        toolsUsed,
+        results,
+      };
     }
   }
 
