@@ -27,7 +27,7 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
 const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY!;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 
 // ERC-8004 registries
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
