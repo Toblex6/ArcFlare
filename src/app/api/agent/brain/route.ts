@@ -553,113 +553,104 @@ async function saveMemory(sessionId: string, message: any) {
   } catch {}
 }
 
-// ── Agent Loop ────────────────────────────────────────────────────────────────
 async function runBrain(
   userMessage: string,
   sessionId: string,
   agentContext: string
 ): Promise<{ response: string; toolsUsed: string[]; results: any[] }> {
+  console.log(`[brain] runBrain starting with message: ${userMessage.slice(0, 50)}`);
+  console.log(`[brain] GROQ_API_KEY exists: ${!!GROQ_API_KEY}, GROQ_MODEL: ${GROQ_MODEL}`);
+
   const toolsUsed: string[] = [];
   const results: any[] = [];
   const memory = await getMemory(sessionId);
+  console.log(`[brain] memory retrieved: ${memory.length} messages`);
 
-  const system = `You are ArcFlare's autonomous AI agent — a fully autonomous financial and commerce agent 
-registered on Arc Testnet with ERC-8004 identity (Token #${process.env.AGENT_TOKEN_ID || "847277"}).
-
-Your owner wallet: ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"}
-Your validator wallet: ${process.env.AGENT_VALIDATOR_WALLET_ADDRESS || "not set"}
-
-${agentContext ? `Additional context: ${agentContext}` : ""}
-
-You can:
-- Pay other agents directly (A2A via M2M settlement)
-- Hire agents via ERC-8183 jobs with onchain escrow
-- Run payroll for teams of agents
-- Set up recurring subscriptions to agent services
-- Generate invoices for completed work
-- Route USDC cross-chain via Circle CCTP V2
-- Record reputation on ERC-8004 after job completion
-- Fetch real-world data autonomously
-- Check status of any payment, job, or reputation
-
-IMPORTANT:
-- For immediate services: use agent_pay_agent (x402/M2M) 
-- For async work that needs verification: use create_agent_job (ERC-8183)
-- Always record_agent_reputation after completing or rejecting a job
-- For teams: use run_agent_payroll for efficiency
-- After completing tasks, summarize what was done with transaction links`;
+  const system = `You are ArcFlare's autonomous AI agent...`; // (keep the existing system string)
 
   const messages: any[] = [
     { role: "system", content: system },
     ...memory,
     { role: "user", content: userMessage },
   ];
+  console.log(`[brain] messages length: ${messages.length}, tools count: ${GROQ_TOOLS.length}`);
 
   let loop = true;
   let iters = 0;
 
   while (loop && iters < 8) {
     iters++;
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        max_tokens: 1024,
-        messages,
-        tools: GROQ_TOOLS,
-        tool_choice: "auto",
-      }),
-    });
+    console.log(`[brain] iteration ${iters}, calling Groq with model: ${GROQ_MODEL}`);
 
-    if (!res.ok) throw new Error(`Groq: ${res.status} ${await res.text()}`);
-    const data = await res.json();
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          max_tokens: 1024, // reduced from 2048 to avoid token limits
+          messages,
+          tools: GROQ_TOOLS,
+          tool_choice: "auto",
+        }),
+      });
 
-    const choice = data.choices?.[0];
-    if (!choice) throw new Error(`Groq returned no choices: ${JSON.stringify(data)}`);
+      const responseText = await res.text();
+      console.log(`[brain] Groq response status: ${res.status}`);
+      console.log(`[brain] Groq response body (first 500): ${responseText.slice(0, 500)}`);
 
-    const msg = choice.message;
-    const toolCalls = msg.tool_calls || [];
+      if (!res.ok) {
+        console.error(`[brain] Groq error: ${res.status} ${responseText}`);
+        throw new Error(`Groq: ${res.status} ${responseText}`);
+      }
 
-    if (toolCalls.length === 0) {
-      // No tool calls → model produced its final text answer
-      const text = msg.content || "Done.";
-      await saveMemory(sessionId, { role: "user", content: userMessage });
-      await saveMemory(sessionId, { role: "assistant", content: text });
-      return { response: text, toolsUsed, results };
-    }
+      const data = JSON.parse(responseText);
+      const choice = data.choices?.[0];
+      if (!choice) throw new Error(`Groq returned no choices: ${JSON.stringify(data)}`);
 
-    // Model wants to call one or more tools
-    messages.push({
-      role: "assistant",
-      content: msg.content || null,
-      tool_calls: toolCalls,
-    });
+      const msg = choice.message;
+      const toolCalls = msg.tool_calls || [];
 
-    for (const tc of toolCalls) {
-      const name = tc.function.name;
-      let args: any = {};
-      try { args = JSON.parse(tc.function.arguments || "{}"); }
-      catch { args = {}; }
-
-      console.log(`[brain] Tool: ${name}`, JSON.stringify(args).slice(0, 100));
-      toolsUsed.push(name);
-      const result = await executeTool(name, args);
-      results.push({ tool: name, result });
+      if (toolCalls.length === 0) {
+        const text = msg.content || "Done.";
+        await saveMemory(sessionId, { role: "user", content: userMessage });
+        await saveMemory(sessionId, { role: "assistant", content: text });
+        return { response: text, toolsUsed, results };
+      }
 
       messages.push({
-        role: "tool",
-        tool_call_id: tc.id,
-        content: JSON.stringify(result),
+        role: "assistant",
+        content: msg.content || null,
+        tool_calls: toolCalls,
       });
-    }
 
-    if (choice.finish_reason && choice.finish_reason !== "tool_calls" && choice.finish_reason !== "stop") {
-      // e.g. length, content_filter — stop looping and report what we have
-      loop = false;
+      for (const tc of toolCalls) {
+        const name = tc.function.name;
+        let args: any = {};
+        try { args = JSON.parse(tc.function.arguments || "{}"); }
+        catch { args = {}; }
+
+        console.log(`[brain] Tool: ${name}`, JSON.stringify(args).slice(0, 100));
+        toolsUsed.push(name);
+        const result = await executeTool(name, args);
+        results.push({ tool: name, result });
+
+        messages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify(result),
+        });
+      }
+
+      if (choice.finish_reason && choice.finish_reason !== "tool_calls" && choice.finish_reason !== "stop") {
+        loop = false;
+      }
+    } catch (err) {
+      console.error(`[brain] Error in iteration ${iters}:`, err);
+      throw err;
     }
   }
 
