@@ -33,3 +33,61 @@ body {
   background: #c8975a;
   border-radius: 4px;
 }
+
+/* ── Responsive utilities (appended) ── */
+
+/* Container */
+.container-fluid {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+@media (min-width: 768px) {
+  .container-fluid {
+    padding: 0 24px;
+  }
+}
+
+/* Responsive tables */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-wrap table {
+  min-width: 600px;
+  width: 100%;
+}
+@media (max-width: 768px) {
+  .table-wrap table {
+    font-size: 12px;
+  }
+  .table-wrap td,
+  .table-wrap th {
+    padding: 8px 6px;
+  }
+}
+
+/* Responsive typography */
+.responsive-h1 { font-size: clamp(24px, 5vw, 42px); }
+.responsive-h2 { font-size: clamp(20px, 4vw, 32px); }
+.responsive-h3 { font-size: clamp(16px, 3vw, 24px); }
+.responsive-text { font-size: clamp(14px, 1.5vw, 16px); }
+
+/* Responsive grids (auto-fit) */
+.grid-auto-fit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.grid-auto-fit-2 {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.grid-auto-fit-3 {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+/* Card with responsive padding */
+.card-responsive {
+  padding: clamp(16px, 3vw, 32px);
+}

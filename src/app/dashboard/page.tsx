@@ -37,7 +37,6 @@ interface DashboardMetrics {
   totalTransactions: number;
 }
 
-// The dashboard API key — used to call internal settle endpoint from the UI
 const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
 
 export default function MerchantDashboard() {
@@ -54,12 +53,27 @@ export default function MerchantDashboard() {
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
 
+  // ── Responsive state ──
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Close sidebar on mobile when route changes (if using Next.js Link)
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+
+  // ── Existing logic unchanged ──
   const fetchLiveDatabaseState = async (isSilentUpdate = false) => {
     try {
       const res = await fetch("/api/payments/all", {
-        headers: {
-          "x-api-key": INTERNAL_API_KEY,
-        },
+        headers: { "x-api-key": INTERNAL_API_KEY },
       });
       const json = await res.json();
       if (json.status) {
@@ -185,7 +199,7 @@ export default function MerchantDashboard() {
         fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
-      {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
+      {/* ── SIDEBAR ── */}
       <aside
         style={{
           width: 220,
@@ -195,10 +209,15 @@ export default function MerchantDashboard() {
           flexDirection: "column",
           padding: "24px 14px",
           flexShrink: 0,
-          position: "sticky",
+          // ── Responsive: fixed on mobile, slides in/out ──
+          position: isMobile ? "fixed" : "sticky",
           top: 0,
+          left: isMobile ? (sidebarOpen ? 0 : "-280px") : 0,
           height: "100vh",
           overflowY: "auto",
+          zIndex: 1000,
+          transition: "left 0.3s ease",
+          borderRight: "1px solid #2d2015",
         }}
       >
         {/* Logo */}
@@ -219,7 +238,6 @@ export default function MerchantDashboard() {
         {/* ── GROUPED NAV ── */}
         <nav style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
           {[
-            // ── Core ──
             {
               group: "CORE",
               items: [
@@ -230,19 +248,16 @@ export default function MerchantDashboard() {
                 { label: "Escrow", href: "/escrow", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12.01" y2="18" /></svg> },
               ]
             },
-            // ── Agents & Commerce ──
             {
               group: "AGENTS & COMMERCE",
               items: [
                 { label: "Agents", href: "/agents", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /><line x1="12" y1="11" x2="12" y2="15" /></svg> },
-                // ─── NEW AI AGENT ITEM ───
                 { label: "AI Agent", href: "/agent-services", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg> },
                 { label: "Agent Wallets", href: "/agent-wallets", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="7" cy="15" r="1.5" /></svg> },
                 { label: "Jobs", href: "/jobs", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg> },
                 { label: "Nanopayments", href: "/nano", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /><path d="M12 8v8" /></svg> },
               ]
             },
-            // ── Business ──
             {
               group: "BUSINESS",
               items: [
@@ -251,7 +266,6 @@ export default function MerchantDashboard() {
                 { label: "Consumer (Flow)", href: "/consumer", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12l3 3 5-6" /></svg> },
               ]
             },
-            // ── Support (no group) ──
             {
               group: null,
               items: [
@@ -376,25 +390,63 @@ export default function MerchantDashboard() {
         </div>
       </aside>
 
-      {/* ── MAIN CONTENT (unchanged) ──────────────────────────────────── */}
-      <main style={{ flex: 1, padding: "32px 32px", overflowX: "hidden", background: "#f8fafc" }}>
+      {/* ── OVERLAY (mobile) ── */}
+      {isMobile && sidebarOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 999,
+          }}
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* ── MAIN CONTENT ── */}
+      <main style={{ flex: 1, padding: isMobile ? "16px" : "32px", overflowX: "hidden", background: "#f8fafc" }}>
+        {/* Header with hamburger */}
         <div
           style={{
             display: "flex",
-            alignItems: "flex-start",
+            alignItems: "center",
             justifyContent: "space-between",
             marginBottom: 28,
+            flexWrap: "wrap",
+            gap: 8,
           }}
         >
           <div>
-            <h1 style={{ fontSize: 24, fontWeight: 700, color: "#0f172a", margin: "0 0 4px 0" }}>
-              Welcome back, Merchant Admin 👋
-            </h1>
-            <p style={{ color: "#64748b", fontSize: 13, margin: 0 }}>
-              Here's what's happening with your business today.
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {isMobile && (
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    fontSize: 24,
+                    color: "#0f172a",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  ☰
+                </button>
+              )}
+              <div>
+                <h1 style={{ fontSize: "clamp(20px, 4vw, 28px)", fontWeight: 700, color: "#0f172a", margin: "0 0 4px 0" }}>
+                  Welcome back, Merchant Admin 👋
+                </h1>
+                <p style={{ color: "#64748b", fontSize: "clamp(12px, 1.5vw, 16px)", margin: 0 }}>
+                  Here's what's happening with your business today.
+                </p>
+              </div>
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div
               style={{
                 display: "flex",
@@ -404,7 +456,7 @@ export default function MerchantDashboard() {
                 border: "1px solid #e2e8f0",
                 borderRadius: 10,
                 padding: "7px 14px",
-                fontSize: 13,
+                fontSize: "clamp(11px, 1vw, 14px)",
                 color: "#64748b",
                 boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
               }}
@@ -439,7 +491,7 @@ export default function MerchantDashboard() {
               />
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: "clamp(9px, 1vw, 12px)",
                   color: "#0891b2",
                   fontWeight: 600,
                   letterSpacing: 1,
@@ -453,6 +505,7 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
+        {/* Warning Banner */}
         <div
           style={{
             marginBottom: 24,
@@ -465,7 +518,7 @@ export default function MerchantDashboard() {
         >
           <p
             style={{
-              fontSize: 11,
+              fontSize: "clamp(10px, 1vw, 12px)",
               color: "#b45309",
               fontFamily: "monospace",
               letterSpacing: 1,
@@ -483,7 +536,7 @@ export default function MerchantDashboard() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
             gap: 16,
             marginBottom: 24,
           }}
@@ -633,7 +686,12 @@ export default function MerchantDashboard() {
 
         {/* CHART + GATEWAY OVERVIEW */}
         <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20, marginBottom: 24 }}
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "1fr 300px",
+            gap: 20,
+            marginBottom: 24,
+          }}
         >
           {/* Analytics Chart */}
           <div
@@ -753,7 +811,7 @@ export default function MerchantDashboard() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(4,1fr)",
+                gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)",
                 gap: 10,
                 marginTop: 18,
                 paddingTop: 18,
@@ -1046,97 +1104,76 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* SETTLEMENT STREAMS TABLE — dark card */}
-        <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-6 shadow-2xl">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-base font-bold tracking-wide uppercase font-mono text-white">
+        {/* SETTLEMENT STREAMS TABLE */}
+        <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-4 md:p-6 shadow-2xl overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between mb-6 gap-2">
+            <h3 className="text-sm md:text-base font-bold tracking-wide uppercase font-mono text-white">
               Inbound Agent Settlement Streams
             </h3>
-            <span className="text-xs text-gray-500 font-mono bg-[#120b08] px-3 py-1 rounded-lg border border-[#3a2a20]">
-              Prisma Database Synchronization
+            <span className="text-[10px] text-gray-500 font-mono bg-[#120b08] px-3 py-1 rounded-lg border border-[#3a2a20]">
+              Prisma Database Sync
             </span>
           </div>
 
           {error && <div className="text-red-400 text-xs font-mono mb-4">❌ {error}</div>}
 
-          {payments.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-gray-500 text-sm font-mono">No settlement streams recorded yet.</p>
-              <p className="text-gray-600 text-xs mt-2">
-                Payments will appear here after checkout.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs font-mono">
-                <thead>
-                  <tr className="text-gray-500 uppercase tracking-wider border-b border-[#3a2a20]">
-                    <th className="text-left pb-3 pr-4">Reference / Timestamp</th>
-                    <th className="text-left pb-3 pr-4">Entity M2M Graph</th>
-                    <th className="text-left pb-3 pr-4">Execution Domain</th>
-                    <th className="text-left pb-3 pr-4">Payload Value</th>
-                    <th className="text-left pb-3 pr-4">Status</th>
-                    <th className="text-left pb-3">Circle CCTP Attestation</th>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs font-mono min-w-[600px]">
+              <thead>
+                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#3a2a20]">
+                  <th className="text-left pb-3 pr-3">Reference</th>
+                  <th className="text-left pb-3 pr-3">Entity</th>
+                  <th className="text-left pb-3 pr-3">Chain</th>
+                  <th className="text-left pb-3 pr-3">Amount</th>
+                  <th className="text-left pb-3 pr-3">Status</th>
+                  <th className="text-left pb-3">Attestation</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#3a2a20]/40">
+                {payments.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-12 text-gray-500 text-sm font-mono">
+                      No settlement streams recorded yet.
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-[#3a2a20]/40">
-                  {payments.map((payment) => (
+                ) : (
+                  payments.map((payment) => (
                     <tr key={payment.id} className="hover:bg-[#120b08]/40 transition-colors">
-                      <td className="py-4 pr-4">
-                        <div className="text-cyan-400">{payment.reference.slice(0, 16)}</div>
-                        <div className="text-gray-500 text-[10px] mt-0.5">
-                          {new Date(payment.paid_at).toLocaleString()}
+                      <td className="py-3 pr-3">
+                        <div className="text-cyan-400 text-xs">{payment.reference.slice(0, 12)}...</div>
+                        <div className="text-gray-500 text-[9px] mt-0.5">
+                          {new Date(payment.paid_at).toLocaleDateString()}
                         </div>
                       </td>
-                      <td className="py-4 pr-4">
-                        <div className="text-gray-300">{payment.sender_email}</div>
-                        <div className="text-gray-500 text-[10px] mt-0.5">
-                          → Merchant: {payment.merchant}
-                        </div>
+                      <td className="py-3 pr-3">
+                        <div className="text-gray-300 text-xs">{payment.sender_email.slice(0, 10)}...</div>
                       </td>
-                      <td className="py-4 pr-4">
-                        <span className="bg-cyan-400/10 text-cyan-400 px-2 py-0.5 rounded border border-cyan-400/20 text-[10px]">
-                          {payment.chain.length > 20 ? "Arc-L1" : payment.chain}
-                        </span>
+                      <td className="py-3 pr-3">
+                        <span className="text-cyan-400 text-[10px]">{payment.chain}</span>
                       </td>
-                      <td className="py-4 pr-4">
-                        <div className="text-white font-bold">{payment.amount.toFixed(2)}</div>
-                        <div className="text-amber-400 text-[10px]">{payment.currency}</div>
+                      <td className="py-3 pr-3">
+                        <div className="text-white font-bold text-xs">{payment.amount.toFixed(2)}</div>
+                        <div className="text-amber-400 text-[9px]">{payment.currency}</div>
                       </td>
-                      <td className="py-4 pr-4">
-                        <span
-                          className={`px-2 py-1 rounded text-[10px] font-bold border ${payment.status === "SUCCESS"
+                      <td className="py-3 pr-3">
+                        <span className={`px-2 py-1 rounded text-[9px] font-bold border ${
+                          payment.status === "SUCCESS"
                             ? "bg-green-500/10 text-green-400 border-green-500/20"
-                            : payment.status === "ATTESTATION_FAILED"
-                              ? "bg-red-500/10 text-red-400 border-red-500/20"
-                              : "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                            }`}
-                        >
-                          {payment.status === "SUCCESS"
-                            ? "SUCCESS"
-                            : payment.status === "ATTESTATION_FAILED"
-                              ? "FAILED"
-                              : "PENDING"}
+                            : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                        }`}>
+                          {payment.status}
                         </span>
                       </td>
-                      <td className="py-4">
-                        <div
-                          className={`text-[10px] ${payment.cctp_telemetry.attestation_status === "REDEEMED_AND_MINTED" ? "text-green-400" : "text-amber-400"}`}
-                        >
-                          {payment.cctp_telemetry.attestation_status === "REDEEMED_AND_MINTED"
-                            ? "REDEEMED_AND_MINTED"
-                            : "POLLING_CIRCLE_TESTNET_IRIS_API"}
-                        </div>
-                        <div className="text-gray-600 text-[10px] mt-0.5">
-                          Nonce: {payment.cctp_telemetry.nonce}
-                        </div>
+                      <td className="py-3">
+                        <div className="text-[9px] text-green-400">{payment.cctp_telemetry.attestation_status}</div>
+                        <div className="text-gray-600 text-[8px] mt-0.5">Nonce: {payment.cctp_telemetry.nonce}</div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </main>
 

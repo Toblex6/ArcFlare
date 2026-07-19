@@ -2,12 +2,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
+import { generateVerificationCode, sendVerificationEmail } from '@/src/lib/email';
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'crypto';
 
-function generateApiKey(): string {
-  return `arc_live_${randomBytes(24).toString('hex')}`;
-}
+const CODE_TTL_MINUTES = 10;
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,9 +29,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if already registered
     const existing = await (prisma as any).merchant.findUnique({ where: { email } });
-    if (existing) {
+
+    // If they already exist AND are verified, block signup as before.
+    if (existing && existing.verified) {
       return NextResponse.json(
         { success: false, error: 'An account with this email already exists.' },
         { status: 409 }
@@ -41,29 +40,35 @@ export async function POST(req: NextRequest) {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const apiKey = generateApiKey();
+    const verificationCode = generateVerificationCode();
+    const verificationCodeExpiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000);
 
-    const merchant = await (prisma as any).merchant.create({
-      data: {
-        email,
-        businessName,
-        passwordHash,
-        apiKey,
-      },
-    });
+    // If an unverified account already exists for this email (e.g. they
+    // abandoned signup last time), just update it with a fresh code instead
+    // of erroring out.
+    const merchant = existing
+      ? await (prisma as any).merchant.update({
+          where: { email },
+          data: { businessName, passwordHash, verificationCode, verificationCodeExpiresAt },
+        })
+      : await (prisma as any).merchant.create({
+          data: {
+            email,
+            businessName,
+            passwordHash,
+            verified: false,
+            apiKey: null,
+            verificationCode,
+            verificationCodeExpiresAt,
+          },
+        });
+
+    await sendVerificationEmail(email, businessName, verificationCode);
 
     return NextResponse.json({
       success: true,
-      message: 'Account created successfully.',
-      merchant: {
-        id: merchant.id,
-        email: merchant.email,
-        businessName: merchant.businessName,
-        createdAt: merchant.createdAt,
-      },
-      // Show API key ONCE — merchant must save this
-      apiKey,
-      warning: 'Save your API key now. It will not be shown again.',
+      message: 'Verification code sent. Check your email.',
+      email: merchant.email,
     });
   } catch (error: any) {
     console.error('Merchant signup error:', error);

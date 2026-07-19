@@ -4,13 +4,18 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
+type Step = 'form' | 'verify' | 'done';
+
 export default function MerchantSignup() {
   const router = useRouter();
+  const [step, setStep] = useState<Step>('form');
   const [form, setForm] = useState({ email: '', businessName: '', password: '', confirm: '' });
+  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [resendMsg, setResendMsg] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,11 +38,50 @@ export default function MerchantSignup() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
-      setApiKey(data.apiKey);
+      setStep('verify');
     } catch (err: any) {
       setError(err.message || 'Signup failed.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/merchant/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email, code }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setApiKey(data.apiKey);
+      setStep('done');
+    } catch (err: any) {
+      setError(err.message || 'Verification failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setError(null);
+    setResendMsg(null);
+    try {
+      const res = await fetch('/api/merchant/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setResendMsg('A new code has been sent.');
+    } catch (err: any) {
+      setError(err.message || 'Could not resend code.');
     }
   };
 
@@ -49,7 +93,7 @@ export default function MerchantSignup() {
   };
 
   // ── API Key reveal screen ─────────────────────────────────────────────────
-  if (apiKey) {
+  if (step === 'done' && apiKey) {
     return (
       <main
         style={{
@@ -73,7 +117,7 @@ export default function MerchantSignup() {
               style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }}
             />
             <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>
-              Account Created
+              Account Verified
             </h1>
             <p style={{ color: '#6b5a45', fontSize: 14 }}>
               Your API key is shown below. Save it now — it won't appear again.
@@ -198,6 +242,155 @@ export default function MerchantSignup() {
           >
             Continue to Login →
           </button>
+        </div>
+      </main>
+    );
+  }
+
+  // ── Verification code screen ──────────────────────────────────────────────
+  if (step === 'verify') {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          background: '#0e0b08',
+          color: '#f0ece6',
+          fontFamily: 'Inter, system-ui, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 24,
+        }}
+      >
+        <div style={{ width: '100%', maxWidth: 420 }}>
+          <div style={{ textAlign: 'center', marginBottom: 36 }}>
+            <Image
+              src="/arcflare-logo.png.png"
+              alt="ArcFlare"
+              width={52}
+              height={52}
+              style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }}
+            />
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>
+              Check your email
+            </h1>
+            <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>
+              We sent a 6-digit code to {form.email}
+            </p>
+          </div>
+
+          <div
+            style={{
+              background: '#1a1410',
+              border: '1px solid #2d2015',
+              borderRadius: 24,
+              padding: 36,
+            }}
+          >
+            {error && (
+              <div
+                style={{
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.2)',
+                  borderRadius: 12,
+                  padding: '12px 16px',
+                  marginBottom: 20,
+                }}
+              >
+                <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>❌ {error}</p>
+              </div>
+            )}
+            {resendMsg && (
+              <div
+                style={{
+                  background: 'rgba(13,124,95,0.08)',
+                  border: '1px solid rgba(13,124,95,0.2)',
+                  borderRadius: 12,
+                  padding: '12px 16px',
+                  marginBottom: 20,
+                }}
+              >
+                <p style={{ color: '#0d7c5f', fontSize: 13, margin: 0 }}>✓ {resendMsg}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleVerify} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    color: '#8a7560',
+                    fontSize: 12,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.8,
+                    marginBottom: 6,
+                  }}
+                >
+                  Verification Code
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                  required
+                  style={{
+                    width: '100%',
+                    background: '#251c12',
+                    border: '1px solid #3d2e1a',
+                    borderRadius: 10,
+                    padding: '14px',
+                    color: '#f0ece6',
+                    fontSize: 24,
+                    letterSpacing: 8,
+                    textAlign: 'center',
+                    fontFamily: 'monospace',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || code.length !== 6}
+                style={{
+                  marginTop: 8,
+                  padding: '14px',
+                  background: loading || code.length !== 6 ? 'rgba(200,151,90,0.3)' : '#c8975a',
+                  color: loading || code.length !== 6 ? 'rgba(14,11,8,0.5)' : '#0e0b08',
+                  border: 'none',
+                  borderRadius: 12,
+                  fontSize: 15,
+                  fontWeight: 800,
+                  cursor: loading || code.length !== 6 ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {loading ? 'Verifying...' : 'Verify & Get API Key →'}
+              </button>
+            </form>
+
+            <p style={{ textAlign: 'center', marginTop: 20, color: '#4b4035', fontSize: 13 }}>
+              Didn't get a code?{' '}
+              <button
+                onClick={handleResend}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#c8975a',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  padding: 0,
+                }}
+              >
+                Resend
+              </button>
+            </p>
+          </div>
         </div>
       </main>
     );
@@ -337,7 +530,7 @@ export default function MerchantSignup() {
                 transition: 'all 0.15s',
               }}
             >
-              {loading ? 'Creating account...' : 'Create Account & Get API Key'}
+              {loading ? 'Creating account...' : 'Create Account'}
             </button>
           </form>
 

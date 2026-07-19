@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -31,28 +29,24 @@ model PaymentLog {
 }
 
 model AgentRegistry {
-  id             Int     @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   name           String
-  tokenId        String  @unique
-  scaAddress     String  @unique
+  tokenId        String         @unique
+  scaAddress     String         @unique
   circleWalletId String?
   ownerNode      String
   metadataURI    String?
   status         String
-
-  description  String?
-  skills       Json?
-  pricing      Json?
-  reputation   Int       @default(50)
-  lastActiveAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt   // ✅ added @default(now())
-
-  idempotencyKey String? @unique
-
-  agents  Agent[]
-  wallets CircleWallet[]
+  description    String?
+  skills         Json?
+  pricing        Json?
+  reputation     Int            @default(50)
+  lastActiveAt   DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @default(now()) @updatedAt
+  idempotencyKey String?        @unique
+  agents         Agent[]
+  wallets        CircleWallet[]
 }
 
 model ApiKey {
@@ -67,19 +61,17 @@ model ApiKey {
 }
 
 model Agent {
-  id            String   @id @default(cuid())
+  id            String         @id @default(cuid())
   name          String
-  walletAddress String   @unique
+  walletAddress String         @unique
   scaAddress    String?
   capabilities  String[]
   pricePerJob   String
-  createdAt     DateTime @default(now())
-
-  registryId Int?
-  registry   AgentRegistry? @relation(fields: [registryId], references: [id])
-
-  jobs        Job[]
-  erc8183Jobs Erc8183Job[]
+  createdAt     DateTime       @default(now())
+  registryId    Int?
+  registry      AgentRegistry? @relation(fields: [registryId], references: [id])
+  jobs          Job[]
+  erc8183Jobs   Erc8183Job[]
 }
 
 model Escrow {
@@ -131,13 +123,16 @@ model NanoPayment {
 }
 
 model Merchant {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  businessName String
-  passwordHash String
-  apiKey       String   @unique
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  id                        String    @id @default(uuid())
+  email                     String    @unique
+  businessName              String
+  passwordHash              String
+  apiKey                    String?   @unique
+  active                    Boolean   @default(true)
+  createdAt                 DateTime  @default(now())
+  verificationCode          String?
+  verificationCodeExpiresAt DateTime?
+  verified                  Boolean   @default(false)
 }
 
 model Job {
@@ -146,9 +141,8 @@ model Job {
   amount      Float
   status      String
   createdAt   DateTime @default(now())
-
-  agentId String
-  agent   Agent  @relation(fields: [agentId], references: [id])
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id])
 }
 
 model Erc8183Job {
@@ -167,9 +161,8 @@ model Erc8183Job {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   expiredAt       DateTime
-
-  agentId String?
-  agent   Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agentId         String?
+  agent           Agent?   @relation(fields: [agentId], references: [id])
 
   @@index([jobId])
   @@index([clientSCA])
@@ -195,20 +188,19 @@ model Erc8183JobEvent {
 }
 
 model CircleWallet {
-  id          String    @id @default(uuid())
-  walletId    String    @unique
-  address     String    @unique
-  walletSetId String
-  blockchain  String    @default("ARC-TESTNET")
-  accountType String    @default("SCA")
-  label       String?
-  ownerEmail  String?
-  createdAt   DateTime  @default(now())
-  lastUsedAt  DateTime?
-
-  walletSet       CircleWalletSet? @relation(fields: [walletSetId], references: [walletSetId])
-  agentRegistry   AgentRegistry?   @relation(fields: [agentRegistryId], references: [id])
+  id              String          @id @default(uuid())
+  walletId        String          @unique
+  address         String          @unique
+  walletSetId     String
+  blockchain      String          @default("ARC-TESTNET")
+  accountType     String          @default("SCA")
+  label           String?
+  ownerEmail      String?
+  createdAt       DateTime        @default(now())
+  lastUsedAt      DateTime?
   agentRegistryId Int?
+  agentRegistry   AgentRegistry?  @relation(fields: [agentRegistryId], references: [id])
+  walletSet       CircleWalletSet @relation(fields: [walletSetId], references: [walletSetId])
 
   @@index([address])
   @@index([walletSetId])
@@ -217,12 +209,11 @@ model CircleWallet {
 }
 
 model CircleWalletSet {
-  id          String   @id @default(uuid())
-  walletSetId String   @unique
+  id          String         @id @default(uuid())
+  walletSetId String         @unique
   name        String
-  createdAt   DateTime @default(now())
-
-  wallets CircleWallet[]
+  createdAt   DateTime       @default(now())
+  wallets     CircleWallet[]
 
   @@map("circle_wallet_sets")
 }
@@ -263,22 +254,17 @@ model PayrollBatch {
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
 }
-// ── x402 EOA Wallets ──────────────────────────────────────────────────────
-// These are plain Externally Owned Accounts (EOA) used exclusively for
-// x402 nanopayments. Circle's Gateway requires ECDSA signatures from EOAs,
-// not EIP-1271 contract signatures from SCAs.
-//
-// SECURITY: Private keys are stored in plaintext. For testnet/demo only.
-// Production should use a secrets manager (AWS Secrets Manager, Vault, etc.).
+
 model X402EoaWallet {
-  id          String   @id @default(uuid())
-  address     String   @unique
-  privateKey  String   // ⚠️ plaintext – testnet only
-  label       String?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  address    String   @unique
+  privateKey String
+  label      String?
+  createdAt  DateTime @default(now())
 
   @@map("x402_eoa_wallets")
 }
+
 model AgentBrainMemory {
   id        String   @id @default(uuid())
   sessionId String

@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+
     const merchant = await (prisma as any).merchant.findUnique({ where: { email } });
     if (!merchant) {
       return NextResponse.json(
@@ -34,10 +35,11 @@ export async function POST(req: NextRequest) {
 
     const valid = await bcrypt.compare(password, merchant.passwordHash);
     if (!valid) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid email or password.' },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, error: 'Invalid email or password.' }, { status: 401 });
+    }
+
+    if (!merchant.verified) {
+      return NextResponse.json({ success: false, error: 'Please verify your email first.' }, { status: 403 });
     }
 
     if (!merchant.active) {
