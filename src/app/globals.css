@@ -20,6 +20,8 @@ body {
     Roboto,
     'Helvetica Neue',
     sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
 }
 
 /* Custom scrollbar */
@@ -34,7 +36,7 @@ body {
   border-radius: 4px;
 }
 
-/* ── Responsive utilities (appended) ── */
+/* ── Responsive utilities ── */
 
 /* Container */
 .container-fluid {
@@ -90,4 +92,178 @@ body {
 /* Card with responsive padding */
 .card-responsive {
   padding: clamp(16px, 3vw, 32px);
+}
+
+/* ── ArcFlare Layout & Sidebar ── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Sidebar layout (dashboard, agents, jobs, nano, etc.) */
+.arcflare-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.arcflare-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.arcflare-main {
+  flex: 1;
+  min-width: 0; /* prevents overflow */
+  overflow-x: hidden;
+  padding: 24px 32px;
+}
+
+/* Stat/metric card grids — stack on mobile */
+.arcflare-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.arcflare-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.arcflare-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+/* Tables — scroll horizontally on small screens */
+.arcflare-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.arcflare-table-wrap table {
+  min-width: 600px;
+}
+
+/* Cards */
+.arcflare-card {
+  width: 100%;
+  overflow: hidden;
+}
+
+/* ── TABLET (max 1024px) ── */
+@media (max-width: 1024px) {
+  .arcflare-sidebar {
+    width: 180px;
+  }
+
+  .arcflare-main {
+    padding: 20px 20px;
+  }
+
+  .arcflare-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .arcflare-grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ── MOBILE (max 768px) ── */
+@media (max-width: 768px) {
+  .arcflare-layout {
+    flex-direction: column;
+  }
+
+  .arcflare-sidebar {
+    width: 100%;
+    height: auto;
+    position: relative;
+    overflow-y: visible;
+    padding: 12px 16px;
+  }
+
+  /* Hide sidebar nav items on mobile by default */
+  .arcflare-sidebar nav {
+    display: none;
+  }
+
+  /* Show nav when sidebar has .open class (JS toggle) */
+  .arcflare-sidebar.open nav {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .arcflare-main {
+    padding: 16px;
+  }
+
+  .arcflare-grid-4,
+  .arcflare-grid-3,
+  .arcflare-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  /* Dashboard chart + gateway side-by-side → stack */
+  .arcflare-chart-row {
+    flex-direction: column !important;
+  }
+
+  /* Stat cards full width */
+  .arcflare-stat-card {
+    width: 100% !important;
+  }
+
+  /* Tables */
+  .arcflare-table-wrap table {
+    font-size: 12px;
+  }
+
+  /* Inputs full width */
+  input, textarea, select {
+    width: 100% !important;
+  }
+
+  /* Buttons row */
+  .arcflare-btn-row {
+    flex-direction: column !important;
+    gap: 8px;
+  }
+}
+
+/* ── SMALL MOBILE (max 480px) ── */
+@media (max-width: 480px) {
+  .arcflare-main {
+    padding: 12px;
+  }
+
+  h1 { font-size: 20px !important; }
+  h2 { font-size: 17px !important; }
+  h3 { font-size: 15px !important; }
+
+  /* Hide non-essential columns in tables (add this class to <td>/<th>) */
+  .arcflare-table-col-hide {
+    display: none;
+  }
+}
+
+/* ── Utility: prevent text overflow anywhere ── */
+p, span, td, th, div {
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
