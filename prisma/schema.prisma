@@ -25,6 +25,7 @@ model PaymentLog {
   circleTxId     String?
   payerSCA       String?
   merchantSCA    String?
+  merchantId     String?   // FK to Merchant.id — resolves the real payout wallet at settlement
   updatedAt      DateTime? @updatedAt
 }
 
@@ -133,6 +134,11 @@ model Merchant {
   verificationCode          String?
   verificationCodeExpiresAt DateTime?
   verified                  Boolean   @default(false)
+
+  // Payout wallet — Circle-managed by default, or merchant-supplied external address
+  walletType       String    @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
+  walletAddress    String?   // SCA address that receives settlements
+  circleWalletId   String?   // Circle wallet ID, only set when walletType = CIRCLE
 }
 
 model Job {
