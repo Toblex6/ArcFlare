@@ -1,11 +1,13 @@
+//src\app\api\jobs\create\route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, waitForTransaction } from '@/lib/circle/client';
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
 import { createPublicClient, http } from 'viem';
 import { arcTestnet } from 'viem/chains';
+import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 
-export async function POST(req: NextRequest) {
+async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
   try {
     const body = await req.json();
     const { clientWalletId, providerAddress, evaluatorAddress, description } = body;
@@ -59,6 +61,7 @@ export async function POST(req: NextRequest) {
         status: 'OPEN',
         txHashes: [txHash],
         expiredAt: new Date(expiredAt * 1000),
+        merchantId: merchant.id,
       },
     });
 
@@ -74,3 +77,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+export const POST = withMerchantAuth(createJobHandler as any);

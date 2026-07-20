@@ -1,38 +1,43 @@
-import { NextResponse } from 'next/server';
+//src\app\api\agent\status\route.ts
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const scaAddress = searchParams.get('scaAddress');
     const tokenId = searchParams.get('tokenId');
     const name = searchParams.get('name');
 
-    if (!scaAddress && !tokenId && !name) {
-      return NextResponse.json(
-        { success: false, error: 'Pass scaAddress, tokenId, or name as query param.' },
-        { status: 400 }
-      );
-    }
+    let where: any;
 
-    let agents = [];
-
-    // Smart Interceptor: If looking up by a network agent handle/email string
-    if (scaAddress && (scaAddress.includes('@') || !scaAddress.startsWith('0x'))) {
-      agents = await (prisma as any).agentRegistry.findMany({
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      });
+    // Exact-address lookup stays public — this is how the checkout page
+    // shows "paid by [agent name]" to an anonymous customer. It's a narrow
+    // lookup of one already-known address, not a listing, so it doesn't
+    // need merchant auth.
+    if (scaAddress && scaAddress.startsWith('0x') && !tokenId && !name) {
+      where = { scaAddress: { equals: scaAddress, mode: 'insensitive' } };
     } else {
-      const where: any = {};
+      // Anything broader (search by name, tokenId, or no filter at all)
+      // is a listing operation and requires merchant auth, scoped to
+      // that merchant's own agents only.
+      const merchant = await resolveMerchant(request);
+      if (!merchant) {
+        return NextResponse.json(
+          { success: false, error: 'Authentication required for agent search/listing.' },
+          { status: 401 }
+        );
+      }
+      where = { merchantId: merchant.id };
       if (scaAddress) where.scaAddress = { equals: scaAddress, mode: 'insensitive' };
       if (tokenId) where.tokenId = tokenId;
       if (name) where.name = { contains: name, mode: 'insensitive' };
-
-      agents = await (prisma as any).agentRegistry.findMany({ where });
     }
+
+    const agents = await (prisma as any).agentRegistry.findMany({ where });
 
     if (!agents || agents.length === 0) {
       return NextResponse.json(
@@ -68,7 +73,6 @@ export async function GET(request: Request) {
       })
     );
 
-    // FIX: Provide both singular 'agent' and plural 'agents' properties
     return NextResponse.json({
       success: true,
       agent: enriched[0],

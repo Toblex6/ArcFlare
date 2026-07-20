@@ -1,13 +1,23 @@
-import { NextResponse } from 'next/server';
+//src/app/api/payments/all/route.ts
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const merchant = await resolveMerchant(req);
+    if (!merchant) {
+      return NextResponse.json(
+        { status: false, error: 'Authentication required.' },
+        { status: 401 }
+      );
+    }
+
     const paymentLogs = await prisma.paymentLog.findMany({
+      where: { merchantId: merchant.id },
       orderBy: {
-        // Use 'createdAt' if 'timestamp' isn't in your schema
         timestamp: 'desc',
       },
     });

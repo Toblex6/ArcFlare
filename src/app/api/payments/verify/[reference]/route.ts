@@ -36,32 +36,6 @@ export async function GET(
       });
     }
 
-    const { searchParams } = new URL(request.url);
-    const txHash = searchParams.get('txHash');
-
-    if (txHash === '0xSUCCESS') {
-      // Mark as SUCCESS
-      payment = await prisma.paymentLog.update({
-        where: { reference },
-        data: {
-          status: 'SUCCESS',
-          chain: 'Arbitrum Sepolia ➔ Arc Testnet (via Circle CCTP)',
-        },
-      });
-
-      // Fire webhook if merchant registered one
-      if (payment.webhookUrl) {
-        fireWebhook(payment.webhookUrl, {
-          event: 'payment.settled',
-          reference: payment.reference,
-          amount: payment.amount,
-          currency: payment.currency,
-          status: 'SUCCESS',
-          settledAt: new Date().toISOString(),
-        });
-      }
-    }
-
     return NextResponse.json({
       status: true,
       message:
@@ -100,6 +74,7 @@ function formatResponse(payment: any) {
     status: payment.status,
     sender_email: payment.senderEmail || 'autonomous-agent@bot.network',
     merchant: payment.merchant || 'Dispatch Marketplace',
+    merchantSCA: payment.merchantSCA || null,
     paid_at: payment.timestamp,
     cctp_telemetry: {
       source_domain: 3,

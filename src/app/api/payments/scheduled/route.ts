@@ -5,7 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
 
 // ── POST /api/payments/scheduled — create a new recurring payment ────────────
 async function createScheduledHandler(request: Request) {
@@ -66,7 +66,7 @@ async function createScheduledHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(createScheduledHandler);
+export const POST = withApiKeyOrMerchant(createScheduledHandler);
 
 // ── GET /api/payments/scheduled — list scheduled payments ────────────────────
 async function listScheduledHandler(request: Request) {
@@ -94,7 +94,7 @@ async function listScheduledHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(listScheduledHandler);
+export const GET = withApiKeyOrMerchant(listScheduledHandler);
 
 // ── DELETE /api/payments/scheduled — cancel a scheduled payment ──────────────
 async function cancelScheduledHandler(request: Request) {
@@ -123,4 +123,4 @@ async function cancelScheduledHandler(request: Request) {
   }
 }
 
-export const DELETE = withApiKey(cancelScheduledHandler);
+export const DELETE = withApiKeyOrMerchant(cancelScheduledHandler);

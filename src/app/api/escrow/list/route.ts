@@ -2,19 +2,28 @@
 // Returns all escrows with optional status filter.
 // Used by the escrow management dashboard.
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
+    const merchant = await resolveMerchant(request);
+    if (!merchant) {
+      return NextResponse.json(
+        { success: false, error: 'Authentication required. Provide a valid x-api-key or log in.' },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status'); // ACTIVE, RELEASED, DISPUTED, REFUNDED
     const depositor = searchParams.get('depositor');
     const beneficiary = searchParams.get('beneficiary');
 
-    const where: any = {};
+    const where: any = { merchantId: merchant.id };
     if (status) where.status = status;
     if (depositor) where.depositorSCA = depositor;
     if (beneficiary) where.beneficiarySCA = beneficiary;

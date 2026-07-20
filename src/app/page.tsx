@@ -1,3 +1,4 @@
+//src/app/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -15,14 +16,8 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-6">
-            <Link href="/checkout" className="text-sm text-gray-400 hover:text-cyan-300 transition">
-              Demo Checkout
-            </Link>
-            <Link
-              href="/dashboard"
-              className="text-sm text-gray-400 hover:text-cyan-300 transition"
-            >
-              Admin
+            <Link href="/docs" className="text-sm text-gray-400 hover:text-cyan-300 transition">
+              Docs
             </Link>
 
             <div className="flex items-center gap-3 border-l border-[#3a2a22] pl-6">
@@ -30,10 +25,10 @@ export default function HomePage() {
                 href="/merchant/login"
                 className="text-sm text-gray-300 hover:text-white transition"
               >
-                Log in
+                Business Login
               </Link>
               <Link
-                href="/merchant/signup"
+                href="/start"
                 className="text-sm bg-cyan-400 text-black font-semibold px-4 py-2 rounded-xl hover:bg-cyan-300 transition"
               >
                 Get Started
@@ -62,16 +57,16 @@ export default function HomePage() {
 
           <div className="flex flex-wrap gap-5">
             <Link
-              href="/merchant/signup"
+              href="/start"
               className="bg-cyan-400 text-black font-semibold px-8 py-4 rounded-2xl hover:scale-105 transition shadow-[0_0_20px_rgba(34,211,238,0.2)]"
             >
-              Start Accepting Payments →
+              Get Started →
             </Link>
             <Link
-              href="/checkout"
+              href="/docs"
               className="border border-[#3a2a22] bg-[#1a120d] px-8 py-4 rounded-2xl hover:bg-[#241913] transition"
             >
-              Try Demo Checkout
+              Read the Docs
             </Link>
           </div>
         </div>
@@ -127,7 +122,7 @@ export default function HomePage() {
         <h2 className="text-3xl font-bold mb-12 text-center">
           For merchants. For agents. For developers.
         </h2>
-        <div className="grid md:grid-cols-3 gap-8">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
           {[
             {
               icon: '🏪',
@@ -135,6 +130,13 @@ export default function HomePage() {
               desc: 'Sign up, get an API key, and generate payment links in seconds. Customers pay in USDC — you receive it on Arc.',
               cta: 'Create account',
               href: '/merchant/signup',
+            },
+            {
+              icon: '👤',
+              title: 'Individuals',
+              desc: 'Send money, request payments, and save automatically — just connect or create a wallet, no signup form.',
+              cta: 'Get started',
+              href: '/consumer',
             },
             {
               icon: '🤖',
@@ -183,11 +185,11 @@ export default function HomePage() {
             <Link href="/merchant/login" className="hover:text-white transition">
               Login
             </Link>
-            <Link href="/checkout" className="hover:text-white transition">
-              Demo
+            <Link href="/consumer" className="hover:text-white transition">
+              Personal
             </Link>
-            <Link href="/dashboard" className="hover:text-white transition">
-              Admin
+            <Link href="/docs" className="hover:text-white transition">
+              Docs
             </Link>
           </div>
         </div>

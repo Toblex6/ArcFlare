@@ -5,7 +5,6 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 
-const WALLET_STORAGE_KEY = "flow_wallet_address";
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain";
 
 interface ActionResult {
@@ -35,6 +34,7 @@ interface ChainOption {
 export default function ConsumerApp() {
   const router = useRouter();
   const [view, setView] = useState<View>("home");
+  const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
   const [onboardingInput, setOnboardingInput] = useState("");
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
@@ -55,15 +55,20 @@ export default function ConsumerApp() {
   const [crossLoading, setCrossLoading] = useState(false);
   const [crossResult, setCrossResult] = useState<ActionResult | null>(null);
 
-  // ── Check for existing wallet ──
+  // ── Check for existing session ──
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage?.getItem(WALLET_STORAGE_KEY) : null;
-    if (saved) {
-      setWalletAddress(saved);
-      setView("home");
-    } else {
-      setView("onboarding");
-    }
+    fetch("/api/consumer/session")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.account?.walletAddress) {
+          setWalletAddress(data.account.walletAddress);
+          setView("home");
+        } else {
+          setView("onboarding");
+        }
+      })
+      .catch(() => setView("onboarding"))
+      .finally(() => setCheckingSession(false));
   }, []);
 
   // ── Fetch supported source chains ──
@@ -82,36 +87,25 @@ export default function ConsumerApp() {
       .catch(console.error);
   }, []);
 
-  // ── Wallet functions ──
-  const saveWallet = (address: string) => {
-    setWalletAddress(address);
-    try {
-      window.localStorage?.setItem(WALLET_STORAGE_KEY, address);
-    } catch {}
-    setView("home");
-  };
-
-  const connectExisting = () => {
+  // ── Wallet / session functions ──
+  const connectExisting = async () => {
     const trimmed = onboardingInput.trim();
     if (!trimmed.startsWith("0x") || trimmed.length < 10) {
       setOnboardingError("That doesn't look like a wallet address. It should start with 0x.");
       return;
     }
     setOnboardingError(null);
-    saveWallet(trimmed);
-  };
-
-  const createNewWallet = async () => {
     setCreatingWallet(true);
-    setOnboardingError(null);
     try {
-      const res = await fetch(`/api/consumer/wallet`, {
+      const res = await fetch("/api/consumer/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: trimmed }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not create a wallet right now.");
-      saveWallet(data.walletAddress);
+      if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
+      setWalletAddress(data.account.walletAddress);
+      setView("home");
     } catch (e: any) {
       setOnboardingError(e.message);
     } finally {
@@ -119,10 +113,30 @@ export default function ConsumerApp() {
     }
   };
 
-  const disconnectWallet = () => {
+  const createNewWallet = async () => {
+    setCreatingWallet(true);
+    setOnboardingError(null);
     try {
-      window.localStorage?.removeItem(WALLET_STORAGE_KEY);
-    } catch {}
+      const res = await fetch("/api/consumer/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not create a wallet right now.");
+      setWalletAddress(data.account.walletAddress);
+      setView("home");
+    } catch (e: any) {
+      setOnboardingError(e.message);
+    } finally {
+      setCreatingWallet(false);
+    }
+  };
+
+  const disconnectWallet = async () => {
+    try {
+      await fetch("/api/consumer/session", { method: "DELETE" });
+    } catch { }
     setWalletAddress("");
     setView("onboarding");
   };
@@ -249,6 +263,17 @@ export default function ConsumerApp() {
   const submitHandlers: Record<string, () => void> = { send: handleSend, save: handleSave, request: handleRequest };
 
   // ── Onboarding view ──
+  if (checkingSession) {
+    return (
+      <main style={styles.page}>
+        <style>{FONT_IMPORT}</style>
+        <div style={styles.onboardingWrap}>
+          <p style={{ ...styles.onboardingSub, textAlign: "center" }}>Loading...</p>
+        </div>
+      </main>
+    );
+  }
+
   if (view === "onboarding") {
     return (
       <main style={styles.page}>

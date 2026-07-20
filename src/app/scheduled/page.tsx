@@ -1,18 +1,19 @@
-'use client';
-
 // src/app/scheduled/page.tsx
 // Frontend for Recurring/Scheduled Payments.
+
+'use client';
+
+import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
 
-const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
 
 const NAV = [
-  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Dashboard', href: '/merchant/dashboard' },
   { label: 'Homepage', href: '/' },
   { label: 'Transactions', href: '/transactions' },
-  { label: 'Checkout', href: '/checkout' },
+  { label: 'Checkout', href: '/merchant/dashboard#checkout' },
   { label: 'Escrow', href: '/escrow' },
   { label: 'Agents', href: '/agents' },
   { label: 'Agent Wallets', href: '/agent-wallets' },
@@ -31,6 +32,13 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function ScheduledPaymentsPage() {
+  const _router = useRouter();
+  React.useEffect(() => {
+    fetch('/api/merchant/me').then((r) => {
+      if (r.status === 401) _router.replace('/merchant/login');
+    }).catch(() => _router.replace('/merchant/login'));
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'create' | 'list'>('list');
 
   // Create form
@@ -53,7 +61,6 @@ export default function ScheduledPaymentsPage() {
     setListLoading(true);
     setListError(null);
     try {
-      const res = await fetch('/api/payments/scheduled', { headers: { 'x-api-key': API_KEY } });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
       setSchedules(data.scheduledPayments || []);
@@ -75,7 +82,7 @@ export default function ScheduledPaymentsPage() {
     try {
       const res = await fetch('/api/payments/scheduled', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           payerSCA,
           receiverSCA,
@@ -100,11 +107,11 @@ export default function ScheduledPaymentsPage() {
     try {
       await fetch('/api/payments/scheduled', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reference }),
       });
       loadSchedules();
-    } catch {}
+    } catch { }
   };
 
   const S = {

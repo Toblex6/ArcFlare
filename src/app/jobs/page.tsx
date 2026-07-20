@@ -1,15 +1,17 @@
+//src/app/jobs/page.tsx
 'use client';
+
+import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
 
-const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
 
 const NAV = [
-  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Dashboard', href: '/merchant/dashboard' },
   { label: 'Homepage', href: '/' },
   { label: 'Transactions', href: '/transactions' },
-  { label: 'Checkout', href: '/checkout' },
+  { label: 'Checkout', href: '/merchant/dashboard#checkout' },
   { label: 'Escrow', href: '/escrow' },
   { label: 'Agents', href: '/agents' },
   { label: 'Jobs', href: '/jobs', active: true },
@@ -40,6 +42,13 @@ interface JobResult {
 }
 
 export default function JobsPage() {
+  const _router = useRouter();
+  React.useEffect(() => {
+    fetch('/api/merchant/me').then((r) => {
+      if (r.status === 401) _router.replace('/merchant/login');
+    }).catch(() => _router.replace('/merchant/login'));
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'board' | 'create' | 'manage'>('board');
 
   // Create flow state
@@ -76,7 +85,7 @@ export default function JobsPage() {
   const callJobsAPI = async (body: any) => {
     const res = await fetch('/api/jobs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const data = await res.json();
@@ -110,7 +119,6 @@ export default function JobsPage() {
     setLookupResult(null);
     try {
       const res = await fetch(`/api/jobs?jobId=${lookupJobId}`, {
-        headers: { 'x-api-key': API_KEY },
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -974,27 +982,27 @@ export default function JobsPage() {
                         {(manageAction === 'approve' ||
                           manageAction === 'fund' ||
                           manageAction === 'complete') && (
-                          <div>
-                            <span
-                              style={{
-                                fontSize: 10,
-                                color: '#6b5a45',
-                                textTransform: 'uppercase',
-                                letterSpacing: 1,
-                                marginBottom: 4,
-                                display: 'block',
-                              }}
-                            >
-                              Client SCA
-                            </span>
-                            <input
-                              style={S.input}
-                              value={manageClientSCA}
-                              onChange={(e) => setManageClientSCA(e.target.value)}
-                              placeholder="0xClientAddress"
-                            />
-                          </div>
-                        )}
+                            <div>
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  color: '#6b5a45',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: 1,
+                                  marginBottom: 4,
+                                  display: 'block',
+                                }}
+                              >
+                                Client SCA
+                              </span>
+                              <input
+                                style={S.input}
+                                value={manageClientSCA}
+                                onChange={(e) => setManageClientSCA(e.target.value)}
+                                placeholder="0xClientAddress"
+                              />
+                            </div>
+                          )}
                         {manageAction === 'approve' && (
                           <div>
                             <span

@@ -1,15 +1,17 @@
+//src/app/agents/page.tsx
 'use client';
+
+import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
 
-const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
 
 const NAV = [
-  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Dashboard', href: '/merchant/dashboard' },
   { label: 'Homepage', href: '/' },
   { label: 'Transactions', href: '/transactions' },
-  { label: 'Checkout', href: '/checkout' },
+  { label: 'Checkout', href: '/merchant/dashboard#checkout' },
   { label: 'Escrow', href: '/escrow' },
   { label: 'Agents', href: '/agents', active: true },
   { label: 'Jobs', href: '/jobs' },
@@ -50,6 +52,13 @@ interface ValidationResult {
 }
 
 export default function AgentsPage() {
+  const _router = useRouter();
+  React.useEffect(() => {
+    fetch('/api/merchant/me').then((r) => {
+      if (r.status === 401) _router.replace('/merchant/login');
+    }).catch(() => _router.replace('/merchant/login'));
+  }, []);
+
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Agent | null>(null);
@@ -87,13 +96,12 @@ export default function AgentsPage() {
   // Load agents
   useEffect(() => {
     fetch('/api/agent/status?name=Agent', {
-      headers: { 'x-api-key': API_KEY },
     })
       .then((r) => r.json())
       .then((d) => {
         if (d.success) setAgents(d.agents || []);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, []);
 
@@ -104,7 +112,7 @@ export default function AgentsPage() {
     try {
       const res = await fetch('/api/agent/deploy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agentName: deployName,
           metadataUri: 'ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei',
@@ -114,7 +122,6 @@ export default function AgentsPage() {
       if (!data.success) throw new Error(data.error);
       setDeployResult(data);
       // Refresh agent list
-      const r2 = await fetch('/api/agent/status?name=Agent', { headers: { 'x-api-key': API_KEY } });
       const d2 = await r2.json();
       if (d2.success) setAgents(d2.agents || []);
     } catch (e: any) {
@@ -131,7 +138,7 @@ export default function AgentsPage() {
     try {
       const res = await fetch('/api/agent/reputation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agentId: repAgentId,
           validatorSCA: repValidatorSCA,
@@ -175,7 +182,6 @@ export default function AgentsPage() {
       } else {
         // status — use GET
         const res = await fetch(`/api/agent/validation?requestHash=${valRequestHash}`, {
-          headers: { 'x-api-key': API_KEY },
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error);
@@ -192,7 +198,7 @@ export default function AgentsPage() {
       }
       const res = await fetch('/api/agent/validation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       const data = await res.json();

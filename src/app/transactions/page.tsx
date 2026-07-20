@@ -1,4 +1,7 @@
+//src/app/transactions/page.tsx
 'use client';
+
+import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
@@ -20,6 +23,13 @@ interface PaymentItem {
 }
 
 export default function TransactionsPage() {
+  const _router = useRouter();
+  React.useEffect(() => {
+    fetch('/api/merchant/me').then((r) => {
+      if (r.status === 401) _router.replace('/merchant/login');
+    }).catch(() => _router.replace('/merchant/login'));
+  }, []);
+
   const [payments, setPayments] = useState<PaymentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,10 +110,10 @@ export default function TransactionsPage() {
 
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
           {[
-            { label: 'Dashboard', href: '/dashboard', active: false },
+            { label: 'Dashboard', href: '/merchant/dashboard', active: false },
             { label: 'Homepage', href: '/', active: false },
             { label: 'Transactions', href: '/transactions', active: true },
-            { label: 'Checkout', href: '/checkout', active: false },
+            { label: 'Checkout', href: '/merchant/dashboard#checkout', active: false },
             { label: 'Escrow', href: '/escrow', active: false },
             { label: 'Support', href: '/support', active: false },
           ].map((item) => (

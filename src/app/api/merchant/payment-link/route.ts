@@ -39,6 +39,17 @@ export async function POST(req: NextRequest) {
 
     const reference = `arc_ref_${Math.random().toString(36).substring(2, 15)}${Date.now().toString(36)}`;
 
+    if (!merchant.walletAddress) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Your payout wallet is not set up yet. Visit your dashboard to finish wallet setup before creating payment links.',
+        },
+        { status: 400 }
+      );
+    }
+
     await prisma.paymentLog.create({
       data: {
         reference,
@@ -47,6 +58,8 @@ export async function POST(req: NextRequest) {
         chain: 'Arc Testnet v1.0',
         senderEmail: 'pending@checkout',
         merchant: merchant.businessName,
+        merchantId: merchant.id,
+        merchantSCA: merchant.walletAddress,
         status: 'PENDING',
         webhookUrl: webhookUrl || null,
       },

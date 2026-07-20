@@ -13,7 +13,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits } from 'viem';
 
@@ -262,7 +262,7 @@ async function jobsHandler(request: Request) {
             agentId: providerSCA, // using providerSCA as agentId reference
           },
         })
-        .catch(() => {}); // Job model may need agentId FK — graceful fail
+        .catch(() => { }); // Job model may need agentId FK — graceful fail
 
       return NextResponse.json({
         success: true,
@@ -490,7 +490,7 @@ async function jobsHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(jobsHandler);
+export const POST = withApiKeyOrMerchant(jobsHandler);
 
 // ─── GET /api/jobs?jobId=xxx ──────────────────────────────────────────────────
 // Reads job state directly from ERC-8183 AgenticCommerce contract
@@ -541,5 +541,5 @@ async function getJobHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(getJobHandler);
+export const GET = withApiKeyOrMerchant(getJobHandler);
 export const dynamic = 'force-dynamic';

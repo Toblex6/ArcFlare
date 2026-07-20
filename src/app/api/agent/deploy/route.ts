@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, parseAbiItem } from 'viem';
 import { arcTestnet } from 'viem/chains';
-import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
 
 const prisma = new PrismaClient();
 
@@ -13,7 +13,7 @@ const IDENTITY_REGISTRY =
   process.env.IDENTITY_REGISTRY_ADDRESS || '0x8004A818BFB912233c491871b3d84c89A494BD9e';
 
 // ─── Internal Route Handler Logic ─────────────────────────────────────────────
-async function deployAgentHandler(request: Request) {
+async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
   try {
     const body = await request.json().catch(() => ({}));
     const metadataUri =
@@ -131,6 +131,7 @@ async function deployAgentHandler(request: Request) {
         ownerNode: ownerNode,
         metadataURI: metadataUri,
         status: 'ACTIVE_AGENT_PROVISIONED',
+        merchantId: merchant.id,
       },
     });
 
@@ -152,4 +153,4 @@ async function deployAgentHandler(request: Request) {
 
 // ─── Protected Export Gateway ──────────────────────────────────────────────────
 // Wraps your advanced deployment logic safely within your API key middleware
-export const POST = withApiKey(deployAgentHandler);
+export const POST = withMerchantAuth(deployAgentHandler as any);

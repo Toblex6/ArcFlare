@@ -107,6 +107,19 @@ export async function getWallet(walletId: string) {
   return response.data?.wallet;
 }
 
+// Provision a single Circle-managed payout wallet for a merchant at signup.
+// Each merchant gets its own wallet set (simplest to reason about / revoke).
+export async function createAccountWallet(merchantLabel: string) {
+  const result = await createWallets(`merchant_${merchantLabel}`, 1);
+  const wallet = result.wallets[0];
+  if (!wallet) throw new Error('Merchant wallet creation returned no wallet.');
+  return {
+    walletId: wallet.id,
+    address: wallet.address,
+    walletSetId: result.walletSetId,
+  };
+}
+
 export async function createWallets(name: string, count: number = 2) {
   const circleClient = getCircleClient();
 

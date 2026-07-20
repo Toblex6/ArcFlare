@@ -55,7 +55,7 @@ async function pollForAttestation(messageHash: string) {
           return { message: data.message, attestation: data.attestation };
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     await new Promise((r) => setTimeout(r, 3000));
   }
   throw new Error('CCTP Attestation timed out after 90 seconds.');
@@ -235,9 +235,21 @@ async function mergedSettleHandler(request: NextRequest) {
     });
     if (agentRecord?.circleWalletId) payerWalletId = agentRecord.circleWalletId;
 
-    const merchantSCA = payment.merchant?.startsWith('0x')
-      ? payment.merchant
-      : DEFAULT_MERCHANT_SCA;
+    // Resolve the real merchant payout wallet. Falls back to the platform
+    // default ONLY for legacy/test payments with no merchantId attached —
+    // any real merchant payment link must have merchantSCA set already.
+    let merchantSCA = payment.merchantSCA || DEFAULT_MERCHANT_SCA;
+    if (payment.merchantId) {
+      const merchantRecord = await (prisma as any).merchant.findUnique({
+        where: { id: payment.merchantId },
+      });
+      if (!merchantRecord?.walletAddress) {
+        throw new Error(
+          `Merchant ${payment.merchantId} has no payout wallet configured. Cannot settle.`
+        );
+      }
+      merchantSCA = merchantRecord.walletAddress;
+    }
     const circleClient = getCircleClient();
 
     let arcTxHash: string;
@@ -317,7 +329,7 @@ async function mergedSettleHandler(request: NextRequest) {
           where: { reference },
           data: { circleTxId, status: 'SETTLEMENT_ERROR' },
         })
-        .catch(() => {});
+        .catch(() => { });
 
       throw new Error(
         `Transaction tracked (ID: ${circleTxId}), but network finality timed out or failed: ${pollingError.message}`
@@ -367,7 +379,7 @@ async function mergedSettleHandler(request: NextRequest) {
           where: { reference: fallbackReference },
           data: updateData,
         })
-        .catch(() => {});
+        .catch(() => { });
     }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

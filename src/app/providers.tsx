@@ -1,7 +1,10 @@
+//src\app\providers.tsx
 'use client';
 
 import React, { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { WagmiProvider } from 'wagmi';
+import { config } from '@/src/lib/wagmi';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   // Safe initialization of QueryClient for your API calls
@@ -17,5 +20,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       })
   );
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </WagmiProvider>
+  );
 }

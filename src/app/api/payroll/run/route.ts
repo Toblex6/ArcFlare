@@ -5,7 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const USDC_ARC = '0x3600000000000000000000000000000000000000';
@@ -188,7 +188,7 @@ async function runPayrollHandler(request: Request) {
           failedCount,
           results,
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     console.log(
@@ -212,7 +212,7 @@ async function runPayrollHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(runPayrollHandler);
+export const POST = withApiKeyOrMerchant(runPayrollHandler);
 
 // ── GET /api/payroll/run?batchRef=xxx — check a batch's status ───────────────
 async function getPayrollBatchHandler(request: Request) {
@@ -244,4 +244,4 @@ async function getPayrollBatchHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(getPayrollBatchHandler);
+export const GET = withApiKeyOrMerchant(getPayrollBatchHandler);

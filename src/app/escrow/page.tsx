@@ -1,4 +1,7 @@
+//src/app/escrow/page.tsx
 'use client';
+
+import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
@@ -52,15 +55,22 @@ function formatTime(seconds: number): string {
 }
 
 const NAV = [
-  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Dashboard', href: '/merchant/dashboard' },
   { label: 'Homepage', href: '/' },
   { label: 'Transactions', href: '/transactions' },
-  { label: 'Checkout', href: '/checkout' },
+  { label: 'Checkout', href: '/merchant/dashboard#checkout' },
   { label: 'Escrow', href: '/escrow', active: true },
   { label: 'Support', href: '/support' },
 ];
 
 export default function EscrowDashboard() {
+  const _router = useRouter();
+  React.useEffect(() => {
+    fetch('/api/merchant/me').then((r) => {
+      if (r.status === 401) _router.replace('/merchant/login');
+    }).catch(() => _router.replace('/merchant/login'));
+  }, []);
+
   const [escrows, setEscrows] = useState<EscrowItem[]>([]);
   const [metrics, setMetrics] = useState<EscrowMetrics | null>(null);
   const [loading, setLoading] = useState(true);

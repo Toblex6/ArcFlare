@@ -25,7 +25,7 @@ import { createPublicClient, http, keccak256, toHex, parseUnits } from "viem";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
-const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY!;
+const INTERNAL_API_KEY = process.env.INTERNAL_SETTLEMENT_API_KEY!;
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 

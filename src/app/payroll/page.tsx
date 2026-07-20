@@ -1,18 +1,19 @@
-'use client';
-
 // src/app/payroll/page.tsx
 // Frontend for Batch Payroll — pay N recipients in one call.
+
+'use client';
+
+import { useRouter } from 'next/navigation';
 
 import React, { useState } from 'react';
 import Image from 'next/image';
 
-const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
 
 const NAV = [
-  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Dashboard', href: '/merchant/dashboard' },
   { label: 'Homepage', href: '/' },
   { label: 'Transactions', href: '/transactions' },
-  { label: 'Checkout', href: '/checkout' },
+  { label: 'Checkout', href: '/merchant/dashboard#checkout' },
   { label: 'Escrow', href: '/escrow' },
   { label: 'Agents', href: '/agents' },
   { label: 'Agent Wallets', href: '/agent-wallets' },
@@ -30,6 +31,13 @@ interface Recipient {
 }
 
 export default function PayrollPage() {
+  const _router = useRouter();
+  React.useEffect(() => {
+    fetch('/api/merchant/me').then((r) => {
+      if (r.status === 401) _router.replace('/merchant/login');
+    }).catch(() => _router.replace('/merchant/login'));
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'run' | 'lookup'>('run');
 
   const [payerSCA, setPayerSCA] = useState('0x7a8214dad7630a7a39054e0121acdbc7a65821c9');
@@ -68,7 +76,7 @@ export default function PayrollPage() {
 
       const res = await fetch('/api/payroll/run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payerSCA, payerWalletId, recipients: validRecipients }),
       });
       const data = await res.json();
@@ -87,7 +95,6 @@ export default function PayrollPage() {
     setLookupResult(null);
     try {
       const res = await fetch(`/api/payroll/run?batchRef=${lookupRef}`, {
-        headers: { 'x-api-key': API_KEY },
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);

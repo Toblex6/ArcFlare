@@ -17,7 +17,7 @@ export const arcTestnet = defineChain({
 
   rpcUrls: {
     default: {
-      http: ['https://rpc-testnet.arc.xyz'],
+      http: ['https://rpc.testnet.arc.network'],
     },
   },
 

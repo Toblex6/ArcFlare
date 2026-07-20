@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { randomBytes } from 'crypto';
+import { createAccountWallet } from '@/src/lib/circle/client';
 
 function generateApiKey(): string {
   return `arc_live_${randomBytes(24).toString('hex')}`;
@@ -46,6 +47,24 @@ export async function POST(req: NextRequest) {
 
     const apiKey = generateApiKey();
 
+    // Provision a Circle-managed payout wallet for this merchant.
+    // If Circle provisioning fails, we still verify the account — the
+    // merchant can retry wallet setup from the dashboard rather than
+    // being blocked from signing up entirely.
+    let walletFields: {
+      walletType: string;
+      walletAddress?: string;
+      circleWalletId?: string;
+    } = { walletType: 'CIRCLE' };
+
+    try {
+      const wallet = await createAccountWallet(merchant.id);
+      walletFields.walletAddress = wallet.address;
+      walletFields.circleWalletId = wallet.walletId;
+    } catch (walletError: any) {
+      console.error(`Merchant wallet provisioning failed for ${email}:`, walletError.message);
+    }
+
     const updated = await (prisma as any).merchant.update({
       where: { email },
       data: {
@@ -53,6 +72,7 @@ export async function POST(req: NextRequest) {
         apiKey,
         verificationCode: null,
         verificationCodeExpiresAt: null,
+        ...walletFields,
       },
     });
 
@@ -64,9 +84,14 @@ export async function POST(req: NextRequest) {
         email: updated.email,
         businessName: updated.businessName,
         createdAt: updated.createdAt,
+        walletAddress: updated.walletAddress,
+        walletType: updated.walletType,
       },
       apiKey,
       warning: 'Save your API key now. It will not be shown again.',
+      walletWarning: !updated.walletAddress
+        ? 'Payout wallet setup failed — visit your dashboard to retry before accepting live payments.'
+        : undefined,
     });
   } catch (error: any) {
     console.error('Merchant verify error:', error);

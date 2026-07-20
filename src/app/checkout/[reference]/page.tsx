@@ -1,8 +1,12 @@
+//src/app/checkout/[reference]/page.tsx
 'use client';
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
+import { useAccount, useConnect, useDisconnect, useWriteContract } from 'wagmi';
+import { parseUnits } from 'viem';
+import { USDC_CONTRACT, USDC_DECIMALS, erc20TransferAbi } from '@/src/lib/wallet/erc20';
 
 interface PaymentLogData {
   reference: string;
@@ -13,6 +17,7 @@ interface PaymentLogData {
   status: string;
   sender_email: string;
   merchant: string;
+  merchantSCA: string | null;
   paid_at: string | null;
 }
 
@@ -24,8 +29,6 @@ interface AgentData {
   status: string;
 }
 
-const INTERNAL_API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
-
 export default function CheckoutPage() {
   const params = useParams<{ reference: string }>();
   const reference = params?.reference;
@@ -34,16 +37,19 @@ export default function CheckoutPage() {
   const [agent, setAgent] = useState<AgentData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
   const [isTxPending, setIsTxPending] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [settleError, setSettleError] = useState<string | null>(null);
 
-  const fetchLedgerStatus = async (txHash?: string) => {
+  const { address, isConnected } = useAccount();
+  const { connectors, connect } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { writeContractAsync } = useWriteContract();
+
+  const fetchLedgerStatus = async () => {
     if (!reference) return;
     try {
-      let url = `/api/payments/verify/${reference}`;
-      if (txHash) url += `?txHash=${txHash}`;
-      const res = await fetch(url);
+      const res = await fetch(`/api/payments/verify/${reference}`);
       const result = await res.json();
       if (result.status === true && result.data) {
         setPayment(result.data);
@@ -69,7 +75,7 @@ export default function CheckoutPage() {
       if (data.success && data.agents?.length > 0) {
         setAgent(data.agents[0]);
       }
-    } catch {}
+    } catch { }
   };
 
   useEffect(() => {
@@ -78,29 +84,49 @@ export default function CheckoutPage() {
 
   const handlePayment = async () => {
     if (!reference || !payment) return;
+    if (!payment.merchantSCA) {
+      setSettleError('This merchant has not finished payout wallet setup yet. Cannot accept payment.');
+      return;
+    }
+    if (!isConnected || !address) {
+      setSettleError('Connect a wallet first.');
+      return;
+    }
+
     try {
       setSettleError(null);
       setIsTxPending(true);
-      const settleRes = await fetch('/api/payments/settle', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': INTERNAL_API_KEY,
-        },
-        body: JSON.stringify({ reference }),
+
+      // Customer's own wallet signs and submits the USDC transfer directly
+      // to the merchant's wallet. ArcFlare never holds or moves these funds.
+      const txHash = await writeContractAsync({
+        address: USDC_CONTRACT as `0x${string}`,
+        abi: erc20TransferAbi,
+        functionName: 'transfer',
+        args: [payment.merchantSCA as `0x${string}`, parseUnits(payment.amount.toString(), USDC_DECIMALS)],
       });
-      const settleData = await settleRes.json();
-      if (!settleRes.ok || !settleData.success) {
-        throw new Error(settleData.error || settleData.message || 'Settlement failed.');
-      }
+
       setIsTxPending(false);
       setIsVerifying(true);
+
+      // Server independently reads the chain to confirm this really
+      // happened before marking anything settled.
+      const verifyRes = await fetch('/api/payments/verify-onchain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference, txHash }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok || !verifyData.success) {
+        throw new Error(verifyData.error || 'Could not verify the transaction on-chain.');
+      }
+
       await fetchLedgerStatus();
       setIsVerifying(false);
     } catch (err: any) {
       setIsTxPending(false);
       setIsVerifying(false);
-      setSettleError(err.message || 'Payment failed. Please try again.');
+      setSettleError(err.shortMessage || err.message || 'Payment failed. Please try again.');
     }
   };
 
@@ -179,25 +205,57 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          <button
-            onClick={handlePayment}
-            disabled={isTxPending || isVerifying || isConfirmed}
-            style={{
-              width: '100%',
-              padding: 'clamp(14px, 1.8vw, 18px)',
-              borderRadius: 14,
-              border: 'none',
-              fontSize: 'clamp(13px, 1.2vw, 16px)',
-              fontWeight: 800,
-              cursor: isConfirmed ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
-              background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
-              color: isConfirmed ? '#06b6d4' : '#0e0b08',
-              letterSpacing: 0.3,
-              transition: 'all 0.15s',
-            }}
-          >
-            {isConfirmed ? '✓ Ledger Settlement Confirmed' : isTxPending ? '⏳ Submitting to Arc Testnet...' : isVerifying ? '🔍 Verifying Settlement...' : `Pay ${payment.amount} ${payment.currency}`}
-          </button>
+          {!isConnected ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {connectors.map((c) => (
+                <button
+                  key={c.uid}
+                  onClick={() => connect({ connector: c })}
+                  style={{
+                    width: '100%',
+                    padding: 'clamp(14px, 1.8vw, 18px)',
+                    borderRadius: 14,
+                    border: '1px solid #3d2e1a',
+                    fontSize: 'clamp(13px, 1.2vw, 16px)',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    background: '#251c12',
+                    color: '#f0ece6',
+                  }}
+                >
+                  Connect {c.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, fontSize: 'clamp(10px, 0.9vw, 12px)', color: '#6b5a45' }}>
+                <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)}</span>
+                <button onClick={() => disconnect()} style={{ background: 'none', border: 'none', color: '#c8975a', cursor: 'pointer', fontSize: 'inherit' }}>
+                  Disconnect
+                </button>
+              </div>
+              <button
+                onClick={handlePayment}
+                disabled={isTxPending || isVerifying || isConfirmed}
+                style={{
+                  width: '100%',
+                  padding: 'clamp(14px, 1.8vw, 18px)',
+                  borderRadius: 14,
+                  border: 'none',
+                  fontSize: 'clamp(13px, 1.2vw, 16px)',
+                  fontWeight: 800,
+                  cursor: isConfirmed ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
+                  background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
+                  color: isConfirmed ? '#06b6d4' : '#0e0b08',
+                  letterSpacing: 0.3,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : `Pay ${payment.amount} ${payment.currency}`}
+              </button>
+            </>
+          )}
 
           {settleError && (
             <div style={{ marginTop: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: 14, textAlign: 'center' }}>

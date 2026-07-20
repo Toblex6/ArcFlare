@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { parseUnits } from 'viem';
 
@@ -37,7 +37,7 @@ async function waitForCircleTx(
   throw new Error('Escrow transaction timed out.');
 }
 
-async function createEscrowHandler(request: Request) {
+async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
   try {
     const {
       depositorSCA, // Depositor Circle SCA wallet address
@@ -124,6 +124,7 @@ async function createEscrowHandler(request: Request) {
         deadline: deadlineDate,
         txHash,
         webhookUrl: webhookUrl || null,
+        merchantId: merchant.id,
       },
     });
 
@@ -145,7 +146,7 @@ async function createEscrowHandler(request: Request) {
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
           createdAt: new Date().toISOString(),
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     return NextResponse.json({
@@ -177,4 +178,4 @@ async function createEscrowHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(createEscrowHandler);
+export const POST = withMerchantAuth(createEscrowHandler as any);

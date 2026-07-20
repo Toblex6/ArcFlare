@@ -46,6 +46,7 @@ model AgentRegistry {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @default(now()) @updatedAt
   idempotencyKey String?        @unique
+  merchantId     String?        // owning merchant — null only for legacy/pre-scoping rows
   agents         Agent[]
   wallets        CircleWallet[]
 }
@@ -88,6 +89,7 @@ model Escrow {
   condition       String?
   deadline        DateTime?
   createdAt       DateTime  @default(now())
+  merchantId      String?   // owning merchant — null only for legacy/pre-scoping rows
 }
 
 model Stream {
@@ -141,6 +143,16 @@ model Merchant {
   circleWalletId   String?   // Circle wallet ID, only set when walletType = CIRCLE
 }
 
+model ConsumerAccount {
+  id            String    @id @default(uuid())
+  walletAddress String    @unique
+  walletType    String    @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
+  circleWalletId String?
+  email         String?   @unique // optional — recovery/notifications only, never required
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+}
+
 model Job {
   id          String   @id @default(uuid())
   description String
@@ -148,6 +160,7 @@ model Job {
   status      String
   createdAt   DateTime @default(now())
   agentId     String
+  merchantId  String?  // owning merchant — null only for legacy/pre-scoping rows
   agent       Agent    @relation(fields: [agentId], references: [id])
 }
 
@@ -168,6 +181,7 @@ model Erc8183Job {
   updatedAt       DateTime @updatedAt
   expiredAt       DateTime
   agentId         String?
+  merchantId      String?  // owning merchant — null only for legacy/pre-scoping rows
   agent           Agent?   @relation(fields: [agentId], references: [id])
 
   @@index([jobId])
