@@ -7,7 +7,7 @@ import { prisma } from '@/src/lib/prisma';
 import { createWalletClient, createPublicClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet } from 'viem/chains';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
@@ -55,7 +55,7 @@ async function pollForAttestation(messageHash: string) {
           return { message: data.message, attestation: data.attestation };
         }
       }
-    } catch (_) { }
+    } catch (_) {}
     await new Promise((r) => setTimeout(r, 3000));
   }
   throw new Error('CCTP Attestation timed out after 90 seconds.');
@@ -329,7 +329,7 @@ async function mergedSettleHandler(request: NextRequest) {
           where: { reference },
           data: { circleTxId, status: 'SETTLEMENT_ERROR' },
         })
-        .catch(() => { });
+        .catch(() => {});
 
       throw new Error(
         `Transaction tracked (ID: ${circleTxId}), but network finality timed out or failed: ${pollingError.message}`
@@ -379,13 +379,13 @@ async function mergedSettleHandler(request: NextRequest) {
           where: { reference: fallbackReference },
           data: updateData,
         })
-        .catch(() => { });
+        .catch(() => {});
     }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-export const POST = withApiKey(mergedSettleHandler as any);
+export const POST = withApiKeyOrAnySession(mergedSettleHandler as any);
 export async function GET() {
   return NextResponse.json({ success: true, message: 'ArcFlare Merged Settlement Engine Active.' });
 }
