@@ -12,7 +12,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY!;
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
 interface ParsedAction {
   action: 'send' | 'request' | 'save' | 'balance' | 'unclear';
@@ -23,10 +24,10 @@ interface ParsedAction {
   reply: string; // in the same language the person used
 }
 
-async function parseWithClaude(message: string): Promise<ParsedAction> {
-  if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured.');
+async function parseWithGroq(message: string): Promise<ParsedAction> {
+  if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY not configured.');
 
-  const systemPrompt = `You are Flow's payment assistant inside FlareHQ. You read one message from a
+  const systemPrompt = `You are Flow's payment assistant inside ArcFlare. You read one message from a
 person, in ANY language, and turn it into a single structured action. You NEVER
 execute anything yourself — you only describe what would happen so a human can
 confirm it.
@@ -47,18 +48,21 @@ Rules:
 - If the message isn't about money at all, action is "unclear" and reply asks them to rephrase, in their language.
 - Never mark an action confirmed. Never claim money has moved. You are only ever proposing.`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
+      Authorization: `Bearer ${GROQ_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: GROQ_MODEL,
       max_tokens: 400,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: message }],
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message },
+      ],
     }),
   });
 
@@ -68,7 +72,7 @@ Rules:
   }
 
   const data = await response.json();
-  const text = data.content?.[0]?.text;
+  const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error('No response from assistant.');
 
   let parsed: ParsedAction;
@@ -175,7 +179,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'message is required.' }, { status: 400 });
     }
 
-    const parsed = await parseWithClaude(message);
+    const parsed = await parseWithGroq(message);
 
     const needsConfirmation = parsed.action === 'send' || parsed.action === 'request' || parsed.action === 'save';
     const readyToConfirm = needsConfirmation && (parsed.action !== 'send' || !!parsed.recipientAddress) && !!parsed.amount;

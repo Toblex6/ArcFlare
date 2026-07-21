@@ -136,7 +136,7 @@ export default function ConsumerApp() {
   const disconnectWallet = async () => {
     try {
       await fetch("/api/consumer/session", { method: "DELETE" });
-    } catch {}
+    } catch { }
     setWalletAddress("");
     setView("onboarding");
   };
@@ -309,7 +309,7 @@ export default function ConsumerApp() {
         <div style={styles.headerLeft}>
           <Image
             src="/arcflare-logo.png.png"
-            alt="FlareHQ"
+            alt="ArcFlare"
             width={32}
             height={32}
             style={{ borderRadius: 6, flexShrink: 0 }}
@@ -357,11 +357,6 @@ export default function ConsumerApp() {
                 <span style={styles.actionIcon}>💬</span>
                 <span style={styles.actionLabel}>Payroll Chat</span>
                 <span style={styles.actionSub}>Manage payroll with natural language</span>
-              </button>
-              <button style={styles.actionCard} onClick={() => router.push("/consumer/assistant")}>
-                <span style={styles.actionIcon}>🤖</span>
-                <span style={styles.actionLabel}>Ask the Assistant</span>
-                <span style={styles.actionSub}>Send, request, or save — by chat or voice</span>
               </button>
             </section>
             <p style={styles.footnote}>Built on Arc · Settled in USDC · Every transfer is real and onchain</p>
