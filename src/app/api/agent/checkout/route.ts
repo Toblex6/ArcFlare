@@ -19,7 +19,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: 'ArcFlare Agent loop spawned. Check persistent connection log to approve.',
+      message: 'FlareHQ Agent loop spawned. Check persistent connection log to approve.',
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

@@ -94,7 +94,7 @@ body {
   padding: clamp(16px, 3vw, 32px);
 }
 
-/* ── ArcFlare Layout & Sidebar ── */
+/* ── FlareHQ Layout & Sidebar ── */
 
 *, *::before, *::after {
   box-sizing: border-box;

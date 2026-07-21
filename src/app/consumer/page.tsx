@@ -309,7 +309,7 @@ export default function ConsumerApp() {
         <div style={styles.headerLeft}>
           <Image
             src="/arcflare-logo.png.png"
-            alt="ArcFlare"
+            alt="FlareHQ"
             width={32}
             height={32}
             style={{ borderRadius: 6, flexShrink: 0 }}

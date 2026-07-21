@@ -161,7 +161,7 @@ export default function MerchantSignup() {
       <main style={shellStyle}>
         <div style={{ width: '100%', maxWidth: 520 }}>
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
             <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>Account Verified</h1>
             <p style={{ color: '#6b5a45', fontSize: 14 }}>Your API key is shown below. Save it now — it won't appear again.</p>
           </div>
@@ -224,7 +224,7 @@ export default function MerchantSignup() {
       <main style={shellStyle}>
         <div style={{ width: '100%', maxWidth: 420 }}>
           <div style={{ textAlign: 'center', marginBottom: 36 }}>
-            <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
             <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>Check your email</h1>
             <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>We sent a 6-digit code to {form.email}</p>
           </div>
@@ -273,7 +273,7 @@ export default function MerchantSignup() {
       <main style={shellStyle}>
         <div style={{ width: '100%', maxWidth: 460 }}>
           <div style={{ textAlign: 'center', marginBottom: 36 }}>
-            <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
             <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>How should you get paid?</h1>
             <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>You can change this later in Settings.</p>
           </div>
@@ -297,7 +297,7 @@ export default function MerchantSignup() {
                 <input type="radio" checked={walletType === 'CIRCLE'} onChange={() => setWalletType('CIRCLE')} style={{ marginTop: 3 }} />
                 <div>
                   <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: '#f0ece6' }}>
-                    Let ArcFlare manage my wallet (recommended)
+                    Let FlareHQ manage my wallet (recommended)
                   </p>
                   <p style={{ margin: 0, fontSize: 12, color: '#8a7560' }}>
                     We create a wallet for you automatically. Withdraw to any address anytime from your dashboard.
@@ -348,7 +348,7 @@ export default function MerchantSignup() {
     <main style={shellStyle}>
       <div style={{ width: '100%', maxWidth: 460 }}>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
           <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>Create Merchant Account</h1>
           <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>Start accepting USDC payments on Arc in minutes.</p>
         </div>
@@ -392,7 +392,7 @@ export default function MerchantSignup() {
         </div>
 
         <p style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: '#2d2015', fontFamily: 'monospace', letterSpacing: 1 }}>
-          ARCFLARE PAYMENT INFRASTRUCTURE • ARC TESTNET
+          FLAREHQ PAYMENT INFRASTRUCTURE • ARC TESTNET
         </p>
       </div>
     </main>

@@ -122,13 +122,13 @@ export default function PublicStatsPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Image
             src="/arcflare-logo.png.png"
-            alt="ArcFlare"
+            alt="FlareHQ"
             width={36}
             height={36}
             style={{ borderRadius: 8, objectFit: 'contain' }}
           />
           <div>
-            <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>ArcFlare</p>
+            <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>FlareHQ</p>
             <p style={{ fontSize: 10, color: '#6b5a45', margin: 0 }}>
               Public Analytics — Arc Testnet
             </p>
@@ -165,10 +165,10 @@ export default function PublicStatsPage() {
       <div style={S.container}>
         <div style={{ marginBottom: 36, textAlign: 'center' }}>
           <h1 style={{ fontSize: 32, fontWeight: 800, margin: '0 0 8px' }}>
-            ArcFlare Network Stats
+            FlareHQ Network Stats
           </h1>
           <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>
-            Real-time onchain metrics from ArcFlare's payment infrastructure on Arc Testnet
+            Real-time onchain metrics from FlareHQ's payment infrastructure on Arc Testnet
           </p>
         </div>
 

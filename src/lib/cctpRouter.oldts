@@ -9,7 +9,7 @@ const SOURCE_MESSAGE_TRANSMITTER_ABI = [
 ];
 
 /**
- * Core Cross-Chain Router Module for ArcFlare
+ * Core Cross-Chain Router Module for FlareHQ
  */
 export class CCTPRouter {
   /**

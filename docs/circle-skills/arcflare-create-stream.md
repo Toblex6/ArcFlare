@@ -1,6 +1,6 @@
 ---
-name: arcflare-create-stream
-description: Create a per-second USDC streaming payment on ArcFlare's ArcFlareStream.sol on Arc Testnet. Use when an agent needs continuous payment over time rather than a lump sum — e.g. paying for ongoing compute, a subscription, or a freelance engagement billed by time. Also covers stopping a stream and withdrawing earned funds.
+name: flarehq-create-stream
+description: Create a per-second USDC streaming payment on FlareHQ's ArcFlareStream.sol on Arc Testnet. Use when an agent needs continuous payment over time rather than a lump sum — e.g. paying for ongoing compute, a subscription, or a freelance engagement billed by time. Also covers stopping a stream and withdrawing earned funds.
 ---
 
 ## Overview

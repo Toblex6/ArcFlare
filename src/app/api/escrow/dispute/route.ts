@@ -103,7 +103,7 @@ async function disputeHandler(request: Request) {
       escrow: updated,
       txHash,
       explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
-      message: 'Dispute raised. ArcFlare admin will review and resolve.',
+      message: 'Dispute raised. FlareHQ admin will review and resolve.',
     });
   } catch (error: any) {
     console.error('Escrow dispute error:', error);

@@ -82,7 +82,7 @@ async function createAgentWalletHandler(request: Request) {
       policyApplied = await policyRes.json();
     }
 
-    // ── Step 3: Save reference in ArcFlare's own registry ───────────────────
+    // ── Step 3: Save reference in FlareHQ's own registry ───────────────────
     await (prisma as any).agentRegistry
       .create({
         data: {

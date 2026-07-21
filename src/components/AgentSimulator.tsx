@@ -25,7 +25,7 @@ export default function AgentSimulator({ onRefresh }: { onRefresh: () => void })
         headers,
         body: JSON.stringify({
           agentName: `ArcBot-${Date.now()}`,
-          ownerAddress: '0xArcFlare...AutonomousAgent',
+          ownerAddress: '0xFlareHQ...AutonomousAgent',
         }),
       });
       const agentData = await agentRes.json();

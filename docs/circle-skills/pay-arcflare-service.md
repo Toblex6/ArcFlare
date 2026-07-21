@@ -1,11 +1,11 @@
 ---
-name: pay-arcflare-service
-description: Pay for ArcFlare's x402-gated endpoints (agent-lookup, reputation-check, job-status, and other nanopayment-protected resources) using a Circle Agent Wallet. Use whenever the user wants to call an ArcFlare paid resource, mentions "ArcFlare", "arcflare-gateway.onrender.com", or wants to pay for agent identity lookups, reputation checks, or job status checks via x402. Requires the agent wallet to already be bootstrapped — if `circle wallet status` shows not logged in or no wallet exists, hand off to the use-agent-wallet skill first.
+name: pay-flarehq-service
+description: Pay for FlareHQ's x402-gated endpoints (agent-lookup, reputation-check, job-status, and other nanopayment-protected resources) using a Circle Agent Wallet. Use whenever the user wants to call an FlareHQ paid resource, mentions "FlareHQ", "arcflare-gateway.onrender.com", or wants to pay for agent identity lookups, reputation checks, or job status checks via x402. Requires the agent wallet to already be bootstrapped — if `circle wallet status` shows not logged in or no wallet exists, hand off to the use-agent-wallet skill first.
 ---
 
 ## Overview
 
-ArcFlare (https://arcflare-gateway.onrender.com) is stablecoin payment
+FlareHQ (https://arcflare-gateway.onrender.com) is stablecoin payment
 infrastructure on Arc Testnet. Several of its endpoints are gated behind
 Circle's x402 protocol via Gateway Nanopayments — each call costs a small
 amount of USDC, paid directly from the caller's Circle Agent Wallet with no
@@ -23,7 +23,7 @@ If any of these are missing, hand off to `use-agent-wallet` (bootstrap) or
 `fund-agent-wallet` (funding) first. Do not attempt to create wallets or
 handle login here — this skill assumes bootstrap is already done.
 
-## ArcFlare's paid resources
+## FlareHQ's paid resources
 
 | Resource | Path | Price (USDC) |
 |---|---|---|
@@ -92,4 +92,4 @@ Trigger `fund-agent-wallet` instead when:
 
 Trigger `agent-wallet-policy` instead when:
 - The user wants to cap how much this agent wallet can ever spend on
-  ArcFlare or any other x402 service.
+  FlareHQ or any other x402 service.

@@ -70,7 +70,7 @@ export default function AgentsPage() {
   const [deploying, setDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState<any>(null);
   const [deployError, setDeployError] = useState<string | null>(null);
-  const [deployName, setDeployName] = useState('ArcFlare Autonomous Agent');
+  const [deployName, setDeployName] = useState('FlareHQ Autonomous Agent');
 
   // Reputation state
   const [repAgentId, setRepAgentId] = useState('');
@@ -318,13 +318,13 @@ export default function AgentsPage() {
         >
           <Image
             src="/arcflare-logo.png.png"
-            alt="ArcFlare"
+            alt="FlareHQ"
             width={36}
             height={36}
             style={{ borderRadius: 8, objectFit: 'contain' }}
           />
           <div>
-            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>ArcFlare</p>
+            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
             <p style={{ color: '#6b5a45', fontSize: 9, margin: 0 }}>
               Stablecoin Payment Infrastructure
             </p>

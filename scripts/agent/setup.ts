@@ -1,6 +1,6 @@
 // scripts/agent/setup.ts
 // Step 1: Run this ONCE to create owner + validator wallets and register
-// the ArcFlare AI agent on ERC-8004. After running, save the output
+// the FlareHQ AI agent on ERC-8004. After running, save the output
 // (agent ID, wallet addresses) to your .env file.
 //
 // Run: npx tsx --env-file=.env scripts/agent/setup.ts
@@ -53,14 +53,14 @@ async function waitForCircleTx(txId: string, label: string) {
 
 async function main() {
   console.log("\n═══════════════════════════════════════");
-  console.log("   ArcFlare AI Agent Setup (ERC-8004)");
+  console.log("   FlareHQ AI Agent Setup (ERC-8004)");
   console.log("═══════════════════════════════════════\n");
 
   // ── Step 1: Create owner + validator wallets ────────────────────────────────
   console.log("── Step 1: Creating wallets ──");
 
   const walletSet = await circleClient.createWalletSet({
-    name: "ArcFlare Agent Wallets",
+    name: "FlareHQ Agent Wallets",
   });
 
   const walletsResponse = await circleClient.createWallets({

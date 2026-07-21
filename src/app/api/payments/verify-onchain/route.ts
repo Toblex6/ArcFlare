@@ -1,6 +1,6 @@
 // src/app/api/payments/verify-onchain/route.ts
 // The customer's wallet submits the USDC transfer directly on-chain —
-// ArcFlare never touches those funds. This route is what turns "a
+// FlareHQ never touches those funds. This route is what turns "a
 // transaction hash the browser gave us" into "a payment we can trust":
 // it independently reads the transaction receipt from the chain and
 // confirms a real Transfer(customer -> merchant, >= amount) log exists

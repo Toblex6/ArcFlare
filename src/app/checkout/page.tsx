@@ -24,7 +24,7 @@ function CheckoutHubPageContent() {
         body: JSON.stringify({
           amount: 0.1,
           currency: 'USDC',
-          email: 'demo-user@arcflare.network',
+          email: 'demo-user@flarehq.network',
           merchant: 'Dispatch Marketplace',
         }),
       });
@@ -35,7 +35,7 @@ function CheckoutHubPageContent() {
         setError(result.error || 'Ledger rejected context token generation.');
       }
     } catch {
-      setError('Unable to initialize connection with ArcFlare Gateway.');
+      setError('Unable to initialize connection with FlareHQ Gateway.');
     } finally {
       setIsInitializing(false);
     }
@@ -86,7 +86,7 @@ function CheckoutHubPageContent() {
     return (
       <main style={{ minHeight: '100vh', background: '#050403', color: '#f0ece6', fontFamily: 'monospace', padding: 'clamp(20px, 5vw, 40px)' }}>
         <div style={{ maxWidth: 600, margin: '0 auto', border: '1px dashed #2d2015', padding: 'clamp(16px, 3vw, 24px)', background: '#0e0b08' }}>
-          <h2 style={{ color: '#c8975a', margin: '0 0 8px 0', fontSize: 'clamp(20px, 4vw, 28px)' }}>ARCFLARE HEADLESS HUB</h2>
+          <h2 style={{ color: '#c8975a', margin: '0 0 8px 0', fontSize: 'clamp(20px, 4vw, 28px)' }}>FLAREHQ HEADLESS HUB</h2>
           <p style={{ color: '#6b5a45', fontSize: 'clamp(10px, 1.2vw, 12px)', margin: '0 0 24px 0' }}>
             TARGET STATUS: {payment.status}
           </p>
@@ -120,9 +120,9 @@ function CheckoutHubPageContent() {
       {/* Header */}
       <header style={{ borderBottom: '1px solid #2d2015', padding: 'clamp(12px, 2vw, 24px) clamp(16px, 4vw, 48px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={40} height={40} style={{ borderRadius: 10, objectFit: 'contain' }} />
+          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={40} height={40} style={{ borderRadius: 10, objectFit: 'contain' }} />
           <div>
-            <p style={{ color: '#f0ece6', fontSize: 'clamp(14px, 2vw, 18px)', fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>ARCFLARE</p>
+            <p style={{ color: '#f0ece6', fontSize: 'clamp(14px, 2vw, 18px)', fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>FLAREHQ</p>
             <p style={{ color: '#6b5a45', fontSize: 'clamp(8px, 0.8vw, 10px)', margin: 0, letterSpacing: 2, textTransform: 'uppercase', fontFamily: 'monospace' }}>Sandbox Environment</p>
           </div>
         </div>
@@ -138,7 +138,7 @@ function CheckoutHubPageContent() {
           <div style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 28, padding: 'clamp(24px, 5vw, 40px)', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }}>
             <div style={{ textAlign: 'center', marginBottom: 32 }}>
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-                <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={56} height={56} style={{ borderRadius: 14, objectFit: 'contain' }} />
+                <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={56} height={56} style={{ borderRadius: 14, objectFit: 'contain' }} />
               </div>
               <div style={{ display: 'inline-block', background: 'rgba(200,151,90,0.1)', border: '1px solid rgba(200,151,90,0.3)', borderRadius: 20, padding: '4px 14px', marginBottom: 16 }}>
                 <span style={{ fontSize: 'clamp(9px, 1vw, 12px)', color: '#c8975a', fontFamily: 'monospace', letterSpacing: 2, textTransform: 'uppercase' }}>Arc Testnet v1.0</span>
@@ -194,7 +194,7 @@ function CheckoutHubPageContent() {
             </button>
           </div>
 
-          <p style={{ textAlign: 'center', marginTop: 20, fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#3d2e1a', fontFamily: 'monospace', letterSpacing: 1 }}>ARCFLARE PAYMENT INFRASTRUCTURE NODE • CIRCLE CCTP V2</p>
+          <p style={{ textAlign: 'center', marginTop: 20, fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#3d2e1a', fontFamily: 'monospace', letterSpacing: 1 }}>FLAREHQ PAYMENT INFRASTRUCTURE NODE • CIRCLE CCTP V2</p>
         </div>
       </div>
     </main>

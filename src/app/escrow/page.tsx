@@ -173,14 +173,14 @@ export default function EscrowDashboard() {
         >
           <Image
             src="/arcflare-logo.png.png"
-            alt="ArcFlare"
+            alt="FlareHQ"
             width={36}
             height={36}
             style={{ borderRadius: 8, objectFit: 'contain' }}
           />
           <div>
             <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>
-              ArcFlare
+              FlareHQ
             </p>
             <p style={{ color: '#4b5563', fontSize: 10, margin: '3px 0 0 0' }}>
               Stablecoin Payment Infrastructure

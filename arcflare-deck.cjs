@@ -3,7 +3,7 @@ const pptxgen = require('pptxgenjs');
 const pres = new pptxgen();
 pres.layout = 'LAYOUT_16x9';
 pres.author = 'Oyalade Temitope';
-pres.title = 'ArcFlare — Investor Deck';
+pres.title = 'FlareHQ — Investor Deck';
 
 // ── Color palette (matches brand)
 const C = {
@@ -73,7 +73,7 @@ const makeShadow = () => ({
   });
 
   // Company name
-  s.addText('ARCFLARE', {
+  s.addText('FLAREHQ', {
     x: 0.5,
     y: 2.75,
     w: 9,
@@ -149,7 +149,7 @@ const makeShadow = () => ({
     fontFace: 'Calibri',
     margin: 0,
   });
-  s.addText('arcflare-gateway.onrender.com  |  github.com/Toblex6/ArcFlare', {
+  s.addText('arcflare-gateway.onrender.com  |  github.com/Toblex6/FlareHQ', {
     x: 0.5,
     y: 5.2,
     w: 9,
@@ -162,7 +162,7 @@ const makeShadow = () => ({
   });
 
   s.addNotes(
-    "Opening slide. Introduce yourself briefly: 'I'm Oyalade, building ArcFlare — the payment infrastructure for the agentic economy on Arc.' Let the slide breathe — don't read it aloud."
+    "Opening slide. Introduce yourself briefly: 'I'm Oyalade, building FlareHQ — the payment infrastructure for the agentic economy on Arc.' Let the slide breathe — don't read it aloud."
   );
 }
 
@@ -305,7 +305,7 @@ const makeShadow = () => ({
     fontFace: 'Calibri',
     margin: 0,
   });
-  s.addText('ArcFlare — Stripe for the agentic economy on Arc', {
+  s.addText('FlareHQ — Stripe for the agentic economy on Arc', {
     x: 0.5,
     y: 0.75,
     w: 9,
@@ -403,7 +403,7 @@ const makeShadow = () => ({
   });
 
   s.addNotes(
-    "Show breadth. ArcFlare is not one feature — it's a complete payment operating system. Emphasise that all 6 primitives are live on Arc Testnet today."
+    "Show breadth. FlareHQ is not one feature — it's a complete payment operating system. Emphasise that all 6 primitives are live on Arc Testnet today."
   );
 }
 
@@ -872,7 +872,7 @@ const makeShadow = () => ({
     {
       icon: '💳',
       title: 'Transaction Fees',
-      desc: '0.1–0.5% fee on every USDC payment settled through ArcFlare checkout and settle endpoints.',
+      desc: '0.1–0.5% fee on every USDC payment settled through FlareHQ checkout and settle endpoints.',
       color: C.copper,
     },
     {
@@ -945,7 +945,7 @@ const makeShadow = () => ({
   });
 
   s.addNotes(
-    'ArcFlare is infrastructure — revenue compounds as more merchants and agents transact. The key metric is total volume settled. Even 1% fee on $10M monthly volume = $100K MRR.'
+    'FlareHQ is infrastructure — revenue compounds as more merchants and agents transact. The key metric is total volume settled. Even 1% fee on $10M monthly volume = $100K MRR.'
   );
 }
 
@@ -1474,7 +1474,7 @@ const makeShadow = () => ({
     fontFace: 'Cambria',
     margin: 0,
   });
-  s.addText('Founder & CEO — ArcFlare | Lagos, Nigeria', {
+  s.addText('Founder & CEO — FlareHQ | Lagos, Nigeria', {
     x: 2.6,
     y: 3.65,
     w: 4.8,
@@ -1560,7 +1560,7 @@ const makeShadow = () => ({
     margin: 0,
   });
 
-  s.addText('ArcFlare is not a whitepaper.', {
+  s.addText('FlareHQ is not a whitepaper.', {
     x: 0.5,
     y: 3.05,
     w: 9,
@@ -1601,7 +1601,7 @@ const makeShadow = () => ({
     { label: 'Founder', value: 'Oyalade Temitope' },
     { label: 'Email', value: 'tobilade12@gmail.com' },
     { label: 'Live Product', value: 'arcflare-gateway.onrender.com' },
-    { label: 'GitHub', value: 'github.com/Toblex6/ArcFlare' },
+    { label: 'GitHub', value: 'github.com/Toblex6/FlareHQ' },
   ];
 
   contacts.forEach((c, i) => {
@@ -1647,7 +1647,7 @@ const makeShadow = () => ({
 
 // ── Write file
 pres
-  .writeFile({ fileName: './ArcFlare-Investor-Deck.pptx' })
+  .writeFile({ fileName: './FlareHQ-Investor-Deck.pptx' })
   .then(() => console.log('✅ Deck written'))
   .catch((e) => {
     console.error('❌', e);

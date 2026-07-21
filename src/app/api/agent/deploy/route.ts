@@ -18,7 +18,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
     const body = await request.json().catch(() => ({}));
     const metadataUri =
       body.metadataUri || 'ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei';
-    const agentName = body.agentName || 'ArcFlare Autonomous Agent';
+    const agentName = body.agentName || 'FlareHQ Autonomous Agent';
     const ownerNode = body.ownerNode || '0xAgenticNodeOperatorDefaultAddress';
 
     // 1. Initialize Circle Client
@@ -146,7 +146,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
       },
     });
   } catch (error: any) {
-    console.error('❌ API Error [ArcFlare Deploy]:', error);
+    console.error('❌ API Error [FlareHQ Deploy]:', error);
     return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
   }
 }

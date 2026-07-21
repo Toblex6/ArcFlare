@@ -11,11 +11,11 @@ const client = initiateDeveloperControlledWalletsClient({
 
 async function main() {
   // ── Step 1: Create wallet set ──────────────────────────────────────────
-  console.log('🔧 Creating ArcFlare wallet set...');
+  console.log('🔧 Creating FlareHQ wallet set...');
 
   const wsRes = await client.createWalletSet({
     idempotencyKey: randomUUID(),
-    name: 'ArcFlare Agent Wallets',
+    name: 'FlareHQ Agent Wallets',
   });
 
   const walletSetId = wsRes.data?.walletSet?.id;

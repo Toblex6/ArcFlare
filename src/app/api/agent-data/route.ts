@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma'; // Direct named import from unified utility layer
 
 /**
- * GET Handler for ArcFlare's Agentic Paywall Endpoint
+ * GET Handler for FlareHQ's Agentic Paywall Endpoint
  * Handles headless HTTP 402 machine-to-machine stablecoin roadblocks.
  */
 export async function GET(request: NextRequest) {
   try {
     // 1. Inspect incoming network headers for transaction metadata proofs
     const paymentReference = request.headers.get('x-payment-reference');
-    const agentEmail = request.headers.get('x-agent-email') || 'unknown-agent@arcflare.xyz';
-    const merchantName = request.headers.get('x-merchant-name') || 'ArcFlare Core Engine';
+    const agentEmail = request.headers.get('x-agent-email') || 'unknown-agent@flarehq.xyz';
+    const merchantName = request.headers.get('x-merchant-name') || 'FlareHQ Core Engine';
 
     // 2. Roadblock: If no reference header is attached, send the HTTP 402 Challenge
     if (!paymentReference) {

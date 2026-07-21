@@ -7,7 +7,7 @@ import { isAddress } from 'viem';
 import { createAccountWallet } from '@/src/lib/circle/client';
 
 const JWT_SECRET = new TextEncoder().encode(
-    process.env.MERCHANT_JWT_SECRET || 'arcflare-merchant-secret-change-on-mainnet'
+    process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
 );
 
 async function getMerchantFromCookie(req: NextRequest) {

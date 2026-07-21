@@ -33,8 +33,8 @@ async function simulateAgent() {
           const paidResponse = await axios.get(TARGET_URL, {
             headers: {
               "x-payment-reference": mockTxReference,
-              "x-agent-email": "siggy-bot@arcflare.xyz",
-              "x-merchant-name": "ArcFlare Main Engine"
+              "x-agent-email": "siggy-bot@flarehq.xyz",
+              "x-merchant-name": "FlareHQ Main Engine"
             }
           });
 

@@ -37,7 +37,7 @@ export default function MerchantDocsPage() {
         <h1 className="text-4xl font-bold leading-tight md:text-6xl">Merchant Documentation</h1>
         <p className="mt-6 max-w-3xl text-lg leading-relaxed text-gray-400">
           Initialize checkout, escrow funds, and settle recurring or tiny USDC payments with
-          ArcFlare's hosted APIs.
+          FlareHQ's hosted APIs.
         </p>
       </header>
 

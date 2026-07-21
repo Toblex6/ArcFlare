@@ -7,7 +7,7 @@ async function main() {
       data: {
         scaAddress: '0x7cf8ee2ab9c1aeb9cbae26511fb0cbda923ab15e',
         tokenId: '851223',
-        name: 'ArcFlare AI Agent',
+        name: 'FlareHQ AI Agent',
         status: 'ACTIVE',
         ownerNode: '0x7cf8ee2ab9c1aeb9cbae26511fb0cbda923ab15e',
       },

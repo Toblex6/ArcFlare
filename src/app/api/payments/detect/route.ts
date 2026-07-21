@@ -36,7 +36,7 @@ async function detectHandler(request: Request) {
         currency: currency || 'USDC',
         chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
         senderEmail: 'cross-chain-detect@arc.network',
-        merchant: 'ArcFlare CCTP V2 Router',
+        merchant: 'FlareHQ CCTP V2 Router',
         status: 'POLLING_CIRCLE_TESTNET_IRIS_API',
         webhookUrl: webhookUrl || null,
       },

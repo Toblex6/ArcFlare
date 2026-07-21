@@ -164,7 +164,7 @@ async function validationHandler(request: Request) {
 
       const requestURI = `ipfs://arcflare-validation-${agentId}-${requestTag}`;
       const requestHash = keccak256(
-        toHex(`arcflare_validation_agent_${agentId}_${requestTag}_${Date.now()}`)
+        toHex(`flarehq_validation_agent_${agentId}_${requestTag}_${Date.now()}`)
       ) as `0x${string}`;
 
       const tx = await circleClient.createContractExecutionTransaction({

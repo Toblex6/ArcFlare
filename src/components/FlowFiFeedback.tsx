@@ -30,7 +30,7 @@ export default function FlowFiFeedback() {
     setSending(true);
 
     try {
-      // ── Optional: Wire up to ArcFlare API Endpoint if needed ──────────────
+      // ── Optional: Wire up to FlareHQ API Endpoint if needed ──────────────
       // await fetch("/api/feedback", {
       //   method: "POST",
       //   headers: { "Content-Type": "application/json" },
@@ -81,7 +81,7 @@ export default function FlowFiFeedback() {
                 <div style={styles.successIcon}>✓</div>
                 <h2 style={styles.successTitle}>Thanks for the feedback!</h2>
                 <p style={styles.successSub}>
-                  We read every submission and use it to improve ArcFlare.
+                  We read every submission and use it to improve FlareHQ.
                 </p>
                 <button style={styles.closeBtn} onClick={handleClose}>
                   Close

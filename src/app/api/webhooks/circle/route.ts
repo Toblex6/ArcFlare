@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
               currency,
               chain: `${getChainName(sourceDomain)} → Arc Testnet (via CCTP V2)`,
               senderEmail: transfer?.walletId || 'auto-detected@arc.network',
-              merchant: 'ArcFlare Auto-Router',
+              merchant: 'FlareHQ Auto-Router',
               status: 'POLLING_CIRCLE_TESTNET_IRIS_API',
             },
           });

@@ -12,7 +12,7 @@ const REPUTATION_REGISTRY = '0x8004B663056A597Dffe9eCcC1965A193B7388713';
 const VALIDATION_REGISTRY = '0x28836b53b821f5FE3aBcdeDB7a8A67B0D8D08A9E';
 
 async function runErc8004Lifecycle() {
-  console.log('🚀 [ArcFlare Core] Booting Machine Identity Lifecycle Engine...');
+  console.log('🚀 [FlareHQ Core] Booting Machine Identity Lifecycle Engine...');
 
   const circleClient = initiateDeveloperControlledWalletsClient({
     apiKey: process.env.CIRCLE_API_KEY!,
@@ -20,7 +20,7 @@ async function runErc8004Lifecycle() {
   });
 
   // Provisioning
-  const walletSet = await circleClient.createWalletSet({ name: 'ArcFlare ERC8004 Agent Suite' });
+  const walletSet = await circleClient.createWalletSet({ name: 'FlareHQ ERC8004 Agent Suite' });
   const walletsResponse = await circleClient.createWallets({
     blockchains: ['ARC-TESTNET'],
     count: 2,

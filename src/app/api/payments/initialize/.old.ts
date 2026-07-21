@@ -86,6 +86,6 @@ export async function GET() {
   return NextResponse.json({
     success: true,
     status: 'ready',
-    message: 'ArcFlare Gateway Ledger initialization channel is active.',
+    message: 'FlareHQ Gateway Ledger initialization channel is active.',
   });
 }

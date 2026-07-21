@@ -10,7 +10,7 @@ async function run() {
   };
 
   try {
-    console.log('🚀 [Simulated Agent]: Shipping cross-chain intent to ArcFlare Gateway...');
+    console.log('🚀 [Simulated Agent]: Shipping cross-chain intent to FlareHQ Gateway...');
     const response = await axios.post('http://localhost:3000/api/settle-cross-chain', mockPayload);
 
     console.log('\n📥 [Gateway Engine Response]:');

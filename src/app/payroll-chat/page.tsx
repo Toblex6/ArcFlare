@@ -3,7 +3,7 @@
 // consumer-app/src/app/payroll-chat/page.tsx
 // Chat-style payroll interface inside Flow, inspired by Lumma Agent
 // Payroll's UX. Parses natural language with payrollChatParser.ts and
-// executes against ArcFlare's EXISTING /api/payroll/run and
+// executes against FlareHQ's EXISTING /api/payroll/run and
 // /api/payments/scheduled routes — no new backend primitives.
 
 import React, { useState, useRef, useEffect } from "react";
@@ -114,7 +114,7 @@ export default function PayrollChatPage() {
           addMessage("assistant", `Running payroll for ${contractors.length} contractor(s)... please confirm the amounts below before I proceed.`);
           addMessage("assistant", contractors.map((c) => `• ${c.name}: ${c.amount} USDC`).join("\n"));
 
-          // ── Calls ArcFlare's EXISTING /api/payroll/run route ──────────────────
+          // ── Calls FlareHQ's EXISTING /api/payroll/run route ──────────────────
           const res = await fetch(`${ARCFLARE_BASE}/api/payroll/run`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-api-key": ARCFLARE_API_KEY },
@@ -295,7 +295,7 @@ export default function PayrollChatPage() {
     <main style={pageStyle}>
       <header style={headerStyle}>
         <h1 style={titleStyle}>Payroll Assistant</h1>
-        <p style={subStyle}>Chat your payroll — powered by ArcFlare's payroll & scheduled payments</p>
+        <p style={subStyle}>Chat your payroll — powered by FlareHQ's payroll & scheduled payments</p>
       </header>
 
       <div style={setupBoxStyle}>

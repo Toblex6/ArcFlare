@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server';
 
 /**
  * POST /api/protected-service
- * Fully automated environment resolution for ArcFlare Gateway Rails
+ * Fully automated environment resolution for FlareHQ Gateway Rails
  */
 export async function POST(request: Request) {
   try {
-    const headerToken = request.headers.get('X-ArcFlare-Reference');
+    const headerToken = request.headers.get('X-FlareHQ-Reference');
 
     // 1. Dynamically extract the origin (handles localhost or Render automatically)
     const { origin } = new URL(request.url);
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
         {
           status: false,
           error: 'Payment Required',
-          message: 'This resource is protected by ArcFlare Agentic Paywalls.',
+          message: 'This resource is protected by FlareHQ Agentic Paywalls.',
           payment_instructions: {
             currency: 'USDC',
             amount: 0.1,
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
         },
         {
           status: 402,
-          headers: { 'WWW-Authenticate': 'ArcFlare-USDC-Micropayment' },
+          headers: { 'WWW-Authenticate': 'FlareHQ-USDC-Micropayment' },
         }
       );
     }
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
         data: {
           secretPayload:
             'Welcome to the agentic economy. This is secure data processed autonomously.',
-          computedBy: 'ArcFlare Gateway Engine',
+          computedBy: 'FlareHQ Gateway Engine',
         },
       },
       { status: 200 }

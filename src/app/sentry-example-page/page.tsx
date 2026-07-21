@@ -53,7 +53,7 @@ export default function Page() {
           <a
             target="_blank"
             rel="noopener"
-            href="https://arcflare.sentry.io/issues/?project=4511528675704832"
+            href="https://flarehq.sentry.io/issues/?project=4511528675704832"
           >
             Issues Page
           </a>

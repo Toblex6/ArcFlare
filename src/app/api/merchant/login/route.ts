@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import { SignJWT } from 'jose';
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.MERCHANT_JWT_SECRET || 'arcflare-merchant-secret-change-on-mainnet'
+  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
 );
 
 export async function POST(req: NextRequest) {

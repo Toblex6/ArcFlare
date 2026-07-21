@@ -1,11 +1,11 @@
 ---
-name: arcflare-erc8183-job
-description: Run the full ERC-8183 agentic commerce job lifecycle on Arc Testnet via ArcFlare — create a job, set its budget, fund escrow, submit a deliverable, and complete payment. Use when one agent needs to hire another agent (or be hired) for a discrete task with onchain escrow guarantees.
+name: flarehq-erc8183-job
+description: Run the full ERC-8183 agentic commerce job lifecycle on Arc Testnet via FlareHQ — create a job, set its budget, fund escrow, submit a deliverable, and complete payment. Use when one agent needs to hire another agent (or be hired) for a discrete task with onchain escrow guarantees.
 ---
 
 ## Overview
 
-ERC-8183 is Arc's native standard for agent-to-agent hiring. ArcFlare wraps
+ERC-8183 is Arc's native standard for agent-to-agent hiring. FlareHQ wraps
 the full 6-step lifecycle behind one endpoint, driven by an `action` field.
 Each step must happen in order; skipping ahead will fail against the
 underlying contract state.

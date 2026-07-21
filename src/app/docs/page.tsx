@@ -3,7 +3,7 @@ export default function DocsPage() {
     <main className="max-w-4xl mx-auto px-6 py-16 prose prose-invert prose-blue">
       <header className="mb-12 border-b border-zinc-800 pb-8">
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl mb-4">
-          ArcFlare Documentation
+          FlareHQ Documentation
         </h1>
         <p className="text-xl text-zinc-400">
           Stablecoin Payment Infrastructure and Agentic Finance Layer on Arc.
@@ -13,7 +13,7 @@ export default function DocsPage() {
       <section className="mb-12">
         <h2 className="text-2xl font-bold border-l-4 border-blue-500 pl-4">Overview</h2>
         <p>
-          ArcFlare is a full-stack stablecoin payment infrastructure platform built on the Arc
+          FlareHQ is a full-stack stablecoin payment infrastructure platform built on the Arc
           blockchain.
         </p>
         <p>

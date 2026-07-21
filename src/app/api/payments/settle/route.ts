@@ -387,5 +387,5 @@ async function mergedSettleHandler(request: NextRequest) {
 
 export const POST = withApiKeyOrAnySession(mergedSettleHandler as any);
 export async function GET() {
-  return NextResponse.json({ success: true, message: 'ArcFlare Merged Settlement Engine Active.' });
+  return NextResponse.json({ success: true, message: 'FlareHQ Merged Settlement Engine Active.' });
 }

@@ -1,6 +1,6 @@
 // src/app/api/gateway/route.ts
 // Seller-side Gateway operations — check revenue balance and withdraw
-// earnings to your Payout Wallet. Use this to manage ArcFlare's seller
+// earnings to your Payout Wallet. Use this to manage FlareHQ's seller
 // revenue from any Gateway-protected endpoints.
 
 import { NextResponse } from 'next/server';

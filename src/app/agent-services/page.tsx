@@ -165,7 +165,7 @@ export default function AgentServicePage() {
       <div style={{ maxWidth: 900, margin: "0 auto" }}>
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
-            <h1 style={{ fontSize: "clamp(20px, 4vw, 28px)", fontWeight: 700, margin: 0 }}>ArcFlare AI Agent</h1>
+            <h1 style={{ fontSize: "clamp(20px, 4vw, 28px)", fontWeight: 700, margin: 0 }}>FlareHQ AI Agent</h1>
             <span style={badgeStyle("#10b981")}>ERC-8004</span>
             <span style={badgeStyle("#c8975a")}>x402 Paid</span>
           </div>
@@ -239,7 +239,7 @@ export default function AgentServicePage() {
               </div>
               <div>
                 <span style={styles.label}>Task</span>
-                <textarea style={{ ...styles.input, height: 80, resize: "vertical" as const }} value={task} onChange={(e) => setTask(e.target.value)} placeholder="e.g. Analyze the best payment strategy for a small freelance business using ArcFlare" />
+                <textarea style={{ ...styles.input, height: 80, resize: "vertical" as const }} value={task} onChange={(e) => setTask(e.target.value)} placeholder="e.g. Analyze the best payment strategy for a small freelance business using FlareHQ" />
               </div>
               <div>
                 <span style={styles.label}>Context (optional)</span>

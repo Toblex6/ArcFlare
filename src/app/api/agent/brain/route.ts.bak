@@ -18,11 +18,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withGateway } from "@/lib/x402";
 import { prisma } from "@/lib/prisma";
-import { createPublicClient, http, keccak256, toHex } from "viem";
 import {
-  getCircleClient,
-  waitForTransaction,
-} from "@/lib/circle/client"; // FIX #2: reuse shared Circle client instead of a second local copy
+  initiateDeveloperControlledWalletsClient,
+} from "@circle-fin/developer-controlled-wallets";
+import { createPublicClient, http, keccak256, toHex, parseUnits } from "viem";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
@@ -49,7 +48,29 @@ const publicClient = createPublicClient({
   transport: http("https://rpc.testnet.arc.network"),
 });
 
+function getCircle() {
+  return initiateDeveloperControlledWalletsClient({
+    apiKey: process.env.CIRCLE_API_KEY!,
+    entitySecret: process.env.CIRCLE_ENTITY_SECRET!,
+  });
+}
+
+async function waitForCircleTx(txId: string): Promise<string> {
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const { data } = await getCircle().getTransaction({ id: txId });
+    if (data?.transaction?.state === "COMPLETE" && data.transaction.txHash) {
+      return data.transaction.txHash;
+    }
+    if (data?.transaction?.state === "FAILED")
+      throw new Error("Transaction failed onchain");
+  }
+  throw new Error("Transaction timed out");
+}
+
 // ── TOOL DEFINITIONS (what the agent brain can do) ────────────────────────────
+// Kept as "input_schema" for readability; converted to OpenAI/Groq's
+// {type:"function", function:{...parameters}} shape in GROQ_TOOLS below.
 const AGENT_TOOLS = [
   {
     name: "agent_pay_agent",
@@ -195,6 +216,7 @@ const AGENT_TOOLS = [
       properties: {
         agentTokenId: { type: "string" },
         validatorWalletAddress: { type: "string" },
+        validatorWalletId: { type: "string" },
         score: { type: "number", description: "0-100 reputation score" },
         tag: { type: "string", description: "e.g. successful_delivery, late_delivery, rejected_work" },
       },
@@ -404,17 +426,16 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 9. Record ERC-8004 Reputation ─────────────────────────────────────────
     case "record_agent_reputation": {
-      // FIX #3: validatorWalletId was required but never used in the tx call.
-      // Only validatorWalletAddress is actually needed here — dropped the
-      // dead requirement so this no longer blocks on an unused variable.
-      const circle = getCircleClient(); // FIX #2: shared client instead of local getCircle()
+      const circle = getCircle();
       const feedbackHash = keccak256(toHex(input.tag));
       const score = Math.max(0, Math.min(100, input.score));
 
       const validatorAddress = input.validatorWalletAddress ||
         process.env.AGENT_VALIDATOR_WALLET_ADDRESS;
+      const validatorId = input.validatorWalletId ||
+        process.env.AGENT_VALIDATOR_WALLET_ID;
 
-      if (!validatorAddress) {
+      if (!validatorAddress || !validatorId) {
         return { error: "Validator wallet not configured. Run setup script first." };
       }
 
@@ -438,7 +459,7 @@ async function executeTool(name: string, input: any): Promise<any> {
       });
 
       if (!tx.data?.id) return { error: "No transaction ID returned" };
-      const txHash = await waitForTransaction(tx.data.id, "Reputation feedback"); // FIX #2: shared helper
+      const txHash = await waitForCircleTx(tx.data.id);
 
       return {
         success: true,
@@ -512,7 +533,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 }
 
 // ── Agent Memory (Postgres) ───────────────────────────────────────────────────
-// Stored shape is OpenAI/Groq-style chat messages:
+// Stored shape is now OpenAI/Groq-style chat messages:
 // { role: "user"|"assistant"|"tool", content, tool_calls?, tool_call_id? }
 async function getMemory(sessionId: string): Promise<any[]> {
   try {
@@ -533,7 +554,6 @@ async function saveMemory(sessionId: string, message: any) {
   } catch { }
 }
 
-// ── Agent Loop ────────────────────────────────────────────────────────────────
 async function runBrain(
   userMessage: string,
   sessionId: string,
@@ -541,42 +561,15 @@ async function runBrain(
 ): Promise<{ response: string; toolsUsed: string[]; results: any[] }> {
   const toolsUsed: string[] = [];
   const results: any[] = [];
-  const seenCalls = new Set<string>();
+  const seenCalls = new Set<string>(); // NEW: dedupe identical tool calls
   const memory = await getMemory(sessionId);
 
-  // FIX #1 — THE CRITICAL BUG: this was previously the literal placeholder
-  // text "...same as before..." with no real content, meaning the model
-  // has been operating with zero context about FlareHQ, its tools, or
-  // when to use each one. Restored the full system prompt below.
-  const system = `You are FlareHQ's autonomous AI agent — a fully autonomous financial and commerce agent
-registered on Arc Testnet with ERC-8004 identity (Token #${process.env.AGENT_TOKEN_ID || "847277"}).
-
-Your owner wallet: ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"}
-Your validator wallet: ${process.env.AGENT_VALIDATOR_WALLET_ADDRESS || "not set"}
-
-${agentContext ? `Additional context: ${agentContext}` : ""}
-
-You can:
-- Pay other agents directly (A2A via M2M settlement) — use agent_pay_agent
-- Hire agents via ERC-8183 jobs with onchain escrow — use create_agent_job, submit_job_deliverable, complete_or_reject_job
-- Run payroll for teams of agents — use run_agent_payroll
-- Set up recurring subscriptions to agent services — use setup_agent_subscription
-- Generate invoices for completed work — use generate_agent_invoice
-- Route USDC cross-chain via Circle CCTP V2 — use route_cross_chain
-- Record reputation on ERC-8004 after job completion — use record_agent_reputation
-- Fetch real-world data autonomously — use fetch_agent_data
-- Check status of any payment, job, or reputation — use check_agent_status
-
+  const system = `...same as before...
+  
 IMPORTANT:
 - Your own wallet address is ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"} — use this automatically as the payer/sender for any tool that needs it, unless the user specifies a different one. Do not invent placeholder addresses.
-- For immediate services: use agent_pay_agent (x402/M2M)
-- For async work that needs verification: use create_agent_job (ERC-8183)
-- Always record_agent_reputation after completing or rejecting a job
-- For teams: use run_agent_payroll for efficiency
 - Once a tool call returns success: true, the task is DONE. Immediately respond with a final text summary. Do NOT call the same tool again.
-- Never call the exact same tool with the exact same arguments twice.
-- If a tool result contains "not found in registry" or a similar setup/configuration error, do NOT retry — explain the issue to the user in your final response and suggest the specific fix (e.g. deploying the agent first) instead of calling the tool again.
-- After completing tasks, summarize what was done with transaction links.`;
+- Never call the exact same tool with the exact same arguments twice.`;
 
   const messages: any[] = [
     { role: "system", content: system },
@@ -587,53 +580,28 @@ IMPORTANT:
   let loop = true;
   let iters = 0;
 
-  while (loop && iters < 4) {
+  while (loop && iters < 4) { // lowered from 8 — saves rate-limit budget
     iters++;
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: 512,
+        temperature: 0.1,
+        messages,
+        tools: GROQ_TOOLS,
+        tool_choice: "auto",
+      }),
+    });
 
-    let data: any;
-    try {
-      // FIX #4: wrap the Groq call + parse so a malformed/unexpected
-      // response returns a clean error instead of an unhandled throw.
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${GROQ_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: GROQ_MODEL,
-          max_tokens: 512,
-          temperature: 0.1,
-          messages,
-          tools: GROQ_TOOLS,
-          tool_choice: "auto",
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        console.error(`[brain] Groq error ${res.status}:`, errText);
-        return {
-          response: "I ran into a problem talking to my reasoning engine. Please try again.",
-          toolsUsed,
-          results,
-        };
-      }
-      data = await res.json();
-    } catch (fetchErr: any) {
-      console.error("[brain] Groq fetch failed:", fetchErr);
-      return {
-        response: "I couldn't reach my reasoning engine right now. Please try again shortly.",
-        toolsUsed,
-        results,
-      };
-    }
-
+    if (!res.ok) throw new Error(`Groq: ${res.status} ${await res.text()}`);
+    const data = await res.json();
     const choice = data.choices?.[0];
-    if (!choice) {
-      console.error("[brain] Groq returned no choices:", JSON.stringify(data));
-      return { response: "I didn't get a usable response back. Please try again.", toolsUsed, results };
-    }
+    if (!choice) throw new Error(`Groq returned no choices: ${JSON.stringify(data)}`);
 
     const msg = choice.message;
     const toolCalls = msg.tool_calls || [];
@@ -647,16 +615,16 @@ IMPORTANT:
 
     messages.push({ role: "assistant", content: msg.content || null, tool_calls: toolCalls });
 
-    let allDuplicates = true;
+    let allDuplicates = true; // NEW
 
     for (const tc of toolCalls) {
       const name = tc.function.name;
       let args: any = {};
       try { args = JSON.parse(tc.function.arguments || "{}"); } catch { args = {}; }
 
-      const callKey = `${name}:${JSON.stringify(args)}`;
+      const callKey = `${name}:${JSON.stringify(args)}`; // NEW
 
-      if (seenCalls.has(callKey)) {
+      if (seenCalls.has(callKey)) { // NEW — dedupe guard
         messages.push({
           role: "tool",
           tool_call_id: tc.id,
@@ -668,18 +636,7 @@ IMPORTANT:
       allDuplicates = false;
 
       toolsUsed.push(name);
-
-      // FIX #5: catch tool execution errors so a thrown exception (network
-      // blip, unexpected response shape, etc.) becomes a tool result the
-      // model can react to and explain, instead of crashing the request.
-      let result: any;
-      try {
-        result = await executeTool(name, args);
-      } catch (toolErr: any) {
-        console.error(`[brain] Tool ${name} threw:`, toolErr);
-        result = { error: toolErr?.message || "Tool execution failed unexpectedly." };
-      }
-
+      const result = await executeTool(name, args);
       results.push({ tool: name, result });
 
       messages.push({
@@ -689,7 +646,7 @@ IMPORTANT:
       });
     }
 
-    if (allDuplicates) {
+    if (allDuplicates) { // NEW — everything this round was a repeat, force stop
       loop = false;
       const lastResult = results[results.length - 1];
       return {

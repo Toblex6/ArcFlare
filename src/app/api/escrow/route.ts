@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[ArcFlare API] Processing Escrow Provisioning for Ref: ${reference}`);
+    console.log(`[FlareHQ API] Processing Escrow Provisioning for Ref: ${reference}`);
 
     // 2. Persistent storage layer write utilizing Prisma
     // This leverages the unique index constraint successfully pushed to Render Postgres
@@ -54,13 +54,13 @@ export async function POST(request: Request) {
           id: newEscrowRecord.id,
           reference: newEscrowRecord.reference,
           status: newEscrowRecord.status,
-          ArcFlareFactory: ARCFLARE_FACTORY_ADDRESS,
+          FlareHQFactory: ARCFLARE_FACTORY_ADDRESS,
         },
       },
       { status: 201 }
     );
   } catch (error: any) {
-    console.error('[ArcFlare API Error] Failed to process escrow initialization:', error);
+    console.error('[FlareHQ API Error] Failed to process escrow initialization:', error);
 
     // Graceful error classification for unique reference collisions
     if (error.code === 'P2002') {
@@ -107,7 +107,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, data: recentEscrows }, { status: 200 });
   } catch (error: any) {
-    console.error('[ArcFlare API Error] Query failed:', error);
+    console.error('[FlareHQ API Error] Query failed:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   } finally {
     await prisma.$disconnect();

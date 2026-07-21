@@ -48,7 +48,7 @@ export default function MerchantLogin() {
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <Image
             src="/arcflare-logo.png.png"
-            alt="ArcFlare"
+            alt="FlareHQ"
             width={52}
             height={52}
             style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }}
@@ -57,7 +57,7 @@ export default function MerchantLogin() {
             Merchant Login
           </h1>
           <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>
-            Sign in to your ArcFlare merchant account.
+            Sign in to your FlareHQ merchant account.
           </p>
         </div>
 

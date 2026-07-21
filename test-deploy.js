@@ -7,7 +7,7 @@ const TARGET_API_URL = 'http://localhost:3000/api/agent/deploy';
 const TEST_API_KEY = 'your_generated_dev_api_key_here';
 
 async function runVerificationTest() {
-  console.log('🚀 Initiating ArcFlare Agent Deployment Security verification sequence...');
+  console.log('🚀 Initiating FlareHQ Agent Deployment Security verification sequence...');
 
   const payload = JSON.stringify({
     agentName: 'Siggy Alpha Agent-01',

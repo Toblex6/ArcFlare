@@ -9,7 +9,7 @@ dotenv.config();
 const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
 async function main() {
-  console.log('🚀 Initializing ArcFlare Autonomous Test Agent (Programmatic Signer Mode)...');
+  console.log('🚀 Initializing FlareHQ Autonomous Test Agent (Programmatic Signer Mode)...');
   console.log(`📡 Targeting Endpoint Gateway: ${BASE_URL}`);
 
   const testKey =
@@ -30,7 +30,7 @@ async function main() {
     const deployResponse = await axios.post(`${BASE_URL}/api/agent/deploy`, {
       agentOwner: client.account.address,
       metadata: {
-        name: 'ArcFlare Autonomous Buyer',
+        name: 'FlareHQ Autonomous Buyer',
         description: 'AgentFi Settlement Engine',
       },
     });

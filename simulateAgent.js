@@ -1,5 +1,5 @@
 /**
- * ArcFlare Autonomous Agent Simulation Loop
+ * FlareHQ Autonomous Agent Simulation Loop
  * Target Environment: Arc Network (USDC as Native Gas Layer)
  */
 
@@ -23,7 +23,7 @@ async function executeAgentPaymentPipeline() {
 
   try {
     // STEP 1: REQUEST TRANSACTING INTENT REFERENCE
-    console.log('\n[Step 1] Initializing payment intent with ArcFlare Ledger API...');
+    console.log('\n[Step 1] Initializing payment intent with FlareHQ Ledger API...');
     const initResponse = await fetch(`${GATEWAY_URL}/api/payments/initialize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -57,7 +57,7 @@ async function executeAgentPaymentPipeline() {
 
     if (verifyResult.status) {
       console.log('\n=================================================================');
-      console.log('✅ TRANSACTION SUCCESS: ArcFlare Ledger Has Settled.');
+      console.log('✅ TRANSACTION SUCCESS: FlareHQ Ledger Has Settled.');
       console.log(`📦 Settled Reference: ${verifyResult.data.reference}`);
       console.log(`🎯 Network: Arc (USDC-Native Gas Layer)`);
       console.log('=================================================================');

@@ -1,5 +1,5 @@
 // src/lib/gateway-middleware.ts
-// Circle Gateway Nanopayments — x402 middleware wrapper for ArcFlare endpoints
+// Circle Gateway Nanopayments — x402 middleware wrapper for FlareHQ endpoints
 // Replaces manual nano recording/batching with Circle's real Gateway product.
 //
 // Install first:

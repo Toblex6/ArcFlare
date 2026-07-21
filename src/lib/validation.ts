@@ -82,7 +82,7 @@ export const NanoSettleSchema = z.object({
 
 // ── /api/agent/deploy ─────────────────────────────────────────────────────────
 export const AgentDeploySchema = z.object({
-  agentName: z.string().min(1).max(100).default('ArcFlare Autonomous Agent'),
+  agentName: z.string().min(1).max(100).default('FlareHQ Autonomous Agent'),
   metadataUri: z
     .string()
     .url()

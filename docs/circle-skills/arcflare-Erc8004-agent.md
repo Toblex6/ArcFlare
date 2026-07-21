@@ -1,12 +1,12 @@
 ---
-name: arcflare-erc8004-agent
-description: Deploy a new ERC-8004 agent identity, record reputation, or request/respond to validation on Arc Testnet via ArcFlare. Use when an agent needs an onchain identity, needs to attest to another agent's trustworthiness, or needs to verify a credential (e.g. KYC) for another agent.
+name: flarehq-erc8004-agent
+description: Deploy a new ERC-8004 agent identity, record reputation, or request/respond to validation on Arc Testnet via FlareHQ. Use when an agent needs an onchain identity, needs to attest to another agent's trustworthiness, or needs to verify a credential (e.g. KYC) for another agent.
 ---
 
 ## Overview
 
 ERC-8004 gives AI agents a verifiable onchain identity, plus reputation
-and validation registries. ArcFlare wraps Arc's three native ERC-8004
+and validation registries. FlareHQ wraps Arc's three native ERC-8004
 contracts (IdentityRegistry, ReputationRegistry, ValidationRegistry)
 behind simple endpoints.
 

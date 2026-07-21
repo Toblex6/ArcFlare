@@ -5,7 +5,7 @@ import { prisma } from '@/src/lib/prisma';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET Handler for ArcFlare's Live Ledger Activity Dashboard
+ * GET Handler for FlareHQ's Live Ledger Activity Dashboard
  * Endpoint: /api/payments/history
  */
 export async function GET() {

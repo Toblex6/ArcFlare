@@ -48,7 +48,7 @@ export function requireGatewayPayment(
           error: "Payment required",
           resource: {
             url: req.nextUrl.pathname,
-            description: `ArcFlare paid resource: ${req.nextUrl.pathname}`,
+            description: `FlareHQ paid resource: ${req.nextUrl.pathname}`,
             mimeType: "application/json",
           },
           accepts: [

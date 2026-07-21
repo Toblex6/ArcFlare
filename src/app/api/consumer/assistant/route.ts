@@ -26,7 +26,7 @@ interface ParsedAction {
 async function parseWithClaude(message: string): Promise<ParsedAction> {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured.');
 
-  const systemPrompt = `You are Flow's payment assistant inside ArcFlare. You read one message from a
+  const systemPrompt = `You are Flow's payment assistant inside FlareHQ. You read one message from a
 person, in ANY language, and turn it into a single structured action. You NEVER
 execute anything yourself — you only describe what would happen so a human can
 confirm it.

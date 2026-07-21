@@ -1,11 +1,11 @@
 ---
-name: arcflare-scheduled-payment
-description: Create, list, or cancel a recurring USDC payment on ArcFlare that runs automatically every N days. Use when an agent needs to set up an ongoing obligation — subscriptions, weekly allowances, periodic invoices — without manually triggering each payment.
+name: flarehq-scheduled-payment
+description: Create, list, or cancel a recurring USDC payment on FlareHQ that runs automatically every N days. Use when an agent needs to set up an ongoing obligation — subscriptions, weekly allowances, periodic invoices — without manually triggering each payment.
 ---
 
 ## Overview
 
-ArcFlare's scheduler stores recurring payment intent and executes it
+FlareHQ's scheduler stores recurring payment intent and executes it
 automatically on an hourly cron check. This skill covers creating,
 listing, and cancelling these schedules — not the execution itself, which
 runs server-side without further agent involvement.

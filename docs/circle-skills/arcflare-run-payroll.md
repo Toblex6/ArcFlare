@@ -1,6 +1,6 @@
 ---
-name: arcflare-run-payroll
-description: Pay multiple recipients in a single batched USDC payroll run via ArcFlare on Arc Testnet. Use when an agent needs to disburse funds to several people or wallets at once — team payments, contractor payouts, or bulk reimbursements. Each recipient is paid as a real onchain transfer.
+name: flarehq-run-payroll
+description: Pay multiple recipients in a single batched USDC payroll run via FlareHQ on Arc Testnet. Use when an agent needs to disburse funds to several people or wallets at once — team payments, contractor payouts, or bulk reimbursements. Each recipient is paid as a real onchain transfer.
 ---
 
 ## Overview

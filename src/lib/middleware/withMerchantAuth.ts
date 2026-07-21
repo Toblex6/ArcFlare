@@ -12,7 +12,7 @@ import { prisma } from '@/src/lib/prisma';
 import { jwtVerify } from 'jose';
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.MERCHANT_JWT_SECRET || 'arcflare-merchant-secret-change-on-mainnet'
+  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
 );
 
 export interface AuthedMerchant {

@@ -1,0 +1,348 @@
+src/app/agent-services/page.tsx:9:const API_BASE = "https://arcflare-gateway.onrender.com";
+src/app/agent-services/page.tsx:168:            <h1 style={{ fontSize: "clamp(20px, 4vw, 28px)", fontWeight: 700, margin: 0 }}>FlareHQ AI Agent</h1>
+src/app/agent-services/page.tsx:242:                <textarea style={{ ...styles.input, height: 80, resize: "vertical" as const }} value={task} onChange={(e) => setTask(e.target.value)} placeholder="e.g. Analyze the best payment strategy for a small freelance business using FlareHQ" />
+src/app/agent-wallets/page.tsx:197:            src="/arcflare-logo.png.png"
+src/app/agent-wallets/page.tsx:198:            alt="FlareHQ"
+src/app/agent-wallets/page.tsx:204:            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
+src/app/agents/page.tsx:73:  const [deployName, setDeployName] = useState('FlareHQ Autonomous Agent');
+src/app/agents/page.tsx:320:            src="/arcflare-logo.png.png"
+src/app/agents/page.tsx:321:            alt="FlareHQ"
+src/app/agents/page.tsx:327:            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
+src/app/api/agent/brain/route.ts:2:// FlareHQ Autonomous Agent Brain — COMPLETE VERSION (Groq-powered)
+src/app/api/agent/brain/route.ts:28:  process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
+src/app/api/agent/brain/route.ts:57:      "Agent A pays Agent B directly for a service. Use for immediate, synchronous payments between agents. This is A2A payment via FlareHQ M2M settlement.",
+src/app/api/agent/brain/route.ts:372:          merchant: `FlareHQ Agent Invoice — ${input.description}`,
+src/app/api/agent/brain/route.ts:549:  // has been operating with zero context about FlareHQ, its tools, or
+src/app/api/agent/brain/route.ts:551:  const system = `You are FlareHQ's autonomous AI agent — a fully autonomous financial and commerce agent
+src/app/api/agent/brain/route.ts:740:    agent: "FlareHQ Autonomous Agent Brain",
+src/app/api/agent/checkout/route.ts:22:      message: 'FlareHQ Agent loop spawned. Check persistent connection log to approve.',
+src/app/api/agent/deploy/route.ts:21:    const agentName = body.agentName || 'FlareHQ Autonomous Agent';
+src/app/api/agent/deploy/route.ts:149:    console.error('❌ API Error [FlareHQ Deploy]:', error);
+src/app/api/agent/service/route.ts:2:// FlareHQ AI Agent — x402-protected endpoint that:
+src/app/api/agent/service/route.ts:96:  const systemPrompt = `You are FlareHQ's AI payment advisor agent, registered on Arc Testnet 
+src/app/api/agent/service/route.ts:98:analyze payment flows, and make recommendations for using FlareHQ's primitives 
+src/app/api/agent/service/route.ts:143:    task = body.task || "Analyze the best payment strategy for a small business using FlareHQ";
+src/app/api/agent/service/route.ts:226:    agent: "FlareHQ Payment Advisor",
+src/app/api/agent/validation/route.ts:165:      const requestURI = `ipfs://arcflare-validation-${agentId}-${requestTag}`;
+src/app/api/agent/validation/route.ts:167:        toHex(`flarehq_validation_agent_${agentId}_${requestTag}_${Date.now()}`)
+src/app/api/agent/wallet/route.ts:50:        metadata: { name: agentName, source: 'arcflare' },
+src/app/api/agent/wallet/route.ts:85:    // ── Step 3: Save reference in FlareHQ's own registry ───────────────────
+src/app/api/agent-data/route.ts:5: * GET Handler for FlareHQ's Agentic Paywall Endpoint
+src/app/api/agent-data/route.ts:12:    const agentEmail = request.headers.get('x-agent-email') || 'unknown-agent@flarehq.xyz';
+src/app/api/agent-data/route.ts:13:    const merchantName = request.headers.get('x-merchant-name') || 'FlareHQ Core Engine';
+src/app/api/escrow/create/route.ts:2:// REAL onchain escrow — actually calls ArcFlareEscrow.sol
+src/app/api/escrow/create/route.ts:11:const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+src/app/api/escrow/create/route.ts:92:    // ── Step 2: Create escrow on ArcFlareEscrow.sol ──────────────────────────
+src/app/api/escrow/create/route.ts:158:      message: `${amount} USDC locked in ArcFlareEscrow contract on Arc Testnet. Both parties must confirm to release.`,
+src/app/api/escrow/dispute/route.ts:10:const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+src/app/api/escrow/dispute/route.ts:106:      message: 'Dispute raised. FlareHQ admin will review and resolve.',
+src/app/api/escrow/release/route.ts:10:const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+src/app/api/escrow/route.ts:11:const ARCFLARE_FACTORY_ADDRESS = '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F';
+src/app/api/escrow/route.ts:33:    console.log(`[FlareHQ API] Processing Escrow Provisioning for Ref: ${reference}`);
+src/app/api/escrow/route.ts:44:        factoryUsed: ARCFLARE_FACTORY_ADDRESS,
+src/app/api/escrow/route.ts:57:          FlareHQFactory: ARCFLARE_FACTORY_ADDRESS,
+src/app/api/escrow/route.ts:63:    console.error('[FlareHQ API Error] Failed to process escrow initialization:', error);
+src/app/api/escrow/route.ts:110:    console.error('[FlareHQ API Error] Query failed:', error);
+src/app/api/gateway/route.ts:3:// earnings to your Payout Wallet. Use this to manage FlareHQ's seller
+src/app/api/merchant/login/route.ts:9:  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
+src/app/api/merchant/me/route.ts:8:  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
+src/app/api/merchant/me/route.ts:67:        checkoutUrl: `https://arcflare-gateway.onrender.com/checkout/${p.reference}`,
+src/app/api/merchant/payment-link/route.ts:9:  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
+src/app/api/merchant/payment-link/route.ts:68:    const checkoutUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://arcflare-gateway.onrender.com'}/checkout/${reference}`;
+src/app/api/merchant/payment-link/route.ts:114:        checkoutUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://arcflare-gateway.onrender.com'}/checkout/${p.reference}`,
+src/app/api/merchant/wallet/route.ts:10:    process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
+src/app/api/merchant/withdraw/route.ts:15:    process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
+src/app/api/payments/detect/route.ts:39:        merchant: 'FlareHQ CCTP V2 Router',
+src/app/api/payments/history/route.ts:8: * GET Handler for FlareHQ's Live Ledger Activity Dashboard
+src/app/api/payments/initialize/.old.ts:59:      checkoutUrl: `https://arcflare-gateway.onrender.com/checkout/${transactionReference}`,
+src/app/api/payments/initialize/.old.ts:89:    message: 'FlareHQ Gateway Ledger initialization channel is active.',
+src/app/api/payments/initialize/route.ts:113:      checkoutUrl: `https://arcflare-gateway.onrender.com/checkout/${transactionReference}`,
+src/app/api/payments/initialize/route.ts:143:    message: 'FlareHQ Gateway Ledger initialization channel is active.',
+src/app/api/payments/settle/route.ts:390:  return NextResponse.json({ success: true, message: 'FlareHQ Merged Settlement Engine Active.' });
+src/app/api/payments/stream/create/route.ts:3:// USDC drips from sender to receiver per second via ArcFlareStream contract.
+src/app/api/payments/stream/create/route.ts:12:const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
+src/app/api/payments/stream/create/route.ts:62:        { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment.' },
+src/app/api/payments/stream/route.ts:17:  process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '0xc9BbeDFb142b6306c34838a39521c894F3dbc872';
+src/app/api/payments/stream/route.ts:81:          error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS is not set in Render environment variables.',
+src/app/api/payments/stream/route.ts:82:          hint: 'Add ARCFLARE_STREAM_CONTRACT_ADDRESS to your Render env vars once you deploy ArcFlareStream.sol.',
+src/app/api/payments/stream/stop/route.ts:9:const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
+src/app/api/payments/stream/stop/route.ts:26:// ── EXACT ABI matching your deployed ArcFlareStream.sol ──────────────────────
+src/app/api/payments/stream/stop/route.ts:110:      `Check that ARCFLARE_STREAM_CONTRACT_ADDRESS matches your deployed contract.`
+src/app/api/payments/stream/stop/route.ts:127:        { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment.' },
+src/app/api/payments/stream/withdraw/route.ts:9:const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
+src/app/api/payments/stream/withdraw/route.ts:103:        { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set.' },
+src/app/api/payments/verify-onchain/route.ts:3:// FlareHQ never touches those funds. This route is what turns "a
+src/app/api/protected-service/route.ts:5: * Fully automated environment resolution for FlareHQ Gateway Rails
+src/app/api/protected-service/route.ts:9:    const headerToken = request.headers.get('X-FlareHQ-Reference');
+src/app/api/protected-service/route.ts:20:          message: 'This resource is protected by FlareHQ Agentic Paywalls.',
+src/app/api/protected-service/route.ts:31:          headers: { 'WWW-Authenticate': 'FlareHQ-USDC-Micropayment' },
+src/app/api/protected-service/route.ts:65:          computedBy: 'FlareHQ Gateway Engine',
+src/app/api/v1/agent-service/route.ts:8:    const authHeader = req.headers.get('x-arcflare-tx-hash');
+src/app/api/v1/agent-service/route.ts:21:          payment_gateway_address: '0xYourArcFlareEscrowAddressHere',
+src/app/api/webhooks/circle/route.ts:77:              merchant: 'FlareHQ Auto-Router',
+src/app/checkout/page.tsx:27:          email: 'demo-user@flarehq.network',
+src/app/checkout/page.tsx:38:      setError('Unable to initialize connection with FlareHQ Gateway.');
+src/app/checkout/page.tsx:89:          <h2 style={{ color: '#c8975a', margin: '0 0 8px 0', fontSize: 'clamp(20px, 4vw, 28px)' }}>FLAREHQ HEADLESS HUB</h2>
+src/app/checkout/page.tsx:123:          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={40} height={40} style={{ borderRadius: 10, objectFit: 'contain' }} />
+src/app/checkout/page.tsx:125:            <p style={{ color: '#f0ece6', fontSize: 'clamp(14px, 2vw, 18px)', fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>FLAREHQ</p>
+src/app/checkout/page.tsx:141:                <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={56} height={56} style={{ borderRadius: 14, objectFit: 'contain' }} />
+src/app/checkout/page.tsx:197:          <p style={{ textAlign: 'center', marginTop: 20, fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#3d2e1a', fontFamily: 'monospace', letterSpacing: 1 }}>FLAREHQ PAYMENT INFRASTRUCTURE NODE • CIRCLE CCTP V2</p>
+src/app/checkout/[reference]/page.tsx:148:        <p style={{ color: '#c8975a', fontFamily: 'monospace', fontSize: 'clamp(10px, 1.2vw, 14px)', letterSpacing: 2, textTransform: 'uppercase' }}>Syncing FlareHQ Ledger Parameters...</p>
+src/app/checkout/[reference]/page.tsx:205:          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={44} height={44} style={{ borderRadius: 10, objectFit: 'contain' }} />
+src/app/checkout/[reference]/page.tsx:207:            <p style={{ color: '#f0ece6', fontSize: 'clamp(14px, 2vw, 18px)', fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>FLAREHQ</p>
+src/app/checkout/[reference]/page.tsx:226:              { label: 'Merchant', value: payment.merchant || 'FlareHQ Merchant' },
+src/app/checkout/[reference]/page.tsx:359:              <p style={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#4b5563', margin: 0 }}>Settled autonomously via FlareHQ agent pipeline</p>
+src/app/consumer/page.tsx:311:            src="/arcflare-logo.png.png"
+src/app/consumer/page.tsx:312:            alt="FlareHQ"
+src/app/dashboard/page.tsx:226:            src="/arcflare-logo.png.png"
+src/app/dashboard/page.tsx:227:            alt="FlareHQ"
+src/app/dashboard/page.tsx:233:            <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
+src/app/dashboard/page.tsx:529:            ⚠ FlareHQ Ecosystem Monitoring Node — Running on{" "}
+src/app/dashboard/pageold.tsx:70:          src="/arcflare-logo.png"
+src/app/dashboard/pageold.tsx:71:          alt="FlareHQ"
+src/app/dashboard/pageold.tsx:78:            FlareHQ
+src/app/dashboard/pageold.tsx:435:            ⚠ FlareHQ Ecosystem Monitoring Node — Running on{' '}
+src/app/docs/api/page.tsx:64:            <code>https://arcflare-gateway.onrender.com</code>
+src/app/docs/layout.tsx:17:            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={38} height={38} />
+src/app/docs/layout.tsx:19:              <p className="text-lg font-bold leading-tight">FlareHQ Docs</p>
+src/app/docs/merchant/page.tsx:16:      description: 'Create trustless USDC escrows on ArcFlareEscrow.sol.',
+src/app/docs/merchant/page.tsx:40:          FlareHQ's hosted APIs.
+src/app/docs/page.tsx:6:          FlareHQ Documentation
+src/app/docs/page.tsx:16:          FlareHQ is a full-stack stablecoin payment infrastructure platform built on the Arc
+src/app/escrow/page.tsx:175:            src="/arcflare-logo.png.png"
+src/app/escrow/page.tsx:176:            alt="FlareHQ"
+src/app/escrow/page.tsx:183:              FlareHQ
+src/app/escrow/page.tsx:265:              Trustless USDC escrow on Arc Testnet via ArcFlareEscrow contract
+src/app/jobs/page.tsx:299:            src="/arcflare-logo.png.png"
+src/app/jobs/page.tsx:300:            alt="FlareHQ"
+src/app/jobs/page.tsx:306:            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
+src/app/layout.tsx:6:  title: 'FlareHQ | Agentic Stablecoin Infrastructure',
+src/app/merchant/dashboard/page.tsx:347:            src="/arcflare-logo.png.png"
+src/app/merchant/dashboard/page.tsx:348:            alt="FlareHQ"
+src/app/merchant/dashboard/page.tsx:354:            <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
+src/app/merchant/dashboard/page.tsx:631:              Move USDC from your FlareHQ payout wallet ({merchant.walletAddress?.slice(0, 10)}...) to any address you control.
+src/app/merchant/login/page.tsx:50:            src="/arcflare-logo.png.png"
+src/app/merchant/login/page.tsx:51:            alt="FlareHQ"
+src/app/merchant/login/page.tsx:60:            Sign in to your FlareHQ merchant account.
+src/app/merchant/signup/page.tsx:164:            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+src/app/merchant/signup/page.tsx:200:              curl -X POST https://arcflare-gateway.onrender.com/api/payments/initialize \<br />
+src/app/merchant/signup/page.tsx:227:            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+src/app/merchant/signup/page.tsx:276:            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+src/app/merchant/signup/page.tsx:300:                    Let FlareHQ manage my wallet (recommended)
+src/app/merchant/signup/page.tsx:351:          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+src/app/merchant/signup/page.tsx:395:          FLAREHQ PAYMENT INFRASTRUCTURE • ARC TESTNET
+src/app/nano/page.tsx:275:    "https://arcflare-gateway.onrender.com/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9"
+src/app/nano/page.tsx:460:            src="/arcflare-logo.png.png"
+src/app/nano/page.tsx:461:            alt="FlareHQ"
+src/app/nano/page.tsx:467:            <p style={{ color: "#f0ece6", fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
+src/app/page.tsx:14:            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={42} height={42} />
+src/app/page.tsx:15:            <h1 className="text-2xl font-bold">FlareHQ</h1>
+src/app/page.tsx:53:            FlareHQ lets merchants accept USDC payments through hosted checkout links, and enables
+src/app/page.tsx:151:              desc: 'Integrate FlareHQ APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.',
+src/app/page.tsx:178:            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={28} height={28} />
+src/app/page.tsx:179:            <span className="text-gray-500 text-sm">FlareHQ — Built on Arc Testnet</span>
+src/app/payroll/page.tsx:194:            src="/arcflare-logo.png.png"
+src/app/payroll/page.tsx:195:            alt="FlareHQ"
+src/app/payroll/page.tsx:201:            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
+src/app/payroll-chat/page.tsx:6:// executes against FlareHQ's EXISTING /api/payroll/run and
+src/app/payroll-chat/page.tsx:12:const ARCFLARE_BASE = process.env.NEXT_PUBLIC_ARCFLARE_API_BASE || "https://arcflare-gateway.onrender.com";
+src/app/payroll-chat/page.tsx:13:const ARCFLARE_API_KEY = process.env.NEXT_PUBLIC_ARCFLARE_API_KEY || "";
+src/app/payroll-chat/page.tsx:56:    if (!ARCFLARE_API_KEY) {
+src/app/payroll-chat/page.tsx:57:      addMessage("assistant", "⚠️ API key not configured. Add NEXT_PUBLIC_ARCFLARE_API_KEY to your .env.local");
+src/app/payroll-chat/page.tsx:117:          // ── Calls FlareHQ's EXISTING /api/payroll/run route ──────────────────
+src/app/payroll-chat/page.tsx:118:          const res = await fetch(`${ARCFLARE_BASE}/api/payroll/run`, {
+src/app/payroll-chat/page.tsx:120:            headers: { "Content-Type": "application/json", "x-api-key": ARCFLARE_API_KEY },
+src/app/payroll-chat/page.tsx:142:                const schedRes = await fetch(`${ARCFLARE_BASE}/api/payments/scheduled`, {
+src/app/payroll-chat/page.tsx:144:                  headers: { "Content-Type": "application/json", "x-api-key": ARCFLARE_API_KEY },
+src/app/payroll-chat/page.tsx:298:        <p style={subStyle}>Chat your payroll — powered by FlareHQ's payroll & scheduled payments</p>
+src/app/scheduled/page.tsx:203:            src="/arcflare-logo.png.png"
+src/app/scheduled/page.tsx:204:            alt="FlareHQ"
+src/app/scheduled/page.tsx:210:            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
+src/app/sentry-example-page/page.tsx:56:            href="https://flarehq.sentry.io/issues/?project=4511528675704832"
+src/app/start/page.tsx:10:                <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={44} height={44} />
+src/app/start/page.tsx:11:                <h1 className="text-2xl font-bold">FlareHQ</h1>
+src/app/stats/page.tsx:124:            src="/arcflare-logo.png.png"
+src/app/stats/page.tsx:125:            alt="FlareHQ"
+src/app/stats/page.tsx:131:            <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>FlareHQ</p>
+src/app/stats/page.tsx:168:            FlareHQ Network Stats
+src/app/stats/page.tsx:171:            Real-time onchain metrics from FlareHQ's payment infrastructure on Arc Testnet
+src/app/stats/page.tsx:283:                  name: 'ArcFlareEscrow.sol',
+src/app/stats/page.tsx:287:                  name: 'ArcFlareStream.sol',
+src/app/transactions/page.tsx:94:              src="/arcflare-logo.png.png"
+src/app/transactions/page.tsx:95:              alt="FlareHQ Logo"
+src/app/transactions/page.tsx:103:              FlareHQ
+src/components/AgentSimulator.tsx:28:          ownerAddress: '0xFlareHQ...AutonomousAgent',
+src/components/FlowFiFeedback.tsx:33:      // ── Optional: Wire up to FlareHQ API Endpoint if needed ──────────────
+src/components/FlowFiFeedback.tsx:84:                  We read every submission and use it to improve FlareHQ.
+src/components/ResponsiveSidebar.tsx:68:          <Image src="/arcflare-logo.png" alt="FlareHQ" width={36} height={36} style={{ borderRadius: 8, objectFit: "contain" }} />
+src/components/ResponsiveSidebar.tsx:70:            <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
+src/lib/gateway-oldmiddleware.ts:2:// Circle Gateway Nanopayments — x402 middleware wrapper for FlareHQ endpoints
+src/lib/gatewayold-middleware.ts:51:            description: `FlareHQ paid resource: ${req.nextUrl.pathname}`,
+src/lib/middleware/withMerchantAuth.ts:15:    process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
+src/lib/ratelimit.ts:68:        prefix: 'arcflare',
+src/lib/validation.ts:85:  agentName: z.string().min(1).max(100).default('FlareHQ Autonomous Agent'),
+src/services/agentPayService.ts:46:          name: 'FlareHQ AI Agent Node',
+src/services/agentPayService.ts:48:          url: 'https://arcflare-gateway.onrender.com',
+src/services/agentPayService.ts:49:          icons: ['https://arcflare-gateway.onrender.com/favicon.ico'],
+src/services/agentPayService.ts:82:          console.log(`🟢 FlareHQ Agent Payment Dispatched Successfully!`);
+src/services/agentPayService.ts:86:          await triggerFlareHQVerification(intent.paymentReference, txHash as string);
+src/services/agentPayService.ts:101: * Pings your existing FlareHQ validation endpoint to shift status from PENDING to SUCCESS
+src/services/agentPayService.ts:103:async function triggerFlareHQVerification(reference: string, hash: string): Promise<void> {
+src/services/agentPayService.ts:105:    const response = await fetch('https://arcflare-gateway.onrender.com/api/payments/verify', {
+src/services/agentPayService.ts:118:    console.error('⚠️ Failed to automatically alert internal FlareHQ verification engine:', err);
+scripts/agent/setup.ts:3:// the FlareHQ AI agent on ERC-8004. After running, save the output
+scripts/agent/setup.ts:56:  console.log("   FlareHQ AI Agent Setup (ERC-8004)");
+scripts/agent/setup.ts:63:    name: "FlareHQ Agent Wallets",
+scripts/deploy-escrow.old.js:19:  const EscrowFactory = await hre.ethers.getContractFactory('ArcFlareEscrow');
+scripts/deploy-escrow.old.js:24:  console.log('✅ ArcFlareEscrow deployed to:', address);
+scripts/generate-assets.js:83:  title: 'FlareHQ Technical Documentation',
+scripts/generate-assets.js:89:          children: [new TextRun({ text: 'FLAREHQ', size: 72, bold: true, color: copper })],
+scripts/generate-assets.js:102:          ['Live URL', 'arcflare-gateway.onrender.com'],
+scripts/generate-assets.js:103:          ['GitHub', 'github.com/Toblex6/FlareHQ'],
+scripts/generate-assets.js:111:          'FlareHQ is a stablecoin payment infrastructure platform built on the Arc blockchain. It enables merchants, developers, and AI agents to send, receive, escrow, and settle USDC payments.'
+scripts/generate-assets.js:115:        p('Base URL: https://arcflare-gateway.onrender.com'),
+scripts/generate-assets.js:132:        p('ArcFlareEscrow.sol: 0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F'),
+scripts/generate-assets.js:133:        p('ArcFlareStream.sol: 0xc9BbeDFb142b6306c34838a39521c894F3dbc872'),
+scripts/generate-assets.js:137:          'FlareHQ aims to become the financial infrastructure layer for programmable commerce on Arc.'
+scripts/generate-assets.js:148:pres.title = 'FlareHQ — Investor Deck';
+scripts/generate-assets.js:155:s.addText('FLAREHQ', {
+scripts/generate-assets.js:222:s.addText('FlareHQ — Stripe for the agentic economy', {
+scripts/generate-assets.js:283:s.addText('FlareHQ is not a whitepaper.', {
+scripts/generate-assets.js:312:s.addText('tobilade12@gmail.com | github.com/Toblex6/FlareHQ', {
+scripts/generate-assets.js:325:    fs.writeFileSync('./FlareHQ-Documentation.docx', buf);
+scripts/generate-assets.js:333:  .writeFile({ fileName: './FlareHQ-Investor-Deck.pptx' })
+scripts/pay-x402.cjs:32:    "https://arcflare-gateway.onrender.com/api/agent/brain",
+scripts/runErc8004Lifecycle.ts:15:  console.log('🚀 [FlareHQ Core] Booting Machine Identity Lifecycle Engine...');
+scripts/runErc8004Lifecycle.ts:23:  const walletSet = await circleClient.createWalletSet({ name: 'FlareHQ ERC8004 Agent Suite' });
+scripts/sync-agent.ts:10:        name: 'FlareHQ AI Agent',
+scripts/test-402.cjs:3:  const res = await fetch("https://arcflare-gateway.onrender.com/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9", {
+scripts/testAgent.ts:12:  console.log('🚀 Initializing FlareHQ Autonomous Test Agent (Programmatic Signer Mode)...');
+scripts/testAgent.ts:33:        name: 'FlareHQ Autonomous Buyer',
+scripts/testCctpRoute.ts:13:    console.log('🚀 [Simulated Agent]: Shipping cross-chain intent to FlareHQ Gateway...');
+package.json:2:  "name": "arcflare-backend",
+docs/flarehq-deck.cjs:6:pres.title = 'FlareHQ — Investor Deck';
+docs/flarehq-deck.cjs:76:  s.addText('FLAREHQ', {
+docs/flarehq-deck.cjs:152:  s.addText('arcflare-gateway.onrender.com  |  github.com/Toblex6/FlareHQ', {
+docs/flarehq-deck.cjs:165:    "Opening slide. Introduce yourself briefly: 'I'm Oyalade, building FlareHQ — the payment infrastructure for the agentic economy on Arc.' Let the slide breathe — don't read it aloud."
+docs/flarehq-deck.cjs:308:  s.addText('FlareHQ — Stripe for the agentic economy on Arc', {
+docs/flarehq-deck.cjs:340:      desc: 'ArcFlareEscrow.sol locks USDC until both parties confirm. No middleman.',
+docs/flarehq-deck.cjs:345:      desc: 'USDC drips per second via ArcFlareStream.sol. Real-time on Arc L1.',
+docs/flarehq-deck.cjs:406:    "Show breadth. FlareHQ is not one feature — it's a complete payment operating system. Emphasise that all 6 primitives are live on Arc Testnet today."
+docs/flarehq-deck.cjs:494:    { label: 'Contracts Deployed', value: '2', sub: 'ArcFlareEscrow + ArcFlareStream' },
+docs/flarehq-deck.cjs:552:    'This is your strongest slide. Show the live product. Open arcflare-gateway.onrender.com during your pitch if possible. The numbers are real — not projected.'
+docs/flarehq-deck.cjs:875:      desc: '0.1–0.5% fee on every USDC payment settled through FlareHQ checkout and settle endpoints.',
+docs/flarehq-deck.cjs:948:    'FlareHQ is infrastructure — revenue compounds as more merchants and agents transact. The key metric is total volume settled. Even 1% fee on $10M monthly volume = $100K MRR.'
+docs/flarehq-deck.cjs:1168:      sub: 'ArcFlareEscrow + ArcFlareStream deployed and tested on Arc',
+docs/flarehq-deck.cjs:1226:    '✅ ArcFlareEscrow.sol at 0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F',
+docs/flarehq-deck.cjs:1227:    '✅ ArcFlareStream.sol at 0xc9BbeDFb142b6306c34838a39521c894F3dbc872',
+docs/flarehq-deck.cjs:1477:  s.addText('Founder & CEO — FlareHQ | Lagos, Nigeria', {
+docs/flarehq-deck.cjs:1563:  s.addText('FlareHQ is not a whitepaper.', {
+docs/flarehq-deck.cjs:1603:    { label: 'Live Product', value: 'arcflare-gateway.onrender.com' },
+docs/flarehq-deck.cjs:1604:    { label: 'GitHub', value: 'github.com/Toblex6/FlareHQ' },
+docs/flarehq-deck.cjs:1644:    'End strong. Invite them to open arcflare-gateway.onrender.com right now. Let them click through the checkout. Real product, real transactions, real Arc.'
+docs/flarehq-deck.cjs:1650:  .writeFile({ fileName: './docs/FlareHQ-Investor-Deck.pptx' })
+docs/flarehq-doc.cjs:138:  title: 'FlareHQ Technical Documentation',
+docs/flarehq-doc.cjs:140:  description: 'FlareHQ stablecoin payment infrastructure — full technical reference',
+docs/flarehq-doc.cjs:177:                  text: 'FlareHQ — Technical Documentation  |  ',
+docs/flarehq-doc.cjs:183:                  text: 'arcflare-gateway.onrender.com',
+docs/flarehq-doc.cjs:199:              text: 'FlareHQ Documentation',
+docs/flarehq-doc.cjs:210:              text: 'FLAREHQ',
+docs/flarehq-doc.cjs:251:          ['Live URL', 'arcflare-gateway.onrender.com'],
+docs/flarehq-doc.cjs:252:          ['GitHub', 'github.com/Toblex6/FlareHQ'],
+docs/flarehq-doc.cjs:262:          "FlareHQ is a full-stack stablecoin payment infrastructure platform built on the Arc blockchain. It enables merchants, developers, and autonomous AI agents to send, receive, escrow, settle, and automate USDC payments through a unified API layer — powered by Circle's infrastructure and Arc's sub-second deterministic finality."
+docs/flarehq-doc.cjs:279:          "Arc's sub-second deterministic finality makes FlareHQ's payment primitives viable at scale:"
+docs/flarehq-doc.cjs:305:          ['Smart Contracts', 'Solidity 0.8.20', 'ArcFlareEscrow.sol + ArcFlareStream.sol'],
+docs/flarehq-doc.cjs:318:        kv('ArcFlareEscrow', '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F'),
+docs/flarehq-doc.cjs:319:        kv('ArcFlareStream', '0xc9BbeDFb142b6306c34838a39521c894F3dbc872'),
+docs/flarehq-doc.cjs:324:        p("Seven models power FlareHQ's persistence layer:"),
+docs/flarehq-doc.cjs:343:        p('Base URL: https://arcflare-gateway.onrender.com'),
+docs/flarehq-doc.cjs:363:        code('curl -X POST https://arcflare-gateway.onrender.com/api/payments/initialize \\'),
+docs/flarehq-doc.cjs:399:          'curl "https://arcflare-gateway.onrender.com/api/agent/status?scaAddress=0x7a82..." \\'
+docs/flarehq-doc.cjs:406:        p('Creates a trustless USDC escrow on ArcFlareEscrow.sol.'),
+docs/flarehq-doc.cjs:434:          'Creates a USDC stream — USDC drips per second from sender to receiver via ArcFlareStream.sol.'
+docs/flarehq-doc.cjs:474:        h2('4.1 ArcFlareEscrow.sol'),
+docs/flarehq-doc.cjs:485:        h2('4.2 ArcFlareStream.sol'),
+docs/flarehq-doc.cjs:504:        p('FlareHQ uses Circle CCTP V2 for native USDC cross-chain routing. The full flow:'),
+docs/flarehq-doc.cjs:506:        bullet('Step 2: FlareHQ calls Iris API V2 — polls every 3 seconds for attestation'),
+docs/flarehq-doc.cjs:593:          ['ARCFLARE_ESCROW_CONTRACT_ADDRESS', 'Deployed ArcFlareEscrow.sol address'],
+docs/flarehq-doc.cjs:594:          ['ARCFLARE_STREAM_CONTRACT_ADDRESS', 'Deployed ArcFlareStream.sol address'],
+docs/flarehq-doc.cjs:600:        code('git clone https://github.com/Toblex6/FlareHQ.git'),
+docs/flarehq-doc.cjs:601:        code('cd FlareHQ && npm install'),
+docs/flarehq-doc.cjs:628:            'ArcFlareEscrow audit, CCTP V2 real burn test end-to-end',
+docs/flarehq-doc.cjs:641:              text: 'FlareHQ aims to become the financial infrastructure layer for programmable commerce on Arc — where merchants, developers, and autonomous AI agents can seamlessly accept, route, escrow, settle, and automate stablecoin payments across multiple blockchain networks through a unified payment operating system.',
+docs/flarehq-doc.cjs:654:              text: 'FlareHQ is not a whitepaper. It is running infrastructure. When Arc Mainnet launches, the payment layer is ready.',
+docs/flarehq-doc.cjs:679:              text: 'arcflare-gateway.onrender.com',
+docs/flarehq-doc.cjs:695:    fs.writeFileSync('./docs/FlareHQ-Documentation.docx', buf);
+docs/circle-skills/flarehq-checkout-settle.md:2:name: flarehq-checkout-settle
+docs/circle-skills/flarehq-checkout-settle.md:3:description: Initialize and settle a standard USDC checkout payment via FlareHQ on Arc Testnet. Use for the most basic FlareHQ flow — one party paying another for a single transaction, with optional ERC-8004 agent attribution. This is the entry point most other FlareHQ skills assume has already happened once.
+docs/circle-skills/flarehq-checkout-settle.md:8:The simplest FlareHQ flow: initialize a payment, then settle it. Settling
+docs/circle-skills/flarehq-checkout-settle.md:14:curl -X POST https://arcflare-gateway.onrender.com/api/payments/initialize \
+docs/circle-skills/flarehq-checkout-settle.md:15:  -H "x-api-key: $ARCFLARE_API_KEY" -H "Content-Type: application/json" \
+docs/circle-skills/flarehq-checkout-settle.md:29:curl -X POST https://arcflare-gateway.onrender.com/api/payments/settle \
+docs/circle-skills/flarehq-checkout-settle.md:30:  -H "x-api-key: $ARCFLARE_API_KEY" -H "Content-Type: application/json" \
+docs/circle-skills/flarehq-checkout-settle.md:39:curl https://arcflare-gateway.onrender.com/api/payments/verify/<reference> \
+docs/circle-skills/flarehq-checkout-settle.md:40:  -H "x-api-key: $ARCFLARE_API_KEY"
+docs/circle-skills/flarehq-checkout-settle.md:45:- If `agentSCA` is provided but not found in FlareHQ's AgentRegistry, the
+docs/circle-skills/flarehq-checkout-settle.md:47:  `flarehq-erc8004-agent` if it doesn't exist yet.
+docs/circle-skills/flarehq-create-escrow.md:2:name: flarehq-create-escrow
+docs/circle-skills/flarehq-create-escrow.md:3:description: Create a trustless USDC escrow on FlareHQ's ArcFlareEscrow.sol contract on Arc Testnet. Use when an agent needs to lock USDC for another party until a condition is met (e.g. paying for a delivered service, securing a job, or holding funds pending confirmation). Requires both depositor and beneficiary wallets to exist; depositor wallet must hold enough USDC and be deployed on-chain.
+docs/circle-skills/flarehq-create-escrow.md:8:FlareHQ's escrow holds USDC in `ArcFlareEscrow.sol` on Arc Testnet until
+docs/circle-skills/flarehq-create-escrow.md:10:drives that flow entirely from the Circle CLI side — FlareHQ's backend
+docs/circle-skills/flarehq-create-escrow.md:13:Endpoint: `POST https://arcflare-gateway.onrender.com/api/escrow/create`
+docs/circle-skills/flarehq-create-escrow.md:30:curl -X POST https://arcflare-gateway.onrender.com/api/escrow/create \
+docs/circle-skills/flarehq-create-escrow.md:31:  -H "x-api-key: $ARCFLARE_API_KEY" \
+docs/circle-skills/flarehq-create-escrow.md:43:FlareHQ's backend handles the USDC `approve()` + `createEscrow()` two-step
+docs/circle-skills/flarehq-create-escrow.md:65:Trigger `flarehq-release-escrow` once both parties are ready to release
+docs/circle-skills/flarehq-create-escrow.md:66:funds. Trigger `flarehq-dispute-escrow` if something went wrong with
+docs/circle-skills/flarehq-create-stream.md:2:name: flarehq-create-stream
+docs/circle-skills/flarehq-create-stream.md:3:description: Create a per-second USDC streaming payment on FlareHQ's ArcFlareStream.sol on Arc Testnet. Use when an agent needs continuous payment over time rather than a lump sum — e.g. paying for ongoing compute, a subscription, or a freelance engagement billed by time. Also covers stopping a stream and withdrawing earned funds.
+docs/circle-skills/flarehq-create-stream.md:16:curl -X POST https://arcflare-gateway.onrender.com/api/payments/stream \
+docs/circle-skills/flarehq-create-stream.md:17:  -H "x-api-key: $ARCFLARE_API_KEY" \
+docs/circle-skills/flarehq-create-stream.md:34:curl -X POST https://arcflare-gateway.onrender.com/api/payments/stream/stop \
+docs/circle-skills/flarehq-create-stream.md:35:  -H "x-api-key: $ARCFLARE_API_KEY" \
+docs/circle-skills/flarehq-create-stream.md:43:curl -X POST https://arcflare-gateway.onrender.com/api/payments/stream/withdraw \
+docs/circle-skills/flarehq-create-stream.md:44:  -H "x-api-key: $ARCFLARE_API_KEY" \
+docs/circle-skills/flarehq-Erc8004-agent.md:2:name: flarehq-erc8004-agent
+docs/circle-skills/flarehq-Erc8004-agent.md:3:description: Deploy a new ERC-8004 agent identity, record reputation, or request/respond to validation on Arc Testnet via FlareHQ. Use when an agent needs an onchain identity, needs to attest to another agent's trustworthiness, or needs to verify a credential (e.g. KYC) for another agent.
+docs/circle-skills/flarehq-Erc8004-agent.md:9:and validation registries. FlareHQ wraps Arc's three native ERC-8004
+docs/circle-skills/flarehq-Erc8004-agent.md:16:curl -X POST https://arcflare-gateway.onrender.com/api/agent/deploy \
+docs/circle-skills/flarehq-Erc8004-agent.md:17:  -H "x-api-key: $ARCFLARE_API_KEY" -H "Content-Type: application/json" \
+docs/circle-skills/flarehq-Erc8004-agent.md:26:curl -X POST https://arcflare-gateway.onrender.com/api/agent/reputation \
+docs/circle-skills/flarehq-Erc8004-agent.md:27:  -H "x-api-key: $ARCFLARE_API_KEY" -H "Content-Type: application/json" \
+docs/circle-skills/flarehq-Erc8004-agent.md:37:curl -X POST https://arcflare-gateway.onrender.com/api/agent/validation \
+docs/circle-skills/flarehq-Erc8004-agent.md:38:  -H "x-api-key: $ARCFLARE_API_KEY" -H "Content-Type: application/json" \
+docs/circle-skills/flarehq-Erc8004-agent.md:45:curl -X POST https://arcflare-gateway.onrender.com/api/agent/validation \
+docs/circle-skills/flarehq-Erc8004-agent.md:46:  -H "x-api-key: $ARCFLARE_API_KEY" -H "Content-Type: application/json" \
+docs/circle-skills/flarehq-Erc8004-agent.md:53:curl "https://arcflare-gateway.onrender.com/api/agent/validation?requestHash=<hash>" \
+docs/circle-skills/flarehq-Erc8004-agent.md:54:  -H "x-api-key: $ARCFLARE_API_KEY"
+docs/circle-skills/flarehq-Erc8183-job.md:2:name: flarehq-erc8183-job
+docs/circle-skills/flarehq-Erc8183-job.md:3:description: Run the full ERC-8183 agentic commerce job lifecycle on Arc Testnet via FlareHQ — create a job, set its budget, fund escrow, submit a deliverable, and complete payment. Use when one agent needs to hire another agent (or be hired) for a discrete task with onchain escrow guarantees.
+docs/circle-skills/flarehq-Erc8183-job.md:8:ERC-8183 is Arc's native standard for agent-to-agent hiring. FlareHQ wraps
+docs/circle-skills/flarehq-Erc8183-job.md:13:Endpoint: `POST https://arcflare-gateway.onrender.com/api/jobs`
+docs/circle-skills/flarehq-Erc8183-job.md:19:curl -X POST https://arcflare-gateway.onrender.com/api/jobs \
+docs/circle-skills/flarehq-Erc8183-job.md:20:  -H "x-api-key: $ARCFLARE_API_KEY" -H "Content-Type: application/json" \
+docs/circle-skills/flarehq-Erc8183-job.md:52:curl "https://arcflare-gateway.onrender.com/api/jobs?jobId=<jobId>" \
+docs/circle-skills/flarehq-Erc8183-job.md:53:  -H "x-api-key: $ARCFLARE_API_KEY"
+docs/circle-skills/flarehq-run-payroll.md:2:name: flarehq-run-payroll
+docs/circle-skills/flarehq-run-payroll.md:3:description: Pay multiple recipients in a single batched USDC payroll run via FlareHQ on Arc Testnet. Use when an agent needs to disburse funds to several people or wallets at once — team payments, contractor payouts, or bulk reimbursements. Each recipient is paid as a real onchain transfer.
+docs/circle-skills/flarehq-run-payroll.md:12:Endpoint: `POST https://arcflare-gateway.onrender.com/api/payroll/run`
+docs/circle-skills/flarehq-run-payroll.md:26:curl -X POST https://arcflare-gateway.onrender.com/api/payroll/run \
+docs/circle-skills/flarehq-run-payroll.md:27:  -H "x-api-key: $ARCFLARE_API_KEY" \
+docs/circle-skills/flarehq-run-payroll.md:45:curl "https://arcflare-gateway.onrender.com/api/payroll/run?batchRef=<batchRef>" \
+docs/circle-skills/flarehq-run-payroll.md:46:  -H "x-api-key: $ARCFLARE_API_KEY"
+docs/circle-skills/flarehq-scheduled-payment.md:2:name: flarehq-scheduled-payment
+docs/circle-skills/flarehq-scheduled-payment.md:3:description: Create, list, or cancel a recurring USDC payment on FlareHQ that runs automatically every N days. Use when an agent needs to set up an ongoing obligation — subscriptions, weekly allowances, periodic invoices — without manually triggering each payment.
+docs/circle-skills/flarehq-scheduled-payment.md:8:FlareHQ's scheduler stores recurring payment intent and executes it
+docs/circle-skills/flarehq-scheduled-payment.md:16:curl -X POST https://arcflare-gateway.onrender.com/api/payments/scheduled \
+docs/circle-skills/flarehq-scheduled-payment.md:17:  -H "x-api-key: $ARCFLARE_API_KEY" \
+docs/circle-skills/flarehq-scheduled-payment.md:32:curl "https://arcflare-gateway.onrender.com/api/payments/scheduled?payerSCA=<payerSCA>" \
+docs/circle-skills/flarehq-scheduled-payment.md:33:  -H "x-api-key: $ARCFLARE_API_KEY"
+docs/circle-skills/flarehq-scheduled-payment.md:39:curl -X DELETE https://arcflare-gateway.onrender.com/api/payments/scheduled \
+docs/circle-skills/flarehq-scheduled-payment.md:40:  -H "x-api-key: $ARCFLARE_API_KEY" \
+docs/circle-skills/pay-flarehq-service.md:2:name: pay-flarehq-service
+docs/circle-skills/pay-flarehq-service.md:3:description: Pay for FlareHQ's x402-gated endpoints (agent-lookup, reputation-check, job-status, and other nanopayment-protected resources) using a Circle Agent Wallet. Use whenever the user wants to call an FlareHQ paid resource, mentions "FlareHQ", "arcflare-gateway.onrender.com", or wants to pay for agent identity lookups, reputation checks, or job status checks via x402. Requires the agent wallet to already be bootstrapped — if `circle wallet status` shows not logged in or no wallet exists, hand off to the use-agent-wallet skill first.
+docs/circle-skills/pay-flarehq-service.md:8:FlareHQ (https://arcflare-gateway.onrender.com) is stablecoin payment
+docs/circle-skills/pay-flarehq-service.md:26:## FlareHQ's paid resources
+docs/circle-skills/pay-flarehq-service.md:34:Base URL: `https://arcflare-gateway.onrender.com`
+docs/circle-skills/pay-flarehq-service.md:49:  https://arcflare-gateway.onrender.com/api/nano/pay/<resource> \
+docs/circle-skills/pay-flarehq-service.md:95:  FlareHQ or any other x402 service.

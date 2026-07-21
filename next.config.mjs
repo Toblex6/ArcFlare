@@ -36,7 +36,7 @@ export default withSentryConfig(nextConfig, {
   // For all available options, see:
   // https://www.npmjs.com/package/@sentry/webpack-plugin#options
 
-  org: 'arcflare',
+  org: 'flarehq',
 
   project: 'javascript-nextjs',
 

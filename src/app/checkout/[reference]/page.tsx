@@ -145,7 +145,7 @@ export default function CheckoutPage() {
   if (loading) {
     return (
       <main style={{ minHeight: '100vh', background: '#0e0b08', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-        <p style={{ color: '#c8975a', fontFamily: 'monospace', fontSize: 'clamp(10px, 1.2vw, 14px)', letterSpacing: 2, textTransform: 'uppercase' }}>Syncing ArcFlare Ledger Parameters...</p>
+        <p style={{ color: '#c8975a', fontFamily: 'monospace', fontSize: 'clamp(10px, 1.2vw, 14px)', letterSpacing: 2, textTransform: 'uppercase' }}>Syncing FlareHQ Ledger Parameters...</p>
       </main>
     );
   }
@@ -202,9 +202,9 @@ export default function CheckoutPage() {
       {/* Header */}
       <div style={{ maxWidth: 1200, margin: '0 auto 40px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={44} height={44} style={{ borderRadius: 10, objectFit: 'contain' }} />
+          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={44} height={44} style={{ borderRadius: 10, objectFit: 'contain' }} />
           <div>
-            <p style={{ color: '#f0ece6', fontSize: 'clamp(14px, 2vw, 18px)', fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>ARCFLARE</p>
+            <p style={{ color: '#f0ece6', fontSize: 'clamp(14px, 2vw, 18px)', fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>FLAREHQ</p>
             <p style={{ color: '#6b5a45', fontSize: 'clamp(10px, 1vw, 12px)', margin: 0 }}>Stablecoin Payment Infrastructure</p>
           </div>
         </div>
@@ -223,7 +223,7 @@ export default function CheckoutPage() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 28 }}>
             {[
-              { label: 'Merchant', value: payment.merchant || 'ArcFlare Merchant' },
+              { label: 'Merchant', value: payment.merchant || 'FlareHQ Merchant' },
               { label: 'Payment Reference', value: payment.reference, mono: true, truncate: true },
               { label: 'Amount Due', value: payment.amount.toString(), highlight: true },
               { label: 'Target Settlement Layer', value: payment.chain, cyan: true },
@@ -356,7 +356,7 @@ export default function CheckoutPage() {
           {isConfirmed && (
             <div style={{ background: 'rgba(13,124,95,0.1)', border: '1px solid rgba(13,124,95,0.25)', borderRadius: 14, padding: 16, textAlign: 'center' }}>
               <p style={{ fontSize: 'clamp(10px, 0.9vw, 12px)', color: '#0d7c5f', fontFamily: 'monospace', fontWeight: 700, margin: '0 0 4px', letterSpacing: 1 }}>M2M_AUTO_SETTLE</p>
-              <p style={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#4b5563', margin: 0 }}>Settled autonomously via ArcFlare agent pipeline</p>
+              <p style={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#4b5563', margin: 0 }}>Settled autonomously via FlareHQ agent pipeline</p>
             </div>
           )}
         </div>

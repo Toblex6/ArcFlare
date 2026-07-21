@@ -1,11 +1,11 @@
 ---
-name: arcflare-checkout-settle
-description: Initialize and settle a standard USDC checkout payment via ArcFlare on Arc Testnet. Use for the most basic ArcFlare flow — one party paying another for a single transaction, with optional ERC-8004 agent attribution. This is the entry point most other ArcFlare skills assume has already happened once.
+name: flarehq-checkout-settle
+description: Initialize and settle a standard USDC checkout payment via FlareHQ on Arc Testnet. Use for the most basic FlareHQ flow — one party paying another for a single transaction, with optional ERC-8004 agent attribution. This is the entry point most other FlareHQ skills assume has already happened once.
 ---
 
 ## Overview
 
-The simplest ArcFlare flow: initialize a payment, then settle it. Settling
+The simplest FlareHQ flow: initialize a payment, then settle it. Settling
 moves real USDC onchain from the resolved payer wallet to the merchant.
 
 ## Step 1 — Initialize
@@ -42,9 +42,9 @@ curl https://arcflare-gateway.onrender.com/api/payments/verify/<reference> \
 
 ## Rules
 
-- If `agentSCA` is provided but not found in ArcFlare's AgentRegistry, the
+- If `agentSCA` is provided but not found in FlareHQ's AgentRegistry, the
   initialize call will fail — deploy the agent first via
-  `arcflare-erc8004-agent` if it doesn't exist yet.
+  `flarehq-erc8004-agent` if it doesn't exist yet.
 - ALWAYS tell the user the amount and merchant before settling — this moves
   real USDC.
 - A `reference` can only be settled once; calling settle again on an

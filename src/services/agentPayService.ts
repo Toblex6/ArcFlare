@@ -43,7 +43,7 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
       {
         projectId: projectId,
         metadata: {
-          name: 'ArcFlare AI Agent Node',
+          name: 'FlareHQ AI Agent Node',
           description: 'Autonomous Agentic Finance Layer for Arc Network',
           url: 'https://arcflare-gateway.onrender.com',
           icons: ['https://arcflare-gateway.onrender.com/favicon.ico'],
@@ -79,11 +79,11 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
             },
           });
 
-          console.log(`🟢 ArcFlare Agent Payment Dispatched Successfully!`);
+          console.log(`🟢 FlareHQ Agent Payment Dispatched Successfully!`);
           console.log(`🔗 Arc Testnet Tx Hash: ${txHash}`);
 
           // ✅ FIXED: Force-cast txHash as string to pass safety rules for unknown object structures
-          await triggerArcFlareVerification(intent.paymentReference, txHash as string);
+          await triggerFlareHQVerification(intent.paymentReference, txHash as string);
         } catch (error) {
           console.error('🔴 Agent transaction failed or was rejected by supervisor:', error);
         }
@@ -98,9 +98,9 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
 }
 
 /**
- * Pings your existing ArcFlare validation endpoint to shift status from PENDING to SUCCESS
+ * Pings your existing FlareHQ validation endpoint to shift status from PENDING to SUCCESS
  */
-async function triggerArcFlareVerification(reference: string, hash: string): Promise<void> {
+async function triggerFlareHQVerification(reference: string, hash: string): Promise<void> {
   try {
     const response = await fetch('https://arcflare-gateway.onrender.com/api/payments/verify', {
       method: 'POST',
@@ -115,6 +115,6 @@ async function triggerArcFlareVerification(reference: string, hash: string): Pro
     const result = await response.json();
     console.log(`🔄 Verification Ledger Updated:`, result.status || 'SUCCESS');
   } catch (err) {
-    console.error('⚠️ Failed to automatically alert internal ArcFlare verification engine:', err);
+    console.error('⚠️ Failed to automatically alert internal FlareHQ verification engine:', err);
   }
 }

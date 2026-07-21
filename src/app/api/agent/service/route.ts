@@ -1,5 +1,5 @@
 // src/app/api/agent/service/route.ts
-// ArcFlare AI Agent — x402-protected endpoint that:
+// FlareHQ AI Agent — x402-protected endpoint that:
 //   1. Charges per request via Circle Gateway Nanopayments
 //   2. Does real AI work via Claude API
 //   3. Records reputation on ERC-8004 after successful delivery
@@ -93,9 +93,9 @@ async function runAgentTask(task: string, context?: string): Promise<string> {
     throw new Error("ANTHROPIC_API_KEY not configured");
   }
 
-  const systemPrompt = `You are ArcFlare's AI payment advisor agent, registered on Arc Testnet 
+  const systemPrompt = `You are FlareHQ's AI payment advisor agent, registered on Arc Testnet 
 with ERC-8004 identity. You help users optimize their stablecoin payment strategies, 
-analyze payment flows, and make recommendations for using ArcFlare's primitives 
+analyze payment flows, and make recommendations for using FlareHQ's primitives 
 (checkout, escrow, streaming, nanopayments, payroll, scheduled payments).
 
 Be concise, actionable, and specific. Always frame advice in terms of USDC on Arc.`;
@@ -140,7 +140,7 @@ const agentServiceHandler = async (req: NextRequest): Promise<NextResponse> => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    task = body.task || "Analyze the best payment strategy for a small business using ArcFlare";
+    task = body.task || "Analyze the best payment strategy for a small business using FlareHQ";
     context = body.context || "";
   } catch {}
 
@@ -223,7 +223,7 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    agent: "ArcFlare Payment Advisor",
+    agent: "FlareHQ Payment Advisor",
     description: "AI agent that analyzes payment strategies and optimizes USDC flows on Arc",
     standard: "ERC-8004",
     agentId: agentId || "not registered — run scripts/agent/setup.ts first",

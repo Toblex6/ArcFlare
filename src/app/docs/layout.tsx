@@ -14,9 +14,9 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
       <div className="border-b border-[#2a1d16] bg-[#120b08]/95">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
           <Link href="/" className="flex items-center gap-3">
-            <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={38} height={38} />
+            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={38} height={38} />
             <div>
-              <p className="text-lg font-bold leading-tight">ArcFlare Docs</p>
+              <p className="text-lg font-bold leading-tight">FlareHQ Docs</p>
               <p className="text-xs text-gray-500">Built on Arc Testnet</p>
             </div>
           </Link>

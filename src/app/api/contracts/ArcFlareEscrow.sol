@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// ─── ArcFlare Trustless Escrow Contract ──────────────────────────────────────
+// ─── FlareHQ Trustless Escrow Contract ──────────────────────────────────────
 // Deployed on Arc Testnet (Chain ID: 84532)
 // Integrates with Circle CCTP V2 USDC on Arc L1
 // Supports merchant-agent trustless payment flows
@@ -16,7 +16,7 @@ contract ArcFlareEscrow {
     // ─── USDC contract on Arc Testnet ─────────────────────────────────────
     address public constant USDC = 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359;
 
-    // ─── ArcFlare admin — can resolve disputes ────────────────────────────
+    // ─── FlareHQ admin — can resolve disputes ────────────────────────────
     address public admin;
 
     // ─── Escrow states ────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ contract ArcFlareEscrow {
         uint256 amount;         // USDC amount locked (in 6 decimals)
         uint256 deadline;       // Unix timestamp — auto-refund after this
         EscrowStatus status;
-        string reference;       // ArcFlare payment reference
+        string reference;       // FlareHQ payment reference
         bool depositorConfirmed;
         bool beneficiaryConfirmed;
     }
@@ -50,7 +50,7 @@ contract ArcFlareEscrow {
     }
 
     modifier onlyAdmin() {
-        require(msg.sender == admin, "ArcFlare: Not admin");
+        require(msg.sender == admin, "FlareHQ: Not admin");
         _;
     }
 

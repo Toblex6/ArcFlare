@@ -92,7 +92,7 @@ export default function TransactionsPage() {
           >
             <Image
               src="/arcflare-logo.png.png"
-              alt="ArcFlare Logo"
+              alt="FlareHQ Logo"
               width={32}
               height={32}
               style={{ objectFit: 'contain' }}
@@ -100,7 +100,7 @@ export default function TransactionsPage() {
           </div>
           <div>
             <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>
-              ArcFlare
+              FlareHQ
             </p>
             <p style={{ color: '#64748b', fontSize: 10, margin: '3px 0 0 0' }}>
               Stablecoin Infrastructure

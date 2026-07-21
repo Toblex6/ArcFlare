@@ -80,13 +80,13 @@ const apiTable = (rows) =>
 
 // Create DOCX
 const doc = new Document({
-  title: 'ArcFlare Technical Documentation',
+  title: 'FlareHQ Technical Documentation',
   sections: [
     {
       properties: { page: { margin: { top: 1080, bottom: 1080, left: 1080, right: 1080 } } },
       children: [
         new Paragraph({
-          children: [new TextRun({ text: 'ARCFLARE', size: 72, bold: true, color: copper })],
+          children: [new TextRun({ text: 'FLAREHQ', size: 72, bold: true, color: copper })],
           alignment: AlignmentType.CENTER,
           spacing: { before: 600, after: 120 },
         }),
@@ -100,7 +100,7 @@ const doc = new Document({
           ['Founder', 'Oyalade Temitope'],
           ['Email', 'tobilade12@gmail.com'],
           ['Live URL', 'arcflare-gateway.onrender.com'],
-          ['GitHub', 'github.com/Toblex6/ArcFlare'],
+          ['GitHub', 'github.com/Toblex6/FlareHQ'],
           ['Stack', 'Next.js / Prisma / PostgreSQL / Arc Testnet'],
           ['Status', 'Live on Arc Testnet'],
         ]),
@@ -108,7 +108,7 @@ const doc = new Document({
 
         h1('1. Project Overview'),
         p(
-          'ArcFlare is a stablecoin payment infrastructure platform built on the Arc blockchain. It enables merchants, developers, and AI agents to send, receive, escrow, and settle USDC payments.'
+          'FlareHQ is a stablecoin payment infrastructure platform built on the Arc blockchain. It enables merchants, developers, and AI agents to send, receive, escrow, and settle USDC payments.'
         ),
 
         h1('2. API Reference'),
@@ -134,7 +134,7 @@ const doc = new Document({
 
         h1('4. Vision'),
         p(
-          'ArcFlare aims to become the financial infrastructure layer for programmable commerce on Arc.'
+          'FlareHQ aims to become the financial infrastructure layer for programmable commerce on Arc.'
         ),
       ],
     },
@@ -145,14 +145,14 @@ const doc = new Document({
 const pres = new pptxgen();
 pres.layout = 'LAYOUT_16x9';
 pres.author = 'Oyalade Temitope';
-pres.title = 'ArcFlare — Investor Deck';
+pres.title = 'FlareHQ — Investor Deck';
 
 const C = { bg: '0E0B08', card: '1A1410', copper: 'C8975A', white: 'F0ECE6', muted: '6B5A45' };
 
 // Slide 1 - Cover
 let s = pres.addSlide();
 s.background = { color: C.bg };
-s.addText('ARCFLARE', {
+s.addText('FLAREHQ', {
   x: 0.5,
   y: 2,
   w: 9,
@@ -219,7 +219,7 @@ s.addText('THE SOLUTION', {
   color: C.copper,
   bold: true,
 });
-s.addText('ArcFlare — Stripe for the agentic economy', {
+s.addText('FlareHQ — Stripe for the agentic economy', {
   x: 0.5,
   y: 0.75,
   w: 9,
@@ -280,7 +280,7 @@ s.addText(
 // Slide 6 - Closing
 s = pres.addSlide();
 s.background = { color: C.bg };
-s.addText('ArcFlare is not a whitepaper.', {
+s.addText('FlareHQ is not a whitepaper.', {
   x: 0.5,
   y: 2,
   w: 9,
@@ -309,7 +309,7 @@ s.addText('When Arc Mainnet launches, the payment layer is ready.', {
   color: C.muted,
   align: 'center',
 });
-s.addText('tobilade12@gmail.com | github.com/Toblex6/ArcFlare', {
+s.addText('tobilade12@gmail.com | github.com/Toblex6/FlareHQ', {
   x: 0.5,
   y: 5,
   w: 9,
@@ -322,7 +322,7 @@ s.addText('tobilade12@gmail.com | github.com/Toblex6/ArcFlare', {
 // Generate both files
 Packer.toBuffer(doc)
   .then((buf) => {
-    fs.writeFileSync('./ArcFlare-Documentation.docx', buf);
+    fs.writeFileSync('./FlareHQ-Documentation.docx', buf);
     console.log('✅ Doc written');
   })
   .catch((e) => {
@@ -330,7 +330,7 @@ Packer.toBuffer(doc)
   });
 
 pres
-  .writeFile({ fileName: './ArcFlare-Investor-Deck.pptx' })
+  .writeFile({ fileName: './FlareHQ-Investor-Deck.pptx' })
   .then(() => console.log('✅ Deck written'))
   .catch((e) => {
     console.error('❌ Deck error:', e);

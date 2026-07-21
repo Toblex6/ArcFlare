@@ -345,13 +345,13 @@ export default function MerchantDashboard() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6 }}>
           <Image
             src="/arcflare-logo.png.png"
-            alt="ArcFlare"
+            alt="FlareHQ"
             width={36}
             height={36}
             style={{ borderRadius: 8, objectFit: "contain" }}
           />
           <div>
-            <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>ArcFlare</p>
+            <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
             <p style={{ color: "#4b5563", fontSize: 10, margin: "3px 0 0 0" }}>Stablecoin Payment Infrastructure</p>
           </div>
         </div>
@@ -628,7 +628,7 @@ export default function MerchantDashboard() {
           <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: "#0f172a", margin: "0 0 4px 0" }}>Withdraw Funds</h3>
             <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 20px 0" }}>
-              Move USDC from your ArcFlare payout wallet ({merchant.walletAddress?.slice(0, 10)}...) to any address you control.
+              Move USDC from your FlareHQ payout wallet ({merchant.walletAddress?.slice(0, 10)}...) to any address you control.
             </p>
 
             <form onSubmit={handleWithdraw} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr auto", gap: 14, alignItems: "end" }}>

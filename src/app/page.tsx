@@ -11,8 +11,8 @@ export default function HomePage() {
       <nav className="border-b border-[#2a1d16]">
         <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={42} height={42} />
-            <h1 className="text-2xl font-bold">ArcFlare</h1>
+            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={42} height={42} />
+            <h1 className="text-2xl font-bold">FlareHQ</h1>
           </div>
 
           <div className="flex items-center gap-6">
@@ -50,7 +50,7 @@ export default function HomePage() {
           </h1>
 
           <p className="text-xl text-gray-400 leading-relaxed mb-10">
-            ArcFlare lets merchants accept USDC payments through hosted checkout links, and enables
+            FlareHQ lets merchants accept USDC payments through hosted checkout links, and enables
             AI agents to transact autonomously — with streaming payments, escrow, and micro-billing
             built in.
           </p>
@@ -148,7 +148,7 @@ export default function HomePage() {
             {
               icon: '⚡',
               title: 'Developers',
-              desc: 'Integrate ArcFlare APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.',
+              desc: 'Integrate FlareHQ APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.',
               cta: 'Read the docs',
               href: '/docs',
             },
@@ -175,8 +175,8 @@ export default function HomePage() {
       <footer className="border-t border-[#2a1d16] py-10">
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={28} height={28} />
-            <span className="text-gray-500 text-sm">ArcFlare — Built on Arc Testnet</span>
+            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={28} height={28} />
+            <span className="text-gray-500 text-sm">FlareHQ — Built on Arc Testnet</span>
           </div>
           <div className="flex gap-6 text-sm text-gray-500">
             <Link href="/merchant/signup" className="hover:text-white transition">

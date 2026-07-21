@@ -136,9 +136,9 @@ const apiTable = (rows) =>
 // DOCUMENT
 // ════════════════════════════════════════════════════════════════════
 const doc = new Document({
-  title: 'ArcFlare Technical Documentation',
+  title: 'FlareHQ Technical Documentation',
   creator: 'Oyalade Temitope',
-  description: 'ArcFlare stablecoin payment infrastructure — full technical reference',
+  description: 'FlareHQ stablecoin payment infrastructure — full technical reference',
   styles: {
     paragraphStyles: [
       {
@@ -175,7 +175,7 @@ const doc = new Document({
             new Paragraph({
               children: [
                 new TextRun({
-                  text: 'ArcFlare — Technical Documentation  |  ',
+                  text: 'FlareHQ — Technical Documentation  |  ',
                   size: 18,
                   color: '8A7560',
                   font: 'Calibri',
@@ -218,7 +218,7 @@ const doc = new Document({
         new Paragraph({
           children: [
             new TextRun({
-              text: 'ARCFLARE',
+              text: 'FLAREHQ',
               size: 72,
               bold: true,
               color: copper,
@@ -260,7 +260,7 @@ const doc = new Document({
           ['Email', 'tobilade12@gmail.com'],
           ['Location', 'Lagos, Nigeria'],
           ['Live URL', 'arcflare-gateway.onrender.com'],
-          ['GitHub', 'github.com/Toblex6/ArcFlare'],
+          ['GitHub', 'github.com/Toblex6/FlareHQ'],
           ['Stack', 'Next.js 16 / Prisma / PostgreSQL / Arc Testnet'],
           ['Circle Products', 'CCTP V2, Programmable Wallets, SCA, Iris API, Webhooks'],
           ['Status', 'Live on Arc Testnet — Circle 2026 Cohort 2 Grant Applicant'],
@@ -270,7 +270,7 @@ const doc = new Document({
         // ── 1. OVERVIEW ──────────────────────────────────────────────────────
         h1('1. Project Overview'),
         p(
-          "ArcFlare is a full-stack stablecoin payment infrastructure platform built on the Arc blockchain. It enables merchants, developers, and autonomous AI agents to send, receive, escrow, settle, and automate USDC payments through a unified API layer — powered by Circle's infrastructure and Arc's sub-second deterministic finality."
+          "FlareHQ is a full-stack stablecoin payment infrastructure platform built on the Arc blockchain. It enables merchants, developers, and autonomous AI agents to send, receive, escrow, settle, and automate USDC payments through a unified API layer — powered by Circle's infrastructure and Arc's sub-second deterministic finality."
         ),
         p(
           'Think of it as Stripe for programmable commerce and AI agents. One API call initializes a payment. Two API calls complete an agent-to-agent settlement with zero human involvement.'
@@ -287,7 +287,7 @@ const doc = new Document({
 
         h2('1.2 Why Arc'),
         p(
-          "Arc's sub-second deterministic finality makes ArcFlare's payment primitives viable at scale:"
+          "Arc's sub-second deterministic finality makes FlareHQ's payment primitives viable at scale:"
         ),
         bullet('Streaming payments drip USDC per second with real-time accuracy'),
         bullet('Nanopayments settle efficiently without long block wait times'),
@@ -332,7 +332,7 @@ const doc = new Document({
         kv('Developer Wallet', '0x902C565bE31c146a79350387C1f77d6896814B58'),
 
         h2('2.3 Database Schema (Prisma Models)'),
-        p("Seven models power ArcFlare's persistence layer:"),
+        p("Seven models power FlareHQ's persistence layer:"),
         bullet(
           'PaymentLog — all payment records with reference, amount, status, idempotency key, expiry'
         ),
@@ -512,9 +512,9 @@ const doc = new Document({
         h1('5. Circle Integration Details'),
 
         h2('5.1 Circle CCTP V2'),
-        p('ArcFlare uses Circle CCTP V2 for native USDC cross-chain routing. The full flow:'),
+        p('FlareHQ uses Circle CCTP V2 for native USDC cross-chain routing. The full flow:'),
         bullet('Step 1: Customer burns USDC on source chain (Arbitrum, Base, Ethereum)'),
-        bullet('Step 2: ArcFlare calls Iris API V2 — polls every 3 seconds for attestation'),
+        bullet('Step 2: FlareHQ calls Iris API V2 — polls every 3 seconds for attestation'),
         bullet('Step 3: On COMPLETE status, submits attestation to Arc MessageTransmitterV2'),
         bullet('Step 4: USDC mints on Arc L1 — merchant receives webhook confirmation'),
         kv('Iris API', 'https://iris-api-sandbox.circle.com/v2'),
@@ -608,8 +608,8 @@ const doc = new Document({
         ]),
 
         h2('7.3 Getting Started (Local)'),
-        code('git clone https://github.com/Toblex6/ArcFlare.git'),
-        code('cd ArcFlare && npm install'),
+        code('git clone https://github.com/Toblex6/FlareHQ.git'),
+        code('cd FlareHQ && npm install'),
         code('cp .env.example .env  # Fill in your env vars'),
         code('npx prisma db push'),
         code('npm run dev'),
@@ -649,7 +649,7 @@ const doc = new Document({
         new Paragraph({
           children: [
             new TextRun({
-              text: 'ArcFlare aims to become the financial infrastructure layer for programmable commerce on Arc — where merchants, developers, and autonomous AI agents can seamlessly accept, route, escrow, settle, and automate stablecoin payments across multiple blockchain networks through a unified payment operating system.',
+              text: 'FlareHQ aims to become the financial infrastructure layer for programmable commerce on Arc — where merchants, developers, and autonomous AI agents can seamlessly accept, route, escrow, settle, and automate stablecoin payments across multiple blockchain networks through a unified payment operating system.',
               size: 24,
               color: '1A1A1A',
               italics: true,
@@ -662,7 +662,7 @@ const doc = new Document({
         new Paragraph({
           children: [
             new TextRun({
-              text: 'ArcFlare is not a whitepaper. It is running infrastructure. When Arc Mainnet launches, the payment layer is ready.',
+              text: 'FlareHQ is not a whitepaper. It is running infrastructure. When Arc Mainnet launches, the payment layer is ready.',
               size: 28,
               color: copper,
               bold: true,
@@ -703,7 +703,7 @@ const doc = new Document({
 
 Packer.toBuffer(doc)
   .then((buf) => {
-    fs.writeFileSync('./arcflare-Documentation.docx', buf);
+    fs.writeFileSync('./flarehq-Documentation.docx', buf);
     console.log('✅ Doc written');
   })
   .catch((e) => {
@@ -715,7 +715,7 @@ const pptxgen = require('pptxgenjs');
 const pres = new pptxgen();
 pres.layout = 'LAYOUT_16x9';
 pres.author = 'Oyalade Temitope';
-pres.title = 'ArcFlare — Investor Deck';
+pres.title = 'FlareHQ — Investor Deck';
 
 // ── Color palette (matches brand)
 const C = {
@@ -785,7 +785,7 @@ const makeShadow = () => ({
   });
 
   // Company name
-  s.addText('ARCFLARE', {
+  s.addText('FLAREHQ', {
     x: 0.5,
     y: 2.75,
     w: 9,
@@ -861,7 +861,7 @@ const makeShadow = () => ({
     fontFace: 'Calibri',
     margin: 0,
   });
-  s.addText('arcflare-gateway.onrender.com  |  github.com/Toblex6/ArcFlare', {
+  s.addText('arcflare-gateway.onrender.com  |  github.com/Toblex6/FlareHQ', {
     x: 0.5,
     y: 5.2,
     w: 9,
@@ -874,7 +874,7 @@ const makeShadow = () => ({
   });
 
   s.addNotes(
-    "Opening slide. Introduce yourself briefly: 'I'm Oyalade, building ArcFlare — the payment infrastructure for the agentic economy on Arc.' Let the slide breathe — don't read it aloud."
+    "Opening slide. Introduce yourself briefly: 'I'm Oyalade, building FlareHQ — the payment infrastructure for the agentic economy on Arc.' Let the slide breathe — don't read it aloud."
   );
 }
 
@@ -1017,7 +1017,7 @@ const makeShadow = () => ({
     fontFace: 'Calibri',
     margin: 0,
   });
-  s.addText('ArcFlare — Stripe for the agentic economy on Arc', {
+  s.addText('FlareHQ — Stripe for the agentic economy on Arc', {
     x: 0.5,
     y: 0.75,
     w: 9,
@@ -1115,7 +1115,7 @@ const makeShadow = () => ({
   });
 
   s.addNotes(
-    "Show breadth. ArcFlare is not one feature — it's a complete payment operating system. Emphasise that all 6 primitives are live on Arc Testnet today."
+    "Show breadth. FlareHQ is not one feature — it's a complete payment operating system. Emphasise that all 6 primitives are live on Arc Testnet today."
   );
 }
 
@@ -1584,7 +1584,7 @@ const makeShadow = () => ({
     {
       icon: '💳',
       title: 'Transaction Fees',
-      desc: '0.1–0.5% fee on every USDC payment settled through ArcFlare checkout and settle endpoints.',
+      desc: '0.1–0.5% fee on every USDC payment settled through FlareHQ checkout and settle endpoints.',
       color: C.copper,
     },
     {
@@ -1657,7 +1657,7 @@ const makeShadow = () => ({
   });
 
   s.addNotes(
-    'ArcFlare is infrastructure — revenue compounds as more merchants and agents transact. The key metric is total volume settled. Even 1% fee on $10M monthly volume = $100K MRR.'
+    'FlareHQ is infrastructure — revenue compounds as more merchants and agents transact. The key metric is total volume settled. Even 1% fee on $10M monthly volume = $100K MRR.'
   );
 }
 
@@ -2186,7 +2186,7 @@ const makeShadow = () => ({
     fontFace: 'Cambria',
     margin: 0,
   });
-  s.addText('Founder & CEO — ArcFlare | Lagos, Nigeria', {
+  s.addText('Founder & CEO — FlareHQ | Lagos, Nigeria', {
     x: 2.6,
     y: 3.65,
     w: 4.8,
@@ -2272,7 +2272,7 @@ const makeShadow = () => ({
     margin: 0,
   });
 
-  s.addText('ArcFlare is not a whitepaper.', {
+  s.addText('FlareHQ is not a whitepaper.', {
     x: 0.5,
     y: 3.05,
     w: 9,
@@ -2313,7 +2313,7 @@ const makeShadow = () => ({
     { label: 'Founder', value: 'Oyalade Temitope' },
     { label: 'Email', value: 'tobilade12@gmail.com' },
     { label: 'Live Product', value: 'arcflare-gateway.onrender.com' },
-    { label: 'GitHub', value: 'github.com/Toblex6/ArcFlare' },
+    { label: 'GitHub', value: 'github.com/Toblex6/FlareHQ' },
   ];
 
   contacts.forEach((c, i) => {
@@ -2359,7 +2359,7 @@ const makeShadow = () => ({
 
 // ── Write file
 pres
-  .writeFile({ fileName: './ArcFlare-Investor-Deck.pptx' })
+  .writeFile({ fileName: './FlareHQ-Investor-Deck.pptx' })
   .then(() => console.log('✅ Deck written'))
   .catch((e) => {
     console.error('❌', e);

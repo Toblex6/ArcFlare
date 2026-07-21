@@ -1,13 +1,13 @@
 ---
-name: arcflare-create-escrow
-description: Create a trustless USDC escrow on ArcFlare's ArcFlareEscrow.sol contract on Arc Testnet. Use when an agent needs to lock USDC for another party until a condition is met (e.g. paying for a delivered service, securing a job, or holding funds pending confirmation). Requires both depositor and beneficiary wallets to exist; depositor wallet must hold enough USDC and be deployed on-chain.
+name: flarehq-create-escrow
+description: Create a trustless USDC escrow on FlareHQ's ArcFlareEscrow.sol contract on Arc Testnet. Use when an agent needs to lock USDC for another party until a condition is met (e.g. paying for a delivered service, securing a job, or holding funds pending confirmation). Requires both depositor and beneficiary wallets to exist; depositor wallet must hold enough USDC and be deployed on-chain.
 ---
 
 ## Overview
 
-ArcFlare's escrow holds USDC in `ArcFlareEscrow.sol` on Arc Testnet until
+FlareHQ's escrow holds USDC in `ArcFlareEscrow.sol` on Arc Testnet until
 both depositor and beneficiary confirm, or a dispute is resolved. This skill
-drives that flow entirely from the Circle CLI side — ArcFlare's backend
+drives that flow entirely from the Circle CLI side — FlareHQ's backend
 signs the actual contract call via Circle's Developer-Controlled Wallets.
 
 Endpoint: `POST https://arcflare-gateway.onrender.com/api/escrow/create`
@@ -40,7 +40,7 @@ curl -X POST https://arcflare-gateway.onrender.com/api/escrow/create \
   }'
 ```
 
-ArcFlare's backend handles the USDC `approve()` + `createEscrow()` two-step
+FlareHQ's backend handles the USDC `approve()` + `createEscrow()` two-step
 contract call internally — you do not need to run separate approve/transfer
 commands yourself for this flow.
 
@@ -62,6 +62,6 @@ https://testnet.arcscan.app/tx/<txHash>
 
 ## Alternatives
 
-Trigger `arcflare-release-escrow` once both parties are ready to release
-funds. Trigger `arcflare-dispute-escrow` if something went wrong with
+Trigger `flarehq-release-escrow` once both parties are ready to release
+funds. Trigger `flarehq-dispute-escrow` if something went wrong with
 delivery.

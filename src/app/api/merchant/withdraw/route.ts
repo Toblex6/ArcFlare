@@ -12,7 +12,7 @@ import { createContractTransaction, getWalletBalance } from '@/src/lib/circle/cl
 import { erc20TransferAbi, USDC_CONTRACT, USDC_DECIMALS } from '@/src/lib/wallet/erc20';
 
 const JWT_SECRET = new TextEncoder().encode(
-    process.env.MERCHANT_JWT_SECRET || 'arcflare-merchant-secret-change-on-mainnet'
+    process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
 );
 
 export async function POST(req: NextRequest) {

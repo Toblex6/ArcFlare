@@ -3,7 +3,7 @@ import './globals.css';
 import Providers from './providers';
 
 export const metadata: Metadata = {
-  title: 'ArcFlare | Agentic Stablecoin Infrastructure',
+  title: 'FlareHQ | Agentic Stablecoin Infrastructure',
   description: 'Stablecoin payment infrastructure and agentic finance layer on Arc.',
 };
 
