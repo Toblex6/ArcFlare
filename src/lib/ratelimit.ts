@@ -32,6 +32,7 @@ export const RATE_LIMITS = {
   escrow: { limit: 20, windowMs: 60_000 }, // 20 escrow ops per minute
   stream: { limit: 20, windowMs: 60_000 }, // 20 stream ops per minute
   nano: { limit: 100, windowMs: 60_000 }, // 100 nano calls per minute
+  withdraw: { limit: 5, windowMs: 60_000 }, // 5 withdrawal attempts per minute
   default: { limit: 50, windowMs: 60_000 }, // fallback
 } as const;
 

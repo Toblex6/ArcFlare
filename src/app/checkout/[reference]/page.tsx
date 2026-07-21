@@ -40,6 +40,7 @@ export default function CheckoutPage() {
   const [isTxPending, setIsTxPending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [settleError, setSettleError] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(900); // 15-minute link expiration timer
 
   const { address, isConnected } = useAccount();
   const { connectors, connect } = useConnect();
@@ -82,6 +83,21 @@ export default function CheckoutPage() {
     if (reference) fetchLedgerStatus();
   }, [reference]);
 
+  // Payment Link Expiry Countdown Timer
+  useEffect(() => {
+    if (payment?.status === 'SUCCESS') return;
+    const timer = setInterval(() => {
+      setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [payment?.status]);
+
+  const formatCountdown = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   const handlePayment = async () => {
     if (!reference || !payment) return;
     if (!payment.merchantSCA) {
@@ -97,8 +113,6 @@ export default function CheckoutPage() {
       setSettleError(null);
       setIsTxPending(true);
 
-      // Customer's own wallet signs and submits the USDC transfer directly
-      // to the merchant's wallet. ArcFlare never holds or moves these funds.
       const txHash = await writeContractAsync({
         address: USDC_CONTRACT as `0x${string}`,
         abi: erc20TransferAbi,
@@ -109,8 +123,6 @@ export default function CheckoutPage() {
       setIsTxPending(false);
       setIsVerifying(true);
 
-      // Server independently reads the chain to confirm this really
-      // happened before marking anything settled.
       const verifyRes = await fetch('/api/payments/verify-onchain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -150,8 +162,40 @@ export default function CheckoutPage() {
   }
 
   const isConfirmed = payment.status === 'SUCCESS';
-  const displayAddress = agent?.scaAddress || payment.sender_email || '0xArcFlare...AutonomousAgent';
+
+  // Wallet display logic: shows connected wallet when connected, agent address if present, or clean pending state
+  const walletDisplayAddress = isConnected && address
+    ? address
+    : agent?.scaAddress
+      ? agent.scaAddress
+      : payment.sender_email && payment.sender_email.startsWith('0x')
+        ? payment.sender_email
+        : 'Awaiting wallet connection...';
+
   const displayName = agent?.name || 'Autonomous Agent';
+
+  // Ledger Instance rows on the right card
+  const ledgerRows = [];
+  if (agent) {
+    ledgerRows.push({
+      label: 'Agent Identity',
+      value: `ERC-8004 Token #${agent.tokenId}`,
+      color: '#c8975a',
+    });
+  }
+  if (isConfirmed) {
+    ledgerRows.push({
+      label: 'Settled Block Time',
+      value: payment.paid_at ? new Date(payment.paid_at).toLocaleString() : 'Settled',
+      color: '#06b6d4',
+    });
+  } else {
+    ledgerRows.push({
+      label: 'Link Expiry',
+      value: secondsLeft > 0 ? `Expires in ${formatCountdown(secondsLeft)}` : 'Expired',
+      color: secondsLeft > 0 ? '#f59e0b' : '#f87171',
+    });
+  }
 
   return (
     <main style={{ minHeight: '100vh', background: '#0e0b08', color: '#f0ece6', fontFamily: 'Inter, system-ui, sans-serif', padding: 'clamp(16px, 3vw, 32px) clamp(12px, 2vw, 24px)' }}>
@@ -181,7 +225,7 @@ export default function CheckoutPage() {
             {[
               { label: 'Merchant', value: payment.merchant || 'ArcFlare Merchant' },
               { label: 'Payment Reference', value: payment.reference, mono: true, truncate: true },
-              { label: 'Amount Due', value: `${payment.amount} ${payment.currency}`, highlight: true },
+              { label: 'Amount Due', value: payment.amount.toString(), highlight: true },
               { label: 'Target Settlement Layer', value: payment.chain, cyan: true },
               { label: 'Connected Chain ID', value: '5042002', cyan: true },
             ].map((row, i) => (
@@ -194,13 +238,13 @@ export default function CheckoutPage() {
               </div>
             ))}
 
-            {/* Agent Wallet */}
+            {/* Connected Wallet */}
             <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 14, padding: 'clamp(12px, 1.5vw, 16px) clamp(14px, 2vw, 18px)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: agent ? 8 : 0, flexWrap: 'wrap', gap: 6 }}>
                 <span style={{ color: '#6b5a45', fontSize: 'clamp(11px, 1vw, 14px)' }}>Connected Wallet</span>
                 {agent && <span style={{ fontSize: 'clamp(8px, 0.8vw, 10px)', color: '#c8975a', fontFamily: 'monospace', background: 'rgba(200,151,90,0.1)', border: '1px solid rgba(200,151,90,0.2)', padding: '2px 8px', borderRadius: 10 }}>ERC-8004 #{agent.tokenId}</span>}
               </div>
-              <p style={{ color: '#f0ece6', fontSize: 'clamp(11px, 1vw, 13px)', fontFamily: 'monospace', wordBreak: 'break-all', margin: '4px 0 0' }}>{displayAddress}</p>
+              <p style={{ color: isConnected || agent ? '#f0ece6' : '#6b5a45', fontSize: 'clamp(11px, 1vw, 13px)', fontFamily: 'monospace', wordBreak: 'break-all', margin: '4px 0 0' }}>{walletDisplayAddress}</p>
               {agent && <p style={{ color: '#6b5a45', fontSize: 'clamp(9px, 0.8vw, 11px)', margin: '4px 0 0' }}>{displayName} • Circle SCA • {agent.status}</p>}
             </div>
           </div>
@@ -237,7 +281,7 @@ export default function CheckoutPage() {
               </div>
               <button
                 onClick={handlePayment}
-                disabled={isTxPending || isVerifying || isConfirmed}
+                disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0}
                 style={{
                   width: '100%',
                   padding: 'clamp(14px, 1.8vw, 18px)',
@@ -245,14 +289,14 @@ export default function CheckoutPage() {
                   border: 'none',
                   fontSize: 'clamp(13px, 1.2vw, 16px)',
                   fontWeight: 800,
-                  cursor: isConfirmed ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
+                  cursor: isConfirmed || secondsLeft === 0 ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
                   background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
                   color: isConfirmed ? '#06b6d4' : '#0e0b08',
                   letterSpacing: 0.3,
                   transition: 'all 0.15s',
                 }}
               >
-                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : `Pay ${payment.amount} ${payment.currency}`}
+                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : `Pay ${payment.amount} ${payment.currency}`}
               </button>
             </>
           )}
@@ -272,7 +316,7 @@ export default function CheckoutPage() {
 
         {/* RIGHT */}
         <div style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: 'clamp(20px, 3vw, 32px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <h3 style={{ fontSize: 'clamp(18px, 2.5vw, 24px)', fontWeight: 700, color: '#f0ece6', margin: 0 }}>Payment Gateway Tracking</h3>
+          <h3 style={{ fontSize: 'clamp(18px, 2.5vw, 24px)', fontWeight: 700, color: '#f0ece6', margin: 0 }}>Payment Status</h3>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 14, padding: 'clamp(14px, 1.5vw, 18px)' }}>
@@ -300,12 +344,7 @@ export default function CheckoutPage() {
           <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 14, padding: 'clamp(14px, 1.5vw, 18px)', flex: 1 }}>
             <h4 style={{ fontSize: 'clamp(13px, 1.2vw, 15px)', fontWeight: 700, color: '#f0ece6', margin: '0 0 16px' }}>Current Ledger Instance</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {[
-                { label: 'Reference Token', value: `${payment.reference.slice(0, 16)}...`, color: '#06b6d4' },
-                { label: 'Payer Entity', value: displayAddress.slice(0, 30) + '...', color: '#f0ece6' },
-                { label: 'Agent Identity', value: agent ? `ERC-8004 Token #${agent.tokenId}` : 'Autonomous Agent', color: '#c8975a' },
-                { label: 'Settled Block Time', value: payment.paid_at ? new Date(payment.paid_at).toLocaleString() : 'Awaiting settlement', color: '#6b5a45' },
-              ].map((row, i) => (
+              {ledgerRows.map((row, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                   <span style={{ color: '#6b5a45', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>{row.label}</span>
                   <span style={{ color: row.color, fontSize: 'clamp(9px, 0.8vw, 11px)', fontFamily: 'monospace' }}>{row.value}</span>
@@ -320,19 +359,6 @@ export default function CheckoutPage() {
               <p style={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#4b5563', margin: 0 }}>Settled autonomously via ArcFlare agent pipeline</p>
             </div>
           )}
-
-          <div style={{ background: '#0e0b08', border: '1px solid rgba(200,151,90,0.15)', borderRadius: 14, padding: 'clamp(14px, 1.5vw, 18px)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={24} height={24} style={{ borderRadius: 6, objectFit: 'contain' }} />
-                <p style={{ color: '#6b5a45', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 600, margin: 0 }}>ArcFlare Engine</p>
-              </div>
-              <span style={{ fontSize: 'clamp(8px, 0.7vw, 10px)', color: '#c8975a', fontFamily: 'monospace', background: 'rgba(200,151,90,0.1)', border: '1px solid rgba(200,151,90,0.2)', padding: '2px 8px', borderRadius: 10 }}>Active Rails</span>
-            </div>
-            <p style={{ fontSize: 'clamp(10px, 0.9vw, 12px)', color: '#4b4035', lineHeight: 1.5, margin: 0 }}>
-              ArcFlare is building programmable stablecoin settlement infrastructure on Arc with native support for Circle CCTP V2 cross-chain machine execution protocols.
-            </p>
-          </div>
         </div>
       </div>
     </main>

@@ -47,22 +47,20 @@ export async function POST(req: NextRequest) {
 
     const apiKey = generateApiKey();
 
-    // Provision a Circle-managed payout wallet for this merchant.
-    // If Circle provisioning fails, we still verify the account — the
-    // merchant can retry wallet setup from the dashboard rather than
-    // being blocked from signing up entirely.
-    let walletFields: {
-      walletType: string;
-      walletAddress?: string;
-      circleWalletId?: string;
-    } = { walletType: 'CIRCLE' };
-
-    try {
-      const wallet = await createAccountWallet(merchant.id);
-      walletFields.walletAddress = wallet.address;
-      walletFields.circleWalletId = wallet.walletId;
-    } catch (walletError: any) {
-      console.error(`Merchant wallet provisioning failed for ${email}:`, walletError.message);
+    // Provision the payout wallet now — only for merchants who chose Circle-managed.
+    // EXTERNAL merchants already have their walletAddress set at signup, nothing to do.
+    let walletUpdate: { walletAddress?: string; circleWalletId?: string } = {};
+    if (merchant.walletType === 'CIRCLE') {
+      try {
+        const wallet = await createAccountWallet(merchant.businessName);
+        walletUpdate = { walletAddress: wallet.address, circleWalletId: wallet.walletId };
+      } catch (walletErr: any) {
+        console.error('Merchant wallet provisioning failed:', walletErr);
+        return NextResponse.json(
+          { success: false, error: 'Verification succeeded but wallet setup failed. Please contact support.' },
+          { status: 500 }
+        );
+      }
     }
 
     const updated = await (prisma as any).merchant.update({
@@ -72,7 +70,7 @@ export async function POST(req: NextRequest) {
         apiKey,
         verificationCode: null,
         verificationCodeExpiresAt: null,
-        ...walletFields,
+        ...walletUpdate,
       },
     });
 
@@ -83,15 +81,12 @@ export async function POST(req: NextRequest) {
         id: updated.id,
         email: updated.email,
         businessName: updated.businessName,
-        createdAt: updated.createdAt,
-        walletAddress: updated.walletAddress,
         walletType: updated.walletType,
+        walletAddress: updated.walletAddress,
+        createdAt: updated.createdAt,
       },
       apiKey,
       warning: 'Save your API key now. It will not be shown again.',
-      walletWarning: !updated.walletAddress
-        ? 'Payout wallet setup failed — visit your dashboard to retry before accepting live payments.'
-        : undefined,
     });
   } catch (error: any) {
     console.error('Merchant verify error:', error);

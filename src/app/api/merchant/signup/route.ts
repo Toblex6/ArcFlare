@@ -4,6 +4,7 @@ import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { generateVerificationCode, sendVerificationEmail } from '@/src/lib/email';
 import bcrypt from 'bcryptjs';
+import { isAddress } from 'viem';
 
 const CODE_TTL_MINUTES = 10;
 
@@ -13,7 +14,7 @@ export async function POST(req: NextRequest) {
     if (!allowed) return limitResponse;
 
     const body = await req.json().catch(() => ({}));
-    const { email, businessName, password } = body;
+    const { email, businessName, password, walletType, externalAddress } = body;
 
     if (!email || !businessName || !password) {
       return NextResponse.json(
@@ -29,9 +30,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const resolvedWalletType = walletType === 'EXTERNAL' ? 'EXTERNAL' : 'CIRCLE';
+
+    if (resolvedWalletType === 'EXTERNAL') {
+      if (!externalAddress || !isAddress(externalAddress)) {
+        return NextResponse.json(
+          { success: false, error: 'A valid wallet address is required for external payouts.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const existing = await (prisma as any).merchant.findUnique({ where: { email } });
 
-    // If they already exist AND are verified, block signup as before.
     if (existing && existing.verified) {
       return NextResponse.json(
         { success: false, error: 'An account with this email already exists.' },
@@ -43,25 +54,28 @@ export async function POST(req: NextRequest) {
     const verificationCode = generateVerificationCode();
     const verificationCodeExpiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000);
 
-    // If an unverified account already exists for this email (e.g. they
-    // abandoned signup last time), just update it with a fresh code instead
-    // of erroring out.
+    const walletFields =
+      resolvedWalletType === 'EXTERNAL'
+        ? { walletType: 'EXTERNAL', walletAddress: externalAddress, circleWalletId: null }
+        : { walletType: 'CIRCLE', walletAddress: null, circleWalletId: null }; // Circle wallet is created at verification
+
     const merchant = existing
       ? await (prisma as any).merchant.update({
-          where: { email },
-          data: { businessName, passwordHash, verificationCode, verificationCodeExpiresAt },
-        })
+        where: { email },
+        data: { businessName, passwordHash, verificationCode, verificationCodeExpiresAt, ...walletFields },
+      })
       : await (prisma as any).merchant.create({
-          data: {
-            email,
-            businessName,
-            passwordHash,
-            verified: false,
-            apiKey: null,
-            verificationCode,
-            verificationCodeExpiresAt,
-          },
-        });
+        data: {
+          email,
+          businessName,
+          passwordHash,
+          verified: false,
+          apiKey: null,
+          verificationCode,
+          verificationCodeExpiresAt,
+          ...walletFields,
+        },
+      });
 
     await sendVerificationEmail(email, businessName, verificationCode);
 

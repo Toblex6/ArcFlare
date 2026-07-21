@@ -42,6 +42,8 @@ interface MerchantInfo {
   businessName: string;
   email: string;
   apiKeyHint: string;
+  walletType?: 'CIRCLE' | 'EXTERNAL';
+  walletAddress?: string | null;
 }
 
 export default function MerchantDashboard() {
@@ -75,6 +77,13 @@ export default function MerchantDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
 
+  // ── Withdrawal state ──
+  const [withdrawAddress, setWithdrawAddress] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawResult, setWithdrawResult] = useState<any>(null);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -101,6 +110,8 @@ export default function MerchantDashboard() {
           businessName: data.merchant.businessName,
           email: data.merchant.email,
           apiKeyHint: data.merchant.apiKeyHint,
+          walletType: data.merchant.walletType,
+          walletAddress: data.merchant.walletAddress,
         });
       })
       .catch(() => router.replace("/merchant/login"))
@@ -198,6 +209,38 @@ export default function MerchantDashboard() {
       setLinkError(err.message || 'Could not create payment link.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleWithdraw = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWithdrawing(true);
+    setWithdrawError(null);
+    setWithdrawResult(null);
+
+    try {
+      const res = await fetch('/api/merchant/withdraw', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          destinationAddress: withdrawAddress,
+          amount: withdrawAmount,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data.success) throw new Error(data.error);
+
+      setWithdrawResult(data);
+      setWithdrawAddress('');
+      setWithdrawAmount('');
+    } catch (err: any) {
+      setWithdrawError(err.message || 'Withdrawal failed.');
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -389,6 +432,22 @@ export default function MerchantDashboard() {
           </p>
           <p style={{ color: "#4b5563", fontSize: 10, margin: "0 0 10px 0" }}>{merchant.email}</p>
           <button
+            onClick={() => router.push("/merchant/settings")}
+            style={{
+              width: "100%",
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 8,
+              padding: "7px 0",
+              fontSize: 11,
+              color: "#9ca3af",
+              cursor: "pointer",
+              marginBottom: 6,
+            }}
+          >
+            ⚙ Payout Settings
+          </button>
+          <button
             onClick={async () => {
               await fetch("/api/merchant/me", { method: "DELETE" });
               router.replace("/merchant/login");
@@ -565,7 +624,63 @@ export default function MerchantDashboard() {
             </div>
           )}
         </div>
+        {merchant.walletType === 'CIRCLE' && (
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: "#0f172a", margin: "0 0 4px 0" }}>Withdraw Funds</h3>
+            <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 20px 0" }}>
+              Move USDC from your ArcFlare payout wallet ({merchant.walletAddress?.slice(0, 10)}...) to any address you control.
+            </p>
 
+            <form onSubmit={handleWithdraw} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr auto", gap: 14, alignItems: "end" }}>
+              <div>
+                <label style={{ display: "block", color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                  Destination Address
+                </label>
+                <input
+                  type="text" placeholder="0x..."
+                  value={withdrawAddress} onChange={(e) => setWithdrawAddress(e.target.value)} required
+                  style={{ width: "100%", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", color: "#0f172a", fontSize: 13, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                  Amount (USDC)
+                </label>
+                <input
+                  type="number" step="0.01" min="0.01" placeholder="e.g. 50.00"
+                  value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} required
+                  style={{ width: "100%", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", color: "#0f172a", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+              <button
+                type="submit" disabled={withdrawing}
+                style={{
+                  padding: "11px 24px", background: withdrawing ? "#94a3b8" : "#0891b2", color: "#fff",
+                  border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  cursor: withdrawing ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+                }}
+              >
+                {withdrawing ? "Sending..." : "Withdraw →"}
+              </button>
+            </form>
+
+            {withdrawError && <p style={{ color: "#dc2626", fontSize: 12, margin: "12px 0 0 0" }}>❌ {withdrawError}</p>}
+
+            {withdrawResult && (
+              <div style={{ marginTop: 18, background: "#ecfeff", border: "1px solid #a5f3fc", borderRadius: 12, padding: 16 }}>
+                <p style={{ color: "#0891b2", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 8px 0" }}>
+                  ✓ Withdrawal Sent
+                </p>
+                <p style={{ color: "#0f172a", fontSize: 12, margin: "0 0 4px 0" }}>
+                  {withdrawResult.amount} USDC → {withdrawResult.to.slice(0, 10)}...
+                </p>
+                <a href={withdrawResult.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#0891b2", fontSize: 11, fontFamily: "monospace" }}>
+                  View transaction ↗
+                </a>
+              </div>
+            )}
+          </div>
+        )}
         {/* CHART + OVERVIEW */}
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 20, marginBottom: 24 }}>
           <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 16, padding: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
