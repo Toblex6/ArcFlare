@@ -1,9 +1,10 @@
 // src/app/scheduled/page.tsx
-// Frontend for Recurring/Scheduled Payments.
+// Frontend for Recurring/Scheduled Payments.'use client';
 
-'use client';
+import DashboardSidebar from '@/src/components/DashboardSidebar';
 
 import { useRouter } from 'next/navigation';
+
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
@@ -189,64 +190,7 @@ export default function ScheduledPaymentsPage() {
 
   return (
     <div style={S.page}>
-      <aside style={S.aside}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            marginBottom: 36,
-            paddingLeft: 6,
-          }}
-        >
-          <Image
-            src="/arcflare-logo.png.png"
-            alt="FlareHQ"
-            width={36}
-            height={36}
-            style={{ borderRadius: 8, objectFit: 'contain' }}
-          />
-          <div>
-            <p style={{ color: '#f0ece6', fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
-            <p style={{ color: '#6b5a45', fontSize: 9, margin: 0 }}>
-              Stablecoin Payment Infrastructure
-            </p>
-          </div>
-        </div>
-        <nav
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-            flex: 1,
-            overflowY: 'auto' as const,
-          }}
-        >
-          {NAV.map((item) => (
-            <a
-              key={item.label}
-              href={item.href}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '9px 12px',
-                borderRadius: 9,
-                textDecoration: 'none',
-                fontSize: 13,
-                fontWeight: 500,
-                background: (item as any).active ? 'rgba(200,151,90,0.15)' : 'transparent',
-                color: (item as any).active ? '#c8975a' : '#6b5a45',
-                border: (item as any).active
-                  ? '1px solid rgba(200,151,90,0.25)'
-                  : '1px solid transparent',
-              }}
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
-      </aside>
+      <DashboardSidebar active="Scheduled" />
 
       <main style={S.main}>
         <div style={{ marginBottom: 28 }}>

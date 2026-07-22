@@ -3,7 +3,7 @@ const { GatewayClient } = require("@circle-fin/x402-batching/client");
 
 async function main() {
   console.log("🟢 Script started");
-  const PRIVATE_KEY = "0x63a973bd7da204e2e604f2ece36227165b2bae9fc4217f9b46816141d4d8cbfe";
+  const PRIVATE_KEY = process.env.EOA_PRIVATE_KEY;
   console.log("🔑 Private key loaded");
 
   const client = new GatewayClient({

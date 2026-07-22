@@ -44,6 +44,8 @@ export default function ConsumerApp() {
   const [frequency, setFrequency] = useState("7");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
 
   // ── Cross‑chain state ──
   const [chains, setChains] = useState<ChainOption[]>([]);
@@ -319,9 +321,56 @@ export default function ConsumerApp() {
             <span style={styles.logoText}>Flow</span>
           </div>
         </div>
-        <button style={styles.walletPill} onClick={disconnectWallet} title="Tap to switch wallet">
-          {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button
+            style={styles.walletPill}
+            onClick={() => setWalletMenuOpen((o) => !o)}
+            title="Wallet options"
+          >
+            {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+          </button>
+          {walletMenuOpen && (
+            <>
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 10 }}
+                onClick={() => setWalletMenuOpen(false)}
+              />
+              <div
+                style={{
+                  position: 'absolute', top: '110%', right: 0, zIndex: 11,
+                  background: '#FFFFFF', border: '1px solid #E5DDC9', borderRadius: 12,
+                  boxShadow: '0 8px 20px rgba(0,0,0,0.12)', overflow: 'hidden', minWidth: 180,
+                }}
+              >
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(walletAddress);
+                    setAddressCopied(true);
+                    setTimeout(() => setAddressCopied(false), 1500);
+                  }}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
+                    border: 'none', fontSize: 13, color: '#1C1B19', cursor: 'pointer',
+                  }}
+                >
+                  {addressCopied ? '✓ Copied' : '📋 Copy address'}
+                </button>
+                <button
+                  onClick={() => {
+                    setWalletMenuOpen(false);
+                    disconnectWallet();
+                  }}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
+                    border: 'none', borderTop: '1px solid #E5DDC9', fontSize: 13, color: '#C0563A', cursor: 'pointer',
+                  }}
+                >
+                  ⎋ Disconnect
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </header>
 
       <div style={styles.contentArea}>

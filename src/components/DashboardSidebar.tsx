@@ -177,6 +177,12 @@ export default function DashboardSidebar({ active }: { active: string }) {
                     <p style={{ color: '#fff', fontSize: 13, fontWeight: 700, margin: '0 0 2px 0' }}>{merchant?.businessName || '...'}</p>
                     <p style={{ color: '#4b5563', fontSize: 10, margin: '0 0 10px 0' }}>{merchant?.email || ''}</p>
                     <button
+                        onClick={() => router.push('/merchant/settings')}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '7px 0', fontSize: 11, color: '#9ca3af', cursor: 'pointer', marginBottom: 6 }}
+                    >
+                        ⚙ Payout Settings
+                    </button>
+                    <button
                         onClick={signOut}
                         style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '7px 0', fontSize: 11, color: '#9ca3af', cursor: 'pointer' }}
                     >

@@ -1,6 +1,8 @@
 //src/app/transactions/page.tsx
 'use client';
 
+import DashboardSidebar from '@/src/components/DashboardSidebar';
+
 import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
@@ -55,90 +57,7 @@ export default function TransactionsPage() {
       }}
     >
       {/* Sidebar - Updated to Cyan Theme */}
-      <aside
-        style={{
-          width: 220,
-          minHeight: '100vh',
-          background: '#0f171c',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: '24px 14px',
-          flexShrink: 0,
-          position: 'sticky',
-          top: 0,
-          height: '100vh',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            marginBottom: 36,
-            paddingLeft: 6,
-          }}
-        >
-          {/* Logo Container */}
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 9,
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Image
-              src="/arcflare-logo.png.png"
-              alt="FlareHQ Logo"
-              width={32}
-              height={32}
-              style={{ objectFit: 'contain' }}
-            />
-          </div>
-          <div>
-            <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>
-              FlareHQ
-            </p>
-            <p style={{ color: '#64748b', fontSize: 10, margin: '3px 0 0 0' }}>
-              Stablecoin Infrastructure
-            </p>
-          </div>
-        </div>
-
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
-          {[
-            { label: 'Dashboard', href: '/merchant/dashboard', active: false },
-            { label: 'Homepage', href: '/', active: false },
-            { label: 'Transactions', href: '/transactions', active: true },
-            { label: 'Checkout', href: '/merchant/dashboard#checkout', active: false },
-            { label: 'Escrow', href: '/escrow', active: false },
-            { label: 'Support', href: '/support', active: false },
-          ].map((item) => (
-            <a
-              key={item.label}
-              href={item.href}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '9px 12px',
-                borderRadius: 9,
-                textDecoration: 'none',
-                fontSize: 13,
-                fontWeight: 500,
-                background: item.active ? 'rgba(6, 182, 212, 0.1)' : 'transparent',
-                color: item.active ? '#22d3ee' : '#94a3b8',
-                border: item.active ? '1px solid rgba(6, 182, 212, 0.2)' : '1px solid transparent',
-              }}
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
-      </aside>
+      <DashboardSidebar active="Transactions" />
 
       {/* Main Content */}
       <main style={{ flex: 1, padding: '32px 32px' }}>
