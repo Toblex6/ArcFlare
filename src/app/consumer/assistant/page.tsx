@@ -18,6 +18,16 @@ interface ChatMessage {
   pendingAction?: any;
 }
 
+// Assistant replies that contain a generated payment link look like:
+// "Your payment link for 3 USDC is ready: https://.../checkout/arc_ref_..."
+// Pull the URL out so we can offer a one-tap copy instead of making
+// people select the text by hand.
+const URL_REGEX = /(https?:\/\/[^\s]+)/;
+function extractLink(text: string): string | null {
+  const match = text.match(URL_REGEX);
+  return match ? match[1] : null;
+}
+
 export default function FlowAssistantPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -31,6 +41,7 @@ export default function FlowAssistantPage() {
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [copiedLinkIndex, setCopiedLinkIndex] = useState<number | null>(null);
   const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -143,43 +154,69 @@ export default function FlowAssistantPage() {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {messages.map((m, i) => (
-          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div
-              style={{
-                maxWidth: '80%',
-                background: m.role === 'user' ? '#c8975a' : '#1a1410',
-                color: m.role === 'user' ? '#0e0b08' : '#f0ece6',
-                border: m.role === 'assistant' ? '1px solid #2d2015' : 'none',
-                borderRadius: 14,
-                padding: '10px 14px',
-                fontSize: 14,
-                lineHeight: 1.5,
-              }}
-            >
-              {m.text}
-            </div>
-
-            {m.pendingAction && (
-              <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => handleConfirm(m.pendingAction)}
-                  disabled={sending}
-                  style={{ background: '#0d7c5f', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: sending ? 'not-allowed' : 'pointer' }}
-                >
-                  Confirm
-                </button>
-                <button
-                  onClick={handleCancel}
-                  disabled={sending}
-                  style={{ background: 'transparent', color: '#9ca3af', border: '1px solid #2d2015', borderRadius: 8, padding: '8px 16px', fontSize: 13, cursor: sending ? 'not-allowed' : 'pointer' }}
-                >
-                  Cancel
-                </button>
+        {messages.map((m, i) => {
+          const link = m.role === 'assistant' ? extractLink(m.text) : null;
+          return (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <div
+                style={{
+                  maxWidth: '80%',
+                  background: m.role === 'user' ? '#c8975a' : '#1a1410',
+                  color: m.role === 'user' ? '#0e0b08' : '#f0ece6',
+                  border: m.role === 'assistant' ? '1px solid #2d2015' : 'none',
+                  borderRadius: 14,
+                  padding: '10px 14px',
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                {m.text}
               </div>
-            )}
-          </div>
-        ))}
+
+              {link && (
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(link);
+                    setCopiedLinkIndex(i);
+                    setTimeout(() => setCopiedLinkIndex((cur) => (cur === i ? null : cur)), 1500);
+                  }}
+                  style={{
+                    marginTop: 8,
+                    background: copiedLinkIndex === i ? '#0d7c5f' : '#1a1410',
+                    color: copiedLinkIndex === i ? '#fff' : '#c8975a',
+                    border: '1px solid #2d2015',
+                    borderRadius: 8,
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {copiedLinkIndex === i ? '✓ Copied' : '📋 Copy link'}
+                </button>
+              )}
+
+              {m.pendingAction && (
+                <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => handleConfirm(m.pendingAction)}
+                    disabled={sending}
+                    style={{ background: '#0d7c5f', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: sending ? 'not-allowed' : 'pointer' }}
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    disabled={sending}
+                    style={{ background: 'transparent', color: '#9ca3af', border: '1px solid #2d2015', borderRadius: 8, padding: '8px 16px', fontSize: 13, cursor: sending ? 'not-allowed' : 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
         <div ref={scrollRef} />
       </div>
 

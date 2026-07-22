@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
+import { internalUrl } from '@/src/lib/internalUrl';
 
 export async function POST(req: NextRequest) {
     try {
@@ -40,8 +41,7 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const internalUrl = new URL('/api/payments/settle', req.url);
-        const settleRes = await fetch(internalUrl.toString(), {
+        const settleRes = await fetch(internalUrl('/api/payments/settle'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

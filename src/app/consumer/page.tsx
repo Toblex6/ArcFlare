@@ -46,6 +46,7 @@ export default function ConsumerApp() {
   const [result, setResult] = useState<ActionResult | null>(null);
   const [walletMenuOpen, setWalletMenuOpen] = useState(false);
   const [addressCopied, setAddressCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // ── Cross‑chain state ──
   const [chains, setChains] = useState<ChainOption[]>([]);
@@ -267,7 +268,7 @@ export default function ConsumerApp() {
   // ── Onboarding view ──
   if (checkingSession) {
     return (
-      <main style={styles.page}>
+      <main style={styles.page} className="flow-app">
         <style>{FONT_IMPORT}</style>
         <div style={styles.onboardingWrap}>
           <p style={{ ...styles.onboardingSub, textAlign: "center" }}>Loading...</p>
@@ -278,7 +279,7 @@ export default function ConsumerApp() {
 
   if (view === "onboarding") {
     return (
-      <main style={styles.page}>
+      <main style={styles.page} className="flow-app">
         <style>{FONT_IMPORT}</style>
         <div style={styles.onboardingWrap}>
           <div style={styles.logoMark}>
@@ -305,7 +306,7 @@ export default function ConsumerApp() {
 
   // ── Main Dashboard ──
   return (
-    <main style={styles.page}>
+    <main style={styles.page} className="flow-app">
       <style>{FONT_IMPORT}</style>
       <header style={styles.header}>
         <div style={styles.headerLeft}>
@@ -381,7 +382,7 @@ export default function ConsumerApp() {
               <h1 style={styles.heroTitle}>Your money,<br />moving on its own.</h1>
               <p style={styles.heroSub}>Send to anyone. Save without thinking. Get paid in seconds.</p>
             </section>
-            <section style={styles.actionsGrid}>
+            <section style={styles.actionsGrid} className="flow-actions-grid">
               <button style={styles.actionCard} onClick={() => goTo("send")}>
                 <span style={styles.actionIcon}>→</span>
                 <span style={styles.actionLabel}>Send money</span>
@@ -467,7 +468,21 @@ export default function ConsumerApp() {
                 <p style={styles.resultIcon}>{result.success ? "✓" : "!"}</p>
                 <p style={styles.resultText}>{result.success ? result.message : result.error}</p>
                 {result.explorerUrl && <a href={result.explorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>View transaction</a>}
-                {result.reference && view === "request" && <div style={styles.linkBox}>{result.reference}</div>}
+                {result.reference && view === "request" && (
+                  <div style={styles.linkRow}>
+                    <div style={styles.linkBox}>{result.reference}</div>
+                    <button
+                      style={styles.copyLinkButton}
+                      onClick={() => {
+                        navigator.clipboard.writeText(result.reference!);
+                        setLinkCopied(true);
+                        setTimeout(() => setLinkCopied(false), 1500);
+                      }}
+                    >
+                      {linkCopied ? "✓ Copied" : "📋 Copy link"}
+                    </button>
+                  </div>
+                )}
                 <button style={styles.doneButton} onClick={() => goTo("home")}>Done</button>
               </div>
             )}
@@ -577,6 +592,26 @@ export default function ConsumerApp() {
 // ── Styles (fully responsive) ──
 const FONT_IMPORT = `
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap');
+
+  /* Desktop/tablet: the mobile-first single-column layout below still
+     applies by default (nothing changes on small screens) — these rules
+     only kick in once there's real horizontal space to use. */
+  @media (min-width: 720px) {
+    .flow-app {
+      max-width: 720px !important;
+      padding: 0 24px !important;
+    }
+  }
+  @media (min-width: 1080px) {
+    .flow-app {
+      max-width: 1040px !important;
+      padding: 0 40px !important;
+    }
+    .flow-actions-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 16px !important;
+    }
+  }
 `;
 
 const styles: Record<string, React.CSSProperties> = {
@@ -722,6 +757,12 @@ const styles: Record<string, React.CSSProperties> = {
   resultIcon: { fontSize: "clamp(24px, 3vw, 28px)", margin: "0 0 10px", color: "#5C7A5C" },
   resultText: { fontSize: "clamp(13px, 1.2vw, 15px)", margin: "0 0 14px", lineHeight: 1.5 },
   resultLink: { fontSize: "clamp(12px, 1vw, 13px)", color: "#E8714A", fontWeight: 600 },
+  linkRow: {
+    display: "flex",
+    alignItems: "stretch",
+    gap: 8,
+    margin: "0 0 14px",
+  },
   linkBox: {
     fontSize: "clamp(10px, 1vw, 12px)",
     fontFamily: "monospace",
@@ -729,7 +770,20 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "8px 12px",
     borderRadius: 10,
     wordBreak: "break-all",
-    margin: "0 0 14px",
+    flex: 1,
+    minWidth: 0,
+  },
+  copyLinkButton: {
+    flexShrink: 0,
+    fontSize: "clamp(11px, 1vw, 13px)",
+    fontWeight: 600,
+    background: "#1C1B19",
+    color: "#FBF8F3",
+    border: "none",
+    borderRadius: 10,
+    padding: "8px 14px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
   doneButton: {
     marginTop: 12,

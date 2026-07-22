@@ -18,6 +18,9 @@ export const InitializeSchema = z.object({
   merchant: z.string().min(1).max(100).optional(),
   agentSCA: scaAddress.optional(),
   webhookUrl: z.string().url().optional(),
+  // Explicit payout destination for consumer-initiated links (Flow send/request).
+  // Never trust `merchant` (a free-text label) for routing funds.
+  payoutAddress: scaAddress.optional(),
 });
 
 // ── /api/payments/settle ──────────────────────────────────────────────────────

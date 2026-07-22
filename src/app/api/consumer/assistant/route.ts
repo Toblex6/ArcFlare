@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
+import { internalUrl } from '@/src/lib/internalUrl';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
@@ -119,15 +120,20 @@ export async function POST(req: NextRequest) {
         if (!recipientAddress || !amount) {
           return NextResponse.json({ success: false, error: 'Missing amount or address.' }, { status: 400 });
         }
-        const initRes = await fetch(new URL('/api/payments/initialize', req.url), {
+        const initRes = await fetch(internalUrl('/api/payments/initialize'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
-          body: JSON.stringify({ amount, currency: currency || 'USDC', merchant: recipientAddress }),
+          body: JSON.stringify({
+            amount,
+            currency: currency || 'USDC',
+            merchant: recipientAddress,
+            payoutAddress: recipientAddress,
+          }),
         });
         const initData = await initRes.json();
         if (!initData.success) throw new Error(initData.error || 'Could not start payment.');
 
-        const settleRes = await fetch(new URL('/api/payments/settle', req.url), {
+        const settleRes = await fetch(internalUrl('/api/payments/settle'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
           body: JSON.stringify({ reference: initData.reference }),
@@ -143,7 +149,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (action === 'request') {
-        const res = await fetch(new URL('/api/payments/initialize', req.url), {
+        const res = await fetch(internalUrl('/api/payments/initialize'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
           body: JSON.stringify({ amount, currency: currency || 'USDC', merchant: 'Payment request' }),
@@ -157,7 +163,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (action === 'save') {
-        const res = await fetch(new URL('/api/payments/scheduled', req.url), {
+        const res = await fetch(internalUrl('/api/payments/scheduled'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
           body: JSON.stringify({

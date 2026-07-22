@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const { data, error: validationError } = parseBody(InitializeSchema, body);
     if (validationError) return validationError as NextResponse;
 
-    const { amount, currency, email, merchant, agentSCA, webhookUrl } = data;
+    const { amount, currency, email, merchant, agentSCA, webhookUrl, payoutAddress } = data;
 
     // 4. If agentSCA provided, verify it exists in AgentRegistry
     let resolvedSenderEmail = email || 'autonomous-agent@arc.network';
@@ -83,6 +83,14 @@ export async function POST(req: NextRequest) {
       // Flow's "Send"/"Request" — sender is whichever consumer is logged in,
       // not whatever the client claims.
       resolvedSenderEmail = caller.consumerWalletAddress;
+
+      // Payout destination:
+      // - "Send": payoutAddress is the recipient the consumer typed/spoke —
+      //   validated as a real 0x address by the schema, never taken from
+      //   the free-text `merchant` label.
+      // - "Request": no payoutAddress is given, so the requester is paying
+      //   themselves — route to the requesting consumer's own wallet.
+      merchantSCA = payoutAddress || caller.consumerWalletAddress;
     }
     // caller.type === 'internal' — trusted server-to-server call (agent/brain),
     // uses the agentSCA/merchant fields from the request body as before.
