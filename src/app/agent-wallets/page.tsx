@@ -6,6 +6,7 @@
 
 import React, { useState } from 'react';
 import Image from 'next/image';
+import DashboardSidebar from '@/components/DashboardSidebar';
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
 

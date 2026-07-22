@@ -102,7 +102,7 @@ export function withGateway(
       console.log(`[x402] Verifying payment for ${endpoint}...`);
       console.log(`[x402] DEBUG paymentPayload:`, JSON.stringify(sanitizeBigInts(paymentPayload)));
       console.log(`[x402] DEBUG requirements:`, JSON.stringify(sanitizeBigInts(requirements)));
-
+      console.log(`[x402] DEBUG server Date.now():`, new Date().toISOString(), Math.floor(Date.now() / 1000));
       // Call verify directly on BatchFacilitatorClient
       const verifyResult = await facilitator.verify(paymentPayload, requirements);
       console.log(`[x402] DEBUG full verifyResult:`, JSON.stringify(verifyResult, null, 2));
