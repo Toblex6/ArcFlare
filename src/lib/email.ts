@@ -10,6 +10,7 @@ export function generateVerificationCode(): string {
 }
 
 export async function sendVerificationEmail(email: string, businessName: string, code: string) {
+  console.log("FROM_EMAIL =", FROM_EMAIL);
   const { error } = await resend.emails.send({
     from: FROM_EMAIL,
     to: email,
