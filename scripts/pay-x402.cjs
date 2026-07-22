@@ -38,7 +38,7 @@ async function main() {
         sessionId: "a2a-test-1",
       }),
       //validity: { maxSeconds: 604800 }, // matches seller's exact maxTimeoutSeconds
-    }//
+    }
   );
 
   console.log("✅ Payment successful!");
