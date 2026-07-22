@@ -41,7 +41,7 @@ function buildRequirements(price: string) {
     asset: "0x3600000000000000000000000000000000000000",
     amount: amount.toString(),
     payTo: sellerAddress,
-    maxTimeoutSeconds: 604800,
+    maxTimeoutSeconds: 3600,
     extra: {
       name: "GatewayWalletBatched",
       version: "1",
