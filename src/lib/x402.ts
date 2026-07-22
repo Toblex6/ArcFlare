@@ -8,7 +8,7 @@
  *
  * Confirmed working fields (from cast call + circlefin/arc-nanopayments):
  *   network:           "eip155:5042002"
- *   maxTimeoutSeconds: 604800,
+ *   maxTimeoutSeconds: 345600,
  *   extra.name:        "GatewayWalletBatched"
  *   extra.version:     "1"
  *   verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
@@ -41,7 +41,7 @@ function buildRequirements(price: string) {
     asset: "0x3600000000000000000000000000000000000000",
     amount: amount.toString(),
     payTo: sellerAddress,
-    maxTimeoutSeconds: 300,
+    maxTimeoutSeconds: 345600, // matches Circle's own confirmed-working reference value
     extra: {
       name: "GatewayWalletBatched",
       version: "1",
