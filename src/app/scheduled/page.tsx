@@ -1,5 +1,7 @@
+'use client';
+
 // src/app/scheduled/page.tsx
-// Frontend for Recurring/Scheduled Payments.'use client';
+// Frontend for Recurring/Scheduled Payments.
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 
