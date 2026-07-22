@@ -1,13 +1,11 @@
 'use client';
 
 // src/app/consumer/assistant/page.tsx
-// Flow's chat assistant. Speech-to-text is handled by the browser's own
-// Web Speech API (no extra service needed) — the mic button just
-// transcribes speech into the text box before sending. Language
-// translation isn't a separate step: the assistant model itself
-// understands and replies in whatever language the person typed or spoke.
-// Nothing ever executes until the person taps Confirm on a specific
-// parsed action.
+// Fully upgraded speech + multilingual support:
+// - Dropdown to select speech input/output language (defaults to browser language).
+// - Speech-to-Text (STT) uses the selected language for accurate transcription.
+// - Text-to-Speech (TTS) reads every assistant reply aloud in the selected language.
+// - Toggle TTS on/off with a single button.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -18,23 +16,35 @@ interface ChatMessage {
   pendingAction?: any;
 }
 
-// Assistant replies that contain a generated payment link look like:
-// "Your payment link for 3 USDC is ready: https://.../checkout/arc_ref_..."
-// Pull the URL out so we can offer a one-tap copy instead of making
-// people select the text by hand.
 const URL_REGEX = /(https?:\/\/[^\s]+)/;
 function extractLink(text: string): string | null {
   const match = text.match(URL_REGEX);
   return match ? match[1] : null;
 }
 
-export default function FlowAssistantPage() {
+// List of widely supported languages for speech
+const SUPPORTED_LANGUAGES = [
+  { code: 'en-US', label: 'English (US)' },
+  { code: 'es-ES', label: 'Español' },
+  { code: 'fr-FR', label: 'Français' },
+  { code: 'de-DE', label: 'Deutsch' },
+  { code: 'zh-CN', label: '中文 (简体)' },
+  { code: 'ja-JP', label: '日本語' },
+  { code: 'hi-IN', label: 'हिन्दी' },
+  { code: 'ar-SA', label: 'العربية' },
+  { code: 'pt-BR', label: 'Português (BR)' },
+  // ✅ New Nigerian languages added below
+  { code: 'yo-NG', label: 'Yorùbá' },
+  { code: 'ha-NG', label: 'Hausa' },
+];
+
+export default function FlareHQAssistantPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
       text:
-        "Hi! Tell me what you'd like to do — e.g. \"Send 20 USDC to 0xAbc123...\" or \"Save 5 USDC every week.\" You can type in any language, or tap the mic to speak.",
+        "Hi! I am FlareHQ Assistant, Tell me what you'd like to do — e.g. \"Send 20 USDC to 0xAbc123...\" or \"Save 5 USDC every week.\" You can type in any language, or tap the mic to speak.",
     },
   ]);
   const [input, setInput] = useState('');
@@ -42,14 +52,24 @@ export default function FlowAssistantPage() {
   const [listening, setListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [copiedLinkIndex, setCopiedLinkIndex] = useState<number | null>(null);
+
+  // --- NEW: Multilingual states ---
+  // Default to the user's browser/OS language, fallback to English
+  const [selectedLang, setSelectedLang] = useState<string>(
+    typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US'
+  );
+  const [speakReplies, setSpeakReplies] = useState<boolean>(true); // TTS on by default
+
   const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const synthRef = useRef<SpeechSynthesis | null>(null);
 
+  // --- Scroll to bottom ---
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── Auth guard — Flow's own session, not merchant ──
+  // --- Auth guard ---
   useEffect(() => {
     fetch('/api/consumer/session')
       .then((r) => r.json())
@@ -59,7 +79,27 @@ export default function FlowAssistantPage() {
       .catch(() => router.replace('/consumer'));
   }, [router]);
 
-  // ── Speech-to-text setup ──
+  // --- Text-to-Speech: speak assistant replies ---
+  const speakText = (text: string) => {
+    if (!synthRef.current || !speakReplies) return;
+    // Cancel any ongoing speech to avoid overlapping
+    synthRef.current.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = selectedLang;
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    synthRef.current.speak(utterance);
+  };
+
+  // Speak the latest assistant message whenever it's added
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === 'assistant' && lastMsg.text) {
+      speakText(lastMsg.text);
+    }
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Speech-to-Text setup (depends on selectedLang) ---
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -68,31 +108,55 @@ export default function FlowAssistantPage() {
       return;
     }
     setSpeechSupported(true);
+
+    // Re-create recognition whenever language changes
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
-    // Browser auto-detects language reasonably well when lang isn't pinned;
-    // leaving it unset lets it follow the browser/device locale.
+    recognition.lang = selectedLang; // <<-- CRITICAL: sets the listening language
+
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
     };
     recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
+    recognition.onerror = () => {
+      setListening(false);
+      // Silently fail - user can just type or try again
+    };
+
     recognitionRef.current = recognition;
+
+    // Cleanup: stop recognition if component unmounts or lang changes
+    return () => {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (_) { }
+      }
+    };
+  }, [selectedLang]); // Re-run when language changes
+
+  // Initialize speech synthesis once
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      synthRef.current = window.speechSynthesis;
+    }
   }, []);
 
+  // --- Mic toggle ---
   const toggleListening = () => {
     if (!recognitionRef.current) return;
     if (listening) {
       recognitionRef.current.stop();
       setListening(false);
     } else {
+      // Ensure we use the latest language
+      recognitionRef.current.lang = selectedLang;
       recognitionRef.current.start();
       setListening(true);
     }
   };
 
+  // --- Send / Confirm / Cancel (unchanged logic) ---
   const addMessage = (msg: ChatMessage) => setMessages((prev) => [...prev, msg]);
 
   const handleSend = async () => {
@@ -141,18 +205,64 @@ export default function FlowAssistantPage() {
     addMessage({ role: 'assistant', text: 'Okay, cancelled. Anything else?' });
   };
 
+  // --- Render ---
   return (
     <main style={{ minHeight: '100vh', background: '#0e0b08', color: '#f0ece6', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <div style={{ padding: '18px 20px', borderBottom: '1px solid #2d2015', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Header - added language selector and TTS toggle */}
+      <div style={{ padding: '18px 20px', borderBottom: '1px solid #2d2015', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h1 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Flow Assistant</h1>
-          <p style={{ fontSize: 12, color: '#6b5a45', margin: '2px 0 0 0' }}>Talk or type — any language</p>
+          <h1 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>flareHQ Assistant</h1>
+          <p style={{ fontSize: 12, color: '#6b5a45', margin: '2px 0 0 0' }}>
+            {speakReplies ? '🔊 Voice replies ON' : '🔇 Voice replies OFF'}
+          </p>
         </div>
-        <button onClick={() => router.push('/consumer')} style={{ background: 'none', border: '1px solid #2d2015', borderRadius: 8, padding: '6px 12px', color: '#c8975a', fontSize: 12, cursor: 'pointer' }}>
-          ← Back to Flow
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {/* Language Selector */}
+          <select
+            value={selectedLang}
+            onChange={(e) => setSelectedLang(e.target.value)}
+            style={{
+              background: '#1a1410',
+              border: '1px solid #2d2015',
+              borderRadius: 8,
+              padding: '6px 10px',
+              color: '#f0ece6',
+              fontSize: 13,
+              outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            {SUPPORTED_LANGUAGES.map((lang) => (
+              <option key={lang.code} value={lang.code}>
+                {lang.label}
+              </option>
+            ))}
+          </select>
+
+          {/* TTS Toggle Button */}
+          <button
+            onClick={() => setSpeakReplies((prev) => !prev)}
+            style={{
+              background: speakReplies ? '#0d7c5f' : '#1a1410',
+              border: '1px solid #2d2015',
+              borderRadius: 8,
+              padding: '6px 12px',
+              color: speakReplies ? '#fff' : '#6b5a45',
+              fontSize: 13,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            {speakReplies ? '🔊 Speak' : '🔇 Mute'}
+          </button>
+
+          <button onClick={() => router.push('/consumer')} style={{ background: 'none', border: '1px solid #2d2015', borderRadius: 8, padding: '6px 12px', color: '#c8975a', fontSize: 12, cursor: 'pointer' }}>
+            ← Back
+          </button>
+        </div>
       </div>
 
+      {/* Messages - unchanged */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         {messages.map((m, i) => {
           const link = m.role === 'assistant' ? extractLink(m.text) : null;
@@ -220,7 +330,8 @@ export default function FlowAssistantPage() {
         <div ref={scrollRef} />
       </div>
 
-      <div style={{ padding: '16px 20px', borderTop: '1px solid #2d2015', display: 'flex', gap: 10 }}>
+      {/* Input footer - Added Language label next to mic */}
+      <div style={{ padding: '16px 20px', borderTop: '1px solid #2d2015', display: 'flex', gap: 10, alignItems: 'center' }}>
         {speechSupported && (
           <button
             onClick={toggleListening}
@@ -229,10 +340,19 @@ export default function FlowAssistantPage() {
               background: listening ? '#dc2626' : '#1a1410',
               border: '1px solid #2d2015', color: listening ? '#fff' : '#c8975a',
               fontSize: 18, cursor: 'pointer',
+              position: 'relative',
             }}
-            title={listening ? 'Stop listening' : 'Speak instead of typing'}
+            title={`Listening in ${selectedLang}`}
           >
             {listening ? '⏹' : '🎤'}
+            {/* Small indicator of current speech language */}
+            <span style={{
+              position: 'absolute', bottom: -6, right: -6,
+              background: '#0e0b08', fontSize: 8, padding: '1px 4px',
+              borderRadius: 4, border: '1px solid #2d2015', color: '#6b5a45'
+            }}>
+              {selectedLang.split('-')[0]}
+            </span>
           </button>
         )}
         <input
@@ -240,7 +360,7 @@ export default function FlowAssistantPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Send 20 USDC to 0x..."
+          placeholder={`Speak or type in ${selectedLang}...`}
           style={{ flex: 1, background: '#1a1410', border: '1px solid #2d2015', borderRadius: 12, padding: '12px 14px', color: '#f0ece6', fontSize: 14, outline: 'none' }}
         />
         <button

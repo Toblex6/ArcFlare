@@ -11,7 +11,7 @@
   "dependencies": {
     "@cctp-sdk/core": "^0.1.3",
     "@circle-fin/developer-controlled-wallets": "^10.6.0",
-    "@circle-fin/x402-batching": "^2.1.0",
+    "@circle-fin/x402-batching": "^3.2.0",
     "@prisma/client": "^6.13.0",
     "@sentry/nextjs": "^10.56.0",
     "@tanstack/react-query": "^5.101.2",

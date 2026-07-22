@@ -51,7 +51,6 @@ export default function ConsumerApp() {
   // ── Cross‑chain state ──
   const [chains, setChains] = useState<ChainOption[]>([]);
   const [fromChain, setFromChain] = useState<string>("");
-  // Destination is always Arc – stored but not user‑selectable
   const [toChain] = useState<string>("arc");
   const [crossRecipient, setCrossRecipient] = useState("");
   const [crossAmount, setCrossAmount] = useState("");
@@ -243,7 +242,7 @@ export default function ConsumerApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fromChain,
-          toChain,      // always "arc"
+          toChain,
           amount: crossAmount,
           recipient: crossRecipient,
         }),
@@ -308,7 +307,7 @@ export default function ConsumerApp() {
   // ── Onboarding view ──
   if (checkingSession) {
     return (
-      <main style={styles.page} className="flow-app">
+      <main style={styles.page} className="flarehq flow-app">
         <style>{FONT_IMPORT}</style>
         <div style={styles.onboardingWrap}>
           <p style={{ ...styles.onboardingSub, textAlign: "center" }}>Loading...</p>
@@ -319,12 +318,18 @@ export default function ConsumerApp() {
 
   if (view === "onboarding") {
     return (
-      <main style={styles.page} className="flow-app">
+      <main style={styles.page} className="flareHQ flow-app">
         <style>{FONT_IMPORT}</style>
         <div style={styles.onboardingWrap}>
-          <div style={styles.logoMark}>
-            <span style={styles.logoFlow}>＿╱</span>
-            <span style={styles.logoText}>Flow</span>
+          <div style={styles.headerLeft}>
+            <Image
+              src="/arcflare-logo.png.png"
+              alt="ArcFlare"
+              width={40}
+              height={40}
+              style={{ borderRadius: 8, flexShrink: 0 }}
+            />
+            <span style={styles.appName}>FlareHQ Flow</span>
           </div>
           <h1 style={styles.onboardingTitle}>Let's get you set up</h1>
           <p style={styles.onboardingSub}>You'll need a wallet to send, save, and request money. Takes a few seconds.</p>
@@ -346,7 +351,7 @@ export default function ConsumerApp() {
 
   // ── Main Dashboard ──
   return (
-    <main style={styles.page} className="flow-app">
+    <main style={styles.page} className="flareHQ flow-app">
       <style>{FONT_IMPORT}</style>
       <header style={styles.header}>
         <div style={styles.headerLeft}>
@@ -357,10 +362,7 @@ export default function ConsumerApp() {
             height={32}
             style={{ borderRadius: 6, flexShrink: 0 }}
           />
-          <div style={styles.logoMark}>
-            <span style={styles.logoFlow}>＿╱</span>
-            <span style={styles.logoText}>Flow</span>
-          </div>
+          <span style={styles.appName}>FlareHQ Flow</span>
         </div>
         <div style={{ position: 'relative' }}>
           <button
@@ -637,13 +639,13 @@ const FONT_IMPORT = `
      applies by default (nothing changes on small screens) — these rules
      only kick in once there's real horizontal space to use. */
   @media (min-width: 720px) {
-    .flow-app {
+    .flareHq flow-app {
       max-width: 720px !important;
       padding: 0 24px !important;
     }
   }
   @media (min-width: 1080px) {
-    .flow-app {
+    .flareHQ flow-app {
       max-width: 1040px !important;
       padding: 0 40px !important;
     }
@@ -680,9 +682,13 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 12,
   },
-  logoMark: { display: "flex", alignItems: "baseline", gap: 6 },
-  logoFlow: { fontFamily: "'Fraunces', serif", fontSize: 20, color: "#E8714A" },
-  logoText: { fontFamily: "'Fraunces', serif", fontSize: 20, fontWeight: 600, letterSpacing: -0.3 },
+  appName: {
+    fontFamily: "'Fraunces', serif",
+    fontSize: 20,
+    fontWeight: 600,
+    letterSpacing: -0.3,
+    color: "#1C1B19",
+  },
   walletPill: {
     fontSize: "clamp(10px, 1.2vw, 12px)",
     fontFamily: "monospace",

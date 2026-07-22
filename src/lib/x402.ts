@@ -8,11 +8,21 @@
  *
  * Confirmed working fields (from cast call + circlefin/arc-nanopayments):
  *   network:           "eip155:5042002"
- *   maxTimeoutSeconds: 345600,
+ *   
+    * maxTimeoutSeconds: 345600 — matches circlefin/arc-nanopayments reference.
+    * Root cause of "authorization_validity_too_short" (resolved 2026-07-22):
+    * @circle-fin/x402-batching v2.1.0 had a validity-check bug/mismatch.
+    * Upgrading to v3.2.0 fixed it — the value itself was never wrong.
+    
  *   extra.name:        "GatewayWalletBatched"
  *   extra.version:     "1"
  *   verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
  */
+
+
+
+
+
 
 import { NextRequest, NextResponse } from "next/server";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
@@ -100,12 +110,9 @@ export function withGateway(
       }
 
       console.log(`[x402] Verifying payment for ${endpoint}...`);
-      console.log(`[x402] DEBUG paymentPayload:`, JSON.stringify(sanitizeBigInts(paymentPayload)));
-      console.log(`[x402] DEBUG requirements:`, JSON.stringify(sanitizeBigInts(requirements)));
-      console.log(`[x402] DEBUG server Date.now():`, new Date().toISOString(), Math.floor(Date.now() / 1000));
+
       // Call verify directly on BatchFacilitatorClient
       const verifyResult = await facilitator.verify(paymentPayload, requirements);
-      console.log(`[x402] DEBUG full verifyResult:`, JSON.stringify(verifyResult, null, 2));
 
       if (!verifyResult.isValid) {
         console.error(`[x402] Verify failed: ${verifyResult.invalidReason}`);
