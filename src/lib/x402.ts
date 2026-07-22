@@ -105,6 +105,7 @@ export function withGateway(
 
       // Call verify directly on BatchFacilitatorClient
       const verifyResult = await facilitator.verify(paymentPayload, requirements);
+      console.log(`[x402] DEBUG full verifyResult:`, JSON.stringify(verifyResult, null, 2));
 
       if (!verifyResult.isValid) {
         console.error(`[x402] Verify failed: ${verifyResult.invalidReason}`);
