@@ -37,8 +37,8 @@ async function main() {
         message: "Pay 0.1 USDC to 0x954ebd124aedf03b784fcf2cb067de98f04bfa3a as a test A2A payment",
         sessionId: "a2a-test-1",
       }),
-      validity: { maxSeconds: 604800 }, // matches seller's exact maxTimeoutSeconds
-    }
+      //validity: { maxSeconds: 604800 }, // matches seller's exact maxTimeoutSeconds
+    }//
   );
 
   console.log("✅ Payment successful!");
