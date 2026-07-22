@@ -170,7 +170,7 @@ export default function ConsumerApp() {
       const initRes = await fetch(`/api/payments/initialize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, currency: "USDC", agentSCA: walletAddress || undefined, merchant: recipient }),
+        body: JSON.stringify({ amount, currency: "USDC", payoutAddress: recipient, merchant: recipient }),
       });
       const initData = await initRes.json();
       if (!initData.success) throw new Error(initData.error || "Could not start payment.");
@@ -250,11 +250,51 @@ export default function ConsumerApp() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Transfer failed.");
+
+      // Burn is confirmed at this point, but attestation + mint on Arc can
+      // take several minutes — poll for it instead of leaving one request
+      // open (which would just time out) or claiming success too early.
       setCrossResult({
         success: true,
-        message: `Bridged ${crossAmount} USDC from ${fromChain} to Arc!`,
+        message: `Burn confirmed on ${fromChain}. Waiting for Circle's cross-chain attestation — this can take a few minutes...`,
         txHash: data.sourceTxHash,
         explorerUrl: `https://testnet.arcscan.app/tx/${data.sourceTxHash}`,
+      });
+
+      const sourceTxHash = data.sourceTxHash;
+      const pollFromChain = data.fromChain;
+      const maxAttempts = 60; // ~10 minutes at 10s intervals
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        await new Promise((r) => setTimeout(r, 10_000));
+        const statusRes = await fetch(
+          `/api/cctp/transfer/status?sourceTxHash=${sourceTxHash}&fromChain=${pollFromChain}`
+        );
+        const statusData = await statusRes.json();
+        if (!statusData.success) continue; // transient — keep polling
+
+        if (statusData.state === "COMPLETE") {
+          setCrossResult({
+            success: true,
+            message: `Bridged ${crossAmount} USDC from ${fromChain} to Arc!`,
+            txHash: statusData.destinationTxHash || sourceTxHash,
+            explorerUrl: `https://testnet.arcscan.app/tx/${statusData.destinationTxHash || sourceTxHash}`,
+          });
+          setCrossLoading(false);
+          return;
+        }
+        if (statusData.state === "FAILED") {
+          setCrossResult({ success: false, error: statusData.error || "Bridge transfer failed during attestation or mint." });
+          setCrossLoading(false);
+          return;
+        }
+        // Otherwise still in progress (AWAITING_ATTESTATION, ATTESTED, RELAYING) — keep polling.
+      }
+
+      setCrossResult({
+        success: false,
+        error: "Still waiting on Circle's attestation after 10 minutes. It may still complete — check the source transaction on the explorer.",
+        txHash: sourceTxHash,
+        explorerUrl: `https://testnet.arcscan.app/tx/${sourceTxHash}`,
       });
     } catch (e: any) {
       setCrossResult({ success: false, error: e.message });

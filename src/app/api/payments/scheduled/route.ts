@@ -32,6 +32,30 @@ async function createScheduledHandler(request: Request) {
       );
     }
 
+    // Resolve the real Circle wallet ID for payerSCA up front, instead of
+    // leaving payerWalletId null and letting /scheduled/run silently fall
+    // back to one shared default wallet for every recurring payment.
+    let resolvedPayerWalletId = payerWalletId;
+    if (!resolvedPayerWalletId) {
+      const consumerAccount = await (prisma as any).consumerAccount.findUnique({
+        where: { walletAddress: payerSCA },
+      });
+
+      if (consumerAccount?.walletType === 'EXTERNAL') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Wallet ${payerSCA} is an external (non-custodial) wallet — ArcFlare does not hold its private key, so it can't be debited automatically on a schedule. Recurring "Save" currently only works with a Flow-created (Circle-custodied) wallet.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      if (consumerAccount?.circleWalletId) {
+        resolvedPayerWalletId = consumerAccount.circleWalletId;
+      }
+    }
+
     const reference = `sched_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
     const nextRunAt = startImmediately
@@ -42,7 +66,7 @@ async function createScheduledHandler(request: Request) {
       data: {
         reference,
         payerSCA,
-        payerWalletId: payerWalletId || null,
+        payerWalletId: resolvedPayerWalletId || null,
         receiverSCA,
         amount: parseFloat(amount),
         intervalDays: parseInt(intervalDays),

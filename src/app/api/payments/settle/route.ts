@@ -55,7 +55,7 @@ async function pollForAttestation(messageHash: string) {
           return { message: data.message, attestation: data.attestation };
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     await new Promise((r) => setTimeout(r, 3000));
   }
   throw new Error('CCTP Attestation timed out after 90 seconds.');
@@ -230,10 +230,38 @@ async function mergedSettleHandler(request: NextRequest) {
       : DEFAULT_PAYER_SCA;
     let payerWalletId = DEFAULT_PAYER_WALLET_ID;
 
-    const agentRecord = await (prisma as any).agentRegistry.findFirst({
-      where: { scaAddress: payerSCA },
+    // Resolve which Circle wallet actually signs for this address.
+    // Order of precedence:
+    //   1. ConsumerAccount — this is where Flow's "created wallet" consumers
+    //      are registered with their real per-user circleWalletId. This was
+    //      previously skipped entirely, so every consumer payment silently
+    //      settled from one shared DEFAULT_PAYER_WALLET_ID regardless of
+    //      who was actually paying.
+    //   2. AgentRegistry — AI-agent (M2M) wallets, a separate feature.
+    //   3. DEFAULT_PAYER_WALLET_ID — legacy/demo fallback only.
+    const consumerAccount = await (prisma as any).consumerAccount.findUnique({
+      where: { walletAddress: payerSCA },
     });
-    if (agentRecord?.circleWalletId) payerWalletId = agentRecord.circleWalletId;
+
+    if (consumerAccount) {
+      if (consumerAccount.walletType === 'EXTERNAL') {
+        // This is a bring-your-own wallet. We never held its key, so there
+        // is no Circle wallet ID to sign with — this can only be settled by
+        // having the wallet sign the transaction itself client-side (not
+        // yet implemented), not by any server-side fallback.
+        throw new Error(
+          `Wallet ${payerSCA} is an external (non-custodial) wallet — ArcFlare does not hold its private key and cannot sign transactions on its behalf. This wallet must sign and submit the transfer itself.`
+        );
+      }
+      if (consumerAccount.circleWalletId) {
+        payerWalletId = consumerAccount.circleWalletId;
+      }
+    } else {
+      const agentRecord = await (prisma as any).agentRegistry.findFirst({
+        where: { scaAddress: payerSCA },
+      });
+      if (agentRecord?.circleWalletId) payerWalletId = agentRecord.circleWalletId;
+    }
 
     // Resolve the real merchant payout wallet. Falls back to the platform
     // default ONLY for legacy/test payments with no merchantId attached —
@@ -329,7 +357,7 @@ async function mergedSettleHandler(request: NextRequest) {
           where: { reference },
           data: { circleTxId, status: 'SETTLEMENT_ERROR' },
         })
-        .catch(() => {});
+        .catch(() => { });
 
       throw new Error(
         `Transaction tracked (ID: ${circleTxId}), but network finality timed out or failed: ${pollingError.message}`
@@ -379,7 +407,7 @@ async function mergedSettleHandler(request: NextRequest) {
           where: { reference: fallbackReference },
           data: updateData,
         })
-        .catch(() => {});
+        .catch(() => { });
     }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

@@ -1,6 +1,6 @@
 // src/app/api/cctp/transfer/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { transferCctpV2, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
+import { startCctpTransferV2, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
 
 export async function POST(req: NextRequest) {
   try {
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await transferCctpV2({
+    const result = await startCctpTransferV2({
       fromChain,
       toChain,
       amount,
@@ -48,10 +48,17 @@ export async function POST(req: NextRequest) {
       privateKey,
     });
 
+    // Don't wait for attestation + mint here — that's a 10-20+ minute
+    // process on testnet and would hang this request past any proxy
+    // timeout. The burn is confirmed by the time we get here; hand back
+    // enough to poll GET /api/cctp/transfer/status for the rest.
     return NextResponse.json({
       success: true,
+      status: "pending", // burn confirmed, awaiting Circle attestation + destination mint
+      transferId: result.transferId,
       sourceTxHash: result.sourceTxHash,
-      destinationTxHash: result.destinationTxHash,
+      fromChain: result.fromChain,
+      message: "Burn confirmed on the source chain. Waiting for Circle's cross-chain attestation — poll /api/cctp/transfer/status to check progress.",
     });
   } catch (error: any) {
     console.error("[CCTP API]", error);
