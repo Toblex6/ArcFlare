@@ -2,11 +2,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import ResponsiveSidebar from "@/components/ResponsiveSidebar";
+import DashboardSidebar from "@/src/components/DashboardSidebar";
 import Image from "next/image";
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
-const API_BASE = "https://arcflare-gateway.onrender.com";
+const API_BASE = "https://flarehq.xyz";
 
 // ── Navigation config (shared across pages) ──
 const NAV_SECTIONS = [
@@ -161,7 +161,9 @@ export default function AgentServicePage() {
   };
 
   return (
-    <ResponsiveSidebar navSections={NAV_SECTIONS}>
+    <div style={{ display: "flex", minHeight: "100vh", background: "#f8fafc" }}>
+      <DashboardSidebar active="AI Agent" />
+      <main style={{ flex: 1, minWidth: 0, padding: "24px", overflowX: "hidden" }}>
       <div style={{ maxWidth: 900, margin: "0 auto" }}>
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
@@ -278,6 +280,7 @@ export default function AgentServicePage() {
           </div>
         )}
       </div>
-    </ResponsiveSidebar>
+      </main>
+    </div>
   );
 }

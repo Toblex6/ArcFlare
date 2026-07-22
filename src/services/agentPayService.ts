@@ -45,8 +45,8 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
         metadata: {
           name: 'FlareHQ AI Agent Node',
           description: 'Autonomous Agentic Finance Layer for Arc Network',
-          url: 'https://arcflare-gateway.onrender.com',
-          icons: ['https://arcflare-gateway.onrender.com/favicon.ico'],
+          url: 'https://flarehq.xyz',
+          icons: ['https://flarehq.xyz/favicon.ico'],
         },
       },
       async (wallet, { accounts }) => {
@@ -102,7 +102,7 @@ export async function executeAgentPayment(intent: AgentPaymentIntent): Promise<v
  */
 async function triggerFlareHQVerification(reference: string, hash: string): Promise<void> {
   try {
-    const response = await fetch('https://arcflare-gateway.onrender.com/api/payments/verify', {
+    const response = await fetch('https://flarehq.xyz/api/payments/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reference, txHash: hash }),

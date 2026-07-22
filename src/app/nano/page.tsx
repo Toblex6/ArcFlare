@@ -272,7 +272,7 @@ export default function NanoPaymentsPage() {
 
   const [payEoa, setPayEoa] = useState("");
   const [resourceUrl, setResourceUrl] = useState(
-    "https://arcflare-gateway.onrender.com/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9"
+    "https://flarehq.xyz/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9"
   );
   const [paying, setPaying] = useState(false);
   const [payResult, setPayResult] = useState<PayResult | null>(null);
@@ -446,64 +446,7 @@ export default function NanoPaymentsPage() {
   return (
     <div style={styles.page}>
       {/* ── Sidebar ── */}
-      <aside style={styles.aside}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 36,
-            paddingLeft: 6,
-          }}
-        >
-          <Image
-            src="/arcflare-logo.png.png"
-            alt="FlareHQ"
-            width={36}
-            height={36}
-            style={{ borderRadius: 8, objectFit: "contain" }}
-          />
-          <div>
-            <p style={{ color: "#f0ece6", fontSize: 14, fontWeight: 700, margin: 0 }}>FlareHQ</p>
-            <p style={{ color: "#6b5a45", fontSize: 9, margin: 0 }}>
-              Stablecoin Payment Infrastructure
-            </p>
-          </div>
-        </div>
-        <nav
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 3,
-            flex: 1,
-            overflowY: "auto" as const,
-          }}
-        >
-          {NAV.map((item) => (
-            <a
-              key={item.label}
-              href={item.href}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "9px 12px",
-                borderRadius: 9,
-                textDecoration: "none",
-                fontSize: 13,
-                fontWeight: 500,
-                background: (item as any).active ? "rgba(200,151,90,0.15)" : "transparent",
-                color: (item as any).active ? "#c8975a" : "#6b5a45",
-                border: (item as any).active
-                  ? "1px solid rgba(200,151,90,0.25)"
-                  : "1px solid transparent",
-              }}
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
-      </aside>
+      <DashboardSidebar active="Nanopayments" />
 
       {/* ── Main ── */}
       <main style={styles.main}>

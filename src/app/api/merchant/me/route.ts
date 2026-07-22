@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
         currency: p.currency,
         status: p.status,
         timestamp: p.timestamp,
-        checkoutUrl: `https://arcflare-gateway.onrender.com/checkout/${p.reference}`,
+        checkoutUrl: `https://flarehq.xyz/checkout/${p.reference}`,
       })),
     });
   } catch (error: any) {

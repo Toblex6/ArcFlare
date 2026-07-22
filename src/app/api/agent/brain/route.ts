@@ -25,7 +25,7 @@ import {
 } from "@/lib/circle/client"; // FIX #2: reuse shared Circle client instead of a second local copy
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || "https://arcflare-gateway.onrender.com";
+  process.env.NEXT_PUBLIC_API_BASE || "https://flarehq.xyz";
 const INTERNAL_API_KEY = process.env.INTERNAL_SETTLEMENT_API_KEY!;
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";

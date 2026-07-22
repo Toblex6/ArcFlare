@@ -9,7 +9,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { parsePayrollCommand, EXAMPLE_COMMANDS, FREQUENCY_TO_DAYS, Frequency } from "@/lib/payrollChatParser";
 
-const ARCFLARE_BASE = process.env.NEXT_PUBLIC_ARCFLARE_API_BASE || "https://arcflare-gateway.onrender.com";
+const ARCFLARE_BASE = process.env.NEXT_PUBLIC_ARCFLARE_API_BASE || "https://flarehq.xyz";
 const ARCFLARE_API_KEY = process.env.NEXT_PUBLIC_ARCFLARE_API_KEY || "";
 
 interface Contractor {

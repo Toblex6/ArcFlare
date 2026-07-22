@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const checkoutUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://arcflare-gateway.onrender.com'}/checkout/${reference}`;
+    const checkoutUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/checkout/${reference}`;
 
     return NextResponse.json({
       success: true,
@@ -111,7 +111,7 @@ export async function GET(req: NextRequest) {
         amount: p.amount,
         currency: p.currency,
         status: p.status,
-        checkoutUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://arcflare-gateway.onrender.com'}/checkout/${p.reference}`,
+        checkoutUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/checkout/${p.reference}`,
         createdAt: p.timestamp,
       })),
     });

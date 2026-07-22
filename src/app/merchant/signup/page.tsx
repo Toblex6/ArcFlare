@@ -197,7 +197,7 @@ export default function MerchantSignup() {
             <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#c8975a', background: '#0e0b08', borderRadius: 8, padding: 14, lineHeight: 1.8 }}>
               <span style={{ color: '#4b4035' }}># Create a payment link</span>
               <br />
-              curl -X POST https://arcflare-gateway.onrender.com/api/payments/initialize \<br />
+              curl -X POST https://flarehq.xyz/api/payments/initialize \<br />
               &nbsp;&nbsp;-H <span style={{ color: '#f0ece6' }}>"x-api-key: {apiKey.slice(0, 20)}..."</span> \
               <br />
               &nbsp;&nbsp;-d <span style={{ color: '#f0ece6' }}>'&#123;"amount":"10","currency":"USDC","merchant":"Your Business"&#125;'</span>
