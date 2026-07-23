@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { prisma } from '@/src/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, NanoSettleSchema } from '@/lib/validation';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
@@ -388,4 +388,4 @@ async function mergedNanoSettleHandler(request: NextRequest) {
   }
 }
 
-export const POST = withApiKey(mergedNanoSettleHandler as any);
+export const POST = withApiKeyOrMerchant(mergedNanoSettleHandler as any);

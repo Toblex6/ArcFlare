@@ -6,9 +6,7 @@
 
 import React, { useState } from 'react';
 import Image from 'next/image';
-import DashboardSidebar from '@/components/DashboardSidebar';
-
-const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
+import DashboardSidebar from '@/src/components/DashboardSidebar';
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard' },
@@ -69,7 +67,7 @@ export default function AgentWalletsPage() {
 
       const res = await fetch('/api/agent/wallet', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agentName,
           dailySpendLimitUSDC: dailyLimit || undefined,
@@ -96,7 +94,7 @@ export default function AgentWalletsPage() {
     setLookupResult(null);
     try {
       const res = await fetch(`/api/agent/wallet?address=${lookupAddress}`, {
-        headers: { 'x-api-key': API_KEY },
+        headers: {},
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Wallet not found.');

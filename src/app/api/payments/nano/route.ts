@@ -4,7 +4,7 @@
 // Used by agents paying per API call, per token, per second of compute etc.
 
 import { NextResponse } from 'next/server';
-import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { withApiKeyOrMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import {
   recordNanoPayment,
   getUnsettledBalance,
@@ -66,7 +66,7 @@ async function nanoHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(nanoHandler);
+export const POST = withApiKeyOrMerchant(nanoHandler);
 
 // ─── GET: Check unsettled balance for a pair ──────────────────────────────────
 export const dynamic = 'force-dynamic';
@@ -96,4 +96,4 @@ async function getNanoHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(getNanoHandler);
+export const GET = withApiKeyOrMerchant(getNanoHandler);

@@ -4,8 +4,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
+import { withApiKeyOrMerchant } from "@/lib/middleware/withMerchantAuth";
 
-export async function POST(req: NextRequest) {
+async function x402PayHandler(req: NextRequest) {
   try {
     const { resourceUrl, eoaAddress } = await req.json();
 
@@ -75,3 +76,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+export const POST = withApiKeyOrMerchant(x402PayHandler);

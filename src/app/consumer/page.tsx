@@ -257,7 +257,7 @@ export default function ConsumerApp() {
         success: true,
         message: `Burn confirmed on ${fromChain}. Waiting for Circle's cross-chain attestation — this can take a few minutes...`,
         txHash: data.sourceTxHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${data.sourceTxHash}`,
+        explorerUrl: data.explorerUrl,
       });
 
       const sourceTxHash = data.sourceTxHash;
@@ -291,9 +291,9 @@ export default function ConsumerApp() {
 
       setCrossResult({
         success: false,
-        error: "Still waiting on Circle's attestation after 10 minutes. It may still complete — check the source transaction on the explorer.",
+        error: "Still waiting on Circle's attestation after 10 minutes. It may still complete — check the source transaction on the explorer. Note: Arc is a new CCTP destination still in preview, so attestation can take longer than usual — you can also check https://iris-api.circle.com directly using the source tx hash.",
         txHash: sourceTxHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${sourceTxHash}`,
+        explorerUrl: data.explorerUrl,
       });
     } catch (e: any) {
       setCrossResult({ success: false, error: e.message });

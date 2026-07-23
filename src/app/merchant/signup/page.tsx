@@ -295,7 +295,7 @@ export default function MerchantSignup() {
                 }}
               >
                 <input type="radio" checked={walletType === 'CIRCLE'} onChange={() => setWalletType('CIRCLE')} style={{ marginTop: 3 }} />
-                <div>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: '#f0ece6' }}>
                     Let FlareHQ manage my wallet (recommended)
                   </p>
@@ -314,7 +314,7 @@ export default function MerchantSignup() {
                 }}
               >
                 <input type="radio" checked={walletType === 'EXTERNAL'} onChange={() => setWalletType('EXTERNAL')} style={{ marginTop: 3 }} />
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: '#f0ece6' }}>
                     Use my own wallet
                   </p>

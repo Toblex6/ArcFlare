@@ -10,7 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { formatUnits } from "viem";
-import { withApiKey } from "@/lib/middleware/withApiKey";
+import { withApiKeyOrMerchant } from "@/lib/middleware/withMerchantAuth";
 
 const GATEWAY_API = "https://gateway-api-testnet.circle.com/v1/balances";
 const ARC_TESTNET_DOMAIN = 26; // confirmed from CHAIN_CONFIGS / GATEWAY_DOMAINS earlier
@@ -100,4 +100,4 @@ async function getBalanceHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(getBalanceHandler);
+export const GET = withApiKeyOrMerchant(getBalanceHandler);

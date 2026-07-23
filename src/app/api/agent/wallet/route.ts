@@ -13,7 +13,7 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
 
 const CIRCLE_API_BASE = 'https://api.circle.com/v1/w3s';
 
@@ -94,7 +94,7 @@ async function createAgentWalletHandler(request: Request) {
           status: 'ACTIVE_AGENT_WALLET',
         },
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return NextResponse.json({
       success: true,
@@ -106,9 +106,9 @@ async function createAgentWalletHandler(request: Request) {
       },
       policy: policyApplied
         ? {
-            dailySpendLimitUSDC: dailySpendLimitUSDC || null,
-            allowedContracts: allowedContracts || null,
-          }
+          dailySpendLimitUSDC: dailySpendLimitUSDC || null,
+          allowedContracts: allowedContracts || null,
+        }
         : null,
       message: `Agent Wallet created on Arc Testnet${policyApplied ? ' with spending policy applied' : ''}.`,
     });
@@ -118,7 +118,7 @@ async function createAgentWalletHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(createAgentWalletHandler);
+export const POST = withApiKeyOrMerchant(createAgentWalletHandler);
 
 // ── GET /api/agent/wallet?address=0x... — check wallet + policy + balance ────
 async function getAgentWalletHandler(request: Request) {
@@ -154,4 +154,4 @@ async function getAgentWalletHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(getAgentWalletHandler);
+export const GET = withApiKeyOrMerchant(getAgentWalletHandler);

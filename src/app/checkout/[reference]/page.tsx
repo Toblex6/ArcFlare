@@ -273,12 +273,20 @@ export default function CheckoutPage() {
             </div>
           ) : (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, fontSize: 'clamp(10px, 0.9vw, 12px)', color: '#6b5a45' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 'clamp(10px, 0.9vw, 12px)', color: '#6b5a45' }}>
                 <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)}</span>
                 <button onClick={() => disconnect()} style={{ background: 'none', border: 'none', color: '#c8975a', cursor: 'pointer', fontSize: 'inherit' }}>
                   Disconnect
                 </button>
               </div>
+              <a
+                href="https://faucet.circle.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'block', marginBottom: 10, fontSize: 'clamp(10px, 0.9vw, 12px)', color: '#6b5a45', textDecoration: 'underline' }}
+              >
+                No test USDC? Get some free ↗
+              </a>
               <button
                 onClick={handlePayment}
                 disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0}

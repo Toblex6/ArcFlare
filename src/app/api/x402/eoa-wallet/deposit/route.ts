@@ -1,6 +1,7 @@
 // src/app/api/x402/eoa-wallet/deposit/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
+import { withApiKeyOrMerchant } from "@/lib/middleware/withMerchantAuth";
 
 function sanitizeBigInts(obj: any): any {
   if (typeof obj === "bigint") return obj.toString();
@@ -14,7 +15,7 @@ function sanitizeBigInts(obj: any): any {
 }
 
 // POST — deposit USDC into Gateway
-export async function POST(req: NextRequest) {
+async function depositPostHandler(req: NextRequest) {
   try {
     const { eoaAddress, amount } = await req.json();
     if (!eoaAddress || !amount) {
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
 }
 
 // GET — check Gateway + wallet balance
-export async function GET(req: NextRequest) {
+async function depositGetHandler(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const eoaAddress = searchParams.get("eoaAddress");
@@ -97,3 +98,5 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+export const POST = withApiKeyOrMerchant(depositPostHandler);
+export const GET = withApiKeyOrMerchant(depositGetHandler);

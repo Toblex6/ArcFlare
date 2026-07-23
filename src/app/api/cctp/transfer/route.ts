@@ -1,6 +1,6 @@
 // src/app/api/cctp/transfer/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { startCctpTransferV2, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
+import { startCctpTransferV2, getSourceExplorerTxUrl, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
 
 export async function POST(req: NextRequest) {
   try {
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
       transferId: result.transferId,
       sourceTxHash: result.sourceTxHash,
       fromChain: result.fromChain,
+      explorerUrl: getSourceExplorerTxUrl(result.fromChain, result.sourceTxHash),
       message: "Burn confirmed on the source chain. Waiting for Circle's cross-chain attestation — poll /api/cctp/transfer/status to check progress.",
     });
   } catch (error: any) {

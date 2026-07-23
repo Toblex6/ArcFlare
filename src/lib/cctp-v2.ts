@@ -56,6 +56,16 @@ export function getChainById(id: string) {
   return found?.chain;
 }
 
+// ── Build a correct block-explorer URL for a tx on a given source chain ──
+// The burn happens on the *source* chain (e.g. Arbitrum Sepolia), which has
+// its own explorer — Arc's explorer only knows about Arc-chain transactions,
+// so linking a source burn tx through it will always 404.
+export function getSourceExplorerTxUrl(chainId: string, txHash: string): string | null {
+  const chain = getChainById(chainId);
+  const base = chain?.blockExplorers?.default?.url;
+  return base ? `${base}/tx/${txHash}` : null;
+}
+
 // ── Non-blocking transfer: submit approve+burn, return immediately ──
 // Circle's cross-chain attestation + destination mint (what `transfer.wait()`
 // blocks on) commonly takes 10-20+ minutes on testnet — far longer than any
