@@ -1,40 +1,53 @@
 // src/app/api/cctp/transfer/status/route.ts
 // Poll this after POST /api/cctp/transfer returns { status: "pending" }.
-// Read-only lookup against Circle's attestation service — no wallet client
-// needed, so it's cheap to call every few seconds from the frontend.
+// Resumes/checks the bridge via Bridge Kit's own retry() mechanism.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getCctpTransferStatus, CCTP_SOURCE_CHAINS } from "@/lib/cctp-v2";
+import { checkBridgeStatus, findStep } from "@/lib/cctp-v2";
 
 export async function GET(req: NextRequest) {
     try {
         const { searchParams } = new URL(req.url);
-        const sourceTxHash = searchParams.get("sourceTxHash");
-        const fromChain = searchParams.get("fromChain");
+        const reference = searchParams.get("reference");
 
-        if (!sourceTxHash || !fromChain) {
+        if (!reference) {
             return NextResponse.json(
-                { success: false, error: "sourceTxHash and fromChain query params are required." },
+                { success: false, error: "reference query param is required." },
                 { status: 400 }
             );
         }
 
-        const sourceExists = CCTP_SOURCE_CHAINS.some((c) => c.id === fromChain);
-        if (!sourceExists) {
+        const tracked = await checkBridgeStatus(reference);
+        if (!tracked) {
             return NextResponse.json(
-                { success: false, error: `Unsupported source chain: ${fromChain}` },
-                { status: 400 }
+                { success: false, error: "No bridge found for that reference (it may have already completed, or the server restarted)." },
+                { status: 404 }
             );
         }
 
-        const status = await getCctpTransferStatus({
-            sourceTxHash: sourceTxHash as `0x${string}`,
-            fromChain,
+        if (tracked.status === 'submitting') {
+            return NextResponse.json({ success: true, state: 'submitting' });
+        }
+
+        if (tracked.status === 'error') {
+            return NextResponse.json({ success: true, state: 'error', error: tracked.message });
+        }
+
+        // tracked.status === 'settled' — tracked.result is a real BridgeResult
+        const { result } = tracked;
+        const burnStep = findStep(result, 'Burn');
+        const mintStep = findStep(result, 'Mint');
+
+        return NextResponse.json({
+            success: true,
+            state: result.state, // 'pending' | 'success' | 'error'
+            amount: result.amount,
+            sourceExplorerUrl: burnStep?.explorerUrl,
+            destinationExplorerUrl: mintStep?.explorerUrl,
+            error: result.state === 'error' ? mintStep?.errorMessage || burnStep?.errorMessage : undefined,
         });
-
-        return NextResponse.json({ success: true, ...status });
     } catch (error: any) {
-        console.error("[CCTP status]", error);
+        console.error("[CCTP Bridge status]", error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 }

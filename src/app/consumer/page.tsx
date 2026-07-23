@@ -51,7 +51,7 @@ export default function ConsumerApp() {
   // ── Cross‑chain state ──
   const [chains, setChains] = useState<ChainOption[]>([]);
   const [fromChain, setFromChain] = useState<string>("");
-  const [toChain] = useState<string>("arc");
+  const [toChain] = useState<string>("Arc_Testnet");
   const [crossRecipient, setCrossRecipient] = useState("");
   const [crossAmount, setCrossAmount] = useState("");
   const [crossLoading, setCrossLoading] = useState(false);
@@ -250,56 +250,57 @@ export default function ConsumerApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Transfer failed.");
 
-      // Burn is confirmed at this point, but attestation + mint on Arc can
-      // take several minutes — poll for it instead of leaving one request
-      // open (which would just time out) or claiming success too early.
+      // The whole bridge (burn -> attestation -> mint) runs in the
+      // background from here — poll instead of waiting on one open
+      // request, since Circle's attestation for Arc can take a while.
       setCrossResult({
         success: true,
-        message: `Burn confirmed on ${fromChain}. Waiting for Circle's cross-chain attestation — this can take a few minutes...`,
-        txHash: data.sourceTxHash,
-        explorerUrl: data.explorerUrl,
+        message: `Starting bridge from ${fromChain}...`,
       });
 
-      const sourceTxHash = data.sourceTxHash;
-      const pollFromChain = data.fromChain;
+      const { reference } = data;
       const maxAttempts = 60; // ~10 minutes at 10s intervals
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise((r) => setTimeout(r, 10_000));
-        const statusRes = await fetch(
-          `/api/cctp/transfer/status?sourceTxHash=${sourceTxHash}&fromChain=${pollFromChain}`
-        );
+        const statusRes = await fetch(`/api/cctp/transfer/status?reference=${reference}`);
         const statusData = await statusRes.json();
         if (!statusData.success) continue; // transient — keep polling
 
-        if (statusData.state === "COMPLETE") {
+        if (statusData.state === "success") {
           setCrossResult({
             success: true,
             message: `Bridged ${crossAmount} USDC from ${fromChain} to Arc!`,
-            txHash: statusData.destinationTxHash || sourceTxHash,
-            explorerUrl: `https://testnet.arcscan.app/tx/${statusData.destinationTxHash || sourceTxHash}`,
+            explorerUrl: statusData.destinationExplorerUrl,
           });
-          setCrossLoading(false);
           return;
         }
-        if (statusData.state === "FAILED") {
-          setCrossResult({ success: false, error: statusData.error || "Bridge transfer failed during attestation or mint." });
-          setCrossLoading(false);
+        if (statusData.state === "error") {
+          setCrossResult({ success: false, error: statusData.error || "Bridge transfer failed." });
           return;
         }
-        // Otherwise still in progress (AWAITING_ATTESTATION, ATTESTED, RELAYING) — keep polling.
+        // 'submitting' (burn not confirmed yet) or 'pending' (burn confirmed,
+        // waiting on attestation + mint) — keep polling, show whatever link
+        // is available so far.
+        setCrossResult({
+          success: true,
+          message:
+            statusData.state === "submitting"
+              ? `Confirming burn on ${fromChain}...`
+              : `Burn confirmed on ${fromChain}. Waiting for Circle's attestation and mint — this can take a few minutes...`,
+          explorerUrl: statusData.sourceExplorerUrl,
+        });
       }
 
       setCrossResult({
         success: false,
-        error: "Still waiting on Circle's attestation after 10 minutes. It may still complete — check the source transaction on the explorer. Note: Arc is a new CCTP destination still in preview, so attestation can take longer than usual — you can also check https://iris-api.circle.com directly using the source tx hash.",
-        txHash: sourceTxHash,
-        explorerUrl: data.explorerUrl,
+        error: "Still waiting after 10 minutes. It may still complete — check the source transaction on the explorer. Note: Arc is a newer CCTP destination, so attestation can take longer than usual.",
       });
     } catch (e: any) {
       setCrossResult({ success: false, error: e.message });
     } finally {
       setCrossLoading(false);
     }
+
   };
 
   const submitHandlers: Record<string, () => void> = { send: handleSend, save: handleSave, request: handleRequest };

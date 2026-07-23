@@ -1,9 +1,24 @@
 // src/app/api/cctp/transfer/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { startCctpTransferV2, getSourceExplorerTxUrl, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
+import { startBridge, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
+import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
+import { ensureWalletOnChain } from "@/src/lib/circle/client";
+import { prisma } from "@/src/lib/prisma";
 
 export async function POST(req: NextRequest) {
   try {
+    // Who's paying comes from the session, never the request body — the
+    // whole point of the per-user-wallet design is that we bridge FROM the
+    // logged-in consumer's own Circle wallet, not whatever address a client
+    // claims.
+    const consumerWalletAddress = await resolveConsumerSession(req);
+    if (!consumerWalletAddress) {
+      return NextResponse.json(
+        { success: false, error: "Sign in required to bridge funds." },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
     const { fromChain, toChain, amount, recipient } = body;
 
@@ -14,16 +29,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate source chain
-    const sourceExists = CCTP_SOURCE_CHAINS.some((c) => c.id === fromChain);
-    if (!sourceExists) {
+    const source = CCTP_SOURCE_CHAINS.find((c) => c.id === fromChain);
+    if (!source) {
       return NextResponse.json(
         { success: false, error: `Unsupported source chain: ${fromChain}` },
         { status: 400 }
       );
     }
 
-    // Validate destination chain (only "arc" is allowed)
     const destExists = CCTP_DEST_CHAINS.some((c) => c.id === toChain);
     if (!destExists) {
       return NextResponse.json(
@@ -32,37 +45,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const privateKey = process.env.BUYER_PRIVATE_KEY as `0x${string}`;
-    if (!privateKey) {
+    const account = await (prisma as any).consumerAccount.findUnique({
+      where: { walletAddress: consumerWalletAddress },
+    });
+
+    if (!account || account.walletType !== 'CIRCLE' || !account.walletSetId) {
       return NextResponse.json(
-        { success: false, error: "Private key not configured" },
-        { status: 500 }
+        {
+          success: false,
+          error: "Bridging currently requires a FlareHQ-created wallet — external (bring-your-own) wallets can't be bridged from automatically.",
+        },
+        { status: 400 }
       );
     }
 
-    const result = await startCctpTransferV2({
+    // The consumer's wallet is only provisioned on Arc at signup. Add it to
+    // the requested source chain the first time they bridge from there —
+    // same address (Circle SCA wallets share an address across a wallet
+    // set's chains), just a new signable resource on that specific chain.
+    await ensureWalletOnChain(account.walletSetId, source.circleBlockchain);
+
+    const { reference } = startBridge({
       fromChain,
       toChain,
       amount,
-      recipient,
-      privateKey,
+      senderAddress: consumerWalletAddress as `0x${string}`,
+      recipientAddress: recipient,
     });
 
-    // Don't wait for attestation + mint here — that's a 10-20+ minute
-    // process on testnet and would hang this request past any proxy
-    // timeout. The burn is confirmed by the time we get here; hand back
-    // enough to poll GET /api/cctp/transfer/status for the rest.
     return NextResponse.json({
       success: true,
-      status: "pending", // burn confirmed, awaiting Circle attestation + destination mint
-      transferId: result.transferId,
-      sourceTxHash: result.sourceTxHash,
-      fromChain: result.fromChain,
-      explorerUrl: getSourceExplorerTxUrl(result.fromChain, result.sourceTxHash),
-      message: "Burn confirmed on the source chain. Waiting for Circle's cross-chain attestation — poll /api/cctp/transfer/status to check progress.",
+      status: "pending",
+      reference,
+      message: "Bridge started — poll /api/cctp/transfer/status?reference=... to check progress.",
     });
   } catch (error: any) {
-    console.error("[CCTP API]", error);
+    console.error("[CCTP Bridge]", error);
     return NextResponse.json(
       { success: false, error: error.message },
       { status: 500 }
@@ -73,15 +91,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    sourceChains: CCTP_SOURCE_CHAINS.map((c) => ({
-      id: c.id,
-      label: c.label,
-      testnet: c.testnet,
-    })),
-    destinationChains: CCTP_DEST_CHAINS.map((c) => ({
-      id: c.id,
-      label: c.label,
-      testnet: c.testnet,
-    })),
+    sourceChains: CCTP_SOURCE_CHAINS,
+    destinationChains: CCTP_DEST_CHAINS,
   });
 }

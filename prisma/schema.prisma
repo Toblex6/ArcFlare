@@ -148,6 +148,7 @@ model ConsumerAccount {
   walletAddress String    @unique
   walletType    String    @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
   circleWalletId String?
+  walletSetId   String?   // needed to provision this same SCA address on additional chains (e.g. for bridging)
   email         String?   @unique // optional — recovery/notifications only, never required
   createdAt     DateTime  @default(now())
   lastSeenAt    DateTime  @default(now())

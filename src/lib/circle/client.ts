@@ -157,3 +157,37 @@ export async function createWallets(name: string, count: number = 2) {
     })),
   };
 }
+
+// Circle SCA wallets share the same address across every EVM chain in a
+// wallet set, but each chain still needs its own explicit wallet *resource*
+// created before Circle can sign anything on it. A consumer's wallet is
+// only ever provisioned on Arc at signup — this lazily adds the requested
+// chain to their existing wallet set the first time they need it (e.g. the
+// first time they bridge FROM that chain), reusing the same address.
+export async function ensureWalletOnChain(
+  walletSetId: string,
+  circleBlockchainId: string
+): Promise<{ id: string; address: string }> {
+  const circleClient = getCircleClient();
+
+  const existing = await circleClient.listWallets({
+    walletSetId,
+    blockchain: circleBlockchainId as any,
+  });
+  const found = existing.data?.wallets?.[0];
+  if (found?.id && found.address) {
+    return { id: found.id, address: found.address };
+  }
+
+  const created = await circleClient.createWallets({
+    blockchains: [circleBlockchainId as any],
+    count: 1,
+    walletSetId,
+    accountType: 'SCA',
+  });
+  const wallet = created.data?.wallets?.[0];
+  if (!wallet?.id || !wallet?.address) {
+    throw new Error(`Failed to provision wallet on ${circleBlockchainId}`);
+  }
+  return { id: wallet.id, address: wallet.address };
+}

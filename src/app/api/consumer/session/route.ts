@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
                 walletAddress: wallet.address,
                 walletType: 'CIRCLE',
                 circleWalletId: wallet.walletId,
+                walletSetId: wallet.walletSetId,
             },
         });
 
