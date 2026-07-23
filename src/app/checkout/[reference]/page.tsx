@@ -43,7 +43,7 @@ export default function CheckoutPage() {
   const [secondsLeft, setSecondsLeft] = useState(900); // 15-minute link expiration timer
 
   const { address, isConnected } = useAccount();
-  const { connectors, connect } = useConnect();
+  const { connectors, connect, error: connectError, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const { writeContractAsync } = useWriteContract();
 
@@ -267,9 +267,14 @@ export default function CheckoutPage() {
                     color: '#f0ece6',
                   }}
                 >
-                  Connect {c.name}
+                  {isConnecting ? 'Connecting...' : `Connect ${c.name}`}
                 </button>
               ))}
+              {connectError && (
+                <p style={{ color: '#f87171', fontSize: 'clamp(10px, 0.9vw, 12px)', margin: '4px 0 0' }}>
+                  ⚠️ {connectError.message || 'Could not connect. Make sure you have a wallet app installed.'}
+                </p>
+              )}
             </div>
           ) : (
             <>

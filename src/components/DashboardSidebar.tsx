@@ -38,6 +38,7 @@ const SECTIONS: NavSection[] = [
             { label: 'Agent Wallets', href: '/agent-wallets' },
             { label: 'Jobs', href: '/jobs' },
             { label: 'Nanopayments', href: '/nano' },
+            { label: 'Agent Brain', href: '/agent-brain' },
         ],
     },
     {
@@ -58,6 +59,7 @@ const ICONS: Record<string, JSX.Element> = {
     Agents: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /><line x1="12" y1="11" x2="12" y2="15" /></svg>,
     'AI Agent': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" /></svg>,
     'Agent Wallets': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="7" cy="15" r="1.5" /></svg>,
+    'Agent Brain': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" /></svg>,
     Jobs: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>,
     Nanopayments: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /><path d="M12 8v8" /></svg>,
     Payroll: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 4h16v16H4z" /><path d="M4 8h16" /><path d="M4 16h16" /><path d="M8 4v4" /><path d="M16 4v4" /></svg>,

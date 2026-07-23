@@ -30,6 +30,29 @@ const nextConfig = {
       },
     ];
   },
+  webpack: (config, { webpack }) => {
+    // @coinbase/cdp-sdk (pulled in transitively via wagmi's Coinbase Smart
+    // Wallet connector) lazy-loads Solana x402 support through its own
+    // `importX402Dependency()` helper, which already try/catches the import
+    // at runtime — we don't use Solana anywhere in this app, and the
+    // package isn't installed. Webpack still tries to statically resolve
+    // it at build time and hard-fails since there's nothing there to find.
+    // Tell webpack to skip it entirely; the runtime guard handles the rest.
+    config.plugins.push(
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^@x402\/svm(\/.*)?$/,
+      })
+    );
+
+    config.plugins.push(
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^accounts$/,
+      })
+    );
+
+
+    return config;
+  },
 };
 
 export default withSentryConfig(nextConfig, {
