@@ -462,7 +462,7 @@ export default function ConsumerApp() {
                 </div>
                 <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
                   <a
-                    href="https://faucet-v2.circle.com/"
+                    href="https://faucet.circle.com/"
                     target="_blank"
                     rel="noopener noreferrer"
                     style={styles.faucetButton}
@@ -520,7 +520,7 @@ export default function ConsumerApp() {
                 <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 13 }}>Need more test USDC?</p>
                 <p style={{ margin: 0, fontSize: 12, color: "#8a7560" }}>Opens Circle's official Arc testnet faucet.</p>
               </div>
-              <a href="https://faucet-v2.circle.com/" target="_blank" rel="noopener noreferrer" style={styles.faucetCardLink}>
+              <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" style={styles.faucetCardLink}>
                 Open faucet ↗
               </a>
             </section>
