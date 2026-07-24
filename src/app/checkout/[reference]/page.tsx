@@ -4,9 +4,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
-import { useAccount, useConnect, useDisconnect, useWriteContract } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, useSwitchChain } from 'wagmi';
 import { parseUnits } from 'viem';
 import { USDC_CONTRACT, USDC_DECIMALS, erc20TransferAbi } from '@/src/lib/wallet/erc20';
+import { arcTestnet } from '@/src/lib/wagmi';
 
 interface PaymentLogData {
   reference: string;
@@ -46,6 +47,9 @@ export default function CheckoutPage() {
   const { connectors, connect, error: connectError, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const { writeContractAsync } = useWriteContract();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
+  const [networkMismatch, setNetworkMismatch] = useState(false);
 
   const fetchLedgerStatus = async () => {
     if (!reference) return;
@@ -111,7 +115,25 @@ export default function CheckoutPage() {
 
     try {
       setSettleError(null);
+      setNetworkMismatch(false);
       setIsTxPending(true);
+
+      // Explicitly switch chains ourselves, with a clear fallback, rather
+      // than letting writeContractAsync silently try and fail — many
+      // mobile wallets connected via WalletConnect don't support adding an
+      // unrecognized custom chain like Arc Testnet programmatically.
+      if (chainId !== arcTestnet.id) {
+        try {
+          await switchChainAsync({ chainId: arcTestnet.id });
+        } catch {
+          setIsTxPending(false);
+          setNetworkMismatch(true);
+          setSettleError(
+            'Your wallet could not switch networks automatically. Please add Arc Testnet manually — details below — then try again.'
+          );
+          return;
+        }
+      }
 
       const txHash = await writeContractAsync({
         address: USDC_CONTRACT as `0x${string}`,
@@ -317,6 +339,32 @@ export default function CheckoutPage() {
           {settleError && (
             <div style={{ marginTop: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: 14, textAlign: 'center' }}>
               <p style={{ color: '#f87171', fontSize: 'clamp(11px, 1vw, 13px)', margin: 0 }}>❌ {settleError}</p>
+            </div>
+          )}
+
+          {networkMismatch && (
+            <div style={{ marginTop: 12, background: '#1a1410', border: '1px solid #2d2015', borderRadius: 12, padding: 14 }}>
+              <p style={{ color: '#c8975a', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 700, margin: '0 0 8px' }}>
+                Add this network manually in your wallet:
+              </p>
+              {[
+                ['Network Name', 'Arc Testnet'],
+                ['Chain ID', String(arcTestnet.id)],
+                ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
+                ['Currency Symbol', 'ARC'],
+                ['Block Explorer', arcTestnet.blockExplorers.default.url],
+              ].map(([label, value]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 'clamp(10px, 0.9vw, 12px)', color: '#a89684', padding: '4px 0', borderBottom: '1px solid #2d2015' }}>
+                  <span>{label}</span>
+                  <span
+                    style={{ color: '#f0ece6', fontFamily: 'monospace', cursor: 'pointer', wordBreak: 'break-all', textAlign: 'right' }}
+                    onClick={() => navigator.clipboard.writeText(value)}
+                    title="Tap to copy"
+                  >
+                    {value}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
           {isConfirmed && (

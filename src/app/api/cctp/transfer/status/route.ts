@@ -38,12 +38,18 @@ export async function GET(req: NextRequest) {
         const burnStep = findStep(result, 'Burn');
         const mintStep = findStep(result, 'Mint');
 
+        // Bridge Kit doesn't always populate step.explorerUrl until the step is
+        // fully finalized — fall back to building the Arc explorer link
+        // ourselves from the tx hash if we have one but no ready-made URL yet.
+        const destinationExplorerUrl =
+            mintStep?.explorerUrl || (mintStep?.txHash ? `https://testnet.arcscan.app/tx/${mintStep.txHash}` : undefined);
+
         return NextResponse.json({
             success: true,
             state: result.state, // 'pending' | 'success' | 'error'
             amount: result.amount,
             sourceExplorerUrl: burnStep?.explorerUrl,
-            destinationExplorerUrl: mintStep?.explorerUrl,
+            destinationExplorerUrl,
             error: result.state === 'error' ? mintStep?.errorMessage || burnStep?.errorMessage : undefined,
         });
     } catch (error: any) {

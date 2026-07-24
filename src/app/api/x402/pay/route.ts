@@ -56,7 +56,6 @@ async function x402PayHandler(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
-      validity: { maxSeconds: 300 },  // ✅ fix here too
     });
     console.log(`[x402 pay] Success! TX: ${response.transaction}`);
 

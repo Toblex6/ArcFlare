@@ -26,7 +26,7 @@ const SECTIONS: NavSection[] = [
             { label: 'Dashboard', href: '/merchant/dashboard' },
             { label: 'Homepage', href: '/' },
             { label: 'Transactions', href: '/transactions' },
-            { label: 'Checkout', href: '/merchant/dashboard#checkout' },
+            //{ label: 'Checkout', href: '/merchant/dashboard#checkout' },
             { label: 'Escrow', href: '/escrow' },
         ],
     },
@@ -35,19 +35,19 @@ const SECTIONS: NavSection[] = [
         items: [
             { label: 'Agents', href: '/agents' },
             { label: 'AI Agent', href: '/agent-services' },
+            { label: 'Agent Brain', href: '/agent-brain' },
             { label: 'Agent Wallets', href: '/agent-wallets' },
             { label: 'Jobs', href: '/jobs' },
             { label: 'Nanopayments', href: '/nano' },
-            { label: 'Agent Brain', href: '/agent-brain' },
         ],
     },
-    {
+    /*{
         group: 'BUSINESS',
         items: [
             { label: 'Payroll', href: '/payroll' },
             { label: 'Scheduled', href: '/scheduled' },
         ],
-    },
+    },*/
 ];
 
 const ICONS: Record<string, JSX.Element> = {
@@ -136,9 +136,9 @@ export default function DashboardSidebar({ active }: { active: string }) {
                 }}
             >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36, paddingLeft: 6 }}>
-                    <Image src="/arcflare-logo.png.png" alt="ArcFlare" width={36} height={36} style={{ borderRadius: 8, objectFit: 'contain' }} />
+                    <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={36} height={36} style={{ borderRadius: 8, objectFit: 'contain' }} />
                     <div>
-                        <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>ArcFlare</p>
+                        <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
                         <p style={{ color: '#4b5563', fontSize: 10, margin: '3px 0 0 0' }}>Stablecoin Payment Infrastructure</p>
                     </div>
                 </div>

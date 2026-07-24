@@ -36,6 +36,7 @@ export default function ConsumerApp() {
   const [view, setView] = useState<View>("home");
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
+  const [justCreatedWallet, setJustCreatedWallet] = useState(false);
   const [onboardingInput, setOnboardingInput] = useState("");
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [creatingWallet, setCreatingWallet] = useState(false);
@@ -52,10 +53,35 @@ export default function ConsumerApp() {
   const [chains, setChains] = useState<ChainOption[]>([]);
   const [fromChain, setFromChain] = useState<string>("");
   const [toChain] = useState<string>("Arc_Testnet");
-  const [crossRecipient, setCrossRecipient] = useState("");
   const [crossAmount, setCrossAmount] = useState("");
   const [crossLoading, setCrossLoading] = useState(false);
   const [crossResult, setCrossResult] = useState<ActionResult | null>(null);
+  const [balance, setBalance] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [activity, setActivity] = useState<any[]>([]);
+
+  const refreshBalance = () => {
+    if (!walletAddress) return;
+    setBalanceLoading(true);
+    fetch("/api/consumer/balance")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setBalance(data.balance);
+      })
+      .catch(console.error)
+      .finally(() => setBalanceLoading(false));
+  };
+
+  useEffect(() => {
+    if (!walletAddress) return;
+    refreshBalance();
+    fetch("/api/consumer/activity")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setActivity(data.activity || []);
+      })
+      .catch(console.error);
+  }, [walletAddress]);
 
   // ── Check for existing session ──
   useEffect(() => {
@@ -127,6 +153,7 @@ export default function ConsumerApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not create a wallet right now.");
       setWalletAddress(data.account.walletAddress);
+      setJustCreatedWallet(true);
       setView("home");
     } catch (e: any) {
       setOnboardingError(e.message);
@@ -147,7 +174,6 @@ export default function ConsumerApp() {
     setRecipient("");
     setAmount("");
     setResult(null);
-    setCrossRecipient("");
     setCrossAmount("");
     setCrossResult(null);
   };
@@ -230,7 +256,7 @@ export default function ConsumerApp() {
 
   // ── Cross‑chain transfer ──
   const handleCrossChain = async () => {
-    if (!fromChain || !crossAmount || !crossRecipient) {
+    if (!fromChain || !crossAmount) {
       setCrossResult({ success: false, error: "Please fill in all fields." });
       return;
     }
@@ -244,7 +270,7 @@ export default function ConsumerApp() {
           fromChain,
           toChain,
           amount: crossAmount,
-          recipient: crossRecipient,
+          recipient: walletAddress,
         }),
       });
       const data = await res.json();
@@ -425,6 +451,42 @@ export default function ConsumerApp() {
               <h1 style={styles.heroTitle}>Your money,<br />moving on its own.</h1>
               <p style={styles.heroSub}>Send to anyone. Save without thinking. Get paid in seconds.</p>
             </section>
+
+            {justCreatedWallet && (
+              <section style={styles.faucetBanner}>
+                <div>
+                  <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 14 }}>🎉 Wallet created!</p>
+                  <p style={{ margin: 0, fontSize: 13, color: "#5C5850" }}>
+                    Grab some free test USDC to try sending, saving, and bridging.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <a
+                    href="https://faucet-v2.circle.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={styles.faucetButton}
+                  >
+                    Get Test USDC
+                  </a>
+                  <button style={styles.faucetDismiss} onClick={() => setJustCreatedWallet(false)}>✕</button>
+                </div>
+              </section>
+            )}
+
+            <section style={styles.balanceCard}>
+              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#8a7560", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Balance
+              </p>
+              <p style={{ margin: 0, fontSize: "clamp(28px, 5vw, 36px)", fontWeight: 700, fontFamily: "'Fraunces', serif" }}>
+                {balanceLoading ? "..." : balance !== null ? `$${parseFloat(balance).toFixed(2)}` : "—"}
+                <span style={{ fontSize: 16, fontWeight: 500, color: "#8a7560", marginLeft: 6 }}>USDC</span>
+              </p>
+              <button style={styles.refreshBalanceButton} onClick={refreshBalance} disabled={balanceLoading}>
+                {balanceLoading ? "Refreshing..." : "↻ Refresh"}
+              </button>
+            </section>
+
             <section style={styles.actionsGrid} className="flow-actions-grid">
               <button style={styles.actionCard} onClick={() => goTo("send")}>
                 <span style={styles.actionIcon}>→</span>
@@ -452,6 +514,43 @@ export default function ConsumerApp() {
                 <span style={styles.actionSub}>Manage payroll with natural language</span>
               </button>
             </section>
+
+            <section style={styles.faucetCard}>
+              <div>
+                <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 13 }}>Need more test USDC?</p>
+                <p style={{ margin: 0, fontSize: 12, color: "#8a7560" }}>Opens Circle's official Arc testnet faucet.</p>
+              </div>
+              <a href="https://faucet-v2.circle.com/" target="_blank" rel="noopener noreferrer" style={styles.faucetCardLink}>
+                Open faucet ↗
+              </a>
+            </section>
+
+            <section>
+              <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "#5C5850" }}>Recent Activity</p>
+              {activity.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 13, color: "#8a7560" }}>No transactions yet.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {activity.map((a) => (
+                    <div key={a.reference} style={styles.activityRow}>
+                      <div>
+                        <p style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 600 }}>
+                          {a.direction === "out" ? "Sent" : "Received"}
+                          {a.counterparty ? ` ${a.direction === "out" ? "to" : "from"} ${a.counterparty.slice(0, 6)}...${a.counterparty.slice(-4)}` : ""}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 11, color: "#8a7560" }}>
+                          {new Date(a.timestamp).toLocaleString()} · {a.status}
+                        </p>
+                      </div>
+                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: a.direction === "out" ? "#C0563A" : "#3F7A57" }}>
+                        {a.direction === "out" ? "-" : "+"}${a.amount.toFixed(2)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
             <p style={styles.footnote}>Built on Arc · Settled in USDC · Every transfer is real and onchain</p>
           </>
         )}
@@ -581,17 +680,14 @@ export default function ConsumerApp() {
                   />
                 </div>
                 <div style={styles.field}>
-                  <label style={styles.label}>Your Arc Address</label>
-                  <input
-                    style={styles.input}
-                    value={crossRecipient}
-                    onChange={(e) => setCrossRecipient(e.target.value)}
-                    placeholder="0x..."
-                  />
+                  <label style={styles.label}>Arriving in</label>
+                  <div style={{ ...styles.input, background: "#EDE6D8", display: "flex", alignItems: "center", fontFamily: "monospace", fontSize: "clamp(11px, 1vw, 13px)" }}>
+                    Your wallet ({walletAddress.slice(0, 6)}...{walletAddress.slice(-4)})
+                  </div>
                 </div>
                 <button
                   style={styles.submitButton}
-                  disabled={crossLoading || !crossAmount || !crossRecipient || !fromChain}
+                  disabled={crossLoading || !crossAmount || !fromChain}
                   onClick={handleCrossChain}
                 >
                   {crossLoading ? "Processing..." : "Bridge to Arc"}
@@ -605,7 +701,7 @@ export default function ConsumerApp() {
                 <p style={styles.resultText}>{crossResult.success ? crossResult.message : crossResult.error}</p>
                 {crossResult.explorerUrl && (
                   <a href={crossResult.explorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>
-                    View source transaction
+                    View transaction
                   </a>
                 )}
                 <button style={styles.doneButton} onClick={() => goTo("home")}>Done</button>
@@ -640,13 +736,13 @@ const FONT_IMPORT = `
      applies by default (nothing changes on small screens) — these rules
      only kick in once there's real horizontal space to use. */
   @media (min-width: 720px) {
-    .flareHq flow-app {
+    .flow-app {
       max-width: 720px !important;
       padding: 0 24px !important;
     }
   }
   @media (min-width: 1080px) {
-    .flareHQ flow-app {
+    .flow-app {
       max-width: 1040px !important;
       padding: 0 40px !important;
     }
@@ -703,6 +799,37 @@ const styles: Record<string, React.CSSProperties> = {
   },
   contentArea: { flex: 1, padding: "0 0 80px", overflowY: "auto" },
   hero: { padding: "20px 0 16px" },
+  faucetBanner: {
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+    background: "#FCEFE2", border: "1px solid #F0D9BC", borderRadius: 14,
+    padding: "14px 16px", margin: "0 0 16px",
+  },
+  faucetButton: {
+    display: "inline-block", background: "#1C1B19", color: "#FBF8F3", fontSize: 13, fontWeight: 700,
+    padding: "8px 14px", borderRadius: 10, textDecoration: "none", whiteSpace: "nowrap",
+  },
+  faucetDismiss: {
+    background: "none", border: "none", color: "#8a7560", fontSize: 14, cursor: "pointer", padding: 4,
+  },
+  balanceCard: {
+    background: "#1C1B19", color: "#FBF8F3", borderRadius: 18, padding: "20px 22px",
+    margin: "0 0 16px", position: "relative",
+  },
+  refreshBalanceButton: {
+    position: "absolute", top: 18, right: 20, background: "rgba(255,255,255,0.1)", color: "#FBF8F3",
+    border: "none", borderRadius: 8, fontSize: 12, padding: "6px 10px", cursor: "pointer",
+  },
+  faucetCard: {
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+    background: "#F3EEE1", borderRadius: 14, padding: "14px 16px", margin: "0 0 20px",
+  },
+  faucetCardLink: {
+    fontSize: 13, fontWeight: 700, color: "#1C1B19", textDecoration: "none", whiteSpace: "nowrap",
+  },
+  activityRow: {
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+    background: "#F3EEE1", borderRadius: 12, padding: "10px 14px",
+  },
   eyebrow: { fontSize: "clamp(10px, 1vw, 12px)", color: "#5C7A5C", fontWeight: 600, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 14px" },
   heroTitle: {
     fontFamily: "'Fraunces', serif",
