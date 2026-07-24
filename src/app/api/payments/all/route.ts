@@ -36,19 +36,13 @@ export async function GET(req: NextRequest) {
       reference: log.reference,
       amount: log.amount || 0,
       currency: log.currency || 'USDC',
-      chain: log.chain || 'Arbitrum Sepolia ➔ Arc Testnet',
+      chain: log.chain || 'Arc Testnet',
       status: log.status,
       sender_email: log.senderEmail || 'autonomous-agent@bot.network',
       merchant: log.merchant || 'Dispatch Marketplace',
       // Ensure date is a string to prevent serialization errors
       paid_at: (log.timestamp || new Date()).toISOString(),
-      cctp_telemetry: {
-        source_domain: 3,
-        target_domain: 7,
-        attestation_status:
-          log.status === 'SUCCESS' ? 'REDEEMED_AND_MINTED' : 'POLLING_CIRCLE_TESTNET_IRIS_API',
-        nonce: Math.floor(100000 + Math.random() * 800000),
-      },
+      arcTxHash: log.arcTxHash || null,
     }));
 
     return NextResponse.json({

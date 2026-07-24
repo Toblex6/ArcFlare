@@ -18,10 +18,7 @@ interface PaymentItem {
   sender_email: string;
   merchant: string;
   paid_at: string;
-  cctp_telemetry: {
-    attestation_status: string;
-    nonce: number;
-  };
+  arcTxHash: string | null;
 }
 
 export default function TransactionsPage() {
@@ -91,7 +88,7 @@ export default function TransactionsPage() {
                     <th className="text-left pb-3 pr-4">Execution Domain</th>
                     <th className="text-left pb-3 pr-4">Payload Value</th>
                     <th className="text-left pb-3 pr-4">Status</th>
-                    <th className="text-left pb-3">Circle CCTP Attestation</th>
+                    <th className="text-left pb-3">Transaction ID</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -121,8 +118,8 @@ export default function TransactionsPage() {
                           {payment.status}
                         </span>
                       </td>
-                      <td className="py-4 text-slate-500 text-[10px]">
-                        {payment.cctp_telemetry.attestation_status}
+                      <td className="py-4 text-slate-500 text-[10px] font-mono">
+                        {payment.arcTxHash ? `${payment.arcTxHash.slice(0, 8)}...${payment.arcTxHash.slice(-6)}` : '—'}
                       </td>
                     </tr>
                   ))}

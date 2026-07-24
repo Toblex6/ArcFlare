@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation';
 interface NavItem {
     label: string;
     href: string;
+    disabled?: boolean;
 }
 interface NavSection {
     group: string;
@@ -26,28 +27,44 @@ const SECTIONS: NavSection[] = [
             { label: 'Dashboard', href: '/merchant/dashboard' },
             { label: 'Homepage', href: '/' },
             { label: 'Transactions', href: '/transactions' },
-            //{ label: 'Checkout', href: '/merchant/dashboard#checkout' },
             { label: 'Escrow', href: '/escrow' },
         ],
     },
+    // Ordered to match the actual dependency chain: identity (ERC-8004)
+    // must exist first -> payments (x402/Nanopayments) move money for that
+    // identity -> jobs (ERC-8183) wrap multi-step work on top of that same
+    // payment rail -> Agent Brain orchestrates all of it.
     {
-        group: 'AGENTS & COMMERCE',
+        group: 'AGENT IDENTITY',
         items: [
-            { label: 'Agents', href: '/agents' },
-            { label: 'AI Agent', href: '/agent-services' },
-            { label: 'Agent Brain', href: '/agent-brain' },
-            { label: 'Agent Wallets', href: '/agent-wallets' },
-            { label: 'Jobs', href: '/jobs' },
-            { label: 'Nanopayments', href: '/nano' },
+            { label: 'Agents', href: '/agents' }, // ERC-8004 registry — create/view agent identities
         ],
     },
-    /*{
-        group: 'BUSINESS',
+    {
+        group: 'AGENT PAYMENTS',
         items: [
-            { label: 'Payroll', href: '/payroll' },
-            { label: 'Scheduled', href: '/scheduled' },
+            { label: 'Nanopayments', href: '/nano' }, // x402 — the payment rail everything else uses
+            { label: 'AI Agent', href: '/agent-services' }, // single-task paid call
         ],
-    },*/
+    },
+    {
+        group: 'AGENT WORK & ESCROW',
+        items: [
+            { label: 'Jobs', href: '/jobs' }, // ERC-8183 — multi-step work with escrow
+        ],
+    },
+    {
+        group: 'ORCHESTRATION',
+        items: [
+            { label: 'Agent Brain', href: '/agent-brain' }, // natural-language layer over everything above
+        ],
+    },
+    {
+        group: 'COMING SOON',
+        items: [
+            { label: 'Agent Wallets', href: '/agent-wallets', disabled: true }, // policy-controlled wallets — not yet wired to a working Circle API path
+        ],
+    },
 ];
 
 const ICONS: Record<string, JSX.Element> = {
@@ -151,6 +168,24 @@ export default function DashboardSidebar({ active }: { active: string }) {
                             </p>
                             {section.items.map((item) => {
                                 const isActive = item.label === active;
+                                if (item.disabled) {
+                                    return (
+                                        <span
+                                            key={item.label}
+                                            title="Coming soon"
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: 10,
+                                                padding: '9px 12px', borderRadius: 9,
+                                                fontSize: 13, fontWeight: 500,
+                                                color: '#3f3a35', cursor: 'not-allowed',
+                                                border: '1px solid transparent',
+                                            }}
+                                        >
+                                            {ICONS[item.label]}
+                                            <span>{item.label}</span>
+                                        </span>
+                                    );
+                                }
                                 return (
                                     <a
                                         key={item.label}

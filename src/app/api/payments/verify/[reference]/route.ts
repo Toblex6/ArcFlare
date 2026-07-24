@@ -69,21 +69,16 @@ function formatResponse(payment: any) {
     reference: payment.reference,
     amount: payment.amount,
     currency: payment.currency,
-    chain: payment.chain || 'Arbitrum Sepolia ➔ Arc Testnet (via Circle CCTP)',
+    chain: payment.chain || 'Arc Testnet',
     gateway_response: hasSettled ? 'Successful' : 'Pending',
     status: payment.status,
     sender_email: payment.senderEmail || 'autonomous-agent@bot.network',
     merchant: payment.merchant || 'Dispatch Marketplace',
     merchantSCA: payment.merchantSCA || null,
     paid_at: payment.timestamp,
-    cctp_telemetry: {
-      source_domain: 3,
-      target_domain: 7,
-      attestation_status: hasSettled ? 'REDEEMED_AND_MINTED' : 'POLLING_CIRCLE_TESTNET_IRIS_API',
-      nonce: Math.floor(100000 + Math.random() * 900000),
-      message_bytes: hasSettled
-        ? '0x00000003000000000000000000000000' + payment.reference
-        : 'Awaiting testnet burn receipt...',
-    },
+    // Real data only — no fabricated telemetry. arcTxHash is the actual
+    // on-chain transaction hash once verify-onchain confirms a real
+    // transfer; it's null until then, not a randomly generated placeholder.
+    arcTxHash: payment.arcTxHash || null,
   };
 }
