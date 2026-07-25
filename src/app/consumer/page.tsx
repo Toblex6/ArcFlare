@@ -37,6 +37,16 @@ export default function ConsumerApp() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
   const [justCreatedWallet, setJustCreatedWallet] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("flow-theme");
+    if (saved === "dark") setDarkMode(true);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("flow-theme", darkMode ? "dark" : "light");
+  }, [darkMode]);
   const [onboardingInput, setOnboardingInput] = useState("");
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [creatingWallet, setCreatingWallet] = useState(false);
@@ -195,7 +205,7 @@ export default function ConsumerApp() {
       const initRes = await fetch(`/api/payments/initialize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, currency: "USDC", payoutAddress: recipient, merchant: recipient }),
+        body: JSON.stringify({ amount, currency: "USDC", payoutAddress: recipient, merchant: recipient, direction: "send" }),
       });
       const initData = await initRes.json();
       if (!initData.success) throw new Error(initData.error || "Could not start payment.");
@@ -242,7 +252,7 @@ export default function ConsumerApp() {
       const res = await fetch(`/api/payments/initialize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, currency: "USDC", merchant: "Payment request" }),
+        body: JSON.stringify({ amount, currency: "USDC", merchant: "Payment request", direction: "request" }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not create request.");
@@ -334,7 +344,7 @@ export default function ConsumerApp() {
   // ── Onboarding view ──
   if (checkingSession) {
     return (
-      <main style={styles.page} className="flarehq flow-app">
+      <main style={styles.page} className="flarehq flow-app" data-theme={darkMode ? "dark" : "light"}>
         <style>{FONT_IMPORT}</style>
         <div style={styles.onboardingWrap}>
           <p style={{ ...styles.onboardingSub, textAlign: "center" }}>Loading...</p>
@@ -345,7 +355,7 @@ export default function ConsumerApp() {
 
   if (view === "onboarding") {
     return (
-      <main style={styles.page} className="flareHQ flow-app">
+      <main style={styles.page} className="flareHQ flow-app" data-theme={darkMode ? "dark" : "light"}>
         <style>{FONT_IMPORT}</style>
         <div style={styles.onboardingWrap}>
           <div style={styles.headerLeft}>
@@ -378,7 +388,7 @@ export default function ConsumerApp() {
 
   // ── Main Dashboard ──
   return (
-    <main style={styles.page} className="flareHQ flow-app">
+    <main style={styles.page} className="flareHQ flow-app" data-theme={darkMode ? "dark" : "light"}>
       <style>{FONT_IMPORT}</style>
       <header style={styles.header}>
         <div style={styles.headerLeft}>
@@ -391,55 +401,64 @@ export default function ConsumerApp() {
           />
           <span style={styles.appName}>FlareHQ Flow</span>
         </div>
-        <div style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
-            style={styles.walletPill}
-            onClick={() => setWalletMenuOpen((o) => !o)}
-            title="Wallet options"
+            style={styles.themeToggle}
+            onClick={() => setDarkMode((d) => !d)}
+            title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
           >
-            {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+            {darkMode ? "☀️" : "🌙"}
           </button>
-          {walletMenuOpen && (
-            <>
-              <div
-                style={{ position: 'fixed', inset: 0, zIndex: 10 }}
-                onClick={() => setWalletMenuOpen(false)}
-              />
-              <div
-                style={{
-                  position: 'absolute', top: '110%', right: 0, zIndex: 11,
-                  background: '#FFFFFF', border: '1px solid #E5DDC9', borderRadius: 12,
-                  boxShadow: '0 8px 20px rgba(0,0,0,0.12)', overflow: 'hidden', minWidth: 180,
-                }}
-              >
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(walletAddress);
-                    setAddressCopied(true);
-                    setTimeout(() => setAddressCopied(false), 1500);
-                  }}
+          <div style={{ position: 'relative' }}>
+            <button
+              style={styles.walletPill}
+              onClick={() => setWalletMenuOpen((o) => !o)}
+              title="Wallet options"
+            >
+              {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+            </button>
+            {walletMenuOpen && (
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 10 }}
+                  onClick={() => setWalletMenuOpen(false)}
+                />
+                <div
                   style={{
-                    width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
-                    border: 'none', fontSize: 13, color: '#1C1B19', cursor: 'pointer',
+                    position: 'absolute', top: '110%', right: 0, zIndex: 11,
+                    background: 'var(--flow-surface)', border: '1px solid var(--flow-border)', borderRadius: 12,
+                    boxShadow: '0 8px 20px rgba(0,0,0,0.12)', overflow: 'hidden', minWidth: 180,
                   }}
                 >
-                  {addressCopied ? '✓ Copied' : '📋 Copy address'}
-                </button>
-                <button
-                  onClick={() => {
-                    setWalletMenuOpen(false);
-                    disconnectWallet();
-                  }}
-                  style={{
-                    width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
-                    border: 'none', borderTop: '1px solid #E5DDC9', fontSize: 13, color: '#C0563A', cursor: 'pointer',
-                  }}
-                >
-                  ⎋ Disconnect
-                </button>
-              </div>
-            </>
-          )}
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(walletAddress);
+                      setAddressCopied(true);
+                      setTimeout(() => setAddressCopied(false), 1500);
+                    }}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
+                      border: 'none', fontSize: 13, color: 'var(--flow-text)', cursor: 'pointer',
+                    }}
+                  >
+                    {addressCopied ? '✓ Copied' : '📋 Copy address'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setWalletMenuOpen(false);
+                      disconnectWallet();
+                    }}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
+                      border: 'none', borderTop: '1px solid var(--flow-border)', fontSize: 13, color: '#C0563A', cursor: 'pointer',
+                    }}
+                  >
+                    ⎋ Disconnect
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -456,7 +475,7 @@ export default function ConsumerApp() {
               <section style={styles.faucetBanner}>
                 <div>
                   <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 14 }}>🎉 Wallet created!</p>
-                  <p style={{ margin: 0, fontSize: 13, color: "#5C5850" }}>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--flow-text-muted)" }}>
                     Grab some free test USDC to try sending, saving, and bridging.
                   </p>
                 </div>
@@ -475,12 +494,12 @@ export default function ConsumerApp() {
             )}
 
             <section style={styles.balanceCard}>
-              <p style={{ margin: "0 0 4px", fontSize: 12, color: "#8a7560", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--flow-text-faint)", textTransform: "uppercase", letterSpacing: 0.5 }}>
                 Balance
               </p>
               <p style={{ margin: 0, fontSize: "clamp(28px, 5vw, 36px)", fontWeight: 700, fontFamily: "'Fraunces', serif" }}>
                 {balanceLoading ? "..." : balance !== null ? `$${parseFloat(balance).toFixed(2)}` : "—"}
-                <span style={{ fontSize: 16, fontWeight: 500, color: "#8a7560", marginLeft: 6 }}>USDC</span>
+                <span style={{ fontSize: 16, fontWeight: 500, color: "var(--flow-text-faint)", marginLeft: 6 }}>USDC</span>
               </p>
               <button style={styles.refreshBalanceButton} onClick={refreshBalance} disabled={balanceLoading}>
                 {balanceLoading ? "Refreshing..." : "↻ Refresh"}
@@ -518,7 +537,7 @@ export default function ConsumerApp() {
             <section style={styles.faucetCard}>
               <div>
                 <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 13 }}>Need more test USDC?</p>
-                <p style={{ margin: 0, fontSize: 12, color: "#8a7560" }}>Opens Circle's official Arc testnet faucet.</p>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)" }}>Opens Circle's official Arc testnet faucet.</p>
               </div>
               <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" style={styles.faucetCardLink}>
                 Open faucet ↗
@@ -526,9 +545,9 @@ export default function ConsumerApp() {
             </section>
 
             <section>
-              <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "#5C5850" }}>Recent Activity</p>
+              <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "var(--flow-text-muted)" }}>Recent Activity</p>
               {activity.length === 0 ? (
-                <p style={{ margin: 0, fontSize: 13, color: "#8a7560" }}>No transactions yet.</p>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--flow-text-faint)" }}>No transactions yet.</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {activity.map((a) => (
@@ -538,7 +557,7 @@ export default function ConsumerApp() {
                           {a.direction === "out" ? "Sent" : "Received"}
                           {a.counterparty ? ` ${a.direction === "out" ? "to" : "from"} ${a.counterparty.slice(0, 6)}...${a.counterparty.slice(-4)}` : ""}
                         </p>
-                        <p style={{ margin: 0, fontSize: 11, color: "#8a7560" }}>
+                        <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>
                           {new Date(a.timestamp).toLocaleString()} · {a.status}
                         </p>
                       </div>
@@ -635,7 +654,7 @@ export default function ConsumerApp() {
         {view === "crosschain" && (
           <section style={styles.flowCard}>
             <h2 style={styles.flowTitle}>Bridge to Arc</h2>
-            <p style={{ color: "#8A8275", fontSize: "clamp(13px, 1.2vw, 15px)", marginBottom: 20 }}>
+            <p style={{ color: "var(--flow-text-faint)", fontSize: "clamp(13px, 1.2vw, 15px)", marginBottom: 20 }}>
               Send USDC from any supported chain directly to your Arc wallet.
             </p>
             <div style={styles.flowLine}>
@@ -663,7 +682,7 @@ export default function ConsumerApp() {
                 <div style={styles.field}>
                   <label style={styles.label}>Destination Chain</label>
                   <input
-                    style={{ ...styles.input, background: "#EDE6D8", cursor: "not-allowed" }}
+                    style={{ ...styles.input, background: "var(--flow-surface-2)", cursor: "not-allowed" }}
                     value="Arc Testnet"
                     disabled
                   />
@@ -681,7 +700,7 @@ export default function ConsumerApp() {
                 </div>
                 <div style={styles.field}>
                   <label style={styles.label}>Arriving in</label>
-                  <div style={{ ...styles.input, background: "#EDE6D8", display: "flex", alignItems: "center", fontFamily: "monospace", fontSize: "clamp(11px, 1vw, 13px)" }}>
+                  <div style={{ ...styles.input, background: "var(--flow-surface-2)", display: "flex", alignItems: "center", fontFamily: "monospace", fontSize: "clamp(11px, 1vw, 13px)" }}>
                     Your wallet ({walletAddress.slice(0, 6)}...{walletAddress.slice(-4)})
                   </div>
                 </div>
@@ -732,6 +751,29 @@ export default function ConsumerApp() {
 const FONT_IMPORT = `
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap');
 
+  /* Light is the default/current Flow look. Dark matches the rest of the
+     site's theme (same tones as merchant pages: near-black bg, warm dark
+     card surfaces, cream text). Toggled via data-theme on the .flow-app
+     root — nothing else in the component needs to re-render. */
+  .flow-app {
+    --flow-bg: #FBF8F3;
+    --flow-text: #1C1B19;
+    --flow-text-muted: #5C5850;
+    --flow-text-faint: #8a7560;
+    --flow-surface: #FFFFFF;
+    --flow-surface-2: #EDE6D8;
+    --flow-border: #E5DDC9;
+  }
+  .flow-app[data-theme="dark"] {
+    --flow-bg: #0e0b08;
+    --flow-text: #f0ece6;
+    --flow-text-muted: #a89985;
+    --flow-text-faint: #8a7560;
+    --flow-surface: #1a1410;
+    --flow-surface-2: #241c14;
+    --flow-border: #2d2015;
+  }
+
   /* Desktop/tablet: the mobile-first single-column layout below still
      applies by default (nothing changes on small screens) — these rules
      only kick in once there's real horizontal space to use. */
@@ -756,8 +798,8 @@ const FONT_IMPORT = `
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#FBF8F3",
-    color: "#1C1B19",
+    background: "var(--flow-bg)",
+    color: "var(--flow-text)",
     fontFamily: "'Inter', system-ui, sans-serif",
     maxWidth: 560,
     margin: "0 auto",
@@ -784,13 +826,26 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 20,
     fontWeight: 600,
     letterSpacing: -0.3,
-    color: "#1C1B19",
+    color: "var(--flow-text)",
+  },
+  themeToggle: {
+    fontSize: 16,
+    background: "var(--flow-surface-2)",
+    border: "none",
+    borderRadius: "50%",
+    width: 32,
+    height: 32,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    flexShrink: 0,
   },
   walletPill: {
     fontSize: "clamp(10px, 1.2vw, 12px)",
     fontFamily: "monospace",
     color: "#5C7A5C",
-    background: "#EDE6D8",
+    background: "var(--flow-surface-2)",
     padding: "6px 12px",
     borderRadius: 20,
     border: "none",
@@ -809,7 +864,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "8px 14px", borderRadius: 10, textDecoration: "none", whiteSpace: "nowrap",
   },
   faucetDismiss: {
-    background: "none", border: "none", color: "#8a7560", fontSize: 14, cursor: "pointer", padding: 4,
+    background: "none", border: "none", color: "var(--flow-text-faint)", fontSize: 14, cursor: "pointer", padding: 4,
   },
   balanceCard: {
     background: "#1C1B19", color: "#FBF8F3", borderRadius: 18, padding: "20px 22px",
@@ -821,14 +876,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   faucetCard: {
     display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-    background: "#F3EEE1", borderRadius: 14, padding: "14px 16px", margin: "0 0 20px",
+    background: "var(--flow-surface-2)", borderRadius: 14, padding: "14px 16px", margin: "0 0 20px",
   },
   faucetCardLink: {
-    fontSize: 13, fontWeight: 700, color: "#1C1B19", textDecoration: "none", whiteSpace: "nowrap",
+    fontSize: 13, fontWeight: 700, color: "var(--flow-text)", textDecoration: "none", whiteSpace: "nowrap",
   },
   activityRow: {
     display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-    background: "#F3EEE1", borderRadius: 12, padding: "10px 14px",
+    background: "var(--flow-surface-2)", borderRadius: 12, padding: "10px 14px",
   },
   eyebrow: { fontSize: "clamp(10px, 1vw, 12px)", color: "#5C7A5C", fontWeight: 600, letterSpacing: 1.5, textTransform: "uppercase", margin: "0 0 14px" },
   heroTitle: {
@@ -839,15 +894,15 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 0 16px",
     letterSpacing: -0.5,
   },
-  heroSub: { fontSize: "clamp(14px, 1.5vw, 16px)", lineHeight: 1.55, color: "#5C5850", margin: 0, maxWidth: 440 },
+  heroSub: { fontSize: "clamp(14px, 1.5vw, 16px)", lineHeight: 1.55, color: "var(--flow-text-muted)", margin: 0, maxWidth: 440 },
   actionsGrid: { display: "grid", gridTemplateColumns: "1fr", gap: 12, margin: "20px 0 24px" },
   actionCard: {
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-start",
     gap: 4,
-    background: "#FFFFFF",
-    border: "1px solid #E5DDC9",
+    background: "var(--flow-surface)",
+    border: "1px solid var(--flow-border)",
     borderRadius: 18,
     padding: "16px 18px",
     cursor: "pointer",
@@ -857,8 +912,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   actionIcon: { fontSize: "clamp(18px, 2vw, 20px)", color: "#E8714A", marginBottom: 6, fontFamily: "'Fraunces', serif" },
   actionLabel: { fontSize: "clamp(16px, 1.8vw, 18px)", fontWeight: 600 },
-  actionSub: { fontSize: "clamp(12px, 1.2vw, 14px)", color: "#8A8275" },
-  footnote: { textAlign: "center", fontSize: "clamp(10px, 1vw, 12px)", color: "#A39C8C", margin: "8px 0" },
+  actionSub: { fontSize: "clamp(12px, 1.2vw, 14px)", color: "var(--flow-text-faint)" },
+  footnote: { textAlign: "center", fontSize: "clamp(10px, 1vw, 12px)", color: "var(--flow-text-faint)", margin: "8px 0" },
   flowCard: { paddingTop: 16 },
   flowTitle: { fontFamily: "'Fraunces', serif", fontSize: "clamp(22px, 4vw, 26px)", fontWeight: 500, margin: "0 0 20px" },
   flowLine: { display: "flex", alignItems: "center", gap: 0, marginBottom: 24 },
@@ -866,14 +921,14 @@ const styles: Record<string, React.CSSProperties> = {
   flowStroke: { flex: 1, height: 2, background: "linear-gradient(90deg, #5C7A5C, #E8714A)", margin: "0 6px" },
   form: { display: "flex", flexDirection: "column", gap: 16 },
   field: { display: "flex", flexDirection: "column", gap: 6 },
-  label: { fontSize: "clamp(12px, 1.2vw, 14px)", fontWeight: 600, color: "#5C5850" },
+  label: { fontSize: "clamp(12px, 1.2vw, 14px)", fontWeight: 600, color: "var(--flow-text-muted)" },
   input: {
     padding: "12px 14px",
     borderRadius: 12,
-    border: "1px solid #E5DDC9",
-    background: "#FFFFFF",
+    border: "1px solid var(--flow-border)",
+    background: "var(--flow-surface)",
     fontSize: "clamp(14px, 1.5vw, 16px)",
-    color: "#1C1B19",
+    color: "var(--flow-text)",
     outline: "none",
     fontFamily: "inherit",
     boxSizing: "border-box",
@@ -884,9 +939,9 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     padding: "8px 0",
     borderRadius: 10,
-    border: "1px solid #E5DDC9",
-    background: "#FFFFFF",
-    color: "#5C5850",
+    border: "1px solid var(--flow-border)",
+    background: "var(--flow-surface)",
+    color: "var(--flow-text-muted)",
     fontSize: "clamp(12px, 1.2vw, 14px)",
     fontWeight: 500,
     cursor: "pointer",
@@ -917,14 +972,14 @@ const styles: Record<string, React.CSSProperties> = {
   resultSuccess: {
     textAlign: "center",
     padding: "24px 16px",
-    background: "#FFFFFF",
+    background: "var(--flow-surface)",
     border: "1px solid #D6E2D6",
     borderRadius: 18,
   },
   resultError: {
     textAlign: "center",
     padding: "24px 16px",
-    background: "#FFFFFF",
+    background: "var(--flow-surface)",
     border: "1px solid #F0D5C9",
     borderRadius: 18,
   },
@@ -940,7 +995,7 @@ const styles: Record<string, React.CSSProperties> = {
   linkBox: {
     fontSize: "clamp(10px, 1vw, 12px)",
     fontFamily: "monospace",
-    background: "#EDE6D8",
+    background: "var(--flow-surface-2)",
     padding: "8px 12px",
     borderRadius: 10,
     wordBreak: "break-all",
@@ -963,9 +1018,9 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 12,
     padding: "10px 24px",
     borderRadius: 12,
-    border: "1px solid #1C1B19",
+    border: "1px solid var(--flow-text)",
     background: "transparent",
-    color: "#1C1B19",
+    color: "var(--flow-text)",
     fontSize: "clamp(12px, 1.2vw, 14px)",
     fontWeight: 600,
     cursor: "pointer",
@@ -985,7 +1040,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   onboardingSub: {
     fontSize: "clamp(14px, 1.5vw, 16px)",
-    color: "#5C5850",
+    color: "var(--flow-text-muted)",
     lineHeight: 1.5,
     margin: "0 0 24px",
   },
@@ -1003,24 +1058,24 @@ const styles: Record<string, React.CSSProperties> = {
   secondaryButton: {
     padding: "14px 0",
     borderRadius: 14,
-    border: "1px solid #1C1B19",
+    border: "1px solid var(--flow-text)",
     background: "transparent",
-    color: "#1C1B19",
+    color: "var(--flow-text)",
     fontSize: "clamp(14px, 1.5vw, 16px)",
     fontWeight: 600,
     cursor: "pointer",
     fontFamily: "inherit",
     marginTop: 12,
   },
-  orDivider: { textAlign: "center", color: "#A39C8C", fontSize: "clamp(12px, 1vw, 13px)", margin: "20px 0", position: "relative" },
+  orDivider: { textAlign: "center", color: "var(--flow-text-faint)", fontSize: "clamp(12px, 1vw, 13px)", margin: "20px 0", position: "relative" },
   onboardingError: { color: "#C0563A", fontSize: "clamp(12px, 1vw, 13px)", marginTop: 8 },
   bottomNav: {
     position: "sticky",
     bottom: 0,
     display: "flex",
     justifyContent: "space-around",
-    background: "#FFFFFF",
-    borderTop: "1px solid #E5DDC9",
+    background: "var(--flow-surface)",
+    borderTop: "1px solid var(--flow-border)",
     padding: "8px 4px 12px",
     marginTop: "auto",
   },
@@ -1032,7 +1087,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "none",
     border: "none",
     cursor: "pointer",
-    color: "#A39C8C",
+    color: "var(--flow-text-faint)",
     padding: "4px 8px",
   },
   navItemActive: {
@@ -1043,7 +1098,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "none",
     border: "none",
     cursor: "pointer",
-    color: "#1C1B19",
+    color: "var(--flow-text)",
     padding: "4px 8px",
   },
   navIcon: { fontSize: "clamp(14px, 1.5vw, 16px)", fontFamily: "'Fraunces', serif" },

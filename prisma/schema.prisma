@@ -14,7 +14,8 @@ model PaymentLog {
   amount         Float
   currency       String
   chain          String
-  senderEmail    String
+  senderEmail    String    // 'pending@checkout' until a real payer settles (matches merchant links' convention)
+  direction      String    @default("send") // "send" | "request" — explicit, not inferred
   merchant       String
   status         String
   arcTxHash      String?

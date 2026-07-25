@@ -18,9 +18,13 @@ export const InitializeSchema = z.object({
   merchant: z.string().min(1).max(100).optional(),
   agentSCA: scaAddress.optional(),
   webhookUrl: z.string().url().optional(),
-  // Distinguishes Flow's "Send" (consumer is the payer) from "Request"
-  // (consumer is the recipient) — without this, both looked identical to
-  // the server and the requester's own wallet ended up in the sender slot.
+  // Explicit payout destination for consumer-initiated links (Flow send/request).
+  // Never trust `merchant` (a free-text label) for routing funds.
+  payoutAddress: scaAddress.optional(),
+  // "send": the logged-in consumer IS the payer.
+  // "request": the logged-in consumer is asking to BE PAID — there is no
+  // real payer until someone actually opens the link and settles it.
+  // Explicit instead of inferred, so the server never has to guess.
   direction: z.enum(['send', 'request']).optional(),
 });
 

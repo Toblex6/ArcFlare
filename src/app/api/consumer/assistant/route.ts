@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
             currency: currency || 'USDC',
             merchant: recipientAddress,
             payoutAddress: recipientAddress,
+            direction: 'send',
           }),
         });
         const initData = await initRes.json();
@@ -152,7 +153,7 @@ export async function POST(req: NextRequest) {
         const res = await fetch(internalUrl('/api/payments/initialize'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
-          body: JSON.stringify({ amount, currency: currency || 'USDC', merchant: 'Payment request' }),
+          body: JSON.stringify({ amount, currency: currency || 'USDC', merchant: 'Payment request', direction: 'request' }),
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'Could not create request.');

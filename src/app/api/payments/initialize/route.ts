@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const { data, error: validationError } = parseBody(InitializeSchema, body);
     if (validationError) return validationError as NextResponse;
 
-    const { amount, currency, email, merchant, agentSCA, webhookUrl, direction } = data;
+    const { amount, currency, email, merchant, agentSCA, webhookUrl, payoutAddress, direction } = data;
 
     // 4. If agentSCA provided, verify it exists in AgentRegistry
     let resolvedSenderEmail = email || 'autonomous-agent@arc.network';
@@ -80,17 +80,25 @@ export async function POST(req: NextRequest) {
       merchantId = merchantRecord.id;
       merchantSCA = merchantRecord.walletAddress;
     } else if (caller.type === 'consumer' && caller.consumerWalletAddress) {
-      if (direction === 'request') {
-        // The consumer is the RECIPIENT here, not the payer. Leave
-        // senderEmail as a placeholder — same as merchant links — so the
-        // checkout page correctly waits for a real payer to connect their
-        // own wallet, instead of showing the requester's address as if it
-        // were already "connected."
-        merchantSCA = caller.consumerWalletAddress;
-      } else {
-        // Flow's "Send" — the logged-in consumer is the one paying.
-        resolvedSenderEmail = caller.consumerWalletAddress;
-      }
+      // Flow's "Send"/"Request" — the requesting/sending party is whichever
+      // consumer is logged in, not whatever the client claims.
+      //
+      // "send": this consumer IS the payer — record them as sender now.
+      // "request": this consumer is asking to be paid — there is no real
+      // payer yet, so leave senderEmail as a placeholder (same convention
+      // merchant payment links already use) until someone actually settles
+      // it. Previously this always filled in the requester's own wallet,
+      // which made the checkout page treat the requester as if they were
+      // the payer before anyone had actually paid.
+      resolvedSenderEmail = direction === 'request' ? 'pending@checkout' : caller.consumerWalletAddress;
+
+      // Payout destination:
+      // - "Send": payoutAddress is the recipient the consumer typed/spoke —
+      //   validated as a real 0x address by the schema, never taken from
+      //   the free-text `merchant` label.
+      // - "Request": no payoutAddress is given, so the requester is paying
+      //   themselves — route to the requesting consumer's own wallet.
+      merchantSCA = payoutAddress || caller.consumerWalletAddress;
     }
     // caller.type === 'internal' — trusted server-to-server call (agent/brain),
     // uses the agentSCA/merchant fields from the request body as before.
@@ -106,6 +114,7 @@ export async function POST(req: NextRequest) {
         currency: currency ?? 'USDC',
         chain: 'Arc Testnet v1.0',
         senderEmail: resolvedSenderEmail,
+        direction: direction || 'send',
         merchant: merchantName,
         merchantId,
         merchantSCA,
