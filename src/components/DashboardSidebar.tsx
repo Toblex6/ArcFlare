@@ -44,7 +44,7 @@ const SECTIONS: NavSection[] = [
         group: 'AGENT PAYMENTS',
         items: [
             { label: 'Nanopayments', href: '/nano' }, // x402 — the payment rail everything else uses
-            { label: 'AI Agent', href: '/agent-services' }, // single-task paid call
+            { label: 'AI Agent', href: '/agent-brain' }, // single-task paid call
         ],
     },
     {
