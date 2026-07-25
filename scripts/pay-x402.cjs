@@ -29,7 +29,7 @@ async function main() {
   console.log("📡 Calling agent brain...");
 
   const response = await client.pay(
-    "https://arcflare-gateway.onrender.com/api/agent/brain",
+    "https://flarehq.xyz/api/agent/brain",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

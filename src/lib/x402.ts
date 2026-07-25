@@ -29,7 +29,9 @@ import { prisma } from "@/lib/prisma";
 
 export const sellerAddress = process.env.SELLER_WALLET_ADDRESS as `0x${string}`;
 
-const facilitator = new BatchFacilitatorClient();
+const facilitator = new BatchFacilitatorClient({
+  url: "https://gateway-api-testnet.circle.com",
+});
 
 function sanitizeBigInts(obj: any): any {
   if (typeof obj === "bigint") return obj.toString();

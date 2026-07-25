@@ -1,14 +1,12 @@
 'use client';
 
 // src/app/stats/page.tsx
-// Public analytics dashboard — no auth required.
-// Pulls from existing /api/payments/all and /api/escrow/list endpoints.
-// This is the link you submit for "public analytics dashboard" in grant forms.
+// Public analytics dashboard — genuinely safe to be public, since it only
+// ever shows platform-wide totals (see /api/stats/public), never any
+// individual merchant's or consumer's data.
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
-
-const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || '';
 
 interface Metrics {
   totalVolume: number;
@@ -31,32 +29,19 @@ export default function PublicStatsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [paymentsRes, escrowRes, agentsRes] = await Promise.all([
-        fetch('/api/payments/all', { headers: { 'x-api-key': API_KEY } }),
-        fetch('/api/escrow/list', { headers: { 'x-api-key': API_KEY } }),
-        fetch('/api/agent/status?name=Agent', { headers: { 'x-api-key': API_KEY } }),
-      ]);
-
-      const payments = await paymentsRes.json();
-      const escrow = await escrowRes.json();
-      const agents = await agentsRes.json();
-
-      const allPayments = payments.payments || [];
-      const successCount = allPayments.filter((p: any) => p.status === 'SUCCESS').length;
-      const totalVolume = allPayments
-        .filter((p: any) => p.status === 'SUCCESS')
-        .reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
+      const res = await fetch('/api/stats/public');
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Could not load stats.');
 
       setMetrics({
-        totalVolume: parseFloat(totalVolume.toFixed(6)),
-        totalTransactions: allPayments.length,
-        successCount,
-        successRate:
-          allPayments.length > 0 ? Math.round((successCount / allPayments.length) * 100) : 0,
-        totalEscrows: escrow.escrows?.length || 0,
-        totalLocked: escrow.metrics?.totalLocked || 0,
-        totalReleased: escrow.metrics?.totalReleased || 0,
-        totalAgents: agents.agents?.length || 0,
+        totalVolume: data.data.totalVolume,
+        totalTransactions: data.data.totalTransactions,
+        successCount: Math.round((data.data.successRate / 100) * data.data.totalTransactions),
+        successRate: data.data.successRate,
+        totalEscrows: data.data.totalEscrows,
+        totalLocked: data.data.totalLocked,
+        totalReleased: data.data.totalReleased,
+        totalAgents: data.data.totalAgents,
       });
 
       setLastUpdated(new Date().toLocaleString());
