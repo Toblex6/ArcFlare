@@ -756,11 +756,11 @@ const FONT_IMPORT = `
      card surfaces, cream text). Toggled via data-theme on the .flow-app
      root — nothing else in the component needs to re-render. */
   .flow-app {
-    --flow-bg: #FBF8F3;
+    --flow-bg: #FFFFFF;
     --flow-text: #1C1B19;
     --flow-text-muted: #5C5850;
     --flow-text-faint: #8a7560;
-    --flow-surface: #FFFFFF;
+    --flow-surface: #FBF8F3;
     --flow-surface-2: #EDE6D8;
     --flow-border: #E5DDC9;
   }

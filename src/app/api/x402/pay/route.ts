@@ -8,7 +8,7 @@ import { withApiKeyOrMerchant } from "@/lib/middleware/withMerchantAuth";
 
 async function x402PayHandler(req: NextRequest) {
   try {
-    const { resourceUrl, eoaAddress } = await req.json();
+    const { resourceUrl, eoaAddress, body } = await req.json();  // ← add body here
 
     if (!resourceUrl) {
       return NextResponse.json(
@@ -55,7 +55,7 @@ async function x402PayHandler(req: NextRequest) {
     const response = await client.pay(resourceUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: body || JSON.stringify({}),  // ← forward what was actually sent, fall back to {} for callers that don't need a body
     });
     console.log(`[x402 pay] Success! TX: ${response.transaction}`);
 
