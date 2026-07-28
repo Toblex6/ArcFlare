@@ -1,5 +1,7 @@
 'use client';
 
+//src/app/merchant/login/page.tsx
+
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -35,8 +37,8 @@ export default function MerchantLogin() {
     <main
       style={{
         minHeight: '100vh',
-        background: '#0e0b08',
-        color: '#f0ece6',
+        background: 'var(--background)',
+        color: 'var(--text)',
         fontFamily: 'Inter, system-ui, sans-serif',
         display: 'flex',
         alignItems: 'center',
@@ -53,18 +55,18 @@ export default function MerchantLogin() {
             height={52}
             style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }}
           />
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>
+          <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>
             Merchant Login
           </h1>
-          <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>
             Sign in to your FlareHQ merchant account.
           </p>
         </div>
 
         <div
           style={{
-            background: '#1a1410',
-            border: '1px solid #2d2015',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
             borderRadius: 24,
             padding: 36,
           }}
@@ -79,7 +81,7 @@ export default function MerchantLogin() {
                 marginBottom: 20,
               }}
             >
-              <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>❌ {error}</p>
+              <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>❌ {error}</p>
             </div>
           )}
 
@@ -91,7 +93,7 @@ export default function MerchantLogin() {
               <label
                 style={{
                   display: 'block',
-                  color: '#8a7560',
+                  color: 'var(--text-secondary)',
                   fontSize: 12,
                   textTransform: 'uppercase',
                   letterSpacing: 0.8,
@@ -108,11 +110,11 @@ export default function MerchantLogin() {
                 required
                 style={{
                   width: '100%',
-                  background: '#251c12',
-                  border: '1px solid #3d2e1a',
+                  background: 'var(--surface-secondary)',
+                  border: '1px solid var(--border)',
                   borderRadius: 10,
                   padding: '12px 14px',
-                  color: '#f0ece6',
+                  color: 'var(--text)',
                   fontSize: 14,
                   outline: 'none',
                   boxSizing: 'border-box',
@@ -123,7 +125,7 @@ export default function MerchantLogin() {
               <label
                 style={{
                   display: 'block',
-                  color: '#8a7560',
+                  color: 'var(--text-secondary)',
                   fontSize: 12,
                   textTransform: 'uppercase',
                   letterSpacing: 0.8,
@@ -140,11 +142,11 @@ export default function MerchantLogin() {
                 required
                 style={{
                   width: '100%',
-                  background: '#251c12',
-                  border: '1px solid #3d2e1a',
+                  background: 'var(--surface-secondary)',
+                  border: '1px solid var(--border)',
                   borderRadius: 10,
                   padding: '12px 14px',
-                  color: '#f0ece6',
+                  color: 'var(--text)',
                   fontSize: 14,
                   outline: 'none',
                   boxSizing: 'border-box',
@@ -158,8 +160,8 @@ export default function MerchantLogin() {
               style={{
                 marginTop: 8,
                 padding: '14px',
-                background: loading ? 'rgba(200,151,90,0.3)' : '#c8975a',
-                color: loading ? 'rgba(14,11,8,0.5)' : '#0e0b08',
+                background: loading ? 'rgba(200,151,90,0.3)' : 'var(--primary)',
+                color: loading ? 'rgba(14,11,8,0.5)' : 'var(--background)',
                 border: 'none',
                 borderRadius: 12,
                 fontSize: 15,
@@ -172,11 +174,11 @@ export default function MerchantLogin() {
             </button>
           </form>
 
-          <p style={{ textAlign: 'center', marginTop: 20, color: '#4b4035', fontSize: 13 }}>
+          <p style={{ textAlign: 'center', marginTop: 20, color: 'var(--text-secondary)', fontSize: 13 }}>
             No account yet?{' '}
             <a
               href="/merchant/signup"
-              style={{ color: '#c8975a', textDecoration: 'none', fontWeight: 600 }}
+              style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}
             >
               Create one free
             </a>

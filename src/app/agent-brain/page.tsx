@@ -36,8 +36,8 @@ interface BrainResponse {
 
 const styles = {
     card: {
-        background: "#1a1410",
-        border: "1px solid #2d2015",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
         borderRadius: 16,
         padding: 24,
         marginBottom: 20,
@@ -45,10 +45,10 @@ const styles = {
     input: {
         width: "100%",
         padding: "12px 14px",
-        background: "#251c12",
-        border: "1px solid #3d2e1a",
+        background: "var(--surface-secondary)",
+        border: "1px solid var(--border)",
         borderRadius: 10,
-        color: "#f0ece6",
+        color: "var(--text)",
         fontSize: 14,
         outline: "none",
         boxSizing: "border-box" as const,
@@ -56,7 +56,7 @@ const styles = {
     } as React.CSSProperties,
     label: {
         fontSize: 11,
-        color: "#6b5a45",
+        color: "var(--text-secondary)",
         textTransform: "uppercase" as const,
         letterSpacing: 1,
         marginBottom: 6,
@@ -66,8 +66,8 @@ const styles = {
 
 const btnStyle = (disabled: boolean): React.CSSProperties => ({
     padding: "12px 24px",
-    background: disabled ? "rgba(200,151,90,0.3)" : "#c8975a",
-    color: disabled ? "#6b5a45" : "#0e0b08",
+    background: disabled ? "rgba(8,145,178,0.3)" : "var(--primary)",
+    color: disabled ? "var(--text-secondary)" : "#0e0b08",
     border: "none",
     borderRadius: 10,
     fontWeight: 700,
@@ -140,7 +140,7 @@ export default function AgentBrainPage() {
     };
 
     return (
-        <div style={{ display: "flex", minHeight: "100vh", background: "#f8fafc" }}>
+        <div className="light" style={{ display: "flex", minHeight: "100vh", background: "var(--background)" }}>
             <DashboardSidebar active="AI Agent" />
             <main style={{ flex: 1, minWidth: 0, padding: "24px", overflowX: "hidden" }}>
                 <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -151,9 +151,9 @@ export default function AgentBrainPage() {
                             </h1>
                             <span style={badgeStyle("#10b981")}>ERC-8004</span>
                             <span style={badgeStyle("#8b5cf6")}>ERC-8183</span>
-                            <span style={badgeStyle("#c8975a")}>x402 Paid</span>
+                            <span style={badgeStyle("var(--primary)")}>x402 Paid</span>
                         </div>
-                        <p style={{ color: "#6b5a45", fontSize: "clamp(12px, 1.2vw, 14px)", margin: 0 }}>
+                        <p style={{ color: "var(--text-secondary)", fontSize: "clamp(12px, 1.2vw, 14px)", margin: 0 }}>
                             Autonomous agent-to-agent commerce — A2A payments, ERC-8183 escrow jobs, payroll,
                             subscriptions, cross-chain routing, and ERC-8004 reputation, all driven by natural language.
                         </p>
@@ -163,7 +163,7 @@ export default function AgentBrainPage() {
                         <h3 style={{ fontSize: "clamp(16px, 1.5vw, 20px)", fontWeight: 700, margin: "0 0 20px" }}>
                             Talk to the Brain
                         </h3>
-                        <p style={{ color: "#6b5a45", fontSize: "clamp(12px, 1.2vw, 14px)", margin: "0 0 20px" }}>
+                        <p style={{ color: "var(--text-secondary)", fontSize: "clamp(12px, 1.2vw, 14px)", margin: "0 0 20px" }}>
                             This costs $0.002 USDC per call, paid via x402 from your EOA Gateway balance.
                         </p>
 
@@ -205,9 +205,9 @@ export default function AgentBrainPage() {
                                                 fontSize: 11,
                                                 padding: "6px 12px",
                                                 borderRadius: 20,
-                                                background: "rgba(200,151,90,0.08)",
-                                                border: "1px solid rgba(200,151,90,0.2)",
-                                                color: "#c8975a",
+                                                background: "rgba(8,145,178,0.08)",
+                                                border: "1px solid rgba(8,145,178,0.2)",
+                                                color: "var(--primary)",
                                                 cursor: "pointer",
                                             }}
                                             onClick={() => setMessage(p)}
@@ -237,7 +237,7 @@ export default function AgentBrainPage() {
                                     padding: 16,
                                 }}
                             >
-                                <p style={{ color: "#f87171", fontSize: 13, margin: 0 }}>❌ {error}</p>
+                                <p style={{ color: "var(--danger)", fontSize: 13, margin: 0 }}>❌ {error}</p>
                             </div>
                         )}
 
@@ -261,14 +261,14 @@ export default function AgentBrainPage() {
                                         marginBottom: 14,
                                     }}
                                 >
-                                    <p style={{ color: "#10b981", fontWeight: 700, fontSize: "clamp(14px, 1.2vw, 18px)", margin: 0 }}>
+                                    <p style={{ color: "var(--success)", fontWeight: 700, fontSize: "clamp(14px, 1.2vw, 18px)", margin: 0 }}>
                                         ✅ Brain Response
                                     </p>
                                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                         <span style={badgeStyle("#10b981")}>
                                             ERC-8004 #{result.agent?.tokenId}
                                         </span>
-                                        <span style={badgeStyle("#c8975a")}>{result.agent?.network}</span>
+                                        <span style={badgeStyle("var(--primary)")}>{result.agent?.network}</span>
                                     </div>
                                 </div>
 
@@ -286,11 +286,11 @@ export default function AgentBrainPage() {
                                         { label: "Standard", value: result.agent?.standard },
                                         { label: "Session", value: result.sessionId },
                                     ].map((row) => (
-                                        <div key={row.label} style={{ background: "#251c12", borderRadius: 10, padding: 12 }}>
-                                            <p style={{ fontSize: 9, color: "#6b5a45", textTransform: "uppercase" as const, letterSpacing: 1, margin: "0 0 4px" }}>
+                                        <div key={row.label} style={{ background: "var(--surface-secondary)", borderRadius: 10, padding: 12 }}>
+                                            <p style={{ fontSize: 9, color: "var(--text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, margin: "0 0 4px" }}>
                                                 {row.label}
                                             </p>
-                                            <p style={{ fontSize: 12, color: "#c8975a", fontFamily: "monospace", margin: 0, wordBreak: "break-all" as const }}>
+                                            <p style={{ fontSize: 12, color: "var(--primary)", fontFamily: "monospace", margin: 0, wordBreak: "break-all" as const }}>
                                                 {row.value || "—"}
                                             </p>
                                         </div>
@@ -300,12 +300,12 @@ export default function AgentBrainPage() {
                                 {/* Final text summary from the brain */}
                                 <div
                                     style={{
-                                        background: "#251c12",
+                                        background: "var(--surface-secondary)",
                                         borderRadius: 10,
                                         padding: 16,
                                         fontSize: "clamp(13px, 1vw, 15px)",
                                         lineHeight: 1.7,
-                                        color: "#f0ece6",
+                                        color: "var(--text)",
                                         whiteSpace: "pre-wrap" as const,
                                         marginBottom: result.results?.length ? 16 : 0,
                                     }}
@@ -325,14 +325,14 @@ export default function AgentBrainPage() {
                                                     <div
                                                         key={i}
                                                         style={{
-                                                            background: "#1a1410",
-                                                            border: `1px solid ${hasError ? "rgba(239,68,68,0.3)" : "#2d2015"}`,
+                                                            background: "var(--surface)",
+                                                            border: `1px solid ${hasError ? "rgba(239,68,68,0.3)" : "var(--border)"}`,
                                                             borderRadius: 10,
                                                             padding: 12,
                                                         }}
                                                     >
                                                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                                                            <span style={{ fontSize: 12, fontWeight: 700, color: hasError ? "#f87171" : "#c8975a", fontFamily: "monospace" }}>
+                                                            <span style={{ fontSize: 12, fontWeight: 700, color: hasError ? "var(--danger)" : "var(--primary)", fontFamily: "monospace" }}>
                                                                 {r.tool}
                                                             </span>
                                                             {badge && <span style={badgeStyle(badge.color)}>{badge.label}</span>}
@@ -342,7 +342,7 @@ export default function AgentBrainPage() {
                                                         <pre
                                                             style={{
                                                                 fontSize: 11,
-                                                                color: "#8a7560",
+                                                                color: "var(--text-secondary)",
                                                                 margin: 0,
                                                                 whiteSpace: "pre-wrap" as const,
                                                                 wordBreak: "break-all" as const,
@@ -356,7 +356,7 @@ export default function AgentBrainPage() {
                                                                 href={r.result.explorerUrl}
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
-                                                                style={{ display: "inline-block", marginTop: 8, fontSize: 11, color: "#c8975a" }}
+                                                                style={{ display: "inline-block", marginTop: 8, fontSize: 11, color: "var(--primary)" }}
                                                             >
                                                                 View transaction on ArcScan →
                                                             </a>

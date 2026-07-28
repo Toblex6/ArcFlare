@@ -30,6 +30,19 @@ const nextConfig = {
       },
     ];
   },
+  // Next 16's default `next build` uses Turbopack, which does NOT read the
+  // webpack() function below at all — this is the Turbopack-native
+  // equivalent for @x402/svm (still genuinely unused/uninstalled — only
+  // ever reached via a dynamic import() that's already runtime-guarded).
+  // @solana/kit itself is now a real installed dependency (see
+  // package.json) rather than aliased, since Circle's SDK does static
+  // named imports from it that a stub can't safely satisfy once Next
+  // treats the importing package as external.
+  turbopack: {
+    resolveAlias: {
+      '@x402/svm': './stubs/dynamic-import-stub.mjs',
+    },
+  },
   webpack: (config, { webpack }) => {
     // @coinbase/cdp-sdk (pulled in transitively via wagmi's Coinbase Smart
     // Wallet connector) lazy-loads Solana x402 support through its own
@@ -49,7 +62,6 @@ const nextConfig = {
         resourceRegExp: /^accounts$/,
       })
     );
-
 
     return config;
   },

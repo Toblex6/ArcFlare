@@ -109,8 +109,8 @@ export default function MerchantSignup() {
 
   const shellStyle: React.CSSProperties = {
     minHeight: '100vh',
-    background: '#0e0b08',
-    color: '#f0ece6',
+    background: 'var(--background)',
+    color: 'var(--text)',
     fontFamily: 'Inter, system-ui, sans-serif',
     display: 'flex',
     alignItems: 'center',
@@ -118,14 +118,14 @@ export default function MerchantSignup() {
     padding: 24,
   };
   const cardStyle: React.CSSProperties = {
-    background: '#1a1410',
-    border: '1px solid #2d2015',
+    background: 'var(--surface)',
+    border: '1px solid var(--border)',
     borderRadius: 24,
     padding: 36,
   };
   const labelStyle: React.CSSProperties = {
     display: 'block',
-    color: '#8a7560',
+    color: 'var(--text-secondary)',
     fontSize: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
@@ -133,11 +133,11 @@ export default function MerchantSignup() {
   };
   const inputStyle: React.CSSProperties = {
     width: '100%',
-    background: '#251c12',
-    border: '1px solid #3d2e1a',
+    background: 'var(--surface-secondary)',
+    border: '1px solid var(--border)',
     borderRadius: 10,
     padding: '12px 14px',
-    color: '#f0ece6',
+    color: 'var(--text)',
     fontSize: 14,
     outline: 'none',
     boxSizing: 'border-box',
@@ -145,8 +145,8 @@ export default function MerchantSignup() {
   const primaryBtnStyle = (disabled: boolean): React.CSSProperties => ({
     marginTop: 8,
     padding: '14px',
-    background: disabled ? 'rgba(200,151,90,0.3)' : '#c8975a',
-    color: disabled ? 'rgba(14,11,8,0.5)' : '#0e0b08',
+    background: disabled ? 'rgba(200,151,90,0.3)' : 'var(--primary)',
+    color: disabled ? 'rgba(14,11,8,0.5)' : 'var(--background)',
     border: 'none',
     borderRadius: 12,
     fontSize: 15,
@@ -162,18 +162,18 @@ export default function MerchantSignup() {
         <div style={{ width: '100%', maxWidth: 520 }}>
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
             <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
-            <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>Account Verified</h1>
-            <p style={{ color: '#6b5a45', fontSize: 14 }}>Your API key is shown below. Save it now — it won't appear again.</p>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Account Verified</h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Your API key is shown below. Save it now — it won't appear again.</p>
           </div>
 
-          <div style={{ background: '#1a1410', border: '1px solid #f59e0b', borderRadius: 20, padding: 28, marginBottom: 20 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--warning)', borderRadius: 20, padding: 28, marginBottom: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <span style={{ fontSize: 16 }}>⚠️</span>
-              <p style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: 1 }}>
+              <p style={{ color: 'var(--warning)', fontSize: 12, fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: 1 }}>
                 Save this key — shown once only
               </p>
             </div>
-            <div style={{ background: '#0e0b08', border: '1px solid #2d2015', borderRadius: 10, padding: '14px 16px', fontFamily: 'monospace', fontSize: 13, color: '#c8975a', wordBreak: 'break-all', marginBottom: 16 }}>
+            <div style={{ background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', fontFamily: 'monospace', fontSize: 13, color: 'var(--primary)', wordBreak: 'break-all', marginBottom: 16 }}>
               {apiKey}
             </div>
             <button
@@ -182,7 +182,7 @@ export default function MerchantSignup() {
                 width: '100%', padding: '12px',
                 background: copied ? 'rgba(13,124,95,0.2)' : 'rgba(200,151,90,0.15)',
                 border: `1px solid ${copied ? 'rgba(13,124,95,0.4)' : 'rgba(200,151,90,0.3)'}`,
-                borderRadius: 10, color: copied ? '#0d7c5f' : '#c8975a',
+                borderRadius: 10, color: copied ? 'var(--success)' : 'var(--primary)',
                 fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s',
               }}
             >
@@ -190,21 +190,21 @@ export default function MerchantSignup() {
             </button>
           </div>
 
-          <div style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 16, padding: 20, marginBottom: 20 }}>
-            <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 20, marginBottom: 20 }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: 1 }}>
               Quick Start
             </p>
-            <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#c8975a', background: '#0e0b08', borderRadius: 8, padding: 14, lineHeight: 1.8 }}>
-              <span style={{ color: '#4b4035' }}># Create a payment link</span>
+            <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--primary)', background: 'var(--background)', borderRadius: 8, padding: 14, lineHeight: 1.8 }}>
+              <span style={{ color: 'var(--text-secondary)' }}># Create a payment link</span>
               <br />
               curl -X POST https://flarehq.xyz/api/payments/initialize \<br />
-              &nbsp;&nbsp;-H <span style={{ color: '#f0ece6' }}>"x-api-key: {apiKey.slice(0, 20)}..."</span> \
+              &nbsp;&nbsp;-H <span style={{ color: 'var(--text)' }}>"x-api-key: {apiKey.slice(0, 20)}..."</span> \
               <br />
-              &nbsp;&nbsp;-d <span style={{ color: '#f0ece6' }}>'&#123;"amount":"10","currency":"USDC","merchant":"Your Business"&#125;'</span>
+              &nbsp;&nbsp;-d <span style={{ color: 'var(--text)' }}>'&#123;"amount":"10","currency":"USDC","merchant":"Your Business"&#125;'</span>
             </div>
           </div>
 
-          <p style={{ textAlign: 'center', color: '#6b5a45', fontSize: 12, margin: '0 0 20px' }}>
+          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 20px' }}>
             {walletType === 'CIRCLE'
               ? 'You chose a Circle-managed payout wallet — you can withdraw funds anytime from your dashboard, or switch to your own wallet later in Settings.'
               : 'Payments will settle directly to your own wallet — no withdrawal step needed.'}
@@ -225,19 +225,19 @@ export default function MerchantSignup() {
         <div style={{ width: '100%', maxWidth: 420 }}>
           <div style={{ textAlign: 'center', marginBottom: 36 }}>
             <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
-            <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>Check your email</h1>
-            <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>We sent a 6-digit code to {form.email}</p>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Check your email</h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>We sent a 6-digit code to {form.email}</p>
           </div>
 
           <div style={cardStyle}>
             {error && (
               <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
-                <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>❌ {error}</p>
+                <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>❌ {error}</p>
               </div>
             )}
             {resendMsg && (
               <div style={{ background: 'rgba(13,124,95,0.08)', border: '1px solid rgba(13,124,95,0.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
-                <p style={{ color: '#0d7c5f', fontSize: 13, margin: 0 }}>✓ {resendMsg}</p>
+                <p style={{ color: 'var(--success)', fontSize: 13, margin: 0 }}>✓ {resendMsg}</p>
               </div>
             )}
 
@@ -255,9 +255,9 @@ export default function MerchantSignup() {
               </button>
             </form>
 
-            <p style={{ textAlign: 'center', marginTop: 20, color: '#4b4035', fontSize: 13 }}>
+            <p style={{ textAlign: 'center', marginTop: 20, color: 'var(--text-secondary)', fontSize: 13 }}>
               Didn't get a code?{' '}
-              <button onClick={handleResend} style={{ background: 'none', border: 'none', color: '#c8975a', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0 }}>
+              <button onClick={handleResend} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0 }}>
                 Resend
               </button>
             </p>
@@ -274,14 +274,14 @@ export default function MerchantSignup() {
         <div style={{ width: '100%', maxWidth: 460 }}>
           <div style={{ textAlign: 'center', marginBottom: 36 }}>
             <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
-            <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>How should you get paid?</h1>
-            <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>You can change this later in Settings.</p>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>How should you get paid?</h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>You can change this later in Settings.</p>
           </div>
 
           <div style={cardStyle}>
             {error && (
               <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
-                <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>❌ {error}</p>
+                <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>❌ {error}</p>
               </div>
             )}
 
@@ -289,17 +289,17 @@ export default function MerchantSignup() {
               <label
                 style={{
                   display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer',
-                  background: walletType === 'CIRCLE' ? 'rgba(200,151,90,0.1)' : '#251c12',
-                  border: `1px solid ${walletType === 'CIRCLE' ? '#c8975a' : '#3d2e1a'}`,
+                  background: walletType === 'CIRCLE' ? 'rgba(200,151,90,0.1)' : 'var(--surface-secondary)',
+                  border: `1px solid ${walletType === 'CIRCLE' ? 'var(--primary)' : 'var(--border)'}`,
                   borderRadius: 12, padding: 16,
                 }}
               >
                 <input type="radio" checked={walletType === 'CIRCLE'} onChange={() => setWalletType('CIRCLE')} style={{ marginTop: 3 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: '#f0ece6' }}>
+                  <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>
                     Let FlareHQ manage my wallet (recommended)
                   </p>
-                  <p style={{ margin: 0, fontSize: 12, color: '#8a7560' }}>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
                     We create a wallet for you automatically. Withdraw to any address anytime from your dashboard.
                   </p>
                 </div>
@@ -308,17 +308,17 @@ export default function MerchantSignup() {
               <label
                 style={{
                   display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer',
-                  background: walletType === 'EXTERNAL' ? 'rgba(200,151,90,0.1)' : '#251c12',
-                  border: `1px solid ${walletType === 'EXTERNAL' ? '#c8975a' : '#3d2e1a'}`,
+                  background: walletType === 'EXTERNAL' ? 'rgba(200,151,90,0.1)' : 'var(--surface-secondary)',
+                  border: `1px solid ${walletType === 'EXTERNAL' ? 'var(--primary)' : 'var(--border)'}`,
                   borderRadius: 12, padding: 16,
                 }}
               >
                 <input type="radio" checked={walletType === 'EXTERNAL'} onChange={() => setWalletType('EXTERNAL')} style={{ marginTop: 3 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: '#f0ece6' }}>
+                  <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>
                     Use my own wallet
                   </p>
-                  <p style={{ margin: '0 0 10px', fontSize: 12, color: '#8a7560' }}>
+                  <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--text-secondary)' }}>
                     Payments settle directly to an address you already control. No withdrawal step needed.
                   </p>
                   {walletType === 'EXTERNAL' && (
@@ -349,14 +349,14 @@ export default function MerchantSignup() {
       <div style={{ width: '100%', maxWidth: 460 }}>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f0ece6', margin: '0 0 8px' }}>Create Merchant Account</h1>
-          <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>Start accepting USDC payments on Arc in minutes.</p>
+          <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Create Merchant Account</h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>Start accepting USDC payments on Arc in minutes.</p>
         </div>
 
         <div style={cardStyle}>
           {error && (
             <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
-              <p style={{ color: '#f87171', fontSize: 13, margin: 0 }}>❌ {error}</p>
+              <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>❌ {error}</p>
             </div>
           )}
 
@@ -385,13 +385,13 @@ export default function MerchantSignup() {
             </button>
           </form>
 
-          <p style={{ textAlign: 'center', marginTop: 20, color: '#4b4035', fontSize: 13 }}>
+          <p style={{ textAlign: 'center', marginTop: 20, color: 'var(--text-secondary)', fontSize: 13 }}>
             Already have an account?{' '}
-            <a href="/merchant/login" style={{ color: '#c8975a', textDecoration: 'none', fontWeight: 600 }}>Sign in</a>
+            <a href="/merchant/login" style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600 }}>Sign in</a>
           </p>
         </div>
 
-        <p style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: '#2d2015', fontFamily: 'monospace', letterSpacing: 1 }}>
+        <p style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: 'var(--border)', fontFamily: 'monospace', letterSpacing: 1 }}>
           FLAREHQ PAYMENT INFRASTRUCTURE • ARC TESTNET
         </p>
       </div>

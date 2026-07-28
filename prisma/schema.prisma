@@ -295,3 +295,31 @@ model AgentBrainMemory {
 
   @@index([sessionId])
 }
+
+model MerchantBudget {
+  id           String    @id @default(uuid())
+  merchantId   String
+  category     String    // e.g. "payroll", "marketing", "supplies" — freeform, merchant-defined
+  monthlyLimit Float
+  currency     String    @default("USDC")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([merchantId])
+}
+
+model MerchantReminder {
+  id          String    @id @default(uuid())
+  merchantId  String
+  description String
+  amount      Float?
+  dueDate     DateTime
+  recurring   Boolean   @default(false)
+  intervalDays Int?     // only set if recurring
+  completed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@index([merchantId])
+  @@index([dueDate])
+}
+

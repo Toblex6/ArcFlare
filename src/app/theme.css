@@ -1,0 +1,49 @@
+/* src/app/theme.css
+ *
+ * Single source of truth for color across the app. Every page should read
+ * colors from these variables — never hardcode a hex value for something
+ * that represents a background, surface, text, border, or status color.
+ *
+ * Switching the whole app's theme should only ever require editing the
+ * values in this file, never touching individual pages.
+ *
+ * Brand accents that are NOT part of this system on purpose (e.g. Flow's
+ * own orange/copper wordmark accents) stay hardcoded in the pages that use
+ * them — those are identity marks, not theme-dependent UI color.
+ *
+ * Values below aren't invented: dark = the site's current actual colors
+ * (unchanged), light = the merchant dashboard's current actual colors
+ * (it was already a fully-built light UI — reused as-is rather than
+ * designing a second light palette from scratch).
+ */
+
+:root,
+.dark {
+    --background: #0e0b08;
+    --surface: #1a1410;
+    --surface-secondary: #241c14;
+    --text: #f0ece6;
+    --text-secondary: #8a7560;
+    --border: #2d2015;
+    --primary: #c8975a;
+    --primary-hover: #b3824a;
+    --success: #3f7a57;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --shadow: rgba(0, 0, 0, 0.4);
+}
+
+.light {
+    --background: #f8fafc;
+    --surface: #ffffff;
+    --surface-secondary: #f1f5f9;
+    --text: #4a2f20;
+    --text-secondary: #6d4c41;
+    --border: #e2e8f0;
+    --primary: #0891b2;
+    --primary-hover: #0e7490;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --shadow: rgba(0, 0, 0, 0.05);
+}

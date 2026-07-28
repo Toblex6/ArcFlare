@@ -1,14 +1,14 @@
-//src/app/page.tsx
+// src/app/page.tsx
 'use client';
-
+import ThemeToggle from '@/src/components/ThemeToggle';
 import Link from 'next/link';
 import Image from 'next/image';
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-[#120b08] text-white">
+    <main className="min-h-screen bg-[var(--background)] text-[var(--text)]">
       {/* NAVBAR */}
-      <nav className="border-b border-[#2a1d16]">
+      <nav className="border-b border-[var(--border)]">
         <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={42} height={42} />
@@ -16,14 +16,15 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-6">
-            <Link href="/docs" className="text-sm text-gray-400 hover:text-cyan-300 transition">
+            <ThemeToggle />
+            <Link href="/docs" className="text-sm text-[var(--text-secondary)] hover:text-cyan-300 transition">
               Docs
             </Link>
 
-            <div className="flex items-center gap-3 border-l border-[#3a2a22] pl-6">
+            <div className="flex items-center gap-3 border-l border-[var(--border)] pl-6">
               <Link
                 href="/merchant/login"
-                className="text-sm text-gray-300 hover:text-white transition"
+                className="text-sm text-[var(--text-secondary)] hover:text-[var(--text)] transition"
               >
                 Business Login
               </Link>
@@ -41,7 +42,7 @@ export default function HomePage() {
       {/* HERO */}
       <section className="max-w-7xl mx-auto px-6 py-24 grid lg:grid-cols-2 gap-16 items-center">
         <div>
-          <div className="inline-flex items-center gap-2 bg-[#1f140f] border border-[#3a2a22] rounded-full px-4 py-2 text-sm text-cyan-300 mb-8">
+          <div className="inline-flex items-center gap-2 bg-[var(--surface-secondary)] border border-[var(--border)] rounded-full px-4 py-2 text-sm text-cyan-300 mb-8">
             ● Live on Arc Testnet
           </div>
 
@@ -49,7 +50,7 @@ export default function HomePage() {
             Stablecoin Payments and Agentic Finance on Arc
           </h1>
 
-          <p className="text-xl text-gray-400 leading-relaxed mb-10">
+          <p className="text-xl text-[var(--text-secondary)] leading-relaxed mb-10">
             FlareHQ lets merchants accept USDC payments through hosted checkout links, and enables
             AI agents to transact autonomously — with streaming payments, escrow, and micro-billing
             built in.
@@ -64,7 +65,7 @@ export default function HomePage() {
             </Link>
             <Link
               href="/docs"
-              className="border border-[#3a2a22] bg-[#1a120d] px-8 py-4 rounded-2xl hover:bg-[#241913] transition"
+              className="border border-[var(--border)] bg-[var(--surface)] px-8 py-4 rounded-2xl hover:bg-[var(--surface-secondary)] transition"
             >
               Read the Docs
             </Link>
@@ -72,10 +73,10 @@ export default function HomePage() {
         </div>
 
         {/* RIGHT PANEL — live stats */}
-        <div className="bg-[#1a120d] border border-[#2d2019] rounded-[32px] p-8 shadow-2xl">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[32px] p-8 shadow-2xl">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <p className="text-gray-400 text-sm">Arc Testnet — Live</p>
+              <p className="text-[var(--text-secondary)] text-sm">Arc Testnet — Live</p>
               <h2 className="text-5xl font-bold mt-2">USDC</h2>
             </div>
             <div className="bg-cyan-400/20 text-cyan-300 px-4 py-2 rounded-full text-sm font-mono">
@@ -104,11 +105,11 @@ export default function HomePage() {
             ].map((item, i) => (
               <div
                 key={i}
-                className="bg-[#241913] rounded-2xl p-4 flex items-center justify-between"
+                className="bg-[var(--surface-secondary)] rounded-2xl p-4 flex items-center justify-between"
               >
                 <div>
                   <p className="font-semibold text-sm">{item.title}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{item.desc}</p>
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">{item.desc}</p>
                 </div>
                 <p className="text-cyan-300 text-sm font-mono">{item.status}</p>
               </div>
@@ -155,11 +156,11 @@ export default function HomePage() {
           ].map((card, i) => (
             <div
               key={i}
-              className="bg-[#1a120d] border border-[#2d2019] rounded-3xl p-8 flex flex-col hover:border-cyan-900/50 transition duration-300"
+              className="bg-[var(--surface)] border border-[var(--border)] rounded-3xl p-8 flex flex-col hover:border-cyan-900/50 transition duration-300"
             >
               <div className="text-4xl mb-4">{card.icon}</div>
               <h3 className="text-xl font-bold mb-3">{card.title}</h3>
-              <p className="text-gray-400 leading-relaxed flex-1">{card.desc}</p>
+              <p className="text-[var(--text-secondary)] leading-relaxed flex-1">{card.desc}</p>
               <Link
                 href={card.href}
                 className="mt-6 text-cyan-400 text-sm font-semibold hover:text-cyan-300 transition"
@@ -172,23 +173,23 @@ export default function HomePage() {
       </section>
 
       {/* FOOTER */}
-      <footer className="border-t border-[#2a1d16] py-10">
+      <footer className="border-t border-[var(--border)] py-10">
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={28} height={28} />
-            <span className="text-gray-500 text-sm">FlareHQ — Built on Arc Testnet</span>
+            <span className="text-[var(--text-secondary)] text-sm">FlareHQ — Built on Arc Testnet</span>
           </div>
-          <div className="flex gap-6 text-sm text-gray-500">
-            <Link href="/merchant/signup" className="hover:text-white transition">
+          <div className="flex gap-6 text-sm text-[var(--text-secondary)]">
+            <Link href="/merchant/signup" className="hover:text-[var(--text)] transition">
               Sign Up
             </Link>
-            <Link href="/merchant/login" className="hover:text-white transition">
+            <Link href="/merchant/login" className="hover:text-[var(--text)] transition">
               Login
             </Link>
-            <Link href="/consumer" className="hover:text-white transition">
+            <Link href="/consumer" className="hover:text-[var(--text)] transition">
               Personal
             </Link>
-            <Link href="/docs" className="hover:text-white transition">
+            <Link href="/docs" className="hover:text-[var(--text)] transition">
               Docs
             </Link>
           </div>

@@ -217,14 +217,14 @@ export default function AgentsPage() {
     page: {
       display: 'flex',
       minHeight: '100vh',
-      background: '#0e0b08',
+      background: 'var(--background)',
       fontFamily: 'Inter, system-ui, sans-serif',
-      color: '#f0ece6',
+      color: 'var(--text)',
     },
     aside: {
       width: 220,
       minHeight: '100vh',
-      background: '#1a1410',
+      background: 'var(--surface)',
       display: 'flex',
       flexDirection: 'column' as const,
       padding: '24px 14px',
@@ -233,12 +233,12 @@ export default function AgentsPage() {
       top: 0,
       height: '100vh',
       overflowY: 'auto' as const,
-      borderRight: '1px solid #2d2015',
+      borderRight: '1px solid var(--border)',
     },
     main: { flex: 1, padding: '32px', overflowX: 'hidden' as const },
     card: {
-      background: '#1a1410',
-      border: '1px solid #2d2015',
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
       borderRadius: 16,
       padding: 24,
       marginBottom: 20,
@@ -246,10 +246,10 @@ export default function AgentsPage() {
     input: {
       width: '100%',
       padding: '10px 14px',
-      background: '#251c12',
-      border: '1px solid #3d2e1a',
+      background: 'var(--surface-secondary)',
+      border: '1px solid var(--border)',
       borderRadius: 10,
-      color: '#f0ece6',
+      color: 'var(--text)',
       fontSize: 13,
       fontFamily: 'monospace',
       outline: 'none',
@@ -258,8 +258,8 @@ export default function AgentsPage() {
     },
     btn: {
       padding: '12px 24px',
-      background: '#c8975a',
-      color: '#0e0b08',
+      background: 'var(--primary)',
+      color: 'var(--background)',
       border: 'none',
       borderRadius: 10,
       fontWeight: 700,
@@ -269,8 +269,8 @@ export default function AgentsPage() {
     btnGhost: {
       padding: '10px 20px',
       background: 'transparent',
-      color: '#c8975a',
-      border: '1px solid #c8975a',
+      color: 'var(--primary)',
+      border: '1px solid var(--primary)',
       borderRadius: 10,
       fontWeight: 600,
       fontSize: 12,
@@ -278,7 +278,7 @@ export default function AgentsPage() {
     },
     label: {
       fontSize: 10,
-      color: '#6b5a45',
+      color: 'var(--text-secondary)',
       textTransform: 'uppercase' as const,
       letterSpacing: 1,
       marginBottom: 4,
@@ -298,25 +298,25 @@ export default function AgentsPage() {
       borderRadius: 8,
       fontSize: 12,
       cursor: 'pointer',
-      border: `1px solid ${active ? '#c8975a' : '#2d2015'}`,
+      border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
       background: active ? 'rgba(200,151,90,0.1)' : 'transparent',
-      color: active ? '#c8975a' : '#6b5a45',
+      color: active ? 'var(--primary)' : 'var(--text-secondary)',
       fontWeight: active ? 700 : 400,
     }),
   };
 
   return (
-    <div style={S.page}>
+    <div className="light" style={S.page}>
       {/* Sidebar */}
       <DashboardSidebar active="Agents" />
 
       {/* Main */}
       <main style={S.main}>
         <div style={{ marginBottom: 28 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f0ece6', margin: '0 0 4px' }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
             Agent Hub
           </h1>
-          <p style={{ color: '#6b5a45', fontSize: 13, margin: 0 }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0 }}>
             ERC-8004 agent identity, reputation and validation on Arc Testnet
           </p>
         </div>
@@ -339,18 +339,18 @@ export default function AgentsPage() {
         {/* ── REGISTRY TAB ── */}
         {activeTab === 'registry' && (
           <div style={S.card}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 16px' }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 16px' }}>
               Registered Agents
             </h3>
             {loading ? (
-              <p style={{ color: '#6b5a45', fontFamily: 'monospace', fontSize: 12 }}>
+              <p style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 12 }}>
                 Loading agents...
               </p>
             ) : agents.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 0' }}>
                 <p style={{ fontSize: 32, marginBottom: 8 }}>🤖</p>
-                <p style={{ color: '#6b5a45', fontSize: 14 }}>No agents deployed yet.</p>
-                <p style={{ color: '#4b4035', fontSize: 12, marginTop: 4 }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>No agents deployed yet.</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>
                   Use the Deploy Agent tab to create your first ERC-8004 agent.
                 </p>
               </div>
@@ -361,8 +361,8 @@ export default function AgentsPage() {
                     key={agent.id}
                     onClick={() => setSelected(selected?.id === agent.id ? null : agent)}
                     style={{
-                      background: '#251c12',
-                      border: `1px solid ${selected?.id === agent.id ? '#c8975a' : '#3d2e1a'}`,
+                      background: 'var(--surface-secondary)',
+                      border: `1px solid ${selected?.id === agent.id ? 'var(--primary)' : 'var(--border)'}`,
                       borderRadius: 14,
                       padding: 18,
                       cursor: 'pointer',
@@ -393,12 +393,12 @@ export default function AgentsPage() {
                           🤖
                         </div>
                         <div>
-                          <p style={{ color: '#f0ece6', fontWeight: 700, fontSize: 13, margin: 0 }}>
+                          <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: 0 }}>
                             {agent.name}
                           </p>
                           <p
                             style={{
-                              color: '#6b5a45',
+                              color: 'var(--text-secondary)',
                               fontSize: 10,
                               margin: 0,
                               fontFamily: 'monospace',
@@ -410,18 +410,18 @@ export default function AgentsPage() {
                       </div>
                       <span
                         style={S.badge(
-                          agent.status === 'ACTIVE_AGENT_PROVISIONED' ? '#06b6d4' : '#6b5a45'
+                          agent.status === 'ACTIVE_AGENT_PROVISIONED' ? 'var(--success)' : 'var(--text-secondary)'
                         )}
                       >
                         {agent.status === 'ACTIVE_AGENT_PROVISIONED' ? 'ACTIVE' : agent.status}
                       </span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      <div style={{ background: '#1a1410', borderRadius: 8, padding: 10 }}>
+                      <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
                         <span style={S.label}>SCA Address</span>
                         <p
                           style={{
-                            color: '#c8975a',
+                            color: 'var(--primary)',
                             fontFamily: 'monospace',
                             fontSize: 11,
                             margin: 0,
@@ -431,11 +431,11 @@ export default function AgentsPage() {
                           {agent.scaAddress}
                         </p>
                       </div>
-                      <div style={{ background: '#1a1410', borderRadius: 8, padding: 10 }}>
+                      <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
                         <span style={S.label}>Circle Wallet ID</span>
                         <p
                           style={{
-                            color: '#f0ece6',
+                            color: 'var(--text)',
                             fontFamily: 'monospace',
                             fontSize: 11,
                             margin: 0,
@@ -480,10 +480,10 @@ export default function AgentsPage() {
         {/* ── REPUTATION TAB ── */}
         {activeTab === 'reputation' && (
           <div style={S.card}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 4px' }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
               Record Agent Reputation
             </h3>
-            <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 20px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 20px' }}>
               Per ERC-8004 — the validator wallet must be different from the agent owner wallet.
             </p>
             <div
@@ -546,7 +546,7 @@ export default function AgentsPage() {
                   padding: 14,
                 }}
               >
-                <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>❌ {repError}</p>
+                <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>❌ {repError}</p>
               </div>
             )}
             {repResult && (
@@ -559,18 +559,18 @@ export default function AgentsPage() {
                   padding: 14,
                 }}
               >
-                <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 8px' }}>
+                <p style={{ color: 'var(--success)', fontWeight: 700, fontSize: 13, margin: '0 0 8px' }}>
                   ✅ Reputation recorded onchain
                 </p>
-                <p style={{ color: '#f0ece6', fontSize: 12, margin: '0 0 4px' }}>
-                  Score: <strong style={{ color: '#c8975a' }}>{repResult.score}/100</strong> — Tag:{' '}
+                <p style={{ color: 'var(--text)', fontSize: 12, margin: '0 0 4px' }}>
+                  Score: <strong style={{ color: 'var(--primary)' }}>{repResult.score}/100</strong> — Tag:{' '}
                   {repResult.tag}
                 </p>
                 <a
                   href={repResult.explorerUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: '#c8975a', fontSize: 11, fontFamily: 'monospace' }}
+                  style={{ color: 'var(--primary)', fontSize: 11, fontFamily: 'monospace' }}
                 >
                   View on ArcScan →
                 </a>
@@ -582,10 +582,10 @@ export default function AgentsPage() {
         {/* ── VALIDATION TAB ── */}
         {activeTab === 'validation' && (
           <div style={S.card}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 4px' }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
               ERC-8004 Validation
             </h3>
-            <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 16px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 16px' }}>
               Two-step flow: owner requests → validator responds.
             </p>
             <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
@@ -690,8 +690,8 @@ export default function AgentsPage() {
                   <button
                     style={{
                       ...S.tab(valPassed),
-                      borderColor: '#06b6d4',
-                      color: valPassed ? '#06b6d4' : '#6b5a45',
+                      borderColor: 'var(--success)',
+                      color: valPassed ? 'var(--success)' : 'var(--text-secondary)',
                     }}
                     onClick={() => setValPassed(true)}
                   >
@@ -700,8 +700,8 @@ export default function AgentsPage() {
                   <button
                     style={{
                       ...S.tab(!valPassed),
-                      borderColor: '#f87171',
-                      color: !valPassed ? '#f87171' : '#6b5a45',
+                      borderColor: 'var(--danger)',
+                      color: !valPassed ? 'var(--danger)' : 'var(--text-secondary)',
                     }}
                     onClick={() => setValPassed(false)}
                   >
@@ -749,7 +749,7 @@ export default function AgentsPage() {
                   padding: 14,
                 }}
               >
-                <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>❌ {valError}</p>
+                <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>❌ {valError}</p>
               </div>
             )}
             {valResult && (
@@ -762,13 +762,13 @@ export default function AgentsPage() {
                   padding: 14,
                 }}
               >
-                <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 8px' }}>
+                <p style={{ color: 'var(--success)', fontWeight: 700, fontSize: 13, margin: '0 0 8px' }}>
                   ✅ {valResult.message}
                 </p>
                 {valResult.requestHash && (
                   <p
                     style={{
-                      color: '#6b5a45',
+                      color: 'var(--text-secondary)',
                       fontSize: 11,
                       fontFamily: 'monospace',
                       margin: '0 0 4px',
@@ -778,7 +778,7 @@ export default function AgentsPage() {
                   </p>
                 )}
                 {valResult.nextStep && (
-                  <p style={{ color: '#c8975a', fontSize: 11, margin: '0 0 8px' }}>
+                  <p style={{ color: 'var(--primary)', fontSize: 11, margin: '0 0 8px' }}>
                     Next: {valResult.nextStep}
                   </p>
                 )}
@@ -787,7 +787,7 @@ export default function AgentsPage() {
                     href={valResult.explorerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ color: '#c8975a', fontSize: 11, fontFamily: 'monospace' }}
+                    style={{ color: 'var(--primary)', fontSize: 11, fontFamily: 'monospace' }}
                   >
                     View on ArcScan →
                   </a>
@@ -800,10 +800,10 @@ export default function AgentsPage() {
         {/* ── DEPLOY TAB ── */}
         {activeTab === 'deploy' && (
           <div style={S.card}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 4px' }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
               Deploy New ERC-8004 Agent
             </h3>
-            <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 20px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 20px' }}>
               Creates a Circle SCA wallet and registers an ERC-8004 identity on Arc Testnet.
             </p>
             <span style={S.label}>Agent Name</span>
@@ -830,7 +830,7 @@ export default function AgentsPage() {
                   padding: 14,
                 }}
               >
-                <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>❌ {deployError}</p>
+                <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>❌ {deployError}</p>
               </div>
             )}
             {deployResult && (
@@ -843,7 +843,7 @@ export default function AgentsPage() {
                   padding: 20,
                 }}
               >
-                <p style={{ color: '#c8975a', fontWeight: 700, fontSize: 14, margin: '0 0 14px' }}>
+                <p style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 14, margin: '0 0 14px' }}>
                   ✅ Agent Deployed Successfully
                 </p>
                 {[
@@ -859,11 +859,11 @@ export default function AgentsPage() {
                       display: 'flex',
                       justifyContent: 'space-between',
                       padding: '6px 0',
-                      borderBottom: '1px solid #2d2015',
+                      borderBottom: '1px solid var(--border)',
                     }}
                   >
-                    <span style={{ color: '#6b5a45', fontSize: 12 }}>{row.label}</span>
-                    <span style={{ color: '#f0ece6', fontSize: 11, fontFamily: 'monospace' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{row.label}</span>
+                    <span style={{ color: 'var(--text)', fontSize: 11, fontFamily: 'monospace' }}>
                       {row.value}
                     </span>
                   </div>
@@ -881,7 +881,7 @@ export default function AgentsPage() {
                       background: 'rgba(200,151,90,0.1)',
                       border: '1px solid rgba(200,151,90,0.25)',
                       borderRadius: 8,
-                      color: '#c8975a',
+                      color: 'var(--primary)',
                       fontSize: 12,
                       textDecoration: 'none',
                       fontWeight: 600,

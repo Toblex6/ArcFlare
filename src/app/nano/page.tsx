@@ -5,7 +5,9 @@
 
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
-import DashboardSidebar from "@/src/components/DashboardSidebar";
+import DashboardSidebar from '@/components/DashboardSidebar';
+
+const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
 
 const NAV = [
   { label: "Dashboard", href: "/dashboard" },
@@ -57,14 +59,14 @@ const styles = {
   page: {
     display: "flex",
     minHeight: "100vh",
-    background: "#0e0b08",
+    background: "var(--background)",
     fontFamily: "Inter, system-ui, sans-serif",
-    color: "#f0ece6",
+    color: "var(--text)",
   } as React.CSSProperties,
   aside: {
     width: 220,
     minHeight: "100vh",
-    background: "#1a1410",
+    background: "var(--surface)",
     display: "flex",
     flexDirection: "column" as const,
     padding: "24px 14px",
@@ -73,7 +75,7 @@ const styles = {
     top: 0,
     height: "100vh",
     overflowY: "auto" as const,
-    borderRight: "1px solid #2d2015",
+    borderRight: "1px solid var(--border)",
   } as React.CSSProperties,
   main: {
     flex: 1,
@@ -81,8 +83,8 @@ const styles = {
     overflowX: "hidden" as const,
   } as React.CSSProperties,
   card: {
-    background: "#1a1410",
-    border: "1px solid #2d2015",
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
     borderRadius: 16,
     padding: 24,
     marginBottom: 20,
@@ -90,10 +92,10 @@ const styles = {
   input: {
     width: "100%",
     padding: "10px 14px",
-    background: "#251c12",
-    border: "1px solid #3d2e1a",
+    background: "var(--surface-secondary)",
+    border: "1px solid var(--border)",
     borderRadius: 10,
-    color: "#f0ece6",
+    color: "var(--text)",
     fontSize: 13,
     fontFamily: "monospace",
     outline: "none",
@@ -102,10 +104,10 @@ const styles = {
   } as React.CSSProperties,
   inputSmall: {
     padding: "10px 14px",
-    background: "#251c12",
-    border: "1px solid #3d2e1a",
+    background: "var(--surface-secondary)",
+    border: "1px solid var(--border)",
     borderRadius: 10,
-    color: "#f0ece6",
+    color: "var(--text)",
     fontSize: 13,
     fontFamily: "monospace",
     outline: "none",
@@ -113,7 +115,7 @@ const styles = {
   } as React.CSSProperties,
   label: {
     fontSize: 10,
-    color: "#6b5a45",
+    color: "var(--text-secondary)",
     textTransform: "uppercase" as const,
     letterSpacing: 1,
     marginBottom: 4,
@@ -126,13 +128,13 @@ const styles = {
     marginBottom: 24,
   } as React.CSSProperties,
   balanceCard: {
-    background: "#1a1410",
-    border: "1px solid #2d2015",
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
     borderRadius: 14,
     padding: 20,
   } as React.CSSProperties,
   balanceLabel: {
-    color: "#6b5a45",
+    color: "var(--text-secondary)",
     fontSize: 12,
     textTransform: "uppercase" as const,
     letterSpacing: 1,
@@ -144,15 +146,15 @@ const styles = {
     fontFamily: "monospace",
     margin: 0,
   } as React.CSSProperties,
-  balanceUnit: { color: "#c8975a", fontSize: 16 },
-  balanceSub: { color: "#4b4035", fontSize: 12, margin: "6px 0 0" },
+  balanceUnit: { color: "var(--primary)", fontSize: 16 },
+  balanceSub: { color: "var(--text-secondary)", fontSize: 12, margin: "6px 0 0" },
   row: { display: "flex", gap: 10, flexWrap: "wrap" as const },
   errorBox: {
     background: "rgba(239,68,68,0.08)",
     border: "1px solid rgba(239,68,68,0.2)",
     borderRadius: 10,
     padding: 12,
-    color: "#f87171",
+    color: "var(--danger)",
     marginBottom: 16,
   } as React.CSSProperties,
   successBox: {
@@ -160,7 +162,7 @@ const styles = {
     border: "1px solid rgba(16,185,129,0.2)",
     borderRadius: 10,
     padding: 12,
-    color: "#10b981",
+    color: "var(--success)",
     marginBottom: 16,
   } as React.CSSProperties,
   tableWrap: { overflowX: "auto" as const },
@@ -173,15 +175,15 @@ const styles = {
   th: {
     textAlign: "left" as const,
     padding: "8px 8px 8px 0",
-    color: "#6b5a45",
-    borderBottom: "1px solid #2d2015",
+    color: "var(--text-secondary)",
+    borderBottom: "1px solid var(--border)",
   } as React.CSSProperties,
-  tdRef: { color: "#c8975a", padding: "8px 8px 8px 0" },
-  tdAmount: { color: "#f0ece6", padding: "8px 8px 8px 0" },
-  tdAddress: { color: "#6b5a45", padding: "8px 8px 8px 0" },
-  tdMerchant: { color: "#f0ece6", padding: "8px 8px 8px 0" },
+  tdRef: { color: "var(--primary)", padding: "8px 8px 8px 0" },
+  tdAmount: { color: "var(--text)", padding: "8px 8px 8px 0" },
+  tdAddress: { color: "var(--text-secondary)", padding: "8px 8px 8px 0" },
+  tdMerchant: { color: "var(--text)", padding: "8px 8px 8px 0" },
   explorerLink: {
-    color: "#c8975a",
+    color: "var(--primary)",
     textDecoration: "none",
     fontSize: 12,
   } as React.CSSProperties,
@@ -192,16 +194,16 @@ const tabStyle = (active: boolean): React.CSSProperties => ({
   borderRadius: 8,
   fontSize: 12,
   cursor: "pointer",
-  border: `1px solid ${active ? "#c8975a" : "#2d2015"}`,
+  border: `1px solid ${active ? "var(--primary)" : "var(--border)"}`,
   background: active ? "rgba(200,151,90,0.1)" : "transparent",
-  color: active ? "#c8975a" : "#6b5a45",
+  color: active ? "var(--primary)" : "var(--text-secondary)",
   fontWeight: active ? 700 : 400,
 });
 
 const btnStyle = (disabled = false): React.CSSProperties => ({
   padding: "12px 24px",
-  background: disabled ? "rgba(200,151,90,0.3)" : "#c8975a",
-  color: disabled ? "rgba(14,11,8,0.5)" : "#0e0b08",
+  background: disabled ? "rgba(200,151,90,0.3)" : "var(--primary)",
+  color: disabled ? "rgba(14,11,8,0.5)" : "var(--background)",
   border: "none",
   borderRadius: 10,
   fontWeight: 700,
@@ -222,9 +224,9 @@ const btnGhostStyle = (disabled = false): React.CSSProperties => ({
 
 const badgeStyle = (status: string): React.CSSProperties => {
   const base = { padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700 };
-  if (status === "SUCCESS") return { ...base, background: "rgba(16,185,129,0.12)", color: "#10b981" };
-  if (status === "PENDING") return { ...base, background: "rgba(245,158,11,0.12)", color: "#f59e0b" };
-  return { ...base, background: "rgba(239,68,68,0.12)", color: "#f87171" };
+  if (status === "SUCCESS") return { ...base, background: "rgba(16,185,129,0.12)", color: "var(--success)" };
+  if (status === "PENDING") return { ...base, background: "rgba(245,158,11,0.12)", color: "var(--warning)" };
+  return { ...base, background: "rgba(239,68,68,0.12)", color: "var(--danger)" };
 };
 
 const payResultBoxStyle = (success: boolean): React.CSSProperties => ({
@@ -233,7 +235,7 @@ const payResultBoxStyle = (success: boolean): React.CSSProperties => ({
   border: success ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(239,68,68,0.2)",
   borderRadius: 10,
   padding: 16,
-  color: success ? "#10b981" : "#f87171",
+  color: success ? "var(--success)" : "var(--danger)",
 });
 
 export default function NanoPaymentsPage() {
@@ -285,7 +287,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/payments/nano", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({ agentSCA, merchantSCA, amount, description }),
       });
       const data = await res.json();
@@ -305,7 +307,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch(
         `/api/payments/nano?agentSCA=${agentSCA}&merchantSCA=${merchantSCA}`,
-        { headers: {} }
+        { headers: { "x-api-key": API_KEY } }
       );
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -324,7 +326,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/payments/nano/settle", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({ agentSCA, merchantSCA, forceSettle }),
       });
       const data = await res.json();
@@ -343,7 +345,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/payments/nano/settle", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({ autoSettle: true }),
       });
       const data = await res.json();
@@ -362,7 +364,7 @@ export default function NanoPaymentsPage() {
     try {
       // 1. Fetch balances – required
       const balanceRes = await fetch("/api/x402/seller/balance", {
-        headers: {},
+        headers: { "x-api-key": API_KEY },
       });
       const balanceData = await balanceRes.json();
       if (balanceData.success) setX402Balances(balanceData);
@@ -370,7 +372,7 @@ export default function NanoPaymentsPage() {
       // 2. Fetch payment history – optional, fallback on error
       try {
         const paymentsRes = await fetch("/api/payments/all?chain=x402", {
-          headers: {},
+          headers: { "x-api-key": API_KEY },
         });
         const paymentsData = await paymentsRes.json();
         if (paymentsData.success) setX402Payments(paymentsData.data || []);
@@ -404,7 +406,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/x402/eoa-wallet/deposit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({ eoaAddress: depositEoa, amount: depositAmount }),
       });
       const data = await res.json();
@@ -429,7 +431,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/x402/pay", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({ resourceUrl, eoaAddress: payEoa }),
       });
       const data = await res.json();
@@ -443,17 +445,17 @@ export default function NanoPaymentsPage() {
   };
 
   return (
-    <div style={styles.page}>
+    <div className="light" style={styles.page}>
       {/* ── Sidebar ── */}
       <DashboardSidebar active="Nanopayments" />
 
       {/* ── Main ── */}
       <main style={styles.main}>
         <div style={{ marginBottom: 28 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f0ece6", margin: "0 0 4px" }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>
             Nanopayments
           </h1>
-          <p style={{ color: "#6b5a45", fontSize: 13, margin: 0 }}>
+          <p style={{ color: "var(--text-secondary)", fontSize: 13, margin: 0 }}>
             Micro-payments that batch automatically + gasless x402 Gateway payments
           </p>
         </div>
@@ -494,7 +496,7 @@ export default function NanoPaymentsPage() {
 
             {/* Record */}
             <div style={styles.card}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#f0ece6", margin: "0 0 16px" }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", margin: "0 0 16px" }}>
                 Record a Micro-Charge
               </h3>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 12 }}>
@@ -514,14 +516,14 @@ export default function NanoPaymentsPage() {
               <button style={btnStyle(recording)} disabled={recording} onClick={recordNano}>
                 {recording ? "Recording..." : "💸 Record Charge"}
               </button>
-              {recordError && <p style={{ color: "#f87171", fontSize: 12, marginTop: 10 }}>❌ {recordError}</p>}
+              {recordError && <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 10 }}>❌ {recordError}</p>}
               {recordResult && (
                 <div style={{ marginTop: 14, background: "rgba(200,151,90,0.06)", border: "1px solid rgba(200,151,90,0.2)", borderRadius: 10, padding: 16 }}>
-                  <p style={{ color: "#c8975a", fontWeight: 700, fontSize: 13, margin: "0 0 8px" }}>✅ Charge Recorded</p>
-                  <p style={{ color: "#f0ece6", fontSize: 12, margin: "0 0 4px" }}>
+                  <p style={{ color: "var(--primary)", fontWeight: 700, fontSize: 13, margin: "0 0 8px" }}>✅ Charge Recorded</p>
+                  <p style={{ color: "var(--text)", fontSize: 12, margin: "0 0 4px" }}>
                     Unsettled balance: <strong>{recordResult.unsettledBalance} USDC</strong> ({recordResult.unsettledCount} charges)
                   </p>
-                  <p style={{ color: recordResult.readyToSettle ? "#10b981" : "#6b5a45", fontSize: 12, margin: 0 }}>
+                  <p style={{ color: recordResult.readyToSettle ? "var(--success)" : "var(--text-secondary)", fontSize: 12, margin: 0 }}>
                     {recordResult.message}
                   </p>
                 </div>
@@ -530,16 +532,16 @@ export default function NanoPaymentsPage() {
 
             {/* Check Balance */}
             <div style={styles.card}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#f0ece6", margin: "0 0 16px" }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", margin: "0 0 16px" }}>
                 Check Unsettled Balance
               </h3>
               <button style={btnStyle(balLoading)} disabled={balLoading} onClick={checkBalance}>
                 {balLoading ? "Checking..." : "📊 Check Balance"}
               </button>
-              {balError && <p style={{ color: "#f87171", fontSize: 12, marginTop: 10 }}>❌ {balError}</p>}
+              {balError && <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 10 }}>❌ {balError}</p>}
               {balResult && (
-                <div style={{ marginTop: 14, background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 10, padding: 16 }}>
-                  <pre style={{ color: "#f0ece6", fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap" as const, margin: 0 }}>
+                <div style={{ marginTop: 14, background: "var(--surface-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
+                  <pre style={{ color: "var(--text)", fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap" as const, margin: 0 }}>
                     {JSON.stringify(balResult, null, 2)}
                   </pre>
                 </div>
@@ -548,15 +550,15 @@ export default function NanoPaymentsPage() {
 
             {/* Settle Batch */}
             <div style={styles.card}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#f0ece6", margin: "0 0 4px" }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>
                 Settle Batch Onchain
               </h3>
-              <p style={{ color: "#6b5a45", fontSize: 12, margin: "0 0 16px" }}>
+              <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: "0 0 16px" }}>
                 Moves real USDC for this agent-merchant pair on Arc Testnet.
               </p>
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, cursor: "pointer" }}>
                 <input type="checkbox" checked={forceSettle} onChange={(e) => setForceSettle(e.target.checked)} />
-                <span style={{ fontSize: 12, color: "#6b5a45" }}>Force settle below threshold</span>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Force settle below threshold</span>
               </label>
               <button style={{ ...btnStyle(settling), marginRight: 10 }} disabled={settling} onClick={settleBatch}>
                 {settling ? "Settling onchain..." : "⚡ Settle This Pair"}
@@ -564,18 +566,18 @@ export default function NanoPaymentsPage() {
               <button style={btnGhostStyle(autoSettling)} disabled={autoSettling} onClick={autoSettleAll}>
                 {autoSettling ? "Settling all..." : "🔄 Auto-Settle All Pairs"}
               </button>
-              {settleError && <p style={{ color: "#f87171", fontSize: 12, marginTop: 10 }}>❌ {settleError}</p>}
+              {settleError && <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 10 }}>❌ {settleError}</p>}
               {settleResult && (
                 <div style={{ marginTop: 14, background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 10, padding: 16 }}>
-                  <p style={{ color: "#10b981", fontWeight: 700, fontSize: 13, margin: "0 0 8px" }}>✅ {settleResult.message}</p>
+                  <p style={{ color: "var(--success)", fontWeight: 700, fontSize: 13, margin: "0 0 8px" }}>✅ {settleResult.message}</p>
                   <a href={settleResult.explorerUrl} target="_blank" rel="noopener noreferrer" style={styles.explorerLink}>
                     View tx on ArcScan →
                   </a>
                 </div>
               )}
               {autoSettleResult && (
-                <div style={{ marginTop: 14, background: "#251c12", border: "1px solid #3d2e1a", borderRadius: 10, padding: 16 }}>
-                  <pre style={{ color: "#f0ece6", fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap" as const, margin: 0 }}>
+                <div style={{ marginTop: 14, background: "var(--surface-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
+                  <pre style={{ color: "var(--text)", fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap" as const, margin: 0 }}>
                     {JSON.stringify(autoSettleResult, null, 2)}
                   </pre>
                 </div>
@@ -613,10 +615,10 @@ export default function NanoPaymentsPage() {
 
             {/* ── DEPOSIT ── */}
             <div style={styles.card}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0ece6", margin: "0 0 4px" }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>
                 💰 Deposit into Gateway
               </h3>
-              <p style={{ color: "#6b5a45", fontSize: 13, margin: "0 0 16px" }}>
+              <p style={{ color: "var(--text-secondary)", fontSize: 13, margin: "0 0 16px" }}>
                 Transfer USDC from your EOA wallet into Circle Gateway.
               </p>
               <div style={styles.row}>
@@ -649,10 +651,10 @@ export default function NanoPaymentsPage() {
 
             {/* ── PAY X402 ── */}
             <div style={styles.card}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0ece6", margin: "0 0 4px" }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>
                 🤖 Pay x402 Resource
               </h3>
-              <p style={{ color: "#6b5a45", fontSize: 13, margin: "0 0 16px" }}>
+              <p style={{ color: "var(--text-secondary)", fontSize: 13, margin: "0 0 16px" }}>
                 Pay for a protected API endpoint using your EOA wallet.
               </p>
               <div style={styles.row}>
@@ -691,9 +693,9 @@ export default function NanoPaymentsPage() {
                           View on ArcScan →
                         </a>
                       )}
-                      <div style={{ marginTop: 8, background: "#251c12", borderRadius: 8, padding: 10 }}>
-                        <p style={{ color: "#6b5a45", fontSize: 10, margin: "0 0 4px" }}>Resource Data:</p>
-                        <pre style={{ color: "#f0ece6", fontSize: 11, margin: 0, whiteSpace: "pre-wrap" as const }}>
+                      <div style={{ marginTop: 8, background: "var(--surface-secondary)", borderRadius: 8, padding: 10 }}>
+                        <p style={{ color: "var(--text-secondary)", fontSize: 10, margin: "0 0 4px" }}>Resource Data:</p>
+                        <pre style={{ color: "var(--text)", fontSize: 11, margin: 0, whiteSpace: "pre-wrap" as const }}>
                           {JSON.stringify(payResult.resourceData, null, 2)}
                         </pre>
                       </div>
@@ -703,7 +705,7 @@ export default function NanoPaymentsPage() {
                       <p style={{ fontWeight: 700, margin: "0 0 6px" }}>❌ Payment failed</p>
                       <p style={{ margin: 0 }}>{payResult.error || payResult.message || "Unknown error"}</p>
                       {payResult.details && (
-                        <pre style={{ fontSize: 11, marginTop: 6, color: "#f0ece6", background: "#251c12", padding: 8, borderRadius: 6 }}>
+                        <pre style={{ fontSize: 11, marginTop: 6, color: "var(--text)", background: "var(--surface-secondary)", padding: 8, borderRadius: 6 }}>
                           {JSON.stringify(payResult.details, null, 2)}
                         </pre>
                       )}
@@ -715,13 +717,13 @@ export default function NanoPaymentsPage() {
 
             {/* ── PAYMENT HISTORY ── */}
             <div style={styles.card}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#f0ece6", margin: "0 0 16px" }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "var(--text)", margin: "0 0 16px" }}>
                 📋 Recent x402 Payments
               </h3>
               {x402Loading ? (
-                <p style={{ color: "#6b5a45" }}>Loading...</p>
+                <p style={{ color: "var(--text-secondary)" }}>Loading...</p>
               ) : x402Payments.length === 0 ? (
-                <p style={{ color: "#6b5a45" }}>No x402 payments yet.</p>
+                <p style={{ color: "var(--text-secondary)" }}>No x402 payments yet.</p>
               ) : (
                 <div style={styles.tableWrap}>
                   <table style={styles.table}>

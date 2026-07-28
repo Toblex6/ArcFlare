@@ -1,16 +1,14 @@
+@import './theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #0e0b08;
-  --foreground: #f0ece6;
-  --copper: #c8975a;
-}
+
 
 body {
   background-color: var(--background);
-  color: var(--foreground);
+  color: var(--text);
   margin: 0;
   padding: 0;
   font-family:
@@ -28,11 +26,13 @@ body {
 ::-webkit-scrollbar {
   width: 8px;
 }
+
 ::-webkit-scrollbar-track {
-  background: #1a1410;
+  background: var(--surface);
 }
+
 ::-webkit-scrollbar-thumb {
-  background: #c8975a;
+  background: var(--primary);
   border-radius: 4px;
 }
 
@@ -45,6 +45,7 @@ body {
   margin: 0 auto;
   padding: 0 16px;
 }
+
 @media (min-width: 768px) {
   .container-fluid {
     padding: 0 24px;
@@ -56,14 +57,17 @@ body {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
+
 .table-wrap table {
   min-width: 600px;
   width: 100%;
 }
+
 @media (max-width: 768px) {
   .table-wrap table {
     font-size: 12px;
   }
+
   .table-wrap td,
   .table-wrap th {
     padding: 8px 6px;
@@ -71,10 +75,21 @@ body {
 }
 
 /* Responsive typography */
-.responsive-h1 { font-size: clamp(24px, 5vw, 42px); }
-.responsive-h2 { font-size: clamp(20px, 4vw, 32px); }
-.responsive-h3 { font-size: clamp(16px, 3vw, 24px); }
-.responsive-text { font-size: clamp(14px, 1.5vw, 16px); }
+.responsive-h1 {
+  font-size: clamp(24px, 5vw, 42px);
+}
+
+.responsive-h2 {
+  font-size: clamp(20px, 4vw, 32px);
+}
+
+.responsive-h3 {
+  font-size: clamp(16px, 3vw, 24px);
+}
+
+.responsive-text {
+  font-size: clamp(14px, 1.5vw, 16px);
+}
 
 /* Responsive grids (auto-fit) */
 .grid-auto-fit {
@@ -82,9 +97,11 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
 }
+
 .grid-auto-fit-2 {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
+
 .grid-auto-fit-3 {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
@@ -96,7 +113,9 @@ body {
 
 /* ── FlareHQ Layout & Sidebar ── */
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -124,7 +143,8 @@ html {
 
 .arcflare-main {
   flex: 1;
-  min-width: 0; /* prevents overflow */
+  min-width: 0;
+  /* prevents overflow */
   overflow-x: hidden;
   padding: 24px 32px;
 }
@@ -235,7 +255,9 @@ html {
   }
 
   /* Inputs full width */
-  input, textarea, select {
+  input,
+  textarea,
+  select {
     width: 100% !important;
   }
 
@@ -252,9 +274,17 @@ html {
     padding: 12px;
   }
 
-  h1 { font-size: 20px !important; }
-  h2 { font-size: 17px !important; }
-  h3 { font-size: 15px !important; }
+  h1 {
+    font-size: 20px !important;
+  }
+
+  h2 {
+    font-size: 17px !important;
+  }
+
+  h3 {
+    font-size: 15px !important;
+  }
 
   /* Hide non-essential columns in tables (add this class to <td>/<th>) */
   .arcflare-table-col-hide {
@@ -263,7 +293,11 @@ html {
 }
 
 /* ── Utility: prevent text overflow anywhere ── */
-p, span, td, th, div {
+p,
+span,
+td,
+th,
+div {
   overflow-wrap: break-word;
   word-break: break-word;
 }

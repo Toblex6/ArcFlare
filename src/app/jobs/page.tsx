@@ -22,12 +22,12 @@ const NAV = [
 
 const JOB_STATUSES = ['Open', 'Funded', 'Submitted', 'Completed', 'Rejected', 'Expired'];
 const STATUS_COLORS: Record<string, string> = {
-  Open: '#f59e0b',
+  Open: 'var(--warning)',
   Funded: '#06b6d4',
-  Submitted: '#c8975a',
-  Completed: '#10b981',
-  Rejected: '#f87171',
-  Expired: '#6b5a45',
+  Submitted: 'var(--primary)',
+  Completed: 'var(--success)',
+  Rejected: 'var(--danger)',
+  Expired: 'var(--text-secondary)',
 };
 
 interface JobResult {
@@ -158,14 +158,14 @@ export default function JobsPage() {
     page: {
       display: 'flex',
       minHeight: '100vh',
-      background: '#0e0b08',
+      background: 'var(--background)',
       fontFamily: 'Inter, system-ui, sans-serif',
-      color: '#f0ece6',
+      color: 'var(--text)',
     },
     aside: {
       width: 220,
       minHeight: '100vh',
-      background: '#1a1410',
+      background: 'var(--surface)',
       display: 'flex',
       flexDirection: 'column' as const,
       padding: '24px 14px',
@@ -174,12 +174,12 @@ export default function JobsPage() {
       top: 0,
       height: '100vh',
       overflowY: 'auto' as const,
-      borderRight: '1px solid #2d2015',
+      borderRight: '1px solid var(--border)',
     },
     main: { flex: 1, padding: '32px', overflowX: 'hidden' as const },
     card: {
-      background: '#1a1410',
-      border: '1px solid #2d2015',
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
       borderRadius: 16,
       padding: 24,
       marginBottom: 20,
@@ -187,10 +187,10 @@ export default function JobsPage() {
     input: {
       width: '100%',
       padding: '10px 14px',
-      background: '#251c12',
-      border: '1px solid #3d2e1a',
+      background: 'var(--surface-secondary)',
+      border: '1px solid var(--border)',
       borderRadius: 10,
-      color: '#f0ece6',
+      color: 'var(--text)',
       fontSize: 13,
       fontFamily: 'monospace',
       outline: 'none',
@@ -199,8 +199,8 @@ export default function JobsPage() {
     },
     btn: (disabled = false) => ({
       padding: '12px 24px',
-      background: disabled ? 'rgba(200,151,90,0.3)' : '#c8975a',
-      color: disabled ? 'rgba(14,11,8,0.5)' : '#0e0b08',
+      background: disabled ? 'rgba(200,151,90,0.3)' : 'var(--primary)',
+      color: disabled ? 'rgba(14,11,8,0.5)' : 'var(--background)',
       border: 'none',
       borderRadius: 10,
       fontWeight: 700,
@@ -210,8 +210,8 @@ export default function JobsPage() {
     btnSm: (active = false) => ({
       padding: '8px 14px',
       background: active ? 'rgba(200,151,90,0.15)' : 'transparent',
-      color: active ? '#c8975a' : '#6b5a45',
-      border: `1px solid ${active ? '#c8975a' : '#2d2015'}`,
+      color: active ? 'var(--primary)' : 'var(--text-secondary)',
+      border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
       borderRadius: 8,
       fontSize: 11,
       cursor: 'pointer',
@@ -222,22 +222,22 @@ export default function JobsPage() {
       borderRadius: 8,
       fontSize: 12,
       cursor: 'pointer',
-      border: `1px solid ${active ? '#c8975a' : '#2d2015'}`,
+      border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
       background: active ? 'rgba(200,151,90,0.1)' : 'transparent',
-      color: active ? '#c8975a' : '#6b5a45',
+      color: active ? 'var(--primary)' : 'var(--text-secondary)',
       fontWeight: active ? 700 : 400,
     }),
     label: {
       fontSize: 10,
-      color: '#6b5a45',
+      color: 'var(--text-secondary)',
       textTransform: 'uppercase' as const,
       letterSpacing: 1,
       marginBottom: 4,
       display: 'block' as const,
     },
     stepBox: (active: boolean, done: boolean) => ({
-      background: done ? 'rgba(16,185,129,0.08)' : active ? 'rgba(200,151,90,0.08)' : '#251c12',
-      border: `1px solid ${done ? 'rgba(16,185,129,0.2)' : active ? 'rgba(200,151,90,0.3)' : '#3d2e1a'}`,
+      background: done ? 'rgba(16,185,129,0.08)' : active ? 'rgba(200,151,90,0.08)' : 'var(--surface-secondary)',
+      border: `1px solid ${done ? 'rgba(16,185,129,0.2)' : active ? 'rgba(200,151,90,0.3)' : 'var(--border)'}`,
       borderRadius: 14,
       padding: 18,
       marginBottom: 12,
@@ -285,17 +285,17 @@ export default function JobsPage() {
   ];
 
   return (
-    <div style={S.page}>
+    <div className="light" style={S.page}>
       {/* Sidebar */}
       <DashboardSidebar active="Jobs" />
 
       {/* Main */}
       <main style={S.main}>
         <div style={{ marginBottom: 28 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f0ece6', margin: '0 0 4px' }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
             ERC-8183 Job Board
           </h1>
-          <p style={{ color: '#6b5a45', fontSize: 13, margin: 0 }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0 }}>
             Arc's native agentic commerce standard — create, fund, and complete jobs onchain
           </p>
         </div>
@@ -312,10 +312,10 @@ export default function JobsPage() {
         {/* ── BOARD TAB ── */}
         {activeTab === 'board' && (
           <div style={S.card}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 8px' }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 8px' }}>
               About ERC-8183
             </h3>
-            <p style={{ color: '#6b5a45', fontSize: 13, lineHeight: 1.6, margin: '0 0 20px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, margin: '0 0 20px' }}>
               ERC-8183 is Arc's native agentic commerce standard. It defines how AI agents create
               jobs, fund escrow with USDC, submit deliverables, and complete payments — all onchain
               with no middleman.
@@ -348,31 +348,31 @@ export default function JobsPage() {
                 <div
                   key={i}
                   style={{
-                    background: '#251c12',
-                    border: '1px solid #3d2e1a',
+                    background: 'var(--surface-secondary)',
+                    border: '1px solid var(--border)',
                     borderRadius: 14,
                     padding: 18,
                   }}
                 >
                   <div style={{ fontSize: 24, marginBottom: 8 }}>{f.icon}</div>
-                  <p style={{ color: '#f0ece6', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
+                  <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
                     {f.title}
                   </p>
-                  <p style={{ color: '#6b5a45', fontSize: 11, margin: 0 }}>{f.desc}</p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: 0 }}>{f.desc}</p>
                 </div>
               ))}
             </div>
             <div
               style={{
-                background: '#251c12',
-                border: '1px solid #3d2e1a',
+                background: 'var(--surface-secondary)',
+                border: '1px solid var(--border)',
                 borderRadius: 14,
                 padding: 18,
               }}
             >
               <p
                 style={{
-                  color: '#c8975a',
+                  color: 'var(--primary)',
                   fontSize: 12,
                   fontWeight: 700,
                   margin: '0 0 10px',
@@ -383,7 +383,7 @@ export default function JobsPage() {
               </p>
               <p
                 style={{
-                  color: '#f0ece6',
+                  color: 'var(--text)',
                   fontSize: 12,
                   fontFamily: 'monospace',
                   margin: '0 0 8px',
@@ -396,7 +396,7 @@ export default function JobsPage() {
                 href="https://testnet.arcscan.app/address/0x0747EEf0706327138c69792bF28Cd525089e4583"
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ color: '#c8975a', fontSize: 11 }}
+                style={{ color: 'var(--primary)', fontSize: 11 }}
               >
                 View on ArcScan →
               </a>
@@ -412,8 +412,8 @@ export default function JobsPage() {
                 style={{
                   padding: '12px 24px',
                   background: 'transparent',
-                  color: '#c8975a',
-                  border: '1px solid #c8975a',
+                  color: 'var(--primary)',
+                  border: '1px solid var(--primary)',
                   borderRadius: 10,
                   fontWeight: 600,
                   fontSize: 13,
@@ -439,7 +439,7 @@ export default function JobsPage() {
                     flex: 1,
                     height: 4,
                     borderRadius: 2,
-                    background: step > s.num ? '#10b981' : step === s.num ? '#c8975a' : '#2d2015',
+                    background: step > s.num ? 'var(--success)' : step === s.num ? 'var(--primary)' : 'var(--border)',
                   }}
                 />
               ))}
@@ -465,13 +465,13 @@ export default function JobsPage() {
                         width: 28,
                         height: 28,
                         borderRadius: '50%',
-                        background: isDone ? '#10b981' : isActive ? '#c8975a' : '#2d2015',
+                        background: isDone ? 'var(--success)' : isActive ? 'var(--primary)' : 'var(--border)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: 12,
                         fontWeight: 700,
-                        color: isDone || isActive ? '#0e0b08' : '#6b5a45',
+                        color: isDone || isActive ? 'var(--background)' : 'var(--text-secondary)',
                         flexShrink: 0,
                       }}
                     >
@@ -480,7 +480,7 @@ export default function JobsPage() {
                     <div>
                       <p
                         style={{
-                          color: isDone ? '#10b981' : isActive ? '#c8975a' : '#6b5a45',
+                          color: isDone ? 'var(--success)' : isActive ? 'var(--primary)' : 'var(--text-secondary)',
                           fontWeight: 700,
                           fontSize: 13,
                           margin: 0,
@@ -488,7 +488,7 @@ export default function JobsPage() {
                       >
                         {s.label}
                       </p>
-                      <p style={{ color: '#4b4035', fontSize: 11, margin: 0 }}>{s.desc}</p>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: 0 }}>{s.desc}</p>
                     </div>
                     {isDone && stepResult?.explorerUrl && s.num === step - 1 && (
                       <a
@@ -497,7 +497,7 @@ export default function JobsPage() {
                         rel="noopener noreferrer"
                         style={{
                           marginLeft: 'auto',
-                          color: '#c8975a',
+                          color: 'var(--primary)',
                           fontSize: 11,
                           fontFamily: 'monospace',
                         }}
@@ -562,8 +562,8 @@ export default function JobsPage() {
                       {/* Step 2: Set Budget */}
                       {s.num === 2 && (
                         <div>
-                          <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 10px' }}>
-                            Job ID: <strong style={{ color: '#c8975a' }}>#{jobId}</strong> —
+                          <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
+                            Job ID: <strong style={{ color: 'var(--primary)' }}>#{jobId}</strong> —
                             Provider sets the price.
                           </p>
                           <div>
@@ -588,8 +588,8 @@ export default function JobsPage() {
 
                       {/* Step 3: Approve */}
                       {s.num === 3 && (
-                        <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 10px' }}>
-                          Approving <strong style={{ color: '#c8975a' }}>{amountUSDC} USDC</strong>{' '}
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
+                          Approving <strong style={{ color: 'var(--primary)' }}>{amountUSDC} USDC</strong>{' '}
                           for the ERC-8183 contract to spend from{' '}
                           <code style={{ color: '#06b6d4' }}>{clientSCA.slice(0, 12)}...</code>
                         </p>
@@ -597,10 +597,10 @@ export default function JobsPage() {
 
                       {/* Step 4: Fund */}
                       {s.num === 4 && (
-                        <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 10px' }}>
-                          Locking <strong style={{ color: '#c8975a' }}>{amountUSDC} USDC</strong>{' '}
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
+                          Locking <strong style={{ color: 'var(--primary)' }}>{amountUSDC} USDC</strong>{' '}
                           into ERC-8183 escrow for job{' '}
-                          <strong style={{ color: '#c8975a' }}>#{jobId}</strong>.
+                          <strong style={{ color: 'var(--primary)' }}>#{jobId}</strong>.
                         </p>
                       )}
 
@@ -629,15 +629,15 @@ export default function JobsPage() {
 
                       {/* Step 6: Complete */}
                       {s.num === 6 && (
-                        <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 10px' }}>
-                          Completing job <strong style={{ color: '#c8975a' }}>#{jobId}</strong> and
-                          releasing <strong style={{ color: '#c8975a' }}>{amountUSDC} USDC</strong>{' '}
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
+                          Completing job <strong style={{ color: 'var(--primary)' }}>#{jobId}</strong> and
+                          releasing <strong style={{ color: 'var(--primary)' }}>{amountUSDC} USDC</strong>{' '}
                           to provider.
                         </p>
                       )}
 
                       {stepError && (
-                        <p style={{ color: '#f87171', fontSize: 12, margin: '8px 0' }}>
+                        <p style={{ color: 'var(--danger)', fontSize: 12, margin: '8px 0' }}>
                           ❌ {stepError}
                         </p>
                       )}
@@ -684,10 +684,10 @@ export default function JobsPage() {
                 }}
               >
                 <p style={{ fontSize: 32, marginBottom: 8 }}>🎉</p>
-                <p style={{ color: '#10b981', fontWeight: 800, fontSize: 18, margin: '0 0 8px' }}>
+                <p style={{ color: 'var(--success)', fontWeight: 800, fontSize: 18, margin: '0 0 8px' }}>
                   Job Completed!
                 </p>
-                <p style={{ color: '#6b5a45', fontSize: 13, margin: '0 0 16px' }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 16px' }}>
                   {stepResult.message}
                 </p>
                 {stepResult.explorerUrl && (
@@ -695,7 +695,7 @@ export default function JobsPage() {
                     href={stepResult.explorerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ color: '#c8975a', fontFamily: 'monospace', fontSize: 12 }}
+                    style={{ color: 'var(--primary)', fontFamily: 'monospace', fontSize: 12 }}
                   >
                     View final tx on ArcScan →
                   </a>
@@ -715,8 +715,8 @@ export default function JobsPage() {
                     style={{
                       padding: '12px 24px',
                       background: 'transparent',
-                      color: '#c8975a',
-                      border: '1px solid #c8975a',
+                      color: 'var(--primary)',
+                      border: '1px solid var(--primary)',
                       borderRadius: 10,
                       fontWeight: 600,
                       fontSize: 13,
@@ -738,7 +738,7 @@ export default function JobsPage() {
         {/* ── MANAGE TAB ── */}
         {activeTab === 'manage' && (
           <div style={S.card}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 16px' }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 16px' }}>
               Look Up Job
             </h3>
             <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
@@ -756,15 +756,15 @@ export default function JobsPage() {
                 {lookupLoading ? 'Loading...' : 'Look Up Job'}
               </button>
             </div>
-            {lookupError && <p style={{ color: '#f87171', fontSize: 12 }}>❌ {lookupError}</p>}
+            {lookupError && <p style={{ color: 'var(--danger)', fontSize: 12 }}>❌ {lookupError}</p>}
 
             {lookupResult && (
               <div>
                 {/* Job card */}
                 <div
                   style={{
-                    background: '#251c12',
-                    border: '1px solid #3d2e1a',
+                    background: 'var(--surface-secondary)',
+                    border: '1px solid var(--border)',
                     borderRadius: 14,
                     padding: 20,
                     marginBottom: 16,
@@ -781,7 +781,7 @@ export default function JobsPage() {
                     <div>
                       <p
                         style={{
-                          color: '#f0ece6',
+                          color: 'var(--text)',
                           fontWeight: 700,
                           fontSize: 16,
                           margin: '0 0 4px',
@@ -789,7 +789,7 @@ export default function JobsPage() {
                       >
                         Job #{lookupResult.jobId}
                       </p>
-                      <p style={{ color: '#6b5a45', fontSize: 12, margin: 0 }}>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
                         {lookupResult.description}
                       </p>
                     </div>
@@ -799,9 +799,9 @@ export default function JobsPage() {
                         padding: '4px 12px',
                         borderRadius: 20,
                         fontWeight: 700,
-                        background: `${STATUS_COLORS[lookupResult.status] || '#6b5a45'}15`,
-                        color: STATUS_COLORS[lookupResult.status] || '#6b5a45',
-                        border: `1px solid ${STATUS_COLORS[lookupResult.status] || '#6b5a45'}30`,
+                        background: `${STATUS_COLORS[lookupResult.status] || 'var(--text-secondary)'}15`,
+                        color: STATUS_COLORS[lookupResult.status] || 'var(--text-secondary)',
+                        border: `1px solid ${STATUS_COLORS[lookupResult.status] || 'var(--text-secondary)'}30`,
                       }}
                     >
                       {lookupResult.status}
@@ -821,12 +821,12 @@ export default function JobsPage() {
                     ].map((row) => (
                       <div
                         key={row.label}
-                        style={{ background: '#1a1410', borderRadius: 8, padding: 10 }}
+                        style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}
                       >
                         <span
                           style={{
                             fontSize: 9,
-                            color: '#6b5a45',
+                            color: 'var(--text-secondary)',
                             textTransform: 'uppercase',
                             letterSpacing: 1,
                             display: 'block',
@@ -835,7 +835,7 @@ export default function JobsPage() {
                         >
                           {row.label}
                         </span>
-                        <span style={{ color: '#f0ece6', fontSize: 12, fontFamily: 'monospace' }}>
+                        <span style={{ color: 'var(--text)', fontSize: 12, fontFamily: 'monospace' }}>
                           {row.value}
                         </span>
                       </div>
@@ -846,7 +846,7 @@ export default function JobsPage() {
                 {/* Actions based on status */}
                 {lookupResult.status !== 'Completed' && lookupResult.status !== 'Rejected' && (
                   <div>
-                    <p style={{ color: '#6b5a45', fontSize: 12, margin: '0 0 10px' }}>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
                       Available Actions:
                     </p>
                     <div
@@ -894,8 +894,8 @@ export default function JobsPage() {
                     {manageAction && (
                       <div
                         style={{
-                          background: '#1a1410',
-                          border: '1px solid #2d2015',
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
                           borderRadius: 12,
                           padding: 16,
                         }}
@@ -907,7 +907,7 @@ export default function JobsPage() {
                               <span
                                 style={{
                                   fontSize: 10,
-                                  color: '#6b5a45',
+                                  color: 'var(--text-secondary)',
                                   textTransform: 'uppercase',
                                   letterSpacing: 1,
                                   marginBottom: 4,
@@ -929,7 +929,7 @@ export default function JobsPage() {
                             <span
                               style={{
                                 fontSize: 10,
-                                color: '#6b5a45',
+                                color: 'var(--text-secondary)',
                                 textTransform: 'uppercase',
                                 letterSpacing: 1,
                                 marginBottom: 4,
@@ -951,7 +951,7 @@ export default function JobsPage() {
                               <span
                                 style={{
                                   fontSize: 10,
-                                  color: '#6b5a45',
+                                  color: 'var(--text-secondary)',
                                   textTransform: 'uppercase',
                                   letterSpacing: 1,
                                   marginBottom: 4,
@@ -971,7 +971,7 @@ export default function JobsPage() {
                               <span
                                 style={{
                                   fontSize: 10,
-                                  color: '#6b5a45',
+                                  color: 'var(--text-secondary)',
                                   textTransform: 'uppercase',
                                   letterSpacing: 1,
                                   marginBottom: 4,
@@ -990,7 +990,7 @@ export default function JobsPage() {
                           </>
                         )}
                         {manageError && (
-                          <p style={{ color: '#f87171', fontSize: 12, margin: '0 0 8px' }}>
+                          <p style={{ color: 'var(--danger)', fontSize: 12, margin: '0 0 8px' }}>
                             ❌ {manageError}
                           </p>
                         )}
@@ -1029,7 +1029,7 @@ export default function JobsPage() {
                             href={manageResult.explorerUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            style={{ color: '#c8975a', fontSize: 11, fontFamily: 'monospace' }}
+                            style={{ color: 'var(--primary)', fontSize: 11, fontFamily: 'monospace' }}
                           >
                             View on ArcScan →
                           </a>
