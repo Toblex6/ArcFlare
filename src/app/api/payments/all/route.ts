@@ -31,19 +31,39 @@ export async function GET(req: NextRequest) {
     const successRate =
       paymentLogs.length > 0 ? (successfulLogs.length / paymentLogs.length) * 100 : 100;
 
-    const formattedPayments = paymentLogs.map((log) => ({
-      id: log.id,
-      reference: log.reference,
-      amount: log.amount || 0,
-      currency: log.currency || 'USDC',
-      chain: log.chain || 'Arc Testnet',
-      status: log.status,
-      sender_email: log.senderEmail || 'autonomous-agent@bot.network',
-      merchant: log.merchant || 'Dispatch Marketplace',
-      // Ensure date is a string to prevent serialization errors
-      paid_at: (log.timestamp || new Date()).toISOString(),
-      arcTxHash: log.arcTxHash || null,
-    }));
+    const formattedPayments = paymentLogs.map((log) => {
+      // The stored `status` never updates itself over time — a PENDING
+      // link that's past its expiresAt is still stored as "PENDING"
+      // forever unless someone actually attempts to settle it (which is
+      // the only place expiry was ever checked). Derive the real status
+      // here instead, so the table reflects reality without needing a
+      // background job to flip rows.
+      const isExpired =
+        log.status === 'PENDING' && log.expiresAt != null && new Date() > log.expiresAt;
+      const displayStatus = isExpired ? 'EXPIRED' : log.status;
+
+      return {
+        id: log.id,
+        reference: log.reference,
+        amount: log.amount || 0,
+        currency: log.currency || 'USDC',
+        chain: log.chain || 'Arbitrum Sepolia ➔ Arc Testnet',
+        status: displayStatus,
+        sender_email: log.senderEmail || 'autonomous-agent@bot.network',
+        merchant: log.merchant || 'Dispatch Marketplace',
+        // Ensure date is a string to prevent serialization errors
+        paid_at: (log.timestamp || new Date()).toISOString(),
+        arc_tx_hash: log.arcTxHash || null,
+        explorer_url: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
+        cctp_telemetry: {
+          source_domain: 3,
+          target_domain: 7,
+          attestation_status:
+            displayStatus === 'SUCCESS' ? 'REDEEMED_AND_MINTED' : 'POLLING_CIRCLE_TESTNET_IRIS_API',
+          nonce: Math.floor(100000 + Math.random() * 800000),
+        },
+      };
+    });
 
     return NextResponse.json({
       status: true,

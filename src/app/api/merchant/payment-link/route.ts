@@ -50,6 +50,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Same gap as the consumer initialize route: this was never set, so
+    // merchant links never functionally expired either. 24h default since
+    // merchant links are closer to invoices than a quick P2P request.
+    const EXPIRY_HOURS = 24;
+    const expiresAt = new Date(Date.now() + EXPIRY_HOURS * 60 * 60_000);
+
     await prisma.paymentLog.create({
       data: {
         reference,
@@ -62,6 +68,7 @@ export async function POST(req: NextRequest) {
         merchantSCA: merchant.walletAddress,
         status: 'PENDING',
         webhookUrl: webhookUrl || null,
+        expiresAt,
       },
     });
 

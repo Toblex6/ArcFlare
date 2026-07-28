@@ -10,7 +10,7 @@ export default function AgentSimulator({ onRefresh }: { onRefresh: () => void })
     setLoading(true);
     setLogs([]);
 
-    const apiKey = 'arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2';
+    const apiKey = process.env.NEXT_PUBLIC_API_KEY;
 
     const headers = {
       'Content-Type': 'application/json',

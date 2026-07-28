@@ -4,6 +4,7 @@
 import Image from "next/image";
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import DashboardSidebar from "@/src/components/DashboardSidebar";
 import {
   AreaChart,
   Area,
@@ -74,7 +75,6 @@ export default function MerchantDashboard() {
   const [copied, setCopied] = useState(false);
 
   // ── Responsive state ──
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const [isMobile, setIsMobile] = useState<boolean>(false);
 
   // ── Withdrawal state ──
@@ -90,10 +90,6 @@ export default function MerchantDashboard() {
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
-
-  useEffect(() => {
-    if (isMobile) setSidebarOpen(false);
-  }, [isMobile]);
 
   // ── Auth gate — this is the whole point of the merge. No merchant
   // session, no dashboard. Redirect to login rather than showing anyone's
@@ -325,187 +321,13 @@ export default function MerchantDashboard() {
       }}
     >
       {/* ── SIDEBAR ── */}
-      <aside
-        style={{
-          width: 220,
-          minHeight: "100vh",
-          background: "#1f140f",
-          display: "flex",
-          flexDirection: "column",
-          padding: "24px 14px",
-          flexShrink: 0,
-          position: isMobile ? "fixed" : "sticky",
-          top: 0,
-          left: isMobile ? (sidebarOpen ? 0 : "-280px") : 0,
-          height: "100vh",
-          overflowY: "auto",
-          zIndex: 1000,
-          transition: "left 0.3s ease",
-          borderRight: "1px solid #2d2015",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6 }}>
-          <Image
-            src="/arcflare-logo.png.png"
-            alt="FlareHQ"
-            width={36}
-            height={36}
-            style={{ borderRadius: 8, objectFit: "contain" }}
-          />
-          <div>
-            <p style={{ color: "var(--surface)", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
-            <p style={{ color: "var(--text-secondary)", fontSize: 10, margin: "3px 0 0 0" }}>Stablecoin Payment Infrastructure</p>
-          </div>
-        </div>
+      <DashboardSidebar active="Dashboard" />
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-          {[
-            {
-              group: "CORE",
-              items: [
-                { label: "Dashboard", href: "/merchant/dashboard", active: true, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg> },
-                { label: "Homepage", href: "/", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" /><line x1="1" y1="10" x2="23" y2="10" /></svg> },
-                { label: "Transactions", href: "/transactions", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> },
-                { label: "Checkout", href: "/merchant/dashboard#checkout", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" /></svg> },
-                { label: "Escrow", href: "/escrow", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12.01" y2="18" /></svg> },
-              ]
-            },
-            {
-              group: "AGENTS & COMMERCE",
-              items: [
-                { label: "Agents", href: "/agents", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /><line x1="12" y1="11" x2="12" y2="15" /></svg> },
-                { label: "AI Agent", href: "/agent-services", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" /></svg> },
-                { label: "Agent Wallets", href: "/agent-wallets", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="7" cy="15" r="1.5" /></svg> },
-                { label: "Jobs", href: "/jobs", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg> },
-                { label: "Nanopayments", href: "/nano", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /><path d="M12 8v8" /></svg> },
-              ]
-            },
-            {
-              group: "BUSINESS",
-              items: [
-                { label: "Payroll", href: "/payroll", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 4h16v16H4z" /><path d="M4 8h16" /><path d="M4 16h16" /><path d="M8 4v4" /><path d="M16 4v4" /></svg> },
-                { label: "Scheduled", href: "/scheduled", active: false, icon: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg> },
-              ]
-            },
-          ].map((section) => (
-            <div key={section.group} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <p style={{ fontSize: 10, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 1, padding: "6px 12px 2px", margin: 0 }}>
-                {section.group}
-              </p>
-              {section.items.map((item) => (
-                <a
-                  key={item.label}
-                  href={item.href}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "9px 12px", borderRadius: 9,
-                    textDecoration: "none", fontSize: 13, fontWeight: 500,
-                    transition: "all 0.15s",
-                    background: item.active ? "rgba(34,211,238,0.18)" : "transparent",
-                    color: item.active ? "#22d3ee" : "var(--text-secondary)",
-                    border: item.active ? "1px solid rgba(34,211,238,0.25)" : "1px solid transparent",
-                  }}
-                  onMouseEnter={e => { if (!item.active) { (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.04)"; (e.currentTarget as HTMLAnchorElement).style.color = "#d1d5db"; } }}
-                  onMouseLeave={e => { if (!item.active) { (e.currentTarget as HTMLAnchorElement).style.background = "transparent"; (e.currentTarget as HTMLAnchorElement).style.color = "var(--text-secondary)"; } }}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                </a>
-              ))}
-            </div>
-          ))}
-        </nav>
-
-        {/* Merchant identity + sign out */}
-        <div
-          style={{
-            background: "rgba(34,211,238,0.1)",
-            border: "1px solid rgba(34,211,238,0.2)",
-            borderRadius: 12,
-            padding: "14px 14px",
-            marginTop: 16,
-          }}
-        >
-          <p style={{ color: "var(--text-secondary)", fontSize: 9, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 6px 0" }}>
-            Signed in as
-          </p>
-          <p style={{ color: "var(--surface)", fontSize: 13, fontWeight: 700, margin: "0 0 2px 0" }}>
-            {merchant.businessName}
-          </p>
-          <p style={{ color: "var(--text-secondary)", fontSize: 10, margin: "0 0 10px 0" }}>{merchant.email}</p>
-          <button
-            onClick={() => router.push("/merchant/settings")}
-            style={{
-              width: "100%",
-              background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 8,
-              padding: "7px 0",
-              fontSize: 11,
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              marginBottom: 6,
-            }}
-          >
-            ⚙ Payout Settings
-          </button>
-          <button
-            onClick={async () => {
-              await fetch("/api/merchant/me", { method: "DELETE" });
-              router.replace("/merchant/login");
-            }}
-            style={{
-              width: "100%",
-              background: "rgba(255,255,255,0.05)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 8,
-              padding: "7px 0",
-              fontSize: 11,
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-
-        <div
-          style={{
-            marginTop: 12,
-            background: "rgba(245,158,11,0.08)",
-            border: "1px solid rgba(245,158,11,0.15)",
-            borderRadius: 10,
-            padding: "8px 12px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
-            <span style={{ fontSize: 9, color: "#f59e0b", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>
-              Arc Testnet Mode
-            </span>
-          </div>
-        </div>
-      </aside>
-
-      {isMobile && sidebarOpen && (
-        <div
-          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", zIndex: 999 }}
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
 
       {/* ── MAIN CONTENT ── */}
       <main style={{ flex: 1, padding: isMobile ? "16px" : "32px", overflowX: "hidden", background: "var(--background)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {isMobile && (
-              <button
-                onClick={() => setSidebarOpen(true)}
-                style={{ background: "transparent", border: "none", fontSize: 24, color: "var(--text)", cursor: "pointer", padding: 0 }}
-              >
-                ☰
-              </button>
-            )}
             <div>
               <h1 style={{ fontSize: "clamp(20px, 4vw, 28px)", fontWeight: 700, color: "var(--text)", margin: "0 0 4px 0" }}>
                 Welcome back, {merchant.businessName} 👋
@@ -806,7 +628,18 @@ export default function MerchantDashboard() {
                   payments.map((payment) => (
                     <tr key={payment.id} className="hover:bg-[#120b08]/40 transition-colors">
                       <td className="py-3 pr-3">
-                        <div className="text-cyan-400 text-xs">{payment.reference.slice(0, 12)}...</div>
+                        {payment.explorer_url ? (
+                          <a
+                            href={payment.explorer_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-cyan-400 text-xs hover:underline"
+                          >
+                            {payment.reference.slice(0, 12)}...
+                          </a>
+                        ) : (
+                          <div className="text-cyan-400 text-xs">{payment.reference.slice(0, 12)}...</div>
+                        )}
                         <div className="text-gray-500 text-[9px] mt-0.5">
                           {new Date(payment.paid_at).toLocaleDateString()}
                         </div>
@@ -824,7 +657,9 @@ export default function MerchantDashboard() {
                       <td className="py-3">
                         <span className={`px-2 py-1 rounded text-[9px] font-bold border ${payment.status === "SUCCESS"
                           ? "bg-green-500/10 text-green-400 border-green-500/20"
-                          : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                          : payment.status === "EXPIRED"
+                            ? "bg-red-500/10 text-red-400 border-red-500/20"
+                            : "bg-amber-500/10 text-amber-400 border-amber-500/20"
                           }`}>
                           {payment.status}
                         </span>

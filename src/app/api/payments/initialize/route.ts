@@ -107,6 +107,13 @@ export async function POST(req: NextRequest) {
       .toString(36)
       .substring(2, 15)}${Date.now().toString(36)}`;
 
+    // Payment links have never actually expired: this field was checked at
+    // settle time (see /api/payments/settle) but never SET anywhere, so it
+    // was always null and the expiry check never fired. 120 minutes is a
+    // reasonable default for a one-off checkout link.
+    const EXPIRY_MINUTES = 120;
+    const expiresAt = new Date(Date.now() + EXPIRY_MINUTES * 60_000);
+
     await prisma.paymentLog.create({
       data: {
         reference: transactionReference,
@@ -120,6 +127,7 @@ export async function POST(req: NextRequest) {
         merchantSCA,
         status: 'PENDING',
         webhookUrl: webhookUrl || null,
+        expiresAt,
       },
     });
 

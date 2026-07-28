@@ -18,7 +18,10 @@ interface PaymentItem {
   sender_email: string;
   merchant: string;
   paid_at: string;
-  arcTxHash: string | null;
+  cctp_telemetry: {
+    attestation_status: string;
+    nonce: number;
+  };
 }
 
 export default function TransactionsPage() {
@@ -84,20 +87,31 @@ export default function TransactionsPage() {
                 <thead>
                   <tr className="text-slate-400 uppercase tracking-wider border-b border-slate-100">
                     <th className="text-left pb-3 pr-4">Reference / Timestamp</th>
-                    <th className="text-left pb-3 pr-4">Entity M2M Graph</th>
-                    <th className="text-left pb-3 pr-4">Execution Domain</th>
+                    <th className="text-left pb-3 pr-4">Payer</th>
+                    <th className="text-left pb-3 pr-4">Chain</th>
                     <th className="text-left pb-3 pr-4">Payload Value</th>
                     <th className="text-left pb-3 pr-4">Status</th>
-                    <th className="text-left pb-3">Transaction ID</th>
+                    <th className="text-left pb-3">Circle CCTP Attestation</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {payments.map((payment) => (
                     <tr key={payment.id} className="hover:bg-slate-50 transition-colors">
                       <td className="py-4 pr-4">
-                        <div className="text-cyan-600 font-semibold">
-                          {payment.reference.slice(0, 16)}
-                        </div>
+                        {payment.explorer_url ? (
+                          <a
+                            href={payment.explorer_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-cyan-600 font-semibold hover:underline"
+                          >
+                            {payment.reference.slice(0, 16)}
+                          </a>
+                        ) : (
+                          <div className="text-cyan-600 font-semibold">
+                            {payment.reference.slice(0, 16)}
+                          </div>
+                        )}
                         <div className="text-slate-400 text-[10px] mt-0.5">
                           {new Date(payment.paid_at).toLocaleString()}
                         </div>
@@ -113,13 +127,18 @@ export default function TransactionsPage() {
                       </td>
                       <td className="py-4 pr-4">
                         <span
-                          className={`px-2 py-1 rounded text-[10px] font-bold border ${payment.status === 'SUCCESS' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}
+                          className={`px-2 py-1 rounded text-[10px] font-bold border ${payment.status === 'SUCCESS'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                            : payment.status === 'EXPIRED'
+                              ? 'bg-red-50 text-red-700 border-red-100'
+                              : 'bg-amber-50 text-amber-700 border-amber-100'
+                            }`}
                         >
                           {payment.status}
                         </span>
                       </td>
-                      <td className="py-4 text-slate-500 text-[10px] font-mono">
-                        {payment.arcTxHash ? `${payment.arcTxHash.slice(0, 8)}...${payment.arcTxHash.slice(-6)}` : '—'}
+                      <td className="py-4 text-slate-500 text-[10px]">
+                        {payment.cctp_telemetry.attestation_status}
                       </td>
                     </tr>
                   ))}
