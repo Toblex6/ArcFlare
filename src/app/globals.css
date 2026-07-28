@@ -293,11 +293,3 @@ html {
 }
 
 /* ── Utility: prevent text overflow anywhere ── */
-p,
-span,
-td,
-th,
-div {
-  overflow-wrap: break-word;
-  word-break: break-word;
-}

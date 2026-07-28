@@ -1,4 +1,3 @@
-// src/app/agent-brain/page.tsx
 "use client";
 
 import React, { useState } from "react";
@@ -85,8 +84,6 @@ const badgeStyle = (color: string): React.CSSProperties => ({
     fontWeight: 700,
 });
 
-// Which tools touch which onchain standard — used to decide which badge
-// to show next to each tool result.
 const ERC8004_TOOLS = new Set(["record_agent_reputation"]);
 const ERC8183_TOOLS = new Set([
     "create_agent_job",
@@ -129,8 +126,6 @@ export default function AgentBrainPage() {
             });
             const data = await res.json();
             if (!data.success) throw new Error(data.error || "Brain call failed");
-            // /api/x402/pay wraps the resource's response — the brain's own JSON
-            // body is expected under data.resourceData, matching agent-services' pattern.
             setResult(data.resourceData || data);
         } catch (e: any) {
             setError(e.message);
@@ -307,64 +302,32 @@ export default function AgentBrainPage() {
                                         lineHeight: 1.7,
                                         color: "var(--text)",
                                         whiteSpace: "pre-wrap" as const,
-                                        marginBottom: result.results?.length ? 16 : 0,
                                     }}
                                 >
                                     {result.response}
                                 </div>
 
-                                {/* Tool call trace — with ERC-8004/8183 badges where relevant */}
-                                {result.results && result.results.length > 0 && (
-                                    <div>
-                                        <p style={{ ...styles.label, marginBottom: 10 }}>Tool Calls</p>
-                                        <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
-                                            {result.results.map((r, i) => {
-                                                const badge = standardBadgeFor(r.tool);
-                                                const hasError = r.result?.error;
-                                                return (
-                                                    <div
-                                                        key={i}
-                                                        style={{
-                                                            background: "var(--surface)",
-                                                            border: `1px solid ${hasError ? "rgba(239,68,68,0.3)" : "var(--border)"}`,
-                                                            borderRadius: 10,
-                                                            padding: 12,
-                                                        }}
-                                                    >
-                                                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                                                            <span style={{ fontSize: 12, fontWeight: 700, color: hasError ? "var(--danger)" : "var(--primary)", fontFamily: "monospace" }}>
-                                                                {r.tool}
-                                                            </span>
-                                                            {badge && <span style={badgeStyle(badge.color)}>{badge.label}</span>}
-                                                            {hasError && <span style={badgeStyle("#ef4444")}>Error</span>}
-                                                            {r.result?.success && <span style={badgeStyle("#10b981")}>Success</span>}
-                                                        </div>
-                                                        <pre
-                                                            style={{
-                                                                fontSize: 11,
-                                                                color: "var(--text-secondary)",
-                                                                margin: 0,
-                                                                whiteSpace: "pre-wrap" as const,
-                                                                wordBreak: "break-all" as const,
-                                                                fontFamily: "monospace",
-                                                            }}
-                                                        >
-                                                            {JSON.stringify(r.result, null, 2)}
-                                                        </pre>
-                                                        {r.result?.explorerUrl && (
-                                                            <a
-                                                                href={r.result.explorerUrl}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                style={{ display: "inline-block", marginTop: 8, fontSize: 11, color: "var(--primary)" }}
-                                                            >
-                                                                View transaction on ArcScan →
-                                                            </a>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
+                                {/* Clean ArcScan explorer links (if present) without showing raw tool traces/JSON */}
+                                {result.results && result.results.some((r) => r.result?.explorerUrl) && (
+                                    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                                        {result.results
+                                            .filter((r) => r.result?.explorerUrl)
+                                            .map((r, i) => (
+                                                <a
+                                                    key={i}
+                                                    href={r.result.explorerUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    style={{
+                                                        display: "inline-block",
+                                                        fontSize: 13,
+                                                        fontWeight: 600,
+                                                        color: "var(--primary)",
+                                                    }}
+                                                >
+                                                    View transaction on ArcScan →
+                                                </a>
+                                            ))}
                                     </div>
                                 )}
                             </div>

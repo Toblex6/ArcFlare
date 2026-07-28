@@ -115,13 +115,13 @@ export default function MerchantSignup() {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 'clamp(12px, 4vw, 24px)',
+    padding: 24,
   };
   const cardStyle: React.CSSProperties = {
     background: 'var(--surface)',
     border: '1px solid var(--border)',
     borderRadius: 24,
-    padding: 'clamp(20px, 6vw, 36px)',
+    padding: 36,
   };
   const labelStyle: React.CSSProperties = {
     display: 'block',
@@ -274,7 +274,7 @@ export default function MerchantSignup() {
         <div style={{ width: '100%', maxWidth: 460 }}>
           <div style={{ textAlign: 'center', marginBottom: 36 }}>
             <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
-            <h1 style={{ fontSize: 'clamp(20px, 5vw, 26px)', fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>How should you get paid?</h1>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>How should you get paid?</h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>You can change this later in Settings.</p>
           </div>
 

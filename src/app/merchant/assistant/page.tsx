@@ -1,4 +1,3 @@
-// src/app/merchant/assistant/page.tsx
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
@@ -139,24 +138,6 @@ export default function MerchantAssistantPage() {
                             {messages.map((m, i) => (
                                 <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
                                     <div style={bubbleStyle(m.role)}>{m.text}</div>
-
-                                    {/* Tool trace, shown under assistant messages that used tools */}
-                                    {m.results && m.results.length > 0 && (
-                                        <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6, maxWidth: "80%" }}>
-                                            {m.results.map((r, j) => {
-                                                const hasError = r.result?.error;
-                                                return (
-                                                    <span
-                                                        key={j}
-                                                        style={badgeStyle(hasError ? "#ef4444" : "#10b981")}
-                                                        title={JSON.stringify(r.result)}
-                                                    >
-                                                        {r.tool}
-                                                    </span>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
                                 </div>
                             ))}
                             <div ref={scrollRef} />
