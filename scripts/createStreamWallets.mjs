@@ -60,7 +60,7 @@ async function main() {
   console.log('==============================================');
   console.log(`
 curl -X POST https://arcflare-gateway.onrender.com/api/payments/stream \\
-  -H "x-api-key: arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2" \\
+  -H "x-api-key: ${NEXT_PUBLIC_DASHBOARD_API_KEY}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "senderSCA": "${sender.address}",
