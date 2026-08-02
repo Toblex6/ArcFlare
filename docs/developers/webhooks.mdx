@@ -1,0 +1,25 @@
+---
+title: "Webhooks"
+sidebarTitle: "Webhooks"
+description: "Listen for asynchronous payment, stream, and x402 event triggers."
+---
+
+## Express Webhook Handler
+
+```typescript
+import express from 'express';
+import { FlareHQ } from '@flarehq/sdk';
+
+const app = express();
+const flarehq = new FlareHQ({ apiKey: process.env.FLAREHQ_SECRET_KEY! });
+
+app.post('/webhooks', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['x-flarehq-signature'] as string;
+  const event = flarehq.webhooks.constructEvent(req.body, sig, process.env.FLAREHQ_WEBHOOK_SECRET!);
+
+  if (event.type === 'payment.succeeded') {
+    console.log('Payment Succeeded:', event.data.amount);
+  }
+
+  res.status(200).send({ received: true });
+});

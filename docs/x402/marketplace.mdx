@@ -1,0 +1,223 @@
+---
+title: "x402 Marketplace & API Monetization"
+sidebarTitle: "x402 Marketplace"
+description: "Publish, monetize, and query micro-APIs using HTTP 402 sub-cent USDC paywalls, Circle Nanopayments, and ERC-8004 agent authentication on Arc."
+---
+
+The **x402 Marketplace** on FlareHQ (`flarehq.xyz`) allows developers and AI providers to monetize REST endpoints per request using the HTTP 402 Payment Required handshake. Transactions settle natively in **USDC** on the **Arc testnet (`eip155:5042002`)** using **Circle Nanopayments** and Circle Developer-Controlled MPC Wallets.
+
+---
+
+## How the x402 Protocol Works
+
+Instead of managing subscription tiers, API keys, or monthly billing dashboards, x402 embeds payment execution directly into the standard HTTP request-response cycle.
++--------------+                    +-----------------+                    +----------------+
+   |   AI Agent   |                    | FlareHQ x402    |                    | Provider API   |
+   |  / Client    |                    | Gateway         |                    | (Target URL)   |
+   +------+-------+                    +--------+--------+                    +-------+--------+
+          |                                     |                                     |
+          | 1. GET /api/v1/market-data          |                                     |
+          +------------------------------------>|                                     |
+          |                                     |                                     |
+          | 2. HTTP 402 Payment Required        |                                     |
+          |    (Price: $0.002 USDC, PayTo, Chain|                                     |
+          |<------------------------------------+                                     |
+          |                                     |                                     |
+          | 3. POST /api/x402/pay               |                                     |
+          |    (Header: X-402-Payment-Proof)    |                                     |
+          +------------------------------------>| 4. Verify Proof & Settle Nanopayment|
+          |                                     +------------------------------------>|
+          |                                     |                                     |
+          |                                     | 5. Forward Request                  |
+          |                                     +------------------------------------>|
+          |                                     |                                     |
+          | 6. HTTP 200 OK + Payload            | 6. Return Data                      |
+          |<------------------------------------+<------------------------------------+
+          1. **Request:** The client or AI agent requests a protected API endpoint.
+2. **Challenge:** FlareHQ returns an `HTTP 402 Payment Required` header containing pricing terms (e.g., `$0.002 USDC`), payee wallet address, and Arc network parameters (`5042002`).
+3. **Payment Authorization:** The agent signs an EIP-712 structured payload or Circle Nanopayments authorization header.
+4. **Proxy & Settlement:** FlareHQ verifies the cryptographic proof, executes sub-cent on-chain settlement, and proxies the request to the upstream target provider.
+
+---
+
+## Marketplace Listing Schema
+
+Marketplace listings are indexed and discoverable by both human developers and autonomous AI agents looking for programmatic tools.
+
+### Listing Object
+
+<ResponseField name="id" type="string" required>
+  Unique Marketplace Listing ID (`lst_...`).
+</ResponseField>
+
+<ResponseField name="slug" type="string" required>
+  URL-safe identifier for the endpoint (e.g., `realtime-token-sentiment`).
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Human-readable API title.
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Detailed explanation of the endpoint capabilities and payload response.
+</ResponseField>
+
+<ResponseField name="categories" type="array of strings" required>
+  Categories for agent discoverability (`["AI", "Market Data", "DeFi", "Analytics"]`).
+</ResponseField>
+
+<ResponseField name="pricePerRequest" type="string" required>
+  Price per single API call denominated in USDC (e.g., `"0.002"`).
+</ResponseField>
+
+<ResponseField name="targetUrl" type="string" required>
+  The private upstream API destination server where requests are proxied.
+</ResponseField>
+
+<ResponseField name="docsUrl" type="string">
+  External documentation link for the API.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  Listing state: `active`, `paused`, or `archived`.
+</ResponseField>
+
+<ResponseField name="merchantId" type="string" required>
+  Developer or enterprise ID receiving settlement payouts.
+</ResponseField>
+
+---
+
+## Merchant Integration Guide
+
+<Steps>
+  <Step title="Publish an API Listing">
+    Register your REST endpoint on the x402 Marketplace using the administrative API.
+
+    <CodeGroup>
+      ```bash cURL
+      curl -X POST [https://flarehq.xyz/api/x402/marketplace](https://flarehq.xyz/api/x402/marketplace) \
+        -H "Authorization: Bearer fhq_sec_test_..." \
+        -H "Content-Type: application/json" \
+        -d '{
+          "slug": "solana-whale-tracker",
+          "name": "Solana Whale Tracker API",
+          "description": "Returns real-time DEX transactions greater than $100,000.",
+          "categories": ["DeFi", "Analytics"],
+          "pricePerRequest": "0.005",
+          "targetUrl": "[https://internal-api.yourdomain.com/v1/whales](https://internal-api.yourdomain.com/v1/whales)",
+          "docsUrl": "[https://docs.yourdomain.com/whales](https://docs.yourdomain.com/whales)"
+        }'
+      ```
+
+      ```typescript Node.js SDK
+      import { FlareHQ } from '@flarehq/sdk';
+
+      const flarehq = new FlareHQ({ apiKey: process.env.FLAREHQ_SECRET_KEY! });
+
+      const listing = await flarehq.x402.createListing({
+        slug: 'solana-whale-tracker',
+        name: 'Solana Whale Tracker API',
+        description: 'Returns real-time DEX transactions greater than $100,000.',
+        categories: ['DeFi', 'Analytics'],
+        pricePerRequest: '0.005', // $0.005 USDC
+        targetUrl: '[https://internal-api.yourdomain.com/v1/whales](https://internal-api.yourdomain.com/v1/whales)',
+        docsUrl: '[https://docs.yourdomain.com/whales](https://docs.yourdomain.com/whales)',
+      });
+
+      console.log('Listing Published:', listing.id, listing.slug);
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Update Listing & Status">
+    Modify pricing parameters or toggle endpoint availability on the fly.
+
+    <CodeGroup>
+      ```bash cURL
+      curl -X PATCH [https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker](https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker) \
+        -H "Authorization: Bearer fhq_sec_test_..." \
+        -H "Content-Type: application/json" \
+        -d '{
+          "pricePerRequest": "0.003",
+          "status": "active"
+        }'
+      ```
+
+      ```typescript Node.js SDK
+      const updated = await flarehq.x402.updateListing('solana-whale-tracker', {
+        pricePerRequest: '0.003',
+        status: 'active',
+      });
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Execute Payments & Proxy Request">
+    Clients or AI agents invoke your monetized endpoint through FlareHQ's proxy executor.
+
+    <CodeGroup>
+      ```bash cURL
+      curl -X POST [https://flarehq.xyz/api/x402/pay](https://flarehq.xyz/api/x402/pay) \
+        -H "Content-Type: application/json" \
+        -H "X-Agent-ID: 8004:5042002:1042" \
+        -H "X-Agent-Signature: 0x8f3c..." \
+        -d '{
+          "slug": "solana-whale-tracker",
+          "method": "GET",
+          "params": {
+            "minVolume": "100000"
+          },
+          "paymentProof": "0x402_proof_..."
+        }'
+      ```
+
+      ```typescript Node.js SDK
+      const response = await flarehq.x402.executeRequest({
+        slug: 'solana-whale-tracker',
+        method: 'GET',
+        params: { minVolume: '100000' },
+        agentId: '8004:5042002:1042',
+      });
+
+      console.log('API Response Data:', response.data);
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Fetch Revenue Analytics">
+    Track total requests, unique consuming agents, and total USDC earnings.
+
+    <CodeGroup>
+      ```bash cURL
+      curl -X GET [https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker/analytics](https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker/analytics) \
+        -H "Authorization: Bearer fhq_sec_test_..."
+      ```
+
+      ```typescript Node.js SDK
+      const stats = await flarehq.x402.getListingAnalytics('solana-whale-tracker');
+
+      console.log('Total Requests:', stats.totalRequests);
+      console.log('USDC Earned:', stats.totalRevenueUsdc);
+      console.log('Active Agents:', stats.uniqueAgentsCount);
+      ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+---
+
+## ERC-8004 Agent Identity Integration
+
+When AI agents query x402 endpoints, FlareHQ validates their identity against the on-chain **ERC-8004 Registry** on Arc testnet.
+
+<Note>
+  Including agent identity headers enables providers to grant discounts, whitelist trusted high-reputation agents, or enforce tiered rate limits.
+</Note>
+
+### Required Request Headers
+
+```http
+X-Agent-ID: 8004:5042002:<tokenId>
+X-Agent-Signature: <eip712_signed_timestamp>
+X-402-Payment-Proof: <circle_nanopayment_proof>

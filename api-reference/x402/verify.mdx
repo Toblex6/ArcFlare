@@ -1,0 +1,17 @@
+---
+title: "Verify x402 Payment"
+api: "POST /api/v1/x402/verify"
+description: "Validate cryptographic proof of sub-cent nanopayment settlement."
+---
+
+### Request Body
+
+<ParamField body="proof" type="string" required>
+  The `X-402-Payment-Proof` payload sent by the client.
+</ParamField>
+
+### Response
+
+<ResponseField name="valid" type="boolean">
+  Returns `true` if the payment settled successfully on Arc testnet.
+</ResponseField>

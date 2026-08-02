@@ -1,0 +1,14 @@
+---
+title: "Create Escrow"
+api: "POST /api/v1/escrow"
+description: "Lock funds into an on-chain escrow contract on Arc."
+---
+
+### Request Body
+
+<ParamField body="amount" type="string" required>
+  Amount to lock in USDC.
+</ParamField>
+<ParamField body="provider" type="string" required>
+  Service provider wallet address.
+</ParamField>

@@ -1,0 +1,25 @@
+---
+
+### `docs/payments/streaming-payments.mdx`
+
+```mdx
+---
+title: "Streaming Payments"
+sidebarTitle: "Streaming Payments"
+description: "Real-time per-second USDC streams using ArcFlareStream."
+---
+
+Stream funds continuously over time. Receivers can withdraw vested USDC at any time.
+
+---
+
+## Creating a Stream
+
+```typescript
+const stream = await flarehq.streams.create({
+  recipient: '0x71C...B39',
+  depositAmount: '500.00',
+  durationSeconds: 2592000, // 30 Days
+});
+
+console.log('Stream ID:', stream.id);

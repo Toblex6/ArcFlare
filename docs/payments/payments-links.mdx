@@ -1,0 +1,26 @@
+---
+
+### `docs/payments/payment-links.mdx`
+
+```mdx
+---
+title: "Payment Links"
+sidebarTitle: "Payment Links"
+description: "Shareable checkout URLs for low-code digital commerce."
+---
+
+Generate static or reusable checkout links for products, subscriptions, or donations.
+
+---
+
+## Creating a Payment Link via SDK
+
+```typescript
+const link = await flarehq.paymentLinks.create({
+  name: 'Developer Tier Pass',
+  price: '50.00',
+  currency: 'USDC',
+  collectShippingAddress: false,
+});
+
+console.log('Shareable Link:', link.url);

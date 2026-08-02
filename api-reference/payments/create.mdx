@@ -1,0 +1,29 @@
+---
+
+### `api-reference/payments/create.mdx`
+
+```mdx
+---
+title: "Create Payment"
+api: "POST /api/v1/payments"
+description: "Create an instant on-chain USDC payment intent."
+---
+
+### Request Body
+
+<ParamField body="amount" type="string" required>
+  Amount in USDC (e.g., `"10.00"`).
+</ParamField>
+
+<ParamField body="recipient" type="string" required>
+  Recipient EVM wallet address.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  Unique payment identifier (`pay_...`).
+</ResponseField>
+<ResponseField name="status" type="string">
+  Payment status: `pending`, `completed`, `failed`.
+</ResponseField>

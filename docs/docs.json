@@ -1,0 +1,95 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "FlareHQ",
+  "theme": "mint",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#00ADEF",
+    "light": "#38BDF8",
+    "dark": "#2D140E"
+  },
+  "background": {
+    "color": {
+      "light": "#FFFFFF",
+      "dark": "#1C0F0B"
+    }
+  },
+  "appearance": {
+    "default": "dark",
+    "strict": false
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "App",
+        "href": "https://flarehq.xyz"
+      },
+      {
+        "label": "Status",
+        "href": "https://status.flarehq.xyz"
+      },
+      {
+        "label": "Support",
+        "href": "https://flarehq.xyz"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Dashboard",
+      "href": "https://flarehq.xyz/developer"
+    }
+  },
+  "footer": {
+    "socials": {
+      "x": "https://x.com/flareehq",
+      "website": "https://flarehq.xyz"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "docs/quickstart",
+              "docs/architecture"
+            ]
+          },
+          {
+            "group": "x402 & Agentic Finance",
+            "pages": [
+              "docs/x402/marketplace",
+              "docs/agents/erc8004-identity",
+              "docs/agents/erc8183-commerce"
+            ]
+          },
+          {
+            "group": "Payment Infrastructure",
+            "pages": [
+              "docs/payments/hosted-checkout",
+              "docs/payments/escrow-and-disputes",
+              "docs/payments/streaming-payments"
+            ]
+          },
+          {
+            "group": "Developers & Integration",
+            "pages": [
+              "docs/webhooks",
+              "docs/developers/circle-mpc"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "openapi": "openapi.json"
+      }
+    ]
+  }
+}

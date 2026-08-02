@@ -1,0 +1,23 @@
+---
+title: "x402 Paywall Setup"
+sidebarTitle: "Paywall Setup"
+description: "Protect any HTTP endpoint behind an HTTP 402 USDC paywall."
+---
+
+The x402 middleware inspects incoming HTTP requests for an `X-402-Payment-Proof` header. If missing or invalid, it returns `HTTP 402 Payment Required`.
+
+---
+
+## Express / Node.js Middleware
+
+```typescript
+import { createX402Middleware } from '@flarehq/sdk';
+
+app.use(
+  '/api/v1/premium-data',
+  createX402Middleware({
+    priceUsdc: '0.001',
+    payTo: '0x3500000000000000000000000000000000008004',
+    chainId: 5042002,
+  })
+);

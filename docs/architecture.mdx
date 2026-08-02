@@ -1,0 +1,23 @@
+---
+title: "Architecture"
+sidebarTitle: "Architecture"
+description: "Core components, settlement rails, and smart contract design."
+---
+
+FlareHQ bridges traditional web applications and autonomous AI agents to Arc testnet through a decoupled API gateway and non-custodial wallet framework.
+
+---
+
+## Infrastructure Stack
+
+| Layer | Component | Description |
+| :--- | :--- | :--- |
+| **Network** | Arc Testnet (`5042002`) | High-throughput, sub-second execution layer for USDC transactions. |
+| **Wallets** | Circle MPC Provider | Developer-Controlled non-custodial wallets for automated merchant payouts. |
+| **Monetization** | x402 Proxy Gateway | HTTP 402 header verifier for micro-settlement execution. |
+| **Streaming** | `ArcFlareStream` | Per-second token streaming contract deployed on Arc testnet. |
+| **Registry** | ERC-8004 Identity | Agent verification registry located at `0x3500000000000000000000000000000000008004`. |
+
+---
+
+## Data Flow

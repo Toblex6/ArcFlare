@@ -1,0 +1,191 @@
+---
+title: "Quickstart Guide"
+sidebarTitle: "Quickstart"
+description: "Start accepting USDC payments, gating APIs with x402, and settling on Arc in under 5 minutes."
+---
+
+This guide walks you through setting up your developer environment, obtaining API credentials, installing the SDK, and processing your first stablecoin payment on the **Arc testnet (`eip155:5042002`)**.
+
+<Note>
+  **Prerequisites:** Node.js 18+ or Bun, a wallet with testnet USDC on Arc, and a **FlareHQ Dashboard** account at [flarehq.xyz](https://flarehq.xyz).
+</Note>
+
+---
+
+<Steps>
+  <Step title="Get API Keys & Configure Developer Environment">
+    Log into your FlareHQ Dashboard to obtain your project credentials.
+
+    1. Go to **Settings > API Keys** at `flarehq.xyz/developer`.
+    2. Generate a new **Secret Key** (`fhq_sec_...`) and **Publishable Key** (`fhq_pub_...`).
+    3. Save your keys in your project's `.env.local` file:
+
+    ```bash .env.local
+    FLAREHQ_SECRET_KEY="fhq_sec_test_..."
+    NEXT_PUBLIC_FLAREHQ_PUBLISHABLE_KEY="fhq_pub_test_..."
+    ARC_RPC_URL="[https://rpc.testnet.arc.network](https://rpc.testnet.arc.network)"
+    CHAIN_ID="5042002"
+    ```
+  </Step>
+
+  <Step title="Install the FlareHQ SDK">
+    Install the core SDK and `viem` dependencies in your JavaScript or TypeScript project:
+
+    <CodeGroup>
+      ```bash npm
+      npm install @flarehq/sdk viem
+      ```
+
+      ```bash pnpm
+      pnpm add @flarehq/sdk viem
+      ```
+
+      ```bash yarn
+      yarn add @flarehq/sdk viem
+      ```
+
+      ```bash bun
+      bun add @flarehq/sdk viem
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Initialize the SDK & Circle MPC Provider">
+    Configure the client to connect to Arc testnet with non-custodial Circle Developer-Controlled Wallets.
+
+    ```typescript src/lib/flarehq.ts
+    import { FlareHQ } from '@flarehq/sdk';
+
+    export const flarehq = new FlareHQ({
+      apiKey: process.env.FLAREHQ_SECRET_KEY!,
+      environment: 'testnet', // Arc Testnet (eip155:5042002)
+      chain: {
+        id: 5042002,
+        rpcUrl: process.env.ARC_RPC_URL,
+      },
+    });
+    ```
+  </Step>
+
+  <Step title="Create Your First Hosted Payment Checkout">
+    Generate a shareable payment link or embeddable checkout session for USDC settlement.
+
+    ```typescript src/app/api/checkout/route.ts
+    import { NextResponse } from 'next/server';
+    import { flarehq } from '@/lib/flarehq';
+
+    export async function POST() {
+      try {
+        const session = await flarehq.checkout.createSession({
+          amount: '10.00', // $10.00 USDC
+          currency: 'USDC',
+          recipient: '0x3500000000000000000000000000000000008004',
+          description: 'FlareHQ Pro Subscription',
+          successUrl: '[https://yourdomain.com/success](https://yourdomain.com/success)',
+          cancelUrl: '[https://yourdomain.com/cancel](https://yourdomain.com/cancel)',
+          metadata: {
+            customerUsername: '@alex',
+          },
+        });
+
+        return NextResponse.json({ url: session.url });
+      } catch (error) {
+        return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Gate APIs with x402 Sub-Cent Nanopayments">
+    Gate your API endpoints using HTTP 402 header verifications for micro-billing AI agents and external clients.
+
+    ```typescript src/app/api/agent-data/route.ts
+    import { NextRequest, NextResponse } from 'next/server';
+    import { flarehq } from '@/lib/flarehq';
+
+    export async function GET(req: NextRequest) {
+      // Validate x402 proof header
+      const x402Proof = req.headers.get('X-402-Payment-Proof');
+
+      if (!x402Proof) {
+        return NextResponse.json(
+          {
+            error: 'Payment Required',
+            x402: {
+              price: '0.001', // $0.001 USDC
+              asset: 'USDC',
+              payTo: process.env.NEXT_PUBLIC_TREASURY_ADDRESS,
+              chainId: 5042002,
+            },
+          },
+          { status: 402 }
+        );
+      }
+
+      const isValid = await flarehq.x402.verifyPaymentProof(x402Proof);
+      if (!isValid) {
+        return NextResponse.json({ error: 'Invalid Payment Proof' }, { status: 403 });
+      }
+
+      return NextResponse.json({ data: 'Protected AI dataset payload' });
+    }
+    ```
+  </Step>
+
+  <Step title="Set Up Real-time Webhooks">
+    Listen for transaction status updates, escrow triggers, and x402 micropayments.
+
+    ```typescript src/app/api/webhooks/route.ts
+    import { NextRequest, NextResponse } from 'next/server';
+    import { flarehq } from '@/lib/flarehq';
+
+    export async function POST(req: NextRequest) {
+      const payload = await req.text();
+      const signature = req.headers.get('x-flarehq-signature')!;
+
+      try {
+        const event = flarehq.webhooks.constructEvent(
+          payload,
+          signature,
+          process.env.FLAREHQ_WEBHOOK_SECRET!
+        );
+
+        switch (event.type) {
+          case 'payment.completed':
+            console.log('Payment Succeeded:', event.data.id, event.data.amount);
+            break;
+          case 'escrow.created':
+            console.log('Escrow Initiated:', event.data.escrowId);
+            break;
+          case 'dispute.created':
+            console.log('Dispute Initiated:', event.data.disputeId);
+            break;
+        }
+
+        return NextResponse.json({ received: true });
+      } catch (err) {
+        return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 400 });
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Next Steps & Deep Dives
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/docs/architecture">
+    Learn how FlareHQ orchestrates Circle MPC, Arc testnet, and Paystack-style payment flows.
+  </Card>
+  <Card title="x402 Marketplace" icon="shop" href="/docs/x402/marketplace">
+    List your micro-APIs and monetize per-request calls.
+  </Card>
+  <Card title="Hosted Checkout" icon="credit-card" href="/docs/payments/hosted-checkout">
+    Integrate pre-built payment UI for stablecoin checkout flows.
+  </Card>
+  <Card title="Escrow & Disputes" icon="shield-check" href="/docs/payments/escrow-and-disputes">
+    Configure payment escrows and dispute resolution.
+  </Card>
+</CardGroup>

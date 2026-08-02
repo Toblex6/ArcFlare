@@ -1,0 +1,24 @@
+---
+
+### `docs/payments/escrow-and-disputes.mdx`
+
+```mdx
+---
+title: "Escrow & Disputes"
+sidebarTitle: "Escrow & Disputes"
+description: "Programmatic fund locks with milestone releases and dispute resolution."
+---
+
+Lock funds until project deliverables pass validation checks.
+
+---
+
+## Initiate Escrow
+
+```typescript
+const escrow = await flarehq.escrow.create({
+  amount: '200.00',
+  provider: '0xWorkerAddress',
+  arbiter: '0x3500000000000000000000000000000000008004',
+  releaseDeadline: 1770000000,
+});
