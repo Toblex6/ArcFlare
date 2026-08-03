@@ -1,12 +1,13 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
+  "$schema": "https://mintlify.com/schema.json",
   "name": "FlareHQ",
   "theme": "mint",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "/arcflare-logo.png.png",
+    "dark": "/arcflare-logoo.png",
+    "href": "https://flarehq.xyz"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/arcflare-logo.png.png",
   "colors": {
     "primary": "#00ADEF",
     "light": "#38BDF8",

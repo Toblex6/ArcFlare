@@ -17,9 +17,14 @@ export default function HomePage() {
 
           <div className="flex items-center gap-6">
             <ThemeToggle />
-            <Link href="/docs" className="text-sm text-[var(--text-secondary)] hover:text-cyan-300 transition">
-              Docs
-            </Link>
+            <a
+              href="https://docs.flarehq.xyz"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-[var(--text-secondary)] hover:text-cyan-300 transition"
+            >
+              Docs ↗
+            </a>
 
             <div className="flex items-center gap-3 border-l border-[var(--border)] pl-6">
               <Link
@@ -63,12 +68,14 @@ export default function HomePage() {
             >
               Get Started →
             </Link>
-            <Link
-              href="/docs"
-              className="border border-[var(--border)] bg-[var(--surface)] px-8 py-4 rounded-2xl hover:bg-[var(--surface-secondary)] transition"
+            <a
+              href="https://docs.flarehq.xyz"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-[var(--border)] bg-[var(--surface)] px-8 py-4 rounded-2xl hover:bg-[var(--surface-secondary)] transition inline-flex items-center gap-2"
             >
-              Read the Docs
-            </Link>
+              Read the Docs ↗
+            </a>
           </div>
         </div>
 
@@ -131,6 +138,7 @@ export default function HomePage() {
               desc: 'Sign up, get an API key, and generate payment links in seconds. Customers pay in USDC — you receive it on Arc.',
               cta: 'Create account',
               href: '/merchant/signup',
+              isExternal: false,
             },
             {
               icon: '👤',
@@ -138,20 +146,23 @@ export default function HomePage() {
               desc: 'Send money, request payments, and save automatically — just connect or create a wallet, no signup form.',
               cta: 'Get started',
               href: '/consumer',
+              isExternal: false,
             },
             {
               icon: '🤖',
               title: 'AI Agents',
               desc: 'Deploy ERC-8004 identity wallets and pay other agents per API call, per second, or per task — fully autonomous.',
-              cta: 'View API docs',
-              href: '/docs/agents',
+              cta: 'View API docs ↗',
+              href: 'https://docs.flarehq.xyz',
+              isExternal: true,
             },
             {
               icon: '⚡',
               title: 'Developers',
               desc: 'Integrate FlareHQ APIs into your app. Initialize payments, verify settlements, stream USDC, and set up webhooks.',
-              cta: 'Read the docs',
-              href: '/docs',
+              cta: 'Read the docs ↗',
+              href: 'https://docs.flarehq.xyz',
+              isExternal: true,
             },
           ].map((card, i) => (
             <div
@@ -161,12 +172,23 @@ export default function HomePage() {
               <div className="text-4xl mb-4">{card.icon}</div>
               <h3 className="text-xl font-bold mb-3">{card.title}</h3>
               <p className="text-[var(--text-secondary)] leading-relaxed flex-1">{card.desc}</p>
-              <Link
-                href={card.href}
-                className="mt-6 text-cyan-400 text-sm font-semibold hover:text-cyan-300 transition"
-              >
-                {card.cta} →
-              </Link>
+              {card.isExternal ? (
+                <a
+                  href={card.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-6 text-cyan-400 text-sm font-semibold hover:text-cyan-300 transition"
+                >
+                  {card.cta}
+                </a>
+              ) : (
+                <Link
+                  href={card.href}
+                  className="mt-6 text-cyan-400 text-sm font-semibold hover:text-cyan-300 transition"
+                >
+                  {card.cta} →
+                </Link>
+              )}
             </div>
           ))}
         </div>
@@ -189,9 +211,14 @@ export default function HomePage() {
             <Link href="/consumer" className="hover:text-[var(--text)] transition">
               Personal
             </Link>
-            <Link href="/docs" className="hover:text-[var(--text)] transition">
-              Docs
-            </Link>
+            <a
+              href="https://docs.flarehq.xyz"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-[var(--text)] transition"
+            >
+              Docs ↗
+            </a>
           </div>
         </div>
       </footer>
