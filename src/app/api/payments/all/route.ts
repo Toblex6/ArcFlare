@@ -47,21 +47,20 @@ export async function GET(req: NextRequest) {
         reference: log.reference,
         amount: log.amount || 0,
         currency: log.currency || 'USDC',
-        chain: log.chain || 'Arbitrum Sepolia ➔ Arc Testnet',
+        chain: log.chain || 'Arc Testnet',
         status: displayStatus,
-        sender_email: log.senderEmail || 'autonomous-agent@bot.network',
-        merchant: log.merchant || 'Dispatch Marketplace',
+        sender_email: log.senderEmail || null,
+        merchant: log.merchant || null,
         // Ensure date is a string to prevent serialization errors
         paid_at: (log.timestamp || new Date()).toISOString(),
         arc_tx_hash: log.arcTxHash || null,
         explorer_url: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
-        cctp_telemetry: {
-          source_domain: 3,
-          target_domain: 7,
-          attestation_status:
-            displayStatus === 'SUCCESS' ? 'REDEEMED_AND_MINTED' : 'POLLING_CIRCLE_TESTNET_IRIS_API',
-          nonce: Math.floor(100000 + Math.random() * 800000),
-        },
+        gateway_reference: (log as any).gatewayReference || null,
+        // No real CCTP telemetry (nonce, attestation status) is tracked anywhere
+        // in the schema today — the block that used to be here was fabricated
+        // (Math.random() nonce, hardcoded source/target domains) and has been
+        // removed rather than left in place. If real CCTP domain/nonce data
+        // becomes available (e.g. from cctp.ts/cctp-v2.ts), surface it here honestly.
       };
     });
 

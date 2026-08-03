@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     // never trust a client-supplied "merchant" string as the business
     // identity for merchant-type callers, or a merchant link could be
     // created under someone else's business name.
-    let merchantName = merchant || 'Dispatch Marketplace';
+    let merchantName = merchant || 'Unknown Merchant';
     let merchantId: string | undefined;
     let merchantSCA: string | undefined;
 

@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
             wallet: {
                 walletType: merchant.walletType,
                 walletAddress: merchant.walletAddress,
+                circleWalletId: merchant.circleWalletId,
             },
         });
     } catch {

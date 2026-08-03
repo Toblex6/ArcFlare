@@ -1,10 +1,15 @@
 // src/app/api/escrow/release/route.ts
 // Releases escrowed USDC to beneficiary when conditions are met.
 // Called by depositor confirming delivery, or admin releasing directly.
+//
+// AUTH: switched from withApiKey to withMerchantAuth to match create/route.ts
+// and the dashboard's session-cookie flow. The dashboard's fetch() calls never
+// sent an x-api-key header, so every Confirm Delivery / Dispute click 401'd
+// against the old withApiKey guard even though the merchant was logged in.
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -18,22 +23,34 @@ function getCircleClient() {
 
 async function waitForCircleTx(
   client: ReturnType<typeof getCircleClient>,
-  txId: string
+  txId: string,
+  label: string
 ): Promise<string> {
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
+    const state = data?.transaction?.state;
+    if (state === 'COMPLETE' && data.transaction?.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === 'FAILED') {
-      throw new Error('Release transaction failed onchain.');
+    if (state === 'FAILED') {
+      // Log the FULL transaction object — Circle usually includes an
+      // errorReason/errorDetails field once state is FAILED, and we were
+      // previously discarding it and throwing a generic message, which is
+      // why prior failures had to be diagnosed by elimination instead of
+      // read directly off the response.
+      console.error(`❌ [${label}] Circle tx FAILED — full transaction object:`, JSON.stringify(data?.transaction, null, 2));
+      throw new Error(
+        `${label} transaction failed onchain.` +
+        (data?.transaction?.errorReason ? ` Reason: ${data.transaction.errorReason}` : '')
+      );
     }
+    console.log(`⏳ [${label}] tx polling... attempt ${i + 1}, state=${state}`);
   }
-  throw new Error('Release transaction timed out.');
+  throw new Error(`${label} transaction timed out.`);
 }
 
-async function releaseHandler(request: Request) {
+async function releaseHandler(request: Request, merchant: AuthedMerchant) {
   try {
     const { reference, callerSCA, callerWalletId } = await request.json();
 
@@ -55,27 +72,41 @@ async function releaseHandler(request: Request) {
         { status: 400 }
       );
     }
+    if (!escrow.contractEscrowId) {
+      return NextResponse.json(
+        { success: false, error: 'This escrow has no contractEscrowId recorded — it may predate the FlareHQEscrow migration and cannot be confirmed onchain.' },
+        { status: 400 }
+      );
+    }
 
     const circleClient = getCircleClient();
 
     // ── Step 1: Confirm delivery from caller's SCA ────────────────────────
-    // This calls confirmDelivery() on the escrow contract
-    // If both parties confirm, contract auto-releases
+    // This calls confirmDelivery(bytes32 id) on the escrow contract.
+    // If both parties confirm, contract auto-releases.
     const confirmTx = await circleClient.createContractExecutionTransaction({
       walletAddress: callerSCA,
       blockchain: 'ARC-TESTNET' as any,
       contractAddress: ESCROW_CONTRACT,
       abiFunctionSignature: 'confirmDelivery(bytes32)',
-      abiParameters: [escrow.onchainId || reference],
+      abiParameters: [escrow.contractEscrowId],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
-    const txHash = await waitForCircleTx(circleClient, confirmTx.data?.id!);
+    if (!confirmTx.data?.id) throw new Error('Confirm tx returned no ID.');
+    const txHash = await waitForCircleTx(circleClient, confirmTx.data.id, 'Release/confirm');
     console.log(`✅ Delivery confirmed by ${callerSCA}. Tx: ${txHash}`);
 
     // ── Step 2: Update DB status ──────────────────────────────────────────
     const isDepositor = callerSCA.toLowerCase() === escrow.depositorSCA.toLowerCase();
     const isBeneficiary = callerSCA.toLowerCase() === escrow.beneficiarySCA.toLowerCase();
+
+    if (!isDepositor && !isBeneficiary) {
+      return NextResponse.json(
+        { success: false, error: 'callerSCA is not a party to this escrow.' },
+        { status: 403 }
+      );
+    }
 
     let newStatus = escrow.status;
     let depositorConfirmed = escrow.depositorConfirmed || isDepositor;
@@ -111,7 +142,7 @@ async function releaseHandler(request: Request) {
           releasedAt: new Date().toISOString(),
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     return NextResponse.json({
@@ -131,4 +162,4 @@ async function releaseHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(releaseHandler);
+export const POST = withMerchantAuth(releaseHandler as any);

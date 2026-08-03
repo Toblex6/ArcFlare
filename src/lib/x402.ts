@@ -65,6 +65,10 @@ export function withGateway(
   handler: (req: NextRequest) => Promise<NextResponse>,
   price: string,
   endpoint: string,
+  listingId?: string, // optional — only used to tag the PaymentLog row for marketplace analytics.
+  // Does not touch verify/settle/facilitator/network logic below.
+  merchantId?: string, // optional, same reasoning — without this, x402 PaymentLog rows are
+  // invisible to any merchant-scoped query (analytics, payments/all).
 ) {
   const requirements = buildRequirements(price);
   // Inside withGateway, before returning 402:
@@ -157,7 +161,10 @@ export function withGateway(
           senderEmail: payer,
           merchant: endpoint,
           status: "SUCCESS",
-          arcTxHash: settleResult.transaction ?? null,
+          arcTxHash: null, // no real onchain hash exists yet — settlement is batched, see gatewayReference
+          gatewayReference: settleResult.transaction ?? null,
+          listingId: listingId ?? null,
+          merchantId: merchantId ?? null,
         },
       }).catch((e) => console.error("[x402] DB log failed:", e.message));
 

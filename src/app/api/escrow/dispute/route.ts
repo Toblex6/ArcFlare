@@ -1,10 +1,13 @@
 // src/app/api/escrow/dispute/route.ts
 // Raises a dispute on an active escrow.
 // Admin can then resolve via resolveDispute on the contract.
+//
+// AUTH: switched from withApiKey to withMerchantAuth — see release/route.ts
+// comment for why (dashboard session cookie, no x-api-key header sent).
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -18,22 +21,29 @@ function getCircleClient() {
 
 async function waitForCircleTx(
   client: ReturnType<typeof getCircleClient>,
-  txId: string
+  txId: string,
+  label: string
 ): Promise<string> {
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
+    const state = data?.transaction?.state;
+    if (state === 'COMPLETE' && data.transaction?.txHash) {
       return data.transaction.txHash;
     }
-    if (data?.transaction?.state === 'FAILED') {
-      throw new Error('Dispute transaction failed onchain.');
+    if (state === 'FAILED') {
+      console.error(`❌ [${label}] Circle tx FAILED — full transaction object:`, JSON.stringify(data?.transaction, null, 2));
+      throw new Error(
+        `${label} transaction failed onchain.` +
+        (data?.transaction?.errorReason ? ` Reason: ${data.transaction.errorReason}` : '')
+      );
     }
+    console.log(`⏳ [${label}] tx polling... attempt ${i + 1}, state=${state}`);
   }
-  throw new Error('Dispute transaction timed out.');
+  throw new Error(`${label} transaction timed out.`);
 }
 
-async function disputeHandler(request: Request) {
+async function disputeHandler(request: Request, merchant: AuthedMerchant) {
   try {
     const { reference, callerSCA, reason } = await request.json();
 
@@ -54,26 +64,43 @@ async function disputeHandler(request: Request) {
         { status: 400 }
       );
     }
+    if (!escrow.contractEscrowId) {
+      return NextResponse.json(
+        { success: false, error: 'This escrow has no contractEscrowId recorded — it may predate the FlareHQEscrow migration and cannot be disputed onchain.' },
+        { status: 400 }
+      );
+    }
 
+    const isDepositor = callerSCA.toLowerCase() === escrow.depositorSCA.toLowerCase();
+    const isBeneficiary = callerSCA.toLowerCase() === escrow.beneficiarySCA.toLowerCase();
+    if (!isDepositor && !isBeneficiary) {
+      return NextResponse.json(
+        { success: false, error: 'callerSCA is not a party to this escrow.' },
+        { status: 403 }
+      );
+    }
+
+    const disputeReason = reason || 'No reason provided';
     const circleClient = getCircleClient();
 
-    // Call dispute() on the escrow contract
+    // Call dispute(bytes32 id, string reason) on the escrow contract.
     const disputeTx = await circleClient.createContractExecutionTransaction({
       walletAddress: callerSCA,
       blockchain: 'ARC-TESTNET' as any,
       contractAddress: ESCROW_CONTRACT,
-      abiFunctionSignature: 'dispute(bytes32)',
-      abiParameters: [escrow.onchainId || reference],
+      abiFunctionSignature: 'dispute(bytes32,string)',
+      abiParameters: [escrow.contractEscrowId, disputeReason],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     });
 
-    const txHash = await waitForCircleTx(circleClient, disputeTx.data?.id!);
+    if (!disputeTx.data?.id) throw new Error('Dispute tx returned no ID.');
+    const txHash = await waitForCircleTx(circleClient, disputeTx.data.id, 'Dispute');
 
     const updated = await (prisma as any).escrow.update({
       where: { reference },
       data: {
         status: 'DISPUTED',
-        disputeReason: reason || 'No reason provided',
+        disputeReason,
         disputeTxHash: txHash,
         disputedBy: callerSCA,
       },
@@ -90,12 +117,12 @@ async function disputeHandler(request: Request) {
           amount: escrow.amount,
           currency: escrow.currency,
           disputedBy: callerSCA,
-          reason: reason || 'No reason provided',
+          reason: disputeReason,
           txHash,
           disputedAt: new Date().toISOString(),
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     return NextResponse.json({
@@ -111,4 +138,4 @@ async function disputeHandler(request: Request) {
   }
 }
 
-export const POST = withApiKey(disputeHandler);
+export const POST = withMerchantAuth(disputeHandler as any);

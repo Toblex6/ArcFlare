@@ -1,6 +1,13 @@
 // src/app/api/escrow/list/route.ts
 // Returns all escrows with optional status filter.
 // Used by the escrow management dashboard.
+//
+// FIX: metrics (totalLocked, active count, disputed count, etc.) were
+// previously computed from the filtered `escrows` array, so clicking
+// ACTIVE/DISPUTED/etc. made the metric cards misreport (e.g. Total Locked
+// showing 0 while viewing DISPUTED). Metrics now always come from the full,
+// unfiltered set for this merchant — the status/depositor/beneficiary
+// filters only affect which rows are returned in `escrows`.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
@@ -23,34 +30,40 @@ export async function GET(request: NextRequest) {
     const depositor = searchParams.get('depositor');
     const beneficiary = searchParams.get('beneficiary');
 
-    const where: any = { merchantId: merchant.id };
-    if (status) where.status = status;
-    if (depositor) where.depositorSCA = depositor;
-    if (beneficiary) where.beneficiarySCA = beneficiary;
-
-    const escrows = await (prisma as any).escrow.findMany({
-      where,
+    // ── Fetch ALL of this merchant's escrows first — metrics are always
+    //    computed from this full set, regardless of what's being filtered.
+    const allEscrows = await (prisma as any).escrow.findMany({
+      where: { merchantId: merchant.id },
       orderBy: { createdAt: 'desc' },
+    });
+
+    // ── Apply status/depositor/beneficiary filters only to what gets
+    //    returned as the visible row list.
+    const filteredEscrows = allEscrows.filter((e: any) => {
+      if (status && e.status !== status) return false;
+      if (depositor && e.depositorSCA !== depositor) return false;
+      if (beneficiary && e.beneficiarySCA !== beneficiary) return false;
+      return true;
     });
 
     const now = new Date();
 
-    // Compute summary metrics
-    const active = escrows.filter((e: any) => e.status === 'ACTIVE').length;
-    const released = escrows.filter((e: any) => e.status === 'RELEASED').length;
-    const disputed = escrows.filter((e: any) => e.status === 'DISPUTED').length;
-    const refunded = escrows.filter((e: any) => e.status === 'REFUNDED').length;
-    const totalLocked = escrows
+    // Compute summary metrics from the FULL set, not the filtered one.
+    const active = allEscrows.filter((e: any) => e.status === 'ACTIVE').length;
+    const released = allEscrows.filter((e: any) => e.status === 'RELEASED').length;
+    const disputed = allEscrows.filter((e: any) => e.status === 'DISPUTED').length;
+    const refunded = allEscrows.filter((e: any) => e.status === 'REFUNDED').length;
+    const totalLocked = allEscrows
       .filter((e: any) => e.status === 'ACTIVE')
       .reduce((sum: number, e: any) => sum + e.amount, 0);
-    const totalReleased = escrows
+    const totalReleased = allEscrows
       .filter((e: any) => e.status === 'RELEASED')
       .reduce((sum: number, e: any) => sum + e.amount, 0);
 
     return NextResponse.json({
       success: true,
       metrics: {
-        total: escrows.length,
+        total: allEscrows.length,
         active,
         released,
         disputed,
@@ -58,7 +71,7 @@ export async function GET(request: NextRequest) {
         totalLocked: parseFloat(totalLocked.toFixed(4)),
         totalReleased: parseFloat(totalReleased.toFixed(4)),
       },
-      escrows: escrows.map((e: any) => ({
+      escrows: filteredEscrows.map((e: any) => ({
         ...e,
         isExpired: e.deadline ? new Date(e.deadline) < now : false,
         timeRemaining: e.deadline

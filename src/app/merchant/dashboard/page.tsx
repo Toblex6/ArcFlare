@@ -22,15 +22,11 @@ interface PaymentItem {
   currency: string;
   chain: string;
   status: string;
-  sender_email: string;
-  merchant: string;
+  sender_email: string | null;
+  merchant: string | null;
   paid_at: string;
-  cctp_telemetry: {
-    source_domain: number;
-    target_domain: number;
-    attestation_status: string;
-    nonce: number;
-  };
+  arc_tx_hash: string | null;
+  explorer_url: string | null;
 }
 
 interface DashboardMetrics {
@@ -645,7 +641,7 @@ export default function MerchantDashboard() {
                         </div>
                       </td>
                       <td className="py-3 pr-3">
-                        <div className="text-gray-300 text-xs">{payment.sender_email.slice(0, 10)}...</div>
+                        <div className="text-gray-300 text-xs">{payment.sender_email ? `${payment.sender_email.slice(0, 10)}...` : '—'}</div>
                       </td>
                       <td className="py-3 pr-3">
                         <span className="text-cyan-400 text-[10px]">{payment.chain}</span>

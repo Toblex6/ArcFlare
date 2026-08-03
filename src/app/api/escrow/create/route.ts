@@ -1,12 +1,13 @@
 // src/app/api/escrow/create/route.ts
-// REAL onchain escrow — actually calls ArcFlareEscrow.sol
-// Previously only wrote to DB. Now approves + deposits USDC into contract.
+// REAL onchain escrow — calls FlareHQEscrow.sol
+// onchainId is now derived deterministically from `reference` on the backend
+// and passed straight into createEscrow — no event-log parsing needed.
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
-import { parseUnits } from 'viem';
+import { parseUnits, keccak256, toBytes } from 'viem';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 const USDC_ARC = '0x3600000000000000000000000000000000000000';
@@ -30,9 +31,13 @@ async function waitForCircleTx(
       return data.transaction.txHash;
     }
     if (state === 'FAILED') {
-      throw new Error(`Escrow transaction failed onchain.`);
+      console.error(`❌ Circle tx FAILED — full transaction object:`, JSON.stringify(data?.transaction, null, 2));
+      throw new Error(
+        `Escrow transaction failed onchain.` +
+        (data?.transaction?.errorReason ? ` Reason: ${data.transaction.errorReason}` : '')
+      );
     }
-    console.log(`⏳ Escrow tx polling... attempt ${i + 1}`);
+    console.log(`⏳ Escrow tx polling... attempt ${i + 1}, state=${state}`);
   }
   throw new Error('Escrow transaction timed out.');
 }
@@ -66,10 +71,17 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
     const reference = `escrow_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const deadlineDate = new Date(Date.now() + deadlineHours * 3600 * 1000);
 
+    // Derive the on-chain escrow id deterministically from `reference`, before
+    // sending anything to Circle. `reference` is server-generated (not user
+    // input), so this stays fully under backend control and can't be gamed
+    // by the depositor to force a collision.
+    const onchainId = keccak256(toBytes(reference));
+
     console.log(`🔒 Creating escrow: ${amount} USDC`);
     console.log(`   Depositor: ${depositorSCA}`);
     console.log(`   Beneficiary: ${beneficiarySCA}`);
     console.log(`   Deadline: ${deadlineDate.toISOString()}`);
+    console.log(`   Reference: ${reference} → onchainId: ${onchainId}`);
 
     const circleClient = getCircleClient();
 
@@ -89,15 +101,16 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
     await waitForCircleTx(circleClient, approveTx.data.id);
     console.log('✅ USDC approval confirmed');
 
-    // ── Step 2: Create escrow on ArcFlareEscrow.sol ──────────────────────────
+    // ── Step 2: Create escrow on FlareHQEscrow.sol ────────────────────────────
     console.log('⏳ Step 2/2: Creating escrow on Arc...');
 
     const escrowTx = await circleClient.createContractExecutionTransaction({
       walletAddress: depositorSCA,
       blockchain: 'ARC-TESTNET' as any,
       contractAddress: ESCROW_CONTRACT,
-      abiFunctionSignature: 'createEscrow(address,uint256,uint256,string)',
+      abiFunctionSignature: 'createEscrow(bytes32,address,uint256,uint256,string)',
       abiParameters: [
+        onchainId,
         beneficiarySCA,
         amountWei.toString(),
         deadlineTimestamp.toString(),
@@ -114,6 +127,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
     const escrowRecord = await prisma.escrow.create({
       data: {
         reference,
+        contractEscrowId: onchainId, // bytes32 id, derived from reference — same value used onchain
         amount: amountFloat,
         currency: 'USDC',
         depositorSCA,
@@ -155,7 +169,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       txHash,
       explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
       contractAddress: ESCROW_CONTRACT,
-      message: `${amount} USDC locked in ArcFlareEscrow contract on Arc Testnet. Both parties must confirm to release.`,
+      message: `${amount} USDC locked in FlareHQEscrow contract on Arc Testnet. Both parties must confirm to release.`,
       nextSteps: {
         release: `POST /api/escrow/release { reference: "${reference}", callerSCA: "depositorOrBeneficiarySCA" }`,
         dispute: `POST /api/escrow/dispute { reference: "${reference}", callerSCA: "...", reason: "..." }`,

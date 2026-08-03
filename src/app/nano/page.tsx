@@ -9,6 +9,14 @@ import DashboardSidebar from '@/components/DashboardSidebar';
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
 
+// resolveMerchant() fails closed if x-api-key is present but doesn't match —
+// it will NOT fall back to the merchant_token cookie in that case. Only
+// attach the header when we actually have a real key; otherwise the
+// dashboard cookie session (the correct production path) does the auth.
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return API_KEY ? { ...extra, "x-api-key": API_KEY } : extra;
+}
+
 const NAV = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Homepage", href: "/" },
@@ -287,7 +295,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/payments/nano", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ agentSCA, merchantSCA, amount, description }),
       });
       const data = await res.json();
@@ -307,7 +315,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch(
         `/api/payments/nano?agentSCA=${agentSCA}&merchantSCA=${merchantSCA}`,
-        { headers: { "x-api-key": API_KEY } }
+        { headers: authHeaders() }
       );
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -326,7 +334,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/payments/nano/settle", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ agentSCA, merchantSCA, forceSettle }),
       });
       const data = await res.json();
@@ -345,7 +353,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/payments/nano/settle", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ autoSettle: true }),
       });
       const data = await res.json();
@@ -364,7 +372,7 @@ export default function NanoPaymentsPage() {
     try {
       // 1. Fetch balances – required
       const balanceRes = await fetch("/api/x402/seller/balance", {
-        headers: { "x-api-key": API_KEY },
+        headers: authHeaders(),
       });
       const balanceData = await balanceRes.json();
       if (balanceData.success) setX402Balances(balanceData);
@@ -372,7 +380,7 @@ export default function NanoPaymentsPage() {
       // 2. Fetch payment history – optional, fallback on error
       try {
         const paymentsRes = await fetch("/api/payments/all?chain=x402", {
-          headers: { "x-api-key": API_KEY },
+          headers: authHeaders(),
         });
         const paymentsData = await paymentsRes.json();
         if (paymentsData.success) setX402Payments(paymentsData.data || []);
@@ -406,7 +414,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/x402/eoa-wallet/deposit", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ eoaAddress: depositEoa, amount: depositAmount }),
       });
       const data = await res.json();
@@ -431,7 +439,7 @@ export default function NanoPaymentsPage() {
     try {
       const res = await fetch("/api/x402/pay", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ resourceUrl, eoaAddress: payEoa }),
       });
       const data = await res.json();

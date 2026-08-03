@@ -27,7 +27,14 @@ model PaymentLog {
   payerSCA       String?
   merchantSCA    String?
   merchantId     String?   // FK to Merchant.id — resolves the real payout wallet at settlement
+  listingId      String?   // set when this payment was for a marketplace ApiListing (loose ref, same convention as merchantId above)
+  gatewayReference String? // Circle Gateway's batch settlement reference (a UUID) — NOT an onchain
+                            // tx hash. Settlement happens later in a batch; arcTxHash stays null
+                            // until a real onchain hash exists for it (not tracked yet, see
+                            // merchant/analytics route's notTracked section).
   updatedAt      DateTime? @updatedAt
+
+  @@index([listingId])
 }
 
 model AgentRegistry {
@@ -50,6 +57,26 @@ model AgentRegistry {
   merchantId     String?        // owning merchant — null only for legacy/pre-scoping rows
   agents         Agent[]
   wallets        CircleWallet[]
+}
+
+model ApiListing {
+  id              String    @id @default(uuid())
+  slug            String    @unique // used in the gated route path: /api/x402/marketplace/pay/[slug]
+  name            String
+  description     String?
+  categories      String[]  @default([])
+  pricePerRequest String    // "$X.XX" format, passed straight into withGateway() unchanged
+  docsUrl         String?
+  targetUrl       String    // upstream API this listing proxies to once payment clears — not in the
+                             // original spec, but a listing can't actually gate anything without it
+  status          String    @default("DRAFT") // "DRAFT" | "PUBLISHED" | "SUSPENDED"
+  merchantId      String?   // owning provider — null only for legacy/pre-scoping rows
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([merchantId])
+  @@index([status])
+  @@index([slug])
 }
 
 model ApiKey {
@@ -78,19 +105,29 @@ model Agent {
 }
 
 model Escrow {
-  id              String    @id @default(uuid())
-  reference       String    @unique
-  idempotencyKey  String?   @unique
-  amount          Float
-  currency        String
-  depositorSCA    String
-  beneficiarySCA  String
-  contractAddress String
-  status          String
-  condition       String?
-  deadline        DateTime?
-  createdAt       DateTime  @default(now())
-  merchantId      String?   // owning merchant — null only for legacy/pre-scoping rows
+  id                  String    @id @default(uuid())
+  reference           String    @unique
+  idempotencyKey      String?   @unique
+  amount              Float
+  currency            String
+  depositorSCA        String
+  beneficiarySCA      String
+  contractAddress     String
+  status              String
+  condition           String?
+  contractEscrowId    String?
+  deadline            DateTime?
+  createdAt           DateTime  @default(now())
+  merchantId          String?
+
+  txHash              String?
+  releaseTxHash       String?
+  disputeTxHash       String?
+  disputeReason       String?
+  disputedBy          String?
+  depositorConfirmed  Boolean   @default(false)
+  beneficiaryConfirmed Boolean  @default(false)
+  webhookUrl          String?
 }
 
 model Stream {

@@ -72,8 +72,8 @@ function formatResponse(payment: any) {
     chain: payment.chain || 'Arc Testnet',
     gateway_response: hasSettled ? 'Successful' : 'Pending',
     status: payment.status,
-    sender_email: payment.senderEmail || 'autonomous-agent@bot.network',
-    merchant: payment.merchant || 'Dispatch Marketplace',
+    sender_email: payment.senderEmail || null,
+    merchant: payment.merchant || null,
     merchantSCA: payment.merchantSCA || null,
     paid_at: payment.timestamp,
     // Real data only — no fabricated telemetry. arcTxHash is the actual

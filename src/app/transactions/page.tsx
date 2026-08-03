@@ -15,13 +15,12 @@ interface PaymentItem {
   currency: string;
   chain: string;
   status: string;
-  sender_email: string;
-  merchant: string;
+  sender_email: string | null;
+  merchant: string | null;
   paid_at: string;
-  cctp_telemetry: {
-    attestation_status: string;
-    nonce: number;
-  };
+  arc_tx_hash: string | null;
+  explorer_url: string | null;
+  gateway_reference: string | null;
 }
 
 export default function TransactionsPage() {
@@ -91,7 +90,7 @@ export default function TransactionsPage() {
                     <th className="text-left pb-3 pr-4">Chain</th>
                     <th className="text-left pb-3 pr-4">Payload Value</th>
                     <th className="text-left pb-3 pr-4">Status</th>
-                    <th className="text-left pb-3">Circle CCTP Attestation</th>
+                    <th className="text-left pb-3">Onchain Tx</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -138,7 +137,17 @@ export default function TransactionsPage() {
                         </span>
                       </td>
                       <td className="py-4 text-slate-500 text-[10px]">
-                        {payment.cctp_telemetry.attestation_status}
+                        {payment.explorer_url ? (
+                          <a href={payment.explorer_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                            {payment.arc_tx_hash?.slice(0, 10)}...
+                          </a>
+                        ) : payment.gateway_reference ? (
+                          <span className="text-slate-400" title="Circle Gateway batches this onchain periodically — not yet a resolvable tx hash">
+                            Pending batch settlement
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Not yet onchain</span>
+                        )}
                       </td>
                     </tr>
                   ))}

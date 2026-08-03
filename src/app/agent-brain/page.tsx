@@ -4,7 +4,17 @@ import React, { useState } from "react";
 import DashboardSidebar from "@/src/components/DashboardSidebar";
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
-const API_BASE = "https://flarehq.xyz";
+// Was hardcoded to "https://flarehq.xyz" — meant every local dev call silently
+// hit production instead of localhost. Relative path works in both.
+const API_BASE = "";
+
+// resolveMerchant() fails closed if x-api-key is present but doesn't match —
+// it will NOT fall back to the merchant_token cookie in that case. Only
+// attach the header when we actually have a real key; otherwise the
+// dashboard cookie session (the correct production path) does the auth.
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    return API_KEY ? { ...extra, "x-api-key": API_KEY } : extra;
+}
 
 const EXAMPLE_PROMPTS = [
     "Pay 0.1 USDC to 0x954ebd124aedf03b784fcf2cb067de98f04bfa3a as a test A2A payment",
@@ -117,7 +127,7 @@ export default function AgentBrainPage() {
         try {
             const res = await fetch(`${API_BASE}/api/x402/pay`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+                headers: authHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
                     resourceUrl: `${API_BASE}/api/agent/brain`,
                     eoaAddress,
