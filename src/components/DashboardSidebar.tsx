@@ -36,7 +36,6 @@ const SECTIONS: NavSection[] = [
             { label: 'Transactions', href: '/transactions' },
             { label: 'Escrow', href: '/escrow' },
             { label: 'Nanopayments', href: '/nano' },
-            { label: 'Marketplace', href: '/marketplace' },
         ],
     },
     {
@@ -51,6 +50,7 @@ const SECTIONS: NavSection[] = [
     {
         group: 'COMING SOON',
         items: [
+            { label: 'Marketplace', href: '/marketplace', disabled: true },
             { label: 'Agent Wallets', href: '/agent-wallets', disabled: true },
         ],
     },
