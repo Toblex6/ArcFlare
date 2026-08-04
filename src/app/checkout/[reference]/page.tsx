@@ -244,6 +244,21 @@ export default function CheckoutPage() {
           <p style={{ color: '#c8975a', fontSize: 'clamp(9px, 0.8vw, 11px)', textTransform: 'uppercase', letterSpacing: 2, fontFamily: 'monospace', margin: '0 0 8px' }}>Checkout</p>
           <h2 style={{ fontSize: 'clamp(22px, 4vw, 32px)', fontWeight: 800, color: '#f0ece6', margin: '0 0 28px', lineHeight: 1.2 }}>Complete your payment</h2>
 
+          <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 14, padding: 'clamp(16px, 2vw, 20px)', marginBottom: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <div style={{ background: '#fff', padding: 8, borderRadius: 10 }}>
+              <img
+                src={`/api/checkout/qr?reference=${reference}`}
+                alt="Scan to pay from your phone"
+                width={180}
+                height={180}
+                style={{ display: 'block' }}
+              />
+            </div>
+            <p style={{ color: '#6b5a45', fontSize: 'clamp(10px, 0.9vw, 12px)', margin: 0, textAlign: 'center' }}>
+              Scan to pay from your phone
+            </p>
+          </div>
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 28 }}>
             {[
               { label: 'Merchant', value: payment.merchant || 'FlareHQ Merchant' },

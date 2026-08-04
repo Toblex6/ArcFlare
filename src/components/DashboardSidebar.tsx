@@ -205,7 +205,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
                         onClick={() => router.push('/merchant/settings')}
                         style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '7px 0', fontSize: 11, color: '#9ca3af', cursor: 'pointer', marginBottom: 6 }}
                     >
-                        ⚙ Payout Settings
+                        ⚙ Settings
                     </button>
                     <button
                         onClick={signOut}

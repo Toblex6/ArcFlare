@@ -69,6 +69,7 @@ export default function MerchantDashboard() {
   const [newLink, setNewLink] = useState<any>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
 
   // ── Responsive state ──
   const [isMobile, setIsMobile] = useState<boolean>(false);
@@ -174,6 +175,7 @@ export default function MerchantDashboard() {
     setCreating(true);
     setLinkError(null);
     setNewLink(null);
+    setShowQr(false);
 
     try {
       const res = await fetch('/api/merchant/payment-link', {
@@ -415,32 +417,41 @@ export default function MerchantDashboard() {
                 ✓ Link Created
               </p>
 
-              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ background: "#fff", padding: 8, borderRadius: 10, border: "1px solid #cffafe", flexShrink: 0 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+                <p style={{ color: "var(--text)", fontSize: 12, fontFamily: "monospace", margin: 0, flex: 1, wordBreak: "break-all" }}>
+                  {newLink.checkoutUrl}
+                </p>
+                <button
+                  onClick={() => copyLink(newLink.checkoutUrl)}
+                  style={{
+                    flexShrink: 0, background: copied ? "var(--primary)" : "var(--surface)", border: "1px solid var(--primary)",
+                    borderRadius: 8, padding: "6px 12px", color: copied ? "var(--surface)" : "var(--primary)",
+                    fontSize: 11, cursor: "pointer", fontWeight: 700,
+                  }}
+                >
+                  {copied ? "✓ Copied" : "Copy"}
+                </button>
+                <button
+                  onClick={() => setShowQr((v) => !v)}
+                  style={{
+                    flexShrink: 0, background: "var(--surface)", border: "1px solid var(--border)",
+                    borderRadius: 8, padding: "6px 12px", color: "var(--text-secondary)",
+                    fontSize: 11, cursor: "pointer", fontWeight: 700,
+                  }}
+                >
+                  {showQr ? "Hide QR" : "Show QR"}
+                </button>
+              </div>
+
+              <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: "0 0 12px 0" }}>
+                Amount: <span style={{ fontWeight: 600 }}>{newLink.amount} USDC</span> • Ref: <span style={{ fontFamily: "monospace" }}>{newLink.reference}</span>
+              </p>
+
+              {showQr && (
+                <div style={{ background: "#fff", padding: 8, borderRadius: 10, border: "1px solid #cffafe", display: "inline-block" }}>
                   <img src={`/api/checkout/qr?reference=${newLink.reference}`} alt="Scan to pay" width={120} height={120} style={{ display: "block" }} />
                 </div>
-
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-                    <p style={{ color: "var(--text)", fontSize: 12, fontFamily: "monospace", margin: 0, flex: 1, wordBreak: "break-all" }}>
-                      {newLink.checkoutUrl}
-                    </p>
-                    <button
-                      onClick={() => copyLink(newLink.checkoutUrl)}
-                      style={{
-                        flexShrink: 0, background: copied ? "var(--primary)" : "var(--surface)", border: "1px solid var(--primary)",
-                        borderRadius: 8, padding: "6px 12px", color: copied ? "var(--surface)" : "var(--primary)",
-                        fontSize: 11, cursor: "pointer", fontWeight: 700,
-                      }}
-                    >
-                      {copied ? "✓ Copied" : "Copy"}
-                    </button>
-                  </div>
-                  <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: 0 }}>
-                    Amount: <span style={{ fontWeight: 600 }}>{newLink.amount} USDC</span> • Ref: <span style={{ fontFamily: "monospace" }}>{newLink.reference}</span>
-                  </p>
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>

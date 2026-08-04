@@ -2,12 +2,12 @@
 // Returns all escrows with optional status filter.
 // Used by the escrow management dashboard.
 //
-// FIX: metrics (totalLocked, active count, disputed count, etc.) were
-// previously computed from the filtered `escrows` array, so clicking
-// ACTIVE/DISPUTED/etc. made the metric cards misreport (e.g. Total Locked
-// showing 0 while viewing DISPUTED). Metrics now always come from the full,
-// unfiltered set for this merchant — the status/depositor/beneficiary
-// filters only affect which rows are returned in `escrows`.
+// FIX (this pass): "Total Locked" now includes DISPUTED escrows alongside
+// ACTIVE ones. A dispute doesn't move funds — it just freezes the escrow
+// pending admin resolution — so that USDC is still genuinely locked in the
+// contract. Only RELEASED/REFUNDED funds have actually left it. Previously
+// totalLocked only summed ACTIVE, which understated real locked value
+// whenever anything was under dispute.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
@@ -26,19 +26,15 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status'); // ACTIVE, RELEASED, DISPUTED, REFUNDED
+    const status = searchParams.get('status');
     const depositor = searchParams.get('depositor');
     const beneficiary = searchParams.get('beneficiary');
 
-    // ── Fetch ALL of this merchant's escrows first — metrics are always
-    //    computed from this full set, regardless of what's being filtered.
     const allEscrows = await (prisma as any).escrow.findMany({
       where: { merchantId: merchant.id },
       orderBy: { createdAt: 'desc' },
     });
 
-    // ── Apply status/depositor/beneficiary filters only to what gets
-    //    returned as the visible row list.
     const filteredEscrows = allEscrows.filter((e: any) => {
       if (status && e.status !== status) return false;
       if (depositor && e.depositorSCA !== depositor) return false;
@@ -48,13 +44,17 @@ export async function GET(request: NextRequest) {
 
     const now = new Date();
 
-    // Compute summary metrics from the FULL set, not the filtered one.
     const active = allEscrows.filter((e: any) => e.status === 'ACTIVE').length;
     const released = allEscrows.filter((e: any) => e.status === 'RELEASED').length;
     const disputed = allEscrows.filter((e: any) => e.status === 'DISPUTED').length;
     const refunded = allEscrows.filter((e: any) => e.status === 'REFUNDED').length;
+
+    // Funds still genuinely locked in the contract = ACTIVE + DISPUTED.
+    // RELEASED and REFUNDED have already left the contract, so they're
+    // excluded here (RELEASED counted separately below, REFUNDED isn't
+    // currently surfaced as a total but could be added the same way).
     const totalLocked = allEscrows
-      .filter((e: any) => e.status === 'ACTIVE')
+      .filter((e: any) => e.status === 'ACTIVE' || e.status === 'DISPUTED')
       .reduce((sum: number, e: any) => sum + e.amount, 0);
     const totalReleased = allEscrows
       .filter((e: any) => e.status === 'RELEASED')
