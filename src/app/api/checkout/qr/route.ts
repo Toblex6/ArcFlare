@@ -2,6 +2,12 @@
 // Generates a QR code PNG for a checkout link. GET so it can be dropped
 // straight into an <img src="/api/checkout/qr?reference=..."> tag.
 //
+// Uses NEXT_PUBLIC_BASE_URL — same env var payment-link/route.ts uses to
+// build checkoutUrl — so the QR code always encodes the exact same domain
+// shown in the copy-link text next to it. (Was previously reading a
+// different var, NEXT_PUBLIC_APP_URL, which could point at a different
+// fallback domain if only one of the two was actually set.)
+//
 // Requires: npm install qrcode @types/qrcode
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -23,7 +29,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'Payment reference not found.' }, { status: 404 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://arcflare-gateway.onrender.com';
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz';
     const checkoutUrl = `${baseUrl}/checkout/${reference}`;
 
     const pngBuffer = await QRCode.toBuffer(checkoutUrl, {
