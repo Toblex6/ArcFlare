@@ -151,8 +151,10 @@ export function withGateway(
 
       console.log(`[x402] Settled! ${amountUsdc} USDC from ${payer} tx: ${settleResult.transaction}`);
 
-      // Log to DB — non-blocking
-      prisma.paymentLog.create({
+      // Log to DB. Awaited (not fire-and-forget) so we can attach the
+      // upstream delivery outcome to the same row after the handler runs —
+      // still doesn't touch verify/settle above.
+      const paymentLog = await prisma.paymentLog.create({
         data: {
           reference: `x402_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
           amount: parseFloat(amountUsdc),
@@ -166,10 +168,23 @@ export function withGateway(
           listingId: listingId ?? null,
           merchantId: merchantId ?? null,
         },
-      }).catch((e) => console.error("[x402] DB log failed:", e.message));
+      }).catch((e) => {
+        console.error("[x402] DB log failed:", e.message);
+        return null;
+      });
 
       // Run the actual handler
       const response = await handler(req);
+
+      // Record delivery outcome on the same row, if it exists. Payment is
+      // already settled at this point regardless of what the handler did —
+      // this is bookkeeping for analytics, not a gate on the response.
+      if (paymentLog) {
+        prisma.paymentLog.update({
+          where: { id: paymentLog.id },
+          data: { upstreamOk: response.ok, upstreamStatus: response.status },
+        }).catch((e: any) => console.error("[x402] Delivery-outcome log failed:", e.message));
+      }
 
       response.headers.set(
         "PAYMENT-RESPONSE",

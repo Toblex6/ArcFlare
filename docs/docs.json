@@ -4,7 +4,7 @@
   "theme": "mint",
   "logo": {
     "light": "/arcflare-logo.png.png",
-    "dark": "/arcflare-logoo.png",
+    "dark": "/arcflare-logo.png.png",
     "href": "https://flarehq.xyz"
   },
   "favicon": "/arcflare-logo.png.png",
@@ -58,31 +58,35 @@
           {
             "group": "Getting Started",
             "pages": [
-              "docs/quickstart",
-              "docs/architecture"
+              "quickstart",
+              "overview",
+              "architecture"
             ]
           },
           {
             "group": "x402 & Agentic Finance",
             "pages": [
-              "docs/x402/marketplace",
-              "docs/agents/erc8004-identity",
-              "docs/agents/erc8183-commerce"
+              "x402/marketplace",
+              "x402/agent-payments",
+              "x402/paywall-setup"
             ]
           },
           {
             "group": "Payment Infrastructure",
             "pages": [
-              "docs/payments/hosted-checkout",
-              "docs/payments/escrow-and-disputes",
-              "docs/payments/streaming-payments"
+              "payments/hosted-checkout",
+              "payments/payments-links",
+              "payments/escrow-and-disputes",
+              "payments/streaming-payments",
+              "payments/cctp-bridge"
             ]
           },
           {
             "group": "Developers & Integration",
             "pages": [
-              "docs/webhooks",
-              "docs/developers/circle-mpc"
+              "developers/webhooks",
+              "developers/sdks",
+              "developers/errors"
             ]
           }
         ]

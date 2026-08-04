@@ -14,6 +14,29 @@ function slugify(name: string): string {
         .replace(/(^-|-$)/g, '');
 }
 
+/**
+ * Lightweight reachability check — does NOT guarantee the endpoint will
+ * behave correctly under real traffic, but catches the obvious "typo'd URL"
+ * / "endpoint doesn't exist" class of mistake before it can ever charge a
+ * buyer. Called at publish time, not creation time, since DRAFT listings
+ * aren't payable yet.
+ */
+export async function checkTargetUrlReachable(targetUrl: string): Promise<{ ok: boolean; detail: string }> {
+    try {
+        const res = await fetch(targetUrl, { method: 'HEAD', signal: AbortSignal.timeout(6000) });
+        if (res.status === 405) {
+            // Some APIs reject HEAD but are otherwise fine — not a reason to block publishing.
+            return { ok: true, detail: 'Target does not support HEAD, skipped strict check.' };
+        }
+        if (res.status >= 500) {
+            return { ok: false, detail: `Target responded with server error ${res.status}.` };
+        }
+        return { ok: true, detail: `Reachable (${res.status}).` };
+    } catch (err: any) {
+        return { ok: false, detail: `Target is unreachable: ${err.message}` };
+    }
+}
+
 async function createListingHandler(request: Request, merchant: AuthedMerchant) {
     try {
         const {

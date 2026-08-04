@@ -61,7 +61,7 @@ export default function MerchantDashboard() {
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
 
-  // Payment link creation state — restored from the original merchant dashboard
+  // Payment link creation state
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
@@ -87,9 +87,6 @@ export default function MerchantDashboard() {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // ── Auth gate — this is the whole point of the merge. No merchant
-  // session, no dashboard. Redirect to login rather than showing anyone's
-  // data. ──
   useEffect(() => {
     fetch("/api/merchant/me")
       .then((r) => r.json())
@@ -110,8 +107,6 @@ export default function MerchantDashboard() {
       .finally(() => setCheckingAuth(false));
   }, [router]);
 
-  // ── Data fetching — scoped server-side to the logged-in merchant via
-  // the merchant_token cookie. No API key needed in the browser at all. ──
   const fetchLiveDatabaseState = async (isSilentUpdate = false) => {
     try {
       const res = await fetch("/api/payments/all");
@@ -304,7 +299,7 @@ export default function MerchantDashboard() {
     );
   }
 
-  if (!merchant) return null; // mid-redirect to login
+  if (!merchant) return null;
 
   return (
     <div
@@ -316,11 +311,8 @@ export default function MerchantDashboard() {
         fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
-      {/* ── SIDEBAR ── */}
       <DashboardSidebar active="Dashboard" />
 
-
-      {/* ── MAIN CONTENT ── */}
       <main style={{ flex: 1, padding: isMobile ? "16px" : "32px", overflowX: "hidden", background: "var(--background)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -347,7 +339,6 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* METRIC CARDS */}
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
           {[
             { label: "Total Volume", value: metrics.totalVolume.toFixed(2), unit: "USDC", iconBg: "#dcfce7", iconColor: "#16a34a", icon: "$", stroke: "var(--primary)" },
@@ -367,7 +358,6 @@ export default function MerchantDashboard() {
           ))}
         </div>
 
-        {/* CREATE PAYMENT LINK */}
         <div id="checkout" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
           <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 4px 0" }}>Create Payment Link</h3>
           <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 20px 0" }}>Generate a checkout link customers can pay directly from their own wallet.</p>
@@ -418,32 +408,43 @@ export default function MerchantDashboard() {
             </div>
           </form>
 
+          {/* ── UPDATED LINK RENDER BLOCK WITH QR CODE ── */}
           {newLink && (
             <div style={{ marginTop: 18, background: "#ecfeff", border: "1px solid #a5f3fc", borderRadius: 12, padding: 16 }}>
-              <p style={{ color: "var(--primary)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 10px 0" }}>
+              <p style={{ color: "var(--primary)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, margin: "0 0 16px 0" }}>
                 ✓ Link Created
               </p>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <p style={{ color: "var(--text)", fontSize: 12, fontFamily: "monospace", margin: 0, flex: 1, wordBreak: "break-all" }}>
-                  {newLink.checkoutUrl}
-                </p>
-                <button
-                  onClick={() => copyLink(newLink.checkoutUrl)}
-                  style={{
-                    flexShrink: 0, background: copied ? "var(--primary)" : "var(--surface)", border: "1px solid var(--primary)",
-                    borderRadius: 8, padding: "6px 12px", color: copied ? "var(--surface)" : "var(--primary)",
-                    fontSize: 11, cursor: "pointer", fontWeight: 700,
-                  }}
-                >
-                  {copied ? "✓ Copied" : "Copy"}
-                </button>
+
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ background: "#fff", padding: 8, borderRadius: 10, border: "1px solid #cffafe", flexShrink: 0 }}>
+                  <img src={`/api/checkout/qr?reference=${newLink.reference}`} alt="Scan to pay" width={120} height={120} style={{ display: "block" }} />
+                </div>
+
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+                    <p style={{ color: "var(--text)", fontSize: 12, fontFamily: "monospace", margin: 0, flex: 1, wordBreak: "break-all" }}>
+                      {newLink.checkoutUrl}
+                    </p>
+                    <button
+                      onClick={() => copyLink(newLink.checkoutUrl)}
+                      style={{
+                        flexShrink: 0, background: copied ? "var(--primary)" : "var(--surface)", border: "1px solid var(--primary)",
+                        borderRadius: 8, padding: "6px 12px", color: copied ? "var(--surface)" : "var(--primary)",
+                        fontSize: 11, cursor: "pointer", fontWeight: 700,
+                      }}
+                    >
+                      {copied ? "✓ Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: 0 }}>
+                    Amount: <span style={{ fontWeight: 600 }}>{newLink.amount} USDC</span> • Ref: <span style={{ fontFamily: "monospace" }}>{newLink.reference}</span>
+                  </p>
+                </div>
               </div>
-              <p style={{ color: "var(--text-secondary)", fontSize: 11, margin: "8px 0 0 0" }}>
-                Amount: {newLink.amount} USDC • Ref: {newLink.reference}
-              </p>
             </div>
           )}
         </div>
+
         {merchant.walletType === 'CIRCLE' && (
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 4px 0" }}>Withdraw Funds</h3>
@@ -501,7 +502,7 @@ export default function MerchantDashboard() {
             )}
           </div>
         )}
-        {/* CHART + OVERVIEW */}
+
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 300px", gap: 20, marginBottom: 24 }}>
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: 0 }}>Payment Analytics</h3>
@@ -592,7 +593,6 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        {/* TRANSACTIONS TABLE */}
         <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-4 md:p-6 shadow-2xl overflow-hidden">
           <div className="flex flex-wrap items-center justify-between mb-6 gap-2">
             <h3 className="text-sm md:text-base font-bold tracking-wide uppercase font-mono text-white">

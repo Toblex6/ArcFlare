@@ -1,7 +1,8 @@
 // src/app/api/x402/eoa-wallet/deposit/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
-import { withApiKeyOrMerchant } from "@/lib/middleware/withMerchantAuth";
+import { withApiKeyOrMerchant, resolveMerchant } from "@/lib/middleware/withMerchantAuth";
+import { getOrCreateBuyerWallet } from "@/lib/x402-wallet";
 
 function sanitizeBigInts(obj: any): any {
   if (typeof obj === "bigint") return obj.toString();
@@ -14,31 +15,29 @@ function sanitizeBigInts(obj: any): any {
   return obj;
 }
 
-// POST — deposit USDC into Gateway
+// POST — deposit USDC into Gateway, for the caller's OWN wallet
 async function depositPostHandler(req: NextRequest) {
   try {
-    const { eoaAddress, amount } = await req.json();
-    if (!eoaAddress || !amount) {
+    const { amount } = await req.json();
+    if (!amount) {
       return NextResponse.json(
-        { success: false, error: "Missing eoaAddress or amount" },
+        { success: false, error: "Missing amount" },
         { status: 400 }
       );
     }
 
-    const PRIVATE_KEY = process.env.EOA_PRIVATE_KEY as `0x${string}`;
-    if (!PRIVATE_KEY) {
-      return NextResponse.json(
-        { success: false, error: "EOA_PRIVATE_KEY not set" },
-        { status: 500 }
-      );
+    const merchant = await resolveMerchant(req);
+    if (!merchant) {
+      return NextResponse.json({ success: false, error: "Authentication required." }, { status: 401 });
     }
+
+    const wallet = await getOrCreateBuyerWallet(merchant.id);
 
     const client = new GatewayClient({
       chain: "arcTestnet",
-      privateKey: PRIVATE_KEY,
+      privateKey: wallet.privateKey,
     });
 
-    // ✅ correct method — client.deposit(amountString)
     const result = await client.deposit(amount.toString());
 
     return NextResponse.json(sanitizeBigInts({
@@ -47,7 +46,7 @@ async function depositPostHandler(req: NextRequest) {
       approvalTxHash: result.approvalTxHash || null,
       amountDeposited: result.formattedAmount,
       explorerUrl: `https://testnet.arcscan.app/tx/${result.depositTxHash}`,
-      message: `Deposited ${result.formattedAmount} USDC into Gateway for ${eoaAddress}.`,
+      message: `Deposited ${result.formattedAmount} USDC into Gateway for ${wallet.address}.`,
     }));
   } catch (error: any) {
     console.error("Deposit error:", error.message);
@@ -58,37 +57,25 @@ async function depositPostHandler(req: NextRequest) {
   }
 }
 
-// GET — check Gateway + wallet balance
+// GET — check the CALLER's own Gateway + wallet balance
 async function depositGetHandler(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const eoaAddress = searchParams.get("eoaAddress");
-
-    if (!eoaAddress) {
-      return NextResponse.json(
-        { success: false, error: "eoaAddress query param required" },
-        { status: 400 }
-      );
+    const merchant = await resolveMerchant(req);
+    if (!merchant) {
+      return NextResponse.json({ success: false, error: "Authentication required." }, { status: 401 });
     }
 
-    const PRIVATE_KEY = process.env.EOA_PRIVATE_KEY as `0x${string}`;
-    if (!PRIVATE_KEY) {
-      return NextResponse.json(
-        { success: false, error: "EOA_PRIVATE_KEY not set" },
-        { status: 500 }
-      );
-    }
-
+    const wallet = await getOrCreateBuyerWallet(merchant.id);
     const client = new GatewayClient({
       chain: "arcTestnet",
-      privateKey: PRIVATE_KEY,
+      privateKey: wallet.privateKey,
     });
 
     const balances = await client.getBalances();
 
     return NextResponse.json(sanitizeBigInts({
       success: true,
-      address: eoaAddress,
+      address: wallet.address,
       balances,
     }));
   } catch (error: any) {

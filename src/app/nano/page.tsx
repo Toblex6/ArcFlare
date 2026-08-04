@@ -274,14 +274,12 @@ export default function NanoPaymentsPage() {
   const [x402Payments, setX402Payments] = useState<PaymentLog[]>([]);
   const [x402Loading, setX402Loading] = useState(true);
 
-  const [depositEoa, setDepositEoa] = useState("");
   const [depositAmount, setDepositAmount] = useState("1");
   const [depositing, setDepositing] = useState(false);
   const [depositResult, setDepositResult] = useState<any>(null);
 
-  const [payEoa, setPayEoa] = useState("");
   const [resourceUrl, setResourceUrl] = useState(
-    "https://flarehq.xyz/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9"
+    "/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9"
   );
   const [paying, setPaying] = useState(false);
   const [payResult, setPayResult] = useState<PayResult | null>(null);
@@ -404,8 +402,8 @@ export default function NanoPaymentsPage() {
   }, [activeTab]);
 
   const handleDeposit = async () => {
-    if (!depositEoa || !depositAmount) {
-      setError("Please enter an EOA address and amount.");
+    if (!depositAmount) {
+      setError("Please enter an amount.");
       return;
     }
     setDepositing(true);
@@ -415,7 +413,7 @@ export default function NanoPaymentsPage() {
       const res = await fetch("/api/x402/eoa-wallet/deposit", {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ eoaAddress: depositEoa, amount: depositAmount }),
+        body: JSON.stringify({ amount: depositAmount }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -429,8 +427,8 @@ export default function NanoPaymentsPage() {
   };
 
   const handlePay = async () => {
-    if (!payEoa || !resourceUrl) {
-      setError("Please enter an EOA address and resource URL.");
+    if (!resourceUrl) {
+      setError("Please enter a resource URL.");
       return;
     }
     setPaying(true);
@@ -440,7 +438,7 @@ export default function NanoPaymentsPage() {
       const res = await fetch("/api/x402/pay", {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ resourceUrl, eoaAddress: payEoa }),
+        body: JSON.stringify({ resourceUrl }),
       });
       const data = await res.json();
       setPayResult(data);
@@ -627,15 +625,9 @@ export default function NanoPaymentsPage() {
                 💰 Deposit into Gateway
               </h3>
               <p style={{ color: "var(--text-secondary)", fontSize: 13, margin: "0 0 16px" }}>
-                Transfer USDC from your EOA wallet into Circle Gateway.
+                Transfer USDC from your x402 wallet into Circle Gateway (your wallet is resolved from your login, not entered manually).
               </p>
               <div style={styles.row}>
-                <input
-                  style={{ ...styles.input, flex: 2 }}
-                  placeholder="0xYourEOAWallet..."
-                  value={depositEoa}
-                  onChange={(e) => setDepositEoa(e.target.value)}
-                />
                 <input
                   style={styles.inputSmall}
                   type="number"
@@ -663,15 +655,9 @@ export default function NanoPaymentsPage() {
                 🤖 Pay x402 Resource
               </h3>
               <p style={{ color: "var(--text-secondary)", fontSize: 13, margin: "0 0 16px" }}>
-                Pay for a protected API endpoint using your EOA wallet.
+                Pay for a protected API endpoint using your x402 wallet (resolved from your login).
               </p>
               <div style={styles.row}>
-                <input
-                  style={{ ...styles.input, flex: 1 }}
-                  placeholder="0xYourEOAWallet..."
-                  value={payEoa}
-                  onChange={(e) => setPayEoa(e.target.value)}
-                />
                 <input
                   style={{ ...styles.input, flex: 2 }}
                   placeholder="Resource URL (x402-protected endpoint)"
@@ -692,14 +678,13 @@ export default function NanoPaymentsPage() {
                         Paid <strong>{payResult.amountUSDC} USDC</strong> from {payResult.paidWith?.slice(0, 12)}...
                       </p>
                       {payResult.transaction && (
-                        <a
-                          href={`https://testnet.arcscan.app/tx/${payResult.transaction}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={styles.explorerLink}
-                        >
-                          View on ArcScan →
-                        </a>
+                        <p style={{ color: "var(--text-secondary)", fontSize: 11, fontFamily: "monospace", margin: "0 0 4px" }}>
+                          Settlement ref: {payResult.transaction.slice(0, 18)}...
+                          <br />
+                          <span style={{ fontFamily: "inherit" }}>
+                            Gateway batches this onchain periodically — not yet a resolvable onchain tx hash.
+                          </span>
+                        </p>
                       )}
                       <div style={{ marginTop: 8, background: "var(--surface-secondary)", borderRadius: 8, padding: 10 }}>
                         <p style={{ color: "var(--text-secondary)", fontSize: 10, margin: "0 0 4px" }}>Resource Data:</p>

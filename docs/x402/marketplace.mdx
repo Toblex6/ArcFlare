@@ -11,29 +11,33 @@ The **x402 Marketplace** on FlareHQ (`flarehq.xyz`) allows developers and AI pro
 ## How the x402 Protocol Works
 
 Instead of managing subscription tiers, API keys, or monthly billing dashboards, x402 embeds payment execution directly into the standard HTTP request-response cycle.
+
+```
 +--------------+                    +-----------------+                    +----------------+
-   |   AI Agent   |                    | FlareHQ x402    |                    | Provider API   |
-   |  / Client    |                    | Gateway         |                    | (Target URL)   |
-   +------+-------+                    +--------+--------+                    +-------+--------+
-          |                                     |                                     |
-          | 1. GET /api/v1/market-data          |                                     |
-          +------------------------------------>|                                     |
-          |                                     |                                     |
-          | 2. HTTP 402 Payment Required        |                                     |
-          |    (Price: $0.002 USDC, PayTo, Chain|                                     |
-          |<------------------------------------+                                     |
-          |                                     |                                     |
-          | 3. POST /api/x402/pay               |                                     |
-          |    (Header: X-402-Payment-Proof)    |                                     |
-          +------------------------------------>| 4. Verify Proof & Settle Nanopayment|
-          |                                     +------------------------------------>|
-          |                                     |                                     |
-          |                                     | 5. Forward Request                  |
-          |                                     +------------------------------------>|
-          |                                     |                                     |
-          | 6. HTTP 200 OK + Payload            | 6. Return Data                      |
-          |<------------------------------------+<------------------------------------+
-          1. **Request:** The client or AI agent requests a protected API endpoint.
+|   AI Agent   |                    | FlareHQ x402    |                    | Provider API   |
+|  / Client    |                    | Gateway         |                    | (Target URL)   |
++------+-------+                    +--------+--------+                    +-------+--------+
+       |                                     |                                     |
+       | 1. GET /api/v1/market-data          |                                     |
+       +------------------------------------>|                                     |
+       |                                     |                                     |
+       | 2. HTTP 402 Payment Required        |                                     |
+       |    (Price: $0.002 USDC, PayTo, Chain|                                     |
+       |<------------------------------------+                                     |
+       |                                     |                                     |
+       | 3. POST /api/x402/pay               |                                     |
+       |    (Header: X-402-Payment-Proof)    |                                     |
+       +------------------------------------>| 4. Verify Proof & Settle Nanopayment|
+       |                                     +------------------------------------>|
+       |                                     |                                     |
+       |                                     | 5. Forward Request                  |
+       |                                     +------------------------------------>|
+       |                                     |                                     |
+       | 6. HTTP 200 OK + Payload            | 6. Return Data                      |
+       |<------------------------------------+<------------------------------------+
+```
+
+1. **Request:** The client or AI agent requests a protected API endpoint.
 2. **Challenge:** FlareHQ returns an `HTTP 402 Payment Required` header containing pricing terms (e.g., `$0.002 USDC`), payee wallet address, and Arc network parameters (`5042002`).
 3. **Payment Authorization:** The agent signs an EIP-712 structured payload or Circle Nanopayments authorization header.
 4. **Proxy & Settlement:** FlareHQ verifies the cryptographic proof, executes sub-cent on-chain settlement, and proxies the request to the upstream target provider.
@@ -96,7 +100,7 @@ Marketplace listings are indexed and discoverable by both human developers and a
 
     <CodeGroup>
       ```bash cURL
-      curl -X POST [https://flarehq.xyz/api/x402/marketplace](https://flarehq.xyz/api/x402/marketplace) \
+      curl -X POST https://flarehq.xyz/api/x402/marketplace \
         -H "Authorization: Bearer fhq_sec_test_..." \
         -H "Content-Type: application/json" \
         -d '{
@@ -105,8 +109,8 @@ Marketplace listings are indexed and discoverable by both human developers and a
           "description": "Returns real-time DEX transactions greater than $100,000.",
           "categories": ["DeFi", "Analytics"],
           "pricePerRequest": "0.005",
-          "targetUrl": "[https://internal-api.yourdomain.com/v1/whales](https://internal-api.yourdomain.com/v1/whales)",
-          "docsUrl": "[https://docs.yourdomain.com/whales](https://docs.yourdomain.com/whales)"
+          "targetUrl": "https://internal-api.yourdomain.com/v1/whales",
+          "docsUrl": "https://docs.yourdomain.com/whales"
         }'
       ```
 
@@ -121,8 +125,8 @@ Marketplace listings are indexed and discoverable by both human developers and a
         description: 'Returns real-time DEX transactions greater than $100,000.',
         categories: ['DeFi', 'Analytics'],
         pricePerRequest: '0.005', // $0.005 USDC
-        targetUrl: '[https://internal-api.yourdomain.com/v1/whales](https://internal-api.yourdomain.com/v1/whales)',
-        docsUrl: '[https://docs.yourdomain.com/whales](https://docs.yourdomain.com/whales)',
+        targetUrl: 'https://internal-api.yourdomain.com/v1/whales',
+        docsUrl: 'https://docs.yourdomain.com/whales',
       });
 
       console.log('Listing Published:', listing.id, listing.slug);
@@ -135,7 +139,7 @@ Marketplace listings are indexed and discoverable by both human developers and a
 
     <CodeGroup>
       ```bash cURL
-      curl -X PATCH [https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker](https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker) \
+      curl -X PATCH https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker \
         -H "Authorization: Bearer fhq_sec_test_..." \
         -H "Content-Type: application/json" \
         -d '{
@@ -158,7 +162,7 @@ Marketplace listings are indexed and discoverable by both human developers and a
 
     <CodeGroup>
       ```bash cURL
-      curl -X POST [https://flarehq.xyz/api/x402/pay](https://flarehq.xyz/api/x402/pay) \
+      curl -X POST https://flarehq.xyz/api/x402/pay \
         -H "Content-Type: application/json" \
         -H "X-Agent-ID: 8004:5042002:1042" \
         -H "X-Agent-Signature: 0x8f3c..." \
@@ -190,7 +194,7 @@ Marketplace listings are indexed and discoverable by both human developers and a
 
     <CodeGroup>
       ```bash cURL
-      curl -X GET [https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker/analytics](https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker/analytics) \
+      curl -X GET https://flarehq.xyz/api/x402/marketplace/solana-whale-tracker/analytics \
         -H "Authorization: Bearer fhq_sec_test_..."
       ```
 
@@ -221,3 +225,4 @@ When AI agents query x402 endpoints, FlareHQ validates their identity against th
 X-Agent-ID: 8004:5042002:<tokenId>
 X-Agent-Signature: <eip712_signed_timestamp>
 X-402-Payment-Proof: <circle_nanopayment_proof>
+```

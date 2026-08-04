@@ -8,31 +8,35 @@ datasource db {
 }
 
 model PaymentLog {
-  id             String    @id @default(uuid())
-  reference      String    @unique
-  idempotencyKey String?   @unique
-  amount         Float
-  currency       String
-  chain          String
-  senderEmail    String    // 'pending@checkout' until a real payer settles (matches merchant links' convention)
-  direction      String    @default("send") // "send" | "request" — explicit, not inferred
-  merchant       String
-  status         String
-  arcTxHash      String?
-  webhookUrl     String?
-  timestamp      DateTime  @default(now())
-  expiresAt      DateTime?
-  agentSCA       String?
-  circleTxId     String?
-  payerSCA       String?
-  merchantSCA    String?
-  merchantId     String?   // FK to Merchant.id — resolves the real payout wallet at settlement
-  listingId      String?   // set when this payment was for a marketplace ApiListing (loose ref, same convention as merchantId above)
-  gatewayReference String? // Circle Gateway's batch settlement reference (a UUID) — NOT an onchain
+  id               String    @id @default(uuid())
+  reference        String    @unique
+  idempotencyKey   String?   @unique
+  amount           Float
+  currency         String
+  chain            String
+  senderEmail      String    // 'pending@checkout' until a real payer settles (matches merchant links' convention)
+  direction        String    @default("send") // "send" | "request" — explicit, not inferred
+  merchant         String
+  status           String
+  arcTxHash        String?
+  webhookUrl       String?
+  timestamp        DateTime  @default(now())
+  expiresAt        DateTime?
+  agentSCA         String?
+  circleTxId       String?
+  payerSCA         String?
+  merchantSCA      String?
+  merchantId       String?   // FK to Merchant.id — resolves the real payout wallet at settlement
+  listingId        String?   // set when this payment was for a marketplace ApiListing (loose ref, same convention as merchantId above)
+  gatewayReference String?   // Circle Gateway's batch settlement reference (a UUID) — NOT an onchain
                             // tx hash. Settlement happens later in a batch; arcTxHash stays null
                             // until a real onchain hash exists for it (not tracked yet, see
                             // merchant/analytics route's notTracked section).
-  updatedAt      DateTime? @updatedAt
+  upstreamOk       Boolean?  // For marketplace/x402-proxied payments: whether the upstream targetUrl
+                            // responded successfully AFTER payment settled. Null = not applicable
+                            // (non-proxied payment) or not yet recorded.
+  upstreamStatus   Int?      // The upstream's actual HTTP status code, for merchant debugging.
+  updatedAt        DateTime? @updatedAt
 
   @@index([listingId])
 }
@@ -105,29 +109,29 @@ model Agent {
 }
 
 model Escrow {
-  id                  String    @id @default(uuid())
-  reference           String    @unique
-  idempotencyKey      String?   @unique
-  amount              Float
-  currency            String
-  depositorSCA        String
-  beneficiarySCA      String
-  contractAddress     String
-  status              String
-  condition           String?
-  contractEscrowId    String?
-  deadline            DateTime?
-  createdAt           DateTime  @default(now())
-  merchantId          String?
+  id                 String    @id @default(uuid())
+  reference          String    @unique
+  idempotencyKey     String?   @unique
+  amount             Float
+  currency           String
+  depositorSCA       String
+  beneficiarySCA     String
+  contractAddress    String
+  status             String
+  condition          String?
+  contractEscrowId   String?
+  deadline           DateTime?
+  createdAt          DateTime  @default(now())
+  merchantId         String?   // owning merchant — null only for legacy/pre-scoping rows
 
-  txHash              String?
-  releaseTxHash       String?
-  disputeTxHash       String?
-  disputeReason       String?
-  disputedBy          String?
-  depositorConfirmed  Boolean   @default(false)
+  txHash             String?
+  releaseTxHash      String?
+  disputeTxHash      String?
+  disputeReason      String?
+  disputedBy         String?
+  depositorConfirmed Boolean   @default(false)
   beneficiaryConfirmed Boolean  @default(false)
-  webhookUrl          String?
+  webhookUrl         String?
 }
 
 model Stream {
@@ -182,14 +186,14 @@ model Merchant {
 }
 
 model ConsumerAccount {
-  id            String    @id @default(uuid())
-  walletAddress String    @unique
-  walletType    String    @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
+  id             String    @id @default(uuid())
+  walletAddress  String    @unique
+  walletType     String    @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
   circleWalletId String?
-  walletSetId   String?   // needed to provision this same SCA address on additional chains (e.g. for bridging)
-  email         String?   @unique // optional — recovery/notifications only, never required
-  createdAt     DateTime  @default(now())
-  lastSeenAt    DateTime  @default(now())
+  walletSetId    String?   // needed to provision this same SCA address on additional chains (e.g. for bridging)
+  email          String?   @unique // optional — recovery/notifications only, never required
+  createdAt      DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
 }
 
 model Job {
@@ -315,11 +319,14 @@ model PayrollBatch {
 }
 
 model X402EoaWallet {
-  id         String   @id @default(uuid())
-  address    String   @unique
-  privateKey String
-  label      String?
-  createdAt  DateTime @default(now())
+  id             String   @id @default(uuid())
+  address        String   @unique
+  encryptedKey   String   // AES-256-GCM ciphertext (was plaintext "privateKey" — never shipped that way)
+  keyIv          String   // GCM initialization vector, base64
+  keyAuthTag     String   // GCM auth tag, base64
+  merchantId     String?  @unique // one wallet per merchant for now; null only for pre-migration rows
+  label          String?
+  createdAt      DateTime @default(now())
 
   @@map("x402_eoa_wallets")
 }
@@ -334,29 +341,55 @@ model AgentBrainMemory {
 }
 
 model MerchantBudget {
-  id           String    @id @default(uuid())
+  id           String   @id @default(uuid())
   merchantId   String
-  category     String    // e.g. "payroll", "marketing", "supplies" — freeform, merchant-defined
+  category     String   // e.g. "payroll", "marketing", "supplies" — freeform, merchant-defined
   monthlyLimit Float
-  currency     String    @default("USDC")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  currency     String   @default("USDC")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([merchantId])
 }
 
 model MerchantReminder {
-  id          String    @id @default(uuid())
-  merchantId  String
-  description String
-  amount      Float?
-  dueDate     DateTime
-  recurring   Boolean   @default(false)
+  id           String   @id @default(uuid())
+  merchantId   String
+  description  String
+  amount       Float?
+  dueDate      DateTime
+  recurring    Boolean  @default(false)
   intervalDays Int?     // only set if recurring
-  completed   Boolean   @default(false)
-  createdAt   DateTime  @default(now())
+  completed    Boolean  @default(false)
+  createdAt    DateTime @default(now())
 
   @@index([merchantId])
   @@index([dueDate])
 }
 
+model Notification {
+  id         String   @id @default(uuid())
+  merchantId String
+  type       String   // e.g. "payment.received", "escrow.funded" — see NOTIFICATION_EVENTS in src/lib/notifications.ts
+  title      String
+  message    String
+  data       Json?    // arbitrary event payload (reference, amount, txHash, etc.)
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([merchantId])
+  @@index([merchantId, read])
+  @@index([type])
+}
+
+model NotificationPreference {
+  id             String   @id @default(uuid())
+  merchantId     String   @unique
+  emailEnabled   Boolean  @default(true)
+  webhookEnabled Boolean  @default(false)
+  inAppEnabled   Boolean  @default(true)
+  webhookUrl     String?  // default target when an event doesn't carry its own webhookUrl
+  mutedEvents    String[] @default([]) // event type strings the merchant opted OUT of — default is everything ON
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

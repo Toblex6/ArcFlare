@@ -41,6 +41,9 @@ export async function GET(
             amount: number;
             status: string;
             arcTxHash: string | null;
+            gatewayReference: string | null;
+            upstreamOk: boolean | null;
+            upstreamStatus: number | null;
             timestamp: Date;
             senderEmail: string;
         }>;
@@ -49,6 +52,11 @@ export async function GET(
         const totalRevenue = payments
             .filter((p) => p.status === 'SUCCESS')
             .reduce((sum: number, p) => sum + p.amount, 0);
+
+        // Delivery outcome is only meaningful for payments where we recorded it
+        // (upstreamOk !== null) — older rows predate this tracking.
+        const withDeliveryData = payments.filter((p) => p.upstreamOk !== null);
+        const deliveredCount = withDeliveryData.filter((p) => p.upstreamOk === true).length;
 
         return NextResponse.json({
             success: true,
@@ -59,12 +67,19 @@ export async function GET(
                 failedPayments: payments.length - successCount,
                 totalRevenueUSDC: Number(totalRevenue.toFixed(4)),
                 successRate: payments.length > 0 ? Math.round((successCount / payments.length) * 100) : 0,
+                // Distinct from payment success — this is "did the merchant's API
+                // actually respond OK after the buyer paid."
+                deliverySuccessRate:
+                    withDeliveryData.length > 0 ? Math.round((deliveredCount / withDeliveryData.length) * 100) : null,
+                upstreamFailures: withDeliveryData.filter((p) => p.upstreamOk === false).length,
             },
             recentPayments: payments.slice(0, 25).map((p: (typeof payments)[number]) => ({
                 reference: p.reference,
                 amount: p.amount,
                 status: p.status,
-                arcTxHash: p.arcTxHash,
+                gatewayReference: p.gatewayReference,
+                upstreamOk: p.upstreamOk,
+                upstreamStatus: p.upstreamStatus,
                 timestamp: p.timestamp,
                 payer: p.senderEmail,
             })),

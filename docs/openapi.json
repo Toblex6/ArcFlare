@@ -1,0 +1,20 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "FlareHQ API",
+        "version": "1.0.0",
+        "description": "FlareHQ API documentation"
+    },
+    "paths": {
+        "/health": {
+            "get": {
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        }
+    }
+}

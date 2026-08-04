@@ -92,10 +92,10 @@ async function withdrawHandler(request: Request) {
       sellerAddress: resolvedSeller,
       payoutAddress: resolvedPayout,
       amount,
-      txHash: data.transaction,
-      explorerUrl: data.transaction
-        ? `https://testnet.arcscan.app/tx/${data.transaction}`
-        : undefined,
+      // Same Batch Facilitator as x402.ts's settle() — "transaction" here is
+      // the Gateway's settlement reference, not confirmed to be a real onchain
+      // hash. Shown honestly rather than assumed to be ArcScan-resolvable.
+      gatewayReference: data.transaction ?? null,
       message: `Withdrew ${amount} USDC from Gateway balance to Payout Wallet on Arc Testnet.`,
     });
   } catch (error: any) {

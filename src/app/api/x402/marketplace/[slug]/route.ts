@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
+import { checkTargetUrlReachable } from '../route';
 
 const ALLOWED_STATUSES = ['DRAFT', 'PUBLISHED', 'SUSPENDED'];
 
@@ -101,6 +102,19 @@ export async function PATCH(
                     { success: false, error: `status must be one of: ${ALLOWED_STATUSES.join(', ')}` },
                     { status: 400 }
                 );
+            }
+            if (body.status === 'PUBLISHED') {
+                const effectiveTargetUrl = data.targetUrl ?? existing.targetUrl;
+                const reachability = await checkTargetUrlReachable(effectiveTargetUrl);
+                if (!reachability.ok) {
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            error: `Can't publish — targetUrl failed a reachability check: ${reachability.detail} Fix the URL and try again.`,
+                        },
+                        { status: 422 }
+                    );
+                }
             }
             data.status = body.status;
         }

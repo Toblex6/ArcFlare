@@ -39,8 +39,20 @@ interface PayResult {
     paidWith?: string;
     amountUSDC?: string;
     transaction?: string;
-    resourceData?: any;
+    resourceData?: {
+        paymentStatus?: string;
+        upstreamOk?: boolean;
+        upstreamStatus?: number | null;
+        error?: string | null;
+        data?: unknown;
+    };
     error?: string;
+}
+
+interface WalletInfo {
+    address: string;
+    gatewayBalance: string;
+    walletBalance: string;
 }
 
 interface Analytics {
@@ -51,12 +63,16 @@ interface Analytics {
         failedPayments: number;
         totalRevenueUSDC: number;
         successRate: number;
+        deliverySuccessRate: number | null;
+        upstreamFailures: number;
     };
     recentPayments: Array<{
         reference: string;
         amount: number;
         status: string;
-        arcTxHash: string | null;
+        gatewayReference: string | null;
+        upstreamOk: boolean | null;
+        upstreamStatus: number | null;
         timestamp: string;
         payer: string;
     }>;
@@ -190,7 +206,8 @@ export default function MarketplacePage() {
     const [error, setError] = useState<string | null>(null);
 
     // ── Pay state (per-slug, keyed so multiple cards don't collide) ──
-    const [payEoaBySlug, setPayEoaBySlug] = useState<Record<string, string>>({});
+    const [wallet, setWallet] = useState<WalletInfo | null>(null);
+    const [walletLoading, setWalletLoading] = useState(true);
     const [payingSlug, setPayingSlug] = useState<string | null>(null);
     const [payResultBySlug, setPayResultBySlug] = useState<Record<string, PayResult>>({});
 
@@ -254,15 +271,29 @@ export default function MarketplacePage() {
         if (tab === "mine") fetchMine();
     }, [tab, fetchMine]);
 
+    const fetchWallet = useCallback(async () => {
+        setWalletLoading(true);
+        try {
+            const res = await fetch("/api/x402/eoa-wallet/me", { headers: authHeaders() });
+            const data = await res.json();
+            if (data.success) setWallet({ address: data.address, gatewayBalance: data.gatewayBalance, walletBalance: data.walletBalance });
+        } catch {
+            // Pay button will surface the real error if this failed silently
+        } finally {
+            setWalletLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchWallet();
+    }, [fetchWallet]);
+
     const allCategories = Array.from(new Set(listings.flatMap((l) => l.categories)));
 
-    // ── Pay with USDC — same call shape as nano/page.tsx's handlePay ──
+    // ── Pay with USDC — the caller's own wallet is resolved server-side from
+    // their merchant identity, same as everywhere else in this file. Nothing
+    // typed in the UI selects which wallet pays anymore. ──
     const handlePay = async (slug: string) => {
-        const eoaAddress = payEoaBySlug[slug];
-        if (!eoaAddress) {
-            setPayResultBySlug((prev) => ({ ...prev, [slug]: { success: false, error: "Enter your EOA wallet address first." } }));
-            return;
-        }
         setPayingSlug(slug);
         try {
             const res = await fetch("/api/x402/pay", {
@@ -270,11 +301,11 @@ export default function MarketplacePage() {
                 headers: authHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
                     resourceUrl: `${window.location.origin}/api/x402/marketplace/pay/${slug}`,
-                    eoaAddress,
                 }),
             });
             const data = await res.json();
             setPayResultBySlug((prev) => ({ ...prev, [slug]: data }));
+            if (data.success) fetchWallet(); // balance just changed
         } catch (e: any) {
             setPayResultBySlug((prev) => ({ ...prev, [slug]: { success: false, error: e.message } }));
         } finally {
@@ -385,6 +416,22 @@ export default function MarketplacePage() {
                     <>
                         {error && <div style={styles.errorBox}>❌ {error}</div>}
 
+                        <div style={{ ...styles.card, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" as const, gap: 8 }}>
+                            <div>
+                                <span style={styles.label}>Your x402 Wallet</span>
+                                {walletLoading ? (
+                                    <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>Loading...</p>
+                                ) : wallet ? (
+                                    <p style={{ margin: 0, fontFamily: "monospace", fontSize: 12 }}>
+                                        {wallet.address} — <span style={{ color: "var(--primary)", fontWeight: 700 }}>{wallet.gatewayBalance} USDC</span> available
+                                    </p>
+                                ) : (
+                                    <p style={{ margin: 0, fontSize: 12, color: "var(--danger)" }}>Couldn't load your wallet — log in and retry.</p>
+                                )}
+                            </div>
+                            <button style={btnStyle(false)} onClick={fetchWallet}>Refresh Balance</button>
+                        </div>
+
                         <div style={styles.card}>
                             <input
                                 style={styles.input}
@@ -450,45 +497,51 @@ export default function MarketplacePage() {
                                             </div>
 
                                             <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 4 }}>
-                                                <span style={styles.label}>Pay with USDC</span>
-                                                <div style={{ display: "flex", gap: 6 }}>
-                                                    <input
-                                                        style={{ ...styles.input, marginBottom: 0, fontFamily: "monospace", fontSize: 11 }}
-                                                        placeholder="0xYourEOAWallet..."
-                                                        value={payEoaBySlug[listing.slug] || ""}
-                                                        onChange={(e) =>
-                                                            setPayEoaBySlug((prev) => ({ ...prev, [listing.slug]: e.target.value }))
-                                                        }
-                                                    />
-                                                    <button
-                                                        style={btnStyle(payingSlug === listing.slug)}
-                                                        disabled={payingSlug === listing.slug}
-                                                        onClick={() => handlePay(listing.slug)}
-                                                    >
-                                                        {payingSlug === listing.slug ? "..." : "Pay"}
-                                                    </button>
-                                                </div>
-                                                {payResult && (
-                                                    <div style={payResult.success ? { ...styles.successBox, marginTop: 8, marginBottom: 0 } : { ...styles.errorBox, marginTop: 8, marginBottom: 0 }}>
-                                                        {payResult.success ? (
-                                                            <>
-                                                                <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 12 }}>✅ Paid {payResult.amountUSDC} USDC</p>
-                                                                {payResult.transaction && (
-                                                                    <a
-                                                                        href={`https://testnet.arcscan.app/tx/${payResult.transaction}`}
-                                                                        target="_blank"
-                                                                        rel="noopener noreferrer"
-                                                                        style={{ color: "var(--primary)", fontSize: 11 }}
-                                                                    >
-                                                                        View on ArcScan →
-                                                                    </a>
-                                                                )}
-                                                            </>
-                                                        ) : (
-                                                            <p style={{ margin: 0, fontSize: 12 }}>❌ {payResult.error}</p>
-                                                        )}
-                                                    </div>
-                                                )}
+                                                <button
+                                                    style={{ ...btnStyle(payingSlug === listing.slug), width: "100%" }}
+                                                    disabled={payingSlug === listing.slug}
+                                                    onClick={() => handlePay(listing.slug)}
+                                                >
+                                                    {payingSlug === listing.slug ? "Paying..." : `Pay ${listing.pricePerRequest} with USDC`}
+                                                </button>
+                                                {payResult && (() => {
+                                                    // Three distinct states, not just success/fail:
+                                                    const paymentFailed = !payResult.success;
+                                                    const paymentOkUpstreamFailed = payResult.success && payResult.resourceData?.upstreamOk === false;
+                                                    const fullySucceeded = payResult.success && payResult.resourceData?.upstreamOk !== false;
+
+                                                    if (paymentFailed) {
+                                                        return (
+                                                            <div style={{ ...styles.errorBox, marginTop: 8, marginBottom: 0 }}>
+                                                                <p style={{ margin: 0, fontSize: 12 }}>❌ Payment failed: {payResult.error}</p>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    if (paymentOkUpstreamFailed) {
+                                                        return (
+                                                            <div style={{ ...styles.errorBox, marginTop: 8, marginBottom: 0, background: "rgba(245,158,11,0.08)", borderColor: "rgba(245,158,11,0.25)" }}>
+                                                                <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 12, color: "var(--warning)" }}>
+                                                                    ⚠️ Paid {payResult.amountUSDC} USDC, but the provider's API failed
+                                                                </p>
+                                                                <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)" }}>
+                                                                    {payResult.resourceData?.error || `Upstream returned ${payResult.resourceData?.upstreamStatus}.`} This is a provider-side issue — your payment still went through.
+                                                                </p>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <div style={{ ...styles.successBox, marginTop: 8, marginBottom: 0 }}>
+                                                            <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 12 }}>✅ Paid {payResult.amountUSDC} USDC — delivered</p>
+                                                            <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>
+                                                                Settlement ref: {payResult.transaction?.slice(0, 18)}...
+                                                                <br />
+                                                                <span style={{ fontFamily: "inherit" }}>
+                                                                    Gateway batches this onchain periodically — not yet a resolvable tx hash.
+                                                                </span>
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     );

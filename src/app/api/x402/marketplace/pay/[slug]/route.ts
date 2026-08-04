@@ -31,28 +31,48 @@ async function buildProxyHandler(targetUrl: string) {
 
         const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
 
+        // From here on, the buyer has already paid (this handler only runs after
+        // withGateway settles). An upstream problem is the merchant's problem to
+        // fix, not a reason to fail the payment transaction at the HTTP layer —
+        // so this always returns 200 with a JSON envelope, and the real outcome
+        // is embedded in the body. This also fixes the buyer's x402 client
+        // crashing on non-JSON/error responses from misconfigured upstreams.
         let upstreamRes: Response;
         try {
             upstreamRes = await fetch(targetUrl, {
                 method: req.method,
                 headers: upstreamHeaders,
                 body: hasBody ? await req.text() : undefined,
+                signal: AbortSignal.timeout(15000),
             });
         } catch (err: any) {
-            return NextResponse.json(
-                { success: false, error: `Upstream provider unreachable: ${err.message}` },
-                { status: 502 }
-            );
+            return NextResponse.json({
+                paymentStatus: 'settled',
+                upstreamOk: false,
+                upstreamStatus: null,
+                error: `Upstream provider unreachable: ${err.message}`,
+                data: null,
+            });
         }
 
         const bodyText = await upstreamRes.text();
-        const responseHeaders = new Headers();
-        const contentType = upstreamRes.headers.get('content-type');
-        if (contentType) responseHeaders.set('content-type', contentType);
+        const contentType = upstreamRes.headers.get('content-type') || '';
+        let parsedData: unknown = bodyText;
+        if (contentType.includes('application/json')) {
+            try {
+                parsedData = JSON.parse(bodyText);
+            } catch {
+                // upstream claimed JSON but didn't send valid JSON — fall back to raw text
+                parsedData = bodyText;
+            }
+        }
 
-        return new NextResponse(bodyText, {
-            status: upstreamRes.status,
-            headers: responseHeaders,
+        return NextResponse.json({
+            paymentStatus: 'settled',
+            upstreamOk: upstreamRes.ok,
+            upstreamStatus: upstreamRes.status,
+            error: upstreamRes.ok ? null : `Upstream responded with ${upstreamRes.status}.`,
+            data: parsedData,
         });
     };
 }
