@@ -110,6 +110,7 @@ export default function EscrowDashboard() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState('');
   const [showDisputeForm, setShowDisputeForm] = useState(false);
+  const [evidenceText, setEvidenceText] = useState('');
 
   const fetchWallet = async () => {
     try {
@@ -231,6 +232,48 @@ export default function EscrowDashboard() {
       setActionLoading(false);
     }
   };
+
+  const handleRefundExpired = async () => {
+    if (!selected || !wallet?.walletAddress) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      const res = await fetch('/api/escrow/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: selected.reference, callerSCA: wallet.walletAddress }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      await fetchEscrows();
+      setSelected(data.escrow);
+    } catch (err: any) {
+      setActionError(err.message || 'Could not reclaim escrow.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSubmitEvidence = async () => {
+    if (!selected || !wallet?.walletAddress) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      const res = await fetch('/api/escrow/evidence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: selected.reference, callerSCA: wallet.walletAddress, content: evidenceText }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      setEvidenceText('');
+    } catch (err: any) {
+      setActionError(err.message || 'Could not submit evidence.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
 
   // Is the merchant's own wallet one of the two parties on the selected escrow?
   const isParty =
@@ -472,7 +515,7 @@ export default function EscrowDashboard() {
                     {escrows.map((e) => {
                       const sc = STATUS_COLORS[e.status] || STATUS_COLORS.ACTIVE;
                       return (
-                        <tr key={e.id} className="hover-row" style={{ borderBottom: '1px solid #f8fafc' }} onClick={() => { setSelected(selected?.id === e.id ? null : e); setActionError(null); setShowDisputeForm(false); }}>
+                        <tr key={e.id} className="hover-row" style={{ borderBottom: '1px solid #f8fafc' }} onClick={() => { setSelected(selected?.id === e.id ? null : e); setActionError(null); setShowDisputeForm(false); setEvidenceText(''); }}>
                           <td style={{ padding: '14px 14px 14px 0' }}>
                             <div style={{ color: '#0d7c5f' }}>{e.reference.slice(0, 14)}...</div>
                             <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>{new Date(e.createdAt).toLocaleDateString()}</div>
@@ -581,6 +624,7 @@ export default function EscrowDashboard() {
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {actionError && <p style={{ color: '#dc2626', fontSize: 11, margin: 0 }}>❌ {actionError}</p>}
+
                         <button
                           onClick={handleConfirmDelivery}
                           disabled={actionLoading}
@@ -622,6 +666,16 @@ export default function EscrowDashboard() {
                             </div>
                           </div>
                         )}
+
+                        {selected.isExpired && isDepositorSide && (
+                          <button
+                            onClick={handleRefundExpired}
+                            disabled={actionLoading}
+                            style={{ padding: '10px', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                          >
+                            ⏰ Reclaim Expired Escrow
+                          </button>
+                        )}
                       </div>
                     )
                   ) : (
@@ -629,6 +683,21 @@ export default function EscrowDashboard() {
                       Only the depositor or beneficiary on this escrow can confirm delivery or raise a dispute.
                     </p>
                   )
+                )}
+
+                {selected.status === 'DISPUTED' && isParty && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <textarea
+                      value={evidenceText}
+                      onChange={(e) => setEvidenceText(e.target.value)}
+                      placeholder="Add evidence for the admin reviewing this dispute..."
+                      style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }}
+                    />
+                    <button onClick={handleSubmitEvidence} disabled={!evidenceText.trim() || actionLoading}
+                      style={{ padding: '10px', borderRadius: 8, border: 'none', background: '#0d7c5f', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      Submit Evidence
+                    </button>
+                  </div>
                 )}
 
                 {selected.explorerUrl && (

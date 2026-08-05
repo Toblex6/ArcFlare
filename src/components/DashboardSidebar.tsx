@@ -41,6 +41,7 @@ const SECTIONS: NavSection[] = [
     {
         group: 'AI & AGENTS',
         items: [
+            { label: 'Marketplace', href: '/marketplace' },
             { label: 'Agent Brain', href: '/agent-brain' },
             { label: 'Agents', href: '/agents' },
             { label: 'Jobs', href: '/jobs' },
@@ -50,7 +51,6 @@ const SECTIONS: NavSection[] = [
     {
         group: 'COMING SOON',
         items: [
-            { label: 'Marketplace', href: '/marketplace', disabled: true },
             { label: 'Agent Wallets', href: '/agent-wallets', disabled: true },
         ],
     },

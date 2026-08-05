@@ -28,6 +28,30 @@ const nextConfig = {
         source: '/_next/webpack-hmr',
         headers: [{ key: 'Access-Control-Allow-Origin', value: '*' }],
       },
+      // Site-wide clickjacking protection. Nothing was set here before —
+      // every page (dashboard, login, merchant settings, escrow actions,
+      // etc.) was embeddable in an arbitrary external iframe with zero
+      // restriction. CSP frame-ancestors alone (no X-Frame-Options) is
+      // used deliberately — mixing the two risks conflicting behavior in
+      // older browsers, and frame-ancestors supersedes XFO everywhere that
+      // matters today.
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+        ],
+      },
+      // Embed checkout route is meant to be framed on arbitrary merchant
+      // domains we don't know ahead of time — this rule is listed after
+      // the catch-all above and matches more specifically, so it overrides
+      // the frame-ancestors value for this path only (Next.js applies the
+      // later, more specific matching rule's value for a shared header key).
+      {
+        source: '/checkout/embed/:reference*',
+        headers: [
+          { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+        ],
+      },
     ];
   },
   // Next 16's default `next build` uses Turbopack, which does NOT read the
