@@ -179,10 +179,28 @@ model Merchant {
   verificationCodeExpiresAt DateTime?
   verified                  Boolean   @default(false)
 
-  // Payout wallet — Circle-managed by default, or merchant-supplied external address
-  walletType       String    @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
-  walletAddress    String?   // SCA address that receives settlements
-  circleWalletId   String?   // Circle wallet ID, only set when walletType = CIRCLE
+  // Payout wallet — Circle-managed by default, or a connected external signer.
+  // Open string, not a two-value enum: "CIRCLE" | "METAMASK" | "WALLETCONNECT" |
+  // "COINBASE" | "SAFE" | "DELEGATED_SESSION" (future). Each maps to a
+  // WalletProvider implementation in src/lib/wallet/ — see resolve.ts.
+  walletProvider   String    @default("CIRCLE")
+  walletAddress    String?   // SCA address (Circle) or connected EOA (external)
+  circleWalletId   String?   // Circle wallet ID, only set when walletProvider = CIRCLE
+}
+
+model WalletSignatureRequest {
+  id          String    @id @default(uuid())
+  merchantId  String
+  action      String    // "escrow.release" | "payroll.run" | "scheduled.execute" | etc.
+  actionRefId String    // the Escrow/PayrollBatch/ScheduledPayment id this resumes
+  payload     Json      // unsigned tx / EIP-712 typed-data payload the wallet needs to sign
+  status      String    @default("PENDING") // PENDING | SIGNED | EXPIRED | REJECTED
+  signedTx    String?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+
+  @@index([merchantId])
+  @@index([status])
 }
 
 model ConsumerAccount {
@@ -396,12 +414,31 @@ model NotificationPreference {
 
 model DisputeEvidence {
   id          String   @id @default(uuid())
-  reference   String   // Escrow.reference this evidence belongs to
-  submittedBy String   // SCA address of whoever submitted it
-  role        String   // "depositor" | "beneficiary" — which side they're on
-  type        String   @default("text") // "text" | "link" — kept simple; extend later if needed
-  content     String
+  reference   String
+  submittedBy String
+  role        String
+  type        String   @default("text") // "text" | "link" | "image" | "screenshot" | "pdf" |
+                                        // "chat_export" | "receipt" | "shipping_confirmation" |
+                                        // "transaction_proof"
+  content     String   // raw text, OR a URL for anything file-based
+  mimeType    String?  // set when type implies a file — lets normalizers dispatch without
+                       // guessing from extension (e.g. "application/pdf", "image/png")
   createdAt   DateTime @default(now())
+  
+  @@index([reference])
+}
+
+model DisputeAnalysis {
+  id          String    @id @default(uuid())
+  reference   String    // Escrow.reference
+  status      String    @default("PENDING") // "PENDING" | "COMPLETE" | "FAILED"
+  version     Int       @default(1)          // bumped per re-run; never overwritten
+  provider    String    // e.g. "groq:llama-3.3-70b-versatile"
+  result      Json?     // full DisputeAnalysisResult — see types.ts
+  error       String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
 
   @@index([reference])
+  @@index([reference, version])
 }
