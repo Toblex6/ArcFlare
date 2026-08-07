@@ -19,6 +19,7 @@ model PaymentLog {
   merchant         String
   status           String
   arcTxHash        String?
+  cctpSourceTxHash String? @unique
   webhookUrl       String?
   timestamp        DateTime  @default(now())
   expiresAt        DateTime?
@@ -29,12 +30,12 @@ model PaymentLog {
   merchantId       String?   // FK to Merchant.id — resolves the real payout wallet at settlement
   listingId        String?   // set when this payment was for a marketplace ApiListing (loose ref, same convention as merchantId above)
   gatewayReference String?   // Circle Gateway's batch settlement reference (a UUID) — NOT an onchain
-                            // tx hash. Settlement happens later in a batch; arcTxHash stays null
-                            // until a real onchain hash exists for it (not tracked yet, see
-                            // merchant/analytics route's notTracked section).
+                             // tx hash. Settlement happens later in a batch; arcTxHash stays null
+                             // until a real onchain hash exists for it (not tracked yet, see
+                             // merchant/analytics route's notTracked section).
   upstreamOk       Boolean?  // For marketplace/x402-proxied payments: whether the upstream targetUrl
-                            // responded successfully AFTER payment settled. Null = not applicable
-                            // (non-proxied payment) or not yet recorded.
+                             // responded successfully AFTER payment settled. Null = not applicable
+                             // (non-proxied payment) or not yet recorded.
   upstreamStatus   Int?      // The upstream's actual HTTP status code, for merchant debugging.
   updatedAt        DateTime? @updatedAt
 
@@ -72,7 +73,7 @@ model ApiListing {
   pricePerRequest String    // "$X.XX" format, passed straight into withGateway() unchanged
   docsUrl         String?
   targetUrl       String    // upstream API this listing proxies to once payment clears — not in the
-                             // original spec, but a listing can't actually gate anything without it
+                              // original spec, but a listing can't actually gate anything without it
   status          String    @default("DRAFT") // "DRAFT" | "PUBLISHED" | "SUSPENDED"
   merchantId      String?   // owning provider — null only for legacy/pre-scoping rows
   createdAt       DateTime  @default(now())
@@ -180,12 +181,10 @@ model Merchant {
   verified                  Boolean   @default(false)
 
   // Payout wallet — Circle-managed by default, or a connected external signer.
-  // Open string, not a two-value enum: "CIRCLE" | "METAMASK" | "WALLETCONNECT" |
-  // "COINBASE" | "SAFE" | "DELEGATED_SESSION" (future). Each maps to a
-  // WalletProvider implementation in src/lib/wallet/ — see resolve.ts.
   walletProvider   String    @default("CIRCLE")
   walletAddress    String?   // SCA address (Circle) or connected EOA (external)
   circleWalletId   String?   // Circle wallet ID, only set when walletProvider = CIRCLE
+
 }
 
 model WalletSignatureRequest {

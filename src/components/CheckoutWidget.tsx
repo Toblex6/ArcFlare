@@ -56,7 +56,20 @@ type PaymentMethodKey = 'wallet' | 'cctp';
 
 const PAYMENT_METHODS: { key: PaymentMethodKey; label: string; available: boolean }[] = [
     { key: 'wallet', label: 'Pay from Wallet', available: true },
-    { key: 'cctp', label: 'Pay Cross-Chain (CCTP)', available: false }, // wired in a later pass
+    { key: 'cctp', label: 'Pay Cross-Chain (CCTP)', available: true },
+];
+
+// Small curated list for the source-chain selector — testnet domains this
+// deployment's CCTP pipeline recognizes (src/lib/cctp.ts's CHAIN_DOMAINS).
+// Duplicated here rather than importing cctp.ts client-side, since that
+// module also pulls in server-only signing logic with no business in the
+// browser bundle.
+const CCTP_SOURCE_DOMAINS = [
+    { domain: 3, label: 'Arbitrum' },
+    { domain: 6, label: 'Base' },
+    { domain: 0, label: 'Ethereum' },
+    { domain: 2, label: 'Optimism' },
+    { domain: 7, label: 'Polygon' },
 ];
 
 interface CheckoutWidgetProps {
@@ -77,6 +90,10 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const [settleError, setSettleError] = useState<string | null>(null);
     const [secondsLeft, setSecondsLeft] = useState(900);
     const [method, setMethod] = useState<PaymentMethodKey>('wallet');
+    const [cctpTxHash, setCctpTxHash] = useState('');
+    const [cctpDomain, setCctpDomain] = useState(6); // default Base
+    const [cctpSubmitting, setCctpSubmitting] = useState(false);
+    const [cctpError, setCctpError] = useState<string | null>(null);
 
     const { address, isConnected } = useAccount();
     const { connectors, connect, error: connectError, isPending: isConnecting } = useConnect();
@@ -209,6 +226,29 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             const msg = err.shortMessage || err.message || 'Payment failed. Please try again.';
             setSettleError(msg);
             onEvent?.({ type: 'payment_error', error: msg });
+        }
+    };
+
+    const handleCctpVerify = async () => {
+        if (!reference || !cctpTxHash.trim()) return;
+        setCctpSubmitting(true);
+        setCctpError(null);
+        onEvent?.({ type: 'payment_pending' });
+        try {
+            const res = await fetch('/api/payments/cctp-settle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reference, sourceTxHash: cctpTxHash.trim(), sourceDomain: cctpDomain }),
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Could not verify the cross-chain transfer.');
+            await fetchLedgerStatus();
+        } catch (err: any) {
+            const msg = err.message || 'Verification failed. The transfer may still be confirming — try again shortly.';
+            setCctpError(msg);
+            onEvent?.({ type: 'payment_error', error: msg });
+        } finally {
+            setCctpSubmitting(false);
         }
     };
 
@@ -360,6 +400,60 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                         </>
                     )}
                 </>
+            )}
+
+            {method === 'cctp' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <p style={{ fontSize: 11, color: '#6b5a45', margin: 0 }}>
+                        Send {payment.amount} USDC from another chain using your own wallet, then paste the transaction hash below to verify and settle.
+                    </p>
+                    <div>
+                        <p style={{ fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px' }}>Source Chain</p>
+                        <select
+                            value={cctpDomain}
+                            onChange={(e) => setCctpDomain(Number(e.target.value))}
+                            disabled={cctpSubmitting || isConfirmed}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #3d2e1a', background: '#251c12', color: '#f0ece6', fontSize: 13 }}
+                        >
+                            {CCTP_SOURCE_DOMAINS.map((d) => (
+                                <option key={d.domain} value={d.domain}>{d.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <p style={{ fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px' }}>Burn Transaction Hash</p>
+                        <input
+                            value={cctpTxHash}
+                            onChange={(e) => setCctpTxHash(e.target.value)}
+                            placeholder="0x..."
+                            disabled={cctpSubmitting || isConfirmed}
+                            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #3d2e1a', background: '#251c12', color: '#f0ece6', fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box' }}
+                        />
+                    </div>
+                    <button
+                        onClick={handleCctpVerify}
+                        disabled={cctpSubmitting || isConfirmed || !cctpTxHash.trim()}
+                        style={{
+                            width: '100%',
+                            padding: 16,
+                            borderRadius: 14,
+                            border: 'none',
+                            fontSize: 14,
+                            fontWeight: 800,
+                            cursor: cctpSubmitting || isConfirmed || !cctpTxHash.trim() ? 'not-allowed' : 'pointer',
+                            background: isConfirmed ? 'rgba(6,182,212,0.1)' : cctpSubmitting ? '#6b5a45' : '#c8975a',
+                            color: isConfirmed ? '#06b6d4' : '#0e0b08',
+                        }}
+                    >
+                        {isConfirmed ? '✓ Payment Confirmed' : cctpSubmitting ? '🔍 Verifying attestation...' : 'Verify & Settle'}
+                    </button>
+                    {cctpError && (
+                        <p style={{ color: '#f87171', fontSize: 11, margin: 0 }}>❌ {cctpError}</p>
+                    )}
+                    <p style={{ fontSize: 10, color: '#4b4035', margin: 0 }}>
+                        Attestation typically takes 1–3 minutes. This page will update automatically once settled.
+                    </p>
+                </div>
             )}
 
             {settleError && (

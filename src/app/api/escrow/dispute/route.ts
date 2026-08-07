@@ -2,12 +2,16 @@
 // Raises a dispute on an active escrow.
 // Admin can then resolve via resolveDispute on the contract.
 //
-// AUTH: switched from withApiKey to withMerchantAuth — see release/route.ts
-// comment for why (dashboard session cookie, no x-api-key header sent).
+// SECURITY FIX: same as release/route.ts — party membership was checked
+// against our DB, but ownership of callerSCA itself was never verified,
+// meaning a merchant could name another party's SCA and Circle would
+// execute as them regardless of DB membership. Now verified via
+// verifyCallerControlsAddress() before execution.
 
-import { NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
-import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
+import { NextResponse, NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { resolveWalletProvider } from '@/lib/wallet/resolve';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -28,7 +32,7 @@ async function waitForCircleTx(
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
     const state = data?.transaction?.state;
-    if (state === 'COMPLETE' && data.transaction?.txHash) {
+    if (state === 'COMPLETE' && data?.transaction?.txHash) {
       return data.transaction.txHash;
     }
     if (state === 'FAILED') {
@@ -43,7 +47,7 @@ async function waitForCircleTx(
   throw new Error(`${label} transaction timed out.`);
 }
 
-async function disputeHandler(request: Request, merchant: AuthedMerchant) {
+async function disputeHandler(request: NextRequest) {
   try {
     const { reference, callerSCA, reason } = await request.json();
 
@@ -80,21 +84,49 @@ async function disputeHandler(request: Request, merchant: AuthedMerchant) {
       );
     }
 
+    const actor = await verifyCallerControlsAddress(request, callerSCA);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the wallet named in callerSCA.' },
+        { status: 403 }
+      );
+    }
+
     const disputeReason = reason || 'No reason provided';
-    const circleClient = getCircleClient();
 
-    // Call dispute(bytes32 id, string reason) on the escrow contract.
-    const disputeTx = await circleClient.createContractExecutionTransaction({
-      walletAddress: callerSCA,
-      blockchain: 'ARC-TESTNET' as any,
-      contractAddress: ESCROW_CONTRACT,
-      abiFunctionSignature: 'dispute(bytes32,string)',
-      abiParameters: [escrow.contractEscrowId, disputeReason],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
-
-    if (!disputeTx.data?.id) throw new Error('Dispute tx returned no ID.');
-    const txHash = await waitForCircleTx(circleClient, disputeTx.data.id, 'Dispute');
+    let txHash: string;
+    if (actor.type === 'merchant') {
+      const walletProvider = await resolveWalletProvider(actor.id);
+      const result = await walletProvider.executeContract({
+        contractAddress: ESCROW_CONTRACT,
+        abiFunctionSignature: 'dispute(bytes32,string)',
+        args: [escrow.contractEscrowId, disputeReason],
+      });
+      if (result.status === 'failed') {
+        return NextResponse.json({ success: false, error: result.error }, { status: 500 });
+      }
+      if (result.status === 'pending_signature') {
+        return NextResponse.json({
+          success: true,
+          pendingSignature: true,
+          requestId: result.requestId,
+          message: 'Your wallet needs to approve this dispute — check /api/merchant/wallet/sign-requests.',
+        });
+      }
+      txHash = result.txHash;
+    } else {
+      const circleClient = getCircleClient();
+      const disputeTx = await circleClient.createContractExecutionTransaction({
+        walletAddress: callerSCA,
+        blockchain: 'ARC-TESTNET' as any,
+        contractAddress: ESCROW_CONTRACT,
+        abiFunctionSignature: 'dispute(bytes32,string)',
+        abiParameters: [escrow.contractEscrowId, disputeReason],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      });
+      if (!disputeTx.data?.id) throw new Error('Dispute tx returned no ID.');
+      txHash = await waitForCircleTx(circleClient, disputeTx.data.id, 'Dispute');
+    }
 
     const updated = await (prisma as any).escrow.update({
       where: { reference },
@@ -106,7 +138,6 @@ async function disputeHandler(request: Request, merchant: AuthedMerchant) {
       },
     });
 
-    // Notify admin webhook if set
     if (escrow.webhookUrl) {
       fetch(escrow.webhookUrl, {
         method: 'POST',
@@ -138,4 +169,4 @@ async function disputeHandler(request: Request, merchant: AuthedMerchant) {
   }
 }
 
-export const POST = withMerchantAuth(disputeHandler as any);
+export const POST = disputeHandler;

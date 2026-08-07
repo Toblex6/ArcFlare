@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, createContractTransaction } from '@/lib/circle/client';
 import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
+import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
 
-export async function POST(req: NextRequest) {
+// SECURITY: this route was completely unauthenticated — gated with the
+// existing withApiKeyOrMerchant wrapper as an immediate fix. Does not yet
+// verify the caller owns the walletId supplied — that's the deeper
+// identity-resolution fix still being designed (see handoff notes).
+async function setBudgetJobHandler(req: NextRequest) {
   try {
     const { jobId, providerWalletId, budget } = await req.json();
     if (!jobId || !providerWalletId || !budget) {
@@ -36,3 +41,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+export const POST = withApiKeyOrMerchant(setBudgetJobHandler);

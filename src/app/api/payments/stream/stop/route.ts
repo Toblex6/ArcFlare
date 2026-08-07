@@ -1,8 +1,15 @@
 // src/app/api/payments/stream/stop/route.ts
+//
+// SECURITY FIX: previously had NO party-membership check (didn't verify
+// callerSCA matched stream.senderSCA) and no ownership verification — any
+// caller with a valid internal API key could stop any stream and trigger
+// its refund by naming any callerSCA. Both fixed below.
 
-import { NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
-import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { NextResponse, NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { resolveWalletProvider } from '@/lib/wallet/resolve';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http } from 'viem';
 
@@ -111,7 +118,7 @@ async function getStreamIdFromReceipt(txHash: string): Promise<`0x${string}`> {
   );
 }
 
-async function stopStreamHandler(request: Request) {
+async function stopStreamHandler(request: NextRequest) {
   try {
     const { reference, callerSCA } = await request.json();
 
@@ -143,6 +150,24 @@ async function stopStreamHandler(request: Request) {
       return NextResponse.json({ success: false, error: 'Stream has no txHash.' }, { status: 400 });
     }
 
+    // ── Membership check — only the sender can stop a stream and trigger a
+    // refund. Was completely missing before. ────────────────────────────────
+    if (callerSCA.toLowerCase() !== stream.senderSCA.toLowerCase()) {
+      return NextResponse.json(
+        { success: false, error: 'Only the stream sender can stop this stream.' },
+        { status: 403 }
+      );
+    }
+
+    // ── Ownership check — proves the caller actually controls callerSCA ────
+    const actor = await verifyCallerControlsAddress(request, callerSCA);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the wallet named in callerSCA.' },
+        { status: 403 }
+      );
+    }
+
     // Get bytes32 streamId from original createStream tx
     const contractStreamId = await getStreamIdFromReceipt(stream.txHash);
 
@@ -152,22 +177,41 @@ async function stopStreamHandler(request: Request) {
     const earned = Math.min(stream.ratePerSecond * elapsedSeconds, stream.totalDeposited);
     const refundAmount = Math.max(0, stream.totalDeposited - earned);
 
-    const circleClient = getCircleClient();
-
-    const stopTx = await circleClient.createContractExecutionTransaction({
-      walletAddress: callerSCA,
-      blockchain: 'ARC-TESTNET' as any,
-      contractAddress: STREAM_CONTRACT,
-      abiFunctionSignature: 'stopStream(bytes32)',
-      abiParameters: [contractStreamId],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
-
-    if (!stopTx.data?.id) {
-      throw new Error('Circle stop transaction returned no ID.');
+    let stopTxHash: string;
+    if (actor.type === 'merchant') {
+      const walletProvider = await resolveWalletProvider(actor.id);
+      const result = await walletProvider.executeContract({
+        contractAddress: STREAM_CONTRACT,
+        abiFunctionSignature: 'stopStream(bytes32)',
+        args: [contractStreamId],
+      });
+      if (result.status === 'failed') {
+        return NextResponse.json({ success: false, error: result.error }, { status: 500 });
+      }
+      if (result.status === 'pending_signature') {
+        return NextResponse.json({
+          success: true,
+          pendingSignature: true,
+          requestId: result.requestId,
+          message: 'Your wallet needs to approve stopping this stream — check /api/merchant/wallet/sign-requests.',
+        });
+      }
+      stopTxHash = result.txHash;
+    } else {
+      const circleClient = getCircleClient();
+      const stopTx = await circleClient.createContractExecutionTransaction({
+        walletAddress: callerSCA,
+        blockchain: 'ARC-TESTNET' as any,
+        contractAddress: STREAM_CONTRACT,
+        abiFunctionSignature: 'stopStream(bytes32)',
+        abiParameters: [contractStreamId],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      });
+      if (!stopTx.data?.id) {
+        throw new Error('Circle stop transaction returned no ID.');
+      }
+      stopTxHash = await waitForCircleTx(circleClient, stopTx.data.id);
     }
-
-    const stopTxHash = await waitForCircleTx(circleClient, stopTx.data.id);
     console.log(`✅ Stream stopped. Tx: ${stopTxHash}`);
 
     const updated = await prisma.stream.update({

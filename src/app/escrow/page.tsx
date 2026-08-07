@@ -617,67 +617,76 @@ export default function EscrowDashboard() {
                 {/* ── Action buttons: only shown if merchant's own wallet is a party on this escrow, and it's still ACTIVE ── */}
                 {selected.status === 'ACTIVE' && (
                   isParty ? (
-                    alreadyConfirmedByMe ? (
-                      <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', margin: 0 }}>
-                        ✓ You've already confirmed delivery — waiting on the other party.
-                      </p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {actionError && <p style={{ color: '#dc2626', fontSize: 11, margin: 0 }}>❌ {actionError}</p>}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {actionError && <p style={{ color: '#dc2626', fontSize: 11, margin: 0 }}>❌ {actionError}</p>}
 
-                        <button
-                          onClick={handleConfirmDelivery}
-                          disabled={actionLoading}
-                          style={{ padding: '10px', borderRadius: 8, border: 'none', background: actionLoading ? '#94a3b8' : '#0d7c5f', color: '#fff', fontSize: 12, fontWeight: 700, cursor: actionLoading ? 'not-allowed' : 'pointer' }}
-                        >
-                          {actionLoading ? 'Confirming on-chain...' : '✓ Confirm Delivery'}
-                        </button>
-
-                        {!showDisputeForm ? (
+                      {alreadyConfirmedByMe ? (
+                        <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', margin: 0 }}>
+                          ✓ You've already confirmed delivery — waiting on the other party.
+                        </p>
+                      ) : (
+                        <>
                           <button
-                            onClick={() => setShowDisputeForm(true)}
+                            onClick={handleConfirmDelivery}
                             disabled={actionLoading}
-                            style={{ padding: '10px', borderRadius: 8, border: '1px solid #fde68a', background: '#fffbeb', color: '#d97706', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                            style={{ padding: '10px', borderRadius: 8, border: 'none', background: actionLoading ? '#94a3b8' : '#0d7c5f', color: '#fff', fontSize: 12, fontWeight: 700, cursor: actionLoading ? 'not-allowed' : 'pointer' }}
                           >
-                            ⚠ Raise Dispute
+                            {actionLoading ? 'Confirming on-chain...' : '✓ Confirm Delivery'}
                           </button>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <input
-                              style={inputStyle}
-                              placeholder="Reason for dispute..."
-                              value={disputeReason}
-                              onChange={(e) => setDisputeReason(e.target.value)}
-                            />
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <button
-                                onClick={handleDispute}
-                                disabled={actionLoading}
-                                style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: actionLoading ? '#94a3b8' : '#d97706', color: '#fff', fontSize: 12, fontWeight: 700, cursor: actionLoading ? 'not-allowed' : 'pointer' }}
-                              >
-                                {actionLoading ? 'Submitting...' : 'Confirm Dispute'}
-                              </button>
-                              <button
-                                onClick={() => { setShowDisputeForm(false); setDisputeReason(''); }}
-                                style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 12, cursor: 'pointer' }}
-                              >
-                                Cancel
-                              </button>
+
+                          {!showDisputeForm ? (
+                            <button
+                              onClick={() => setShowDisputeForm(true)}
+                              disabled={actionLoading}
+                              style={{ padding: '10px', borderRadius: 8, border: '1px solid #fde68a', background: '#fffbeb', color: '#d97706', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                            >
+                              ⚠ Raise Dispute
+                            </button>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              <input
+                                style={inputStyle}
+                                placeholder="Reason for dispute..."
+                                value={disputeReason}
+                                onChange={(e) => setDisputeReason(e.target.value)}
+                              />
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                  onClick={handleDispute}
+                                  disabled={actionLoading}
+                                  style={{ flex: 1, padding: '10px', borderRadius: 8, border: 'none', background: actionLoading ? '#94a3b8' : '#d97706', color: '#fff', fontSize: 12, fontWeight: 700, cursor: actionLoading ? 'not-allowed' : 'pointer' }}
+                                >
+                                  {actionLoading ? 'Submitting...' : 'Confirm Dispute'}
+                                </button>
+                                <button
+                                  onClick={() => { setShowDisputeForm(false); setDisputeReason(''); }}
+                                  style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 12, cursor: 'pointer' }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </>
+                      )}
 
-                        {selected.isExpired && isDepositorSide && (
-                          <button
-                            onClick={handleRefundExpired}
-                            disabled={actionLoading}
-                            style={{ padding: '10px', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
-                          >
-                            ⏰ Reclaim Expired Escrow
-                          </button>
-                        )}
-                      </div>
-                    )
+                      {/* Sibling to the confirmed/not-confirmed branch above —
+                          renders whenever this escrow is expired and the
+                          current merchant is the depositor, regardless of
+                          whether they already confirmed delivery. Previously
+                          nested inside the "not yet confirmed" branch only,
+                          making it unreachable in exactly the one-sided-
+                          confirmation-then-expiry scenario it exists for. */}
+                      {selected.isExpired && isDepositorSide && (
+                        <button
+                          onClick={handleRefundExpired}
+                          disabled={actionLoading}
+                          style={{ padding: '10px', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          ⏰ Reclaim Expired Escrow
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', margin: 0 }}>
                       Only the depositor or beneficiary on this escrow can confirm delivery or raise a dispute.

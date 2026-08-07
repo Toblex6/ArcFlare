@@ -1,38 +1,29 @@
 // src/app/api/payroll/run/route.ts
-// Batch payroll — pay N recipients in one call. Wraps the same real
-// onchain USDC transfer logic as /api/payments/settle, run in sequence
-// across an array of recipients.
+// Batch payroll — pay N recipients in one call.
+//
+// SECURITY FIX: previously trusted payerSCA/payerWalletId directly from the
+// request body — any caller with a valid API key could name ANY wallet as
+// the payer, not just their own. Now resolves the payer from the
+// authenticated merchant via resolveMerchant(req) — payroll is a genuine
+// single-owner case (a merchant paying its own employees from its own
+// wallet), so there's no ambiguity to preserve here, unlike Escrow/Stream.
+//
+// WALLET ABSTRACTION: now executes through resolveWalletProvider() instead
+// of calling Circle directly. For Circle wallets this is a straight
+// behavior-preserving swap. For external wallets, each recipient payment
+// needs its own signature (there's no batch-signing across N unrelated
+// transfers on a standard EOA) — so a payroll batch on an external wallet
+// produces up to N separate pending_signature requests, not one. The batch
+// record reflects that with an AWAITING_SIGNATURES status. Auto-resuming a
+// batch as individual signatures land is NOT built yet (same boundary noted
+// in the sign-requests endpoints) — for now, an external-wallet merchant
+// finishes a payroll run by signing each queued request and the batch
+// status has to be re-checked afterward, not this call it will.
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
-
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
-
-function getCircleClient() {
-  return initiateDeveloperControlledWalletsClient({
-    apiKey: process.env.CIRCLE_API_KEY!,
-    entitySecret: process.env.CIRCLE_ENTITY_SECRET!,
-  });
-}
-
-async function waitForCircleTx(
-  client: ReturnType<typeof getCircleClient>,
-  txId: string
-): Promise<string> {
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 2500));
-    const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
-      return data.transaction.txHash;
-    }
-    if (data?.transaction?.state === 'FAILED') {
-      throw new Error('Payroll transaction failed onchain.');
-    }
-  }
-  throw new Error('Payroll transaction timed out.');
-}
+import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
+import { resolveWalletProvider } from '@/lib/wallet/resolve';
 
 interface PayrollRecipient {
   recipientSCA: string;
@@ -40,63 +31,22 @@ interface PayrollRecipient {
   label?: string; // e.g. "Employee ID: EMP-204"
 }
 
-async function payOneRecipient(
-  payerSCA: string,
-  payerWalletId: string,
-  recipient: PayrollRecipient,
-  circleClient: ReturnType<typeof getCircleClient>
-): Promise<string> {
-  const amountStr = parseFloat(recipient.amount as any).toFixed(6);
-
-  try {
-    const transferTx = await circleClient.createTransaction({
-      walletId: payerWalletId,
-      blockchain: 'ARC-TESTNET' as any,
-      tokenAddress: USDC_ARC,
-      destinationAddress: recipient.recipientSCA,
-      amounts: [amountStr],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    } as any);
-
-    if (!transferTx.data?.id) throw new Error('No transaction ID returned.');
-    return await waitForCircleTx(circleClient, transferTx.data.id);
-  } catch (err: any) {
-    const { parseUnits } = await import('viem');
-    const amountWei = parseUnits(amountStr, 6);
-
-    const erc20Tx = await circleClient.createContractExecutionTransaction({
-      walletAddress: payerSCA,
-      blockchain: 'ARC-TESTNET' as any,
-      contractAddress: USDC_ARC,
-      abiFunctionSignature: 'transfer(address,uint256)',
-      abiParameters: [recipient.recipientSCA, amountWei.toString()],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
-
-    if (!erc20Tx.data?.id) throw new Error('No transaction ID returned.');
-    return await waitForCircleTx(circleClient, erc20Tx.data.id);
-  }
-}
-
 // ── POST /api/payroll/run ─────────────────────────────────────────────────────
-async function runPayrollHandler(request: Request) {
+async function runPayrollHandler(request: NextRequest) {
   try {
-    const {
-      payerSCA,
-      payerWalletId,
-      recipients, // array of { recipientSCA, amount, label? }
-      webhookUrl,
-      description,
-    } = await request.json();
+    const merchant = await resolveMerchant(request);
+    if (!merchant) {
+      return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+    }
 
-    if (!payerSCA || !payerWalletId || !Array.isArray(recipients) || recipients.length === 0) {
+    const { recipients, webhookUrl, description } = await request.json();
+
+    if (!Array.isArray(recipients) || recipients.length === 0) {
       return NextResponse.json(
         {
           success: false,
-          error: 'payerSCA, payerWalletId and a non-empty recipients array are required.',
+          error: 'A non-empty recipients array is required.',
           example: {
-            payerSCA: '0xPayerAddress',
-            payerWalletId: 'circle-wallet-uuid',
             recipients: [
               { recipientSCA: '0xEmployee1...', amount: '500', label: 'EMP-001' },
               { recipientSCA: '0xEmployee2...', amount: '750', label: 'EMP-002' },
@@ -107,6 +57,9 @@ async function runPayrollHandler(request: Request) {
       );
     }
 
+    const walletProvider = await resolveWalletProvider(merchant.id);
+    const payerSCA = await walletProvider.getAddress();
+
     const batchRef = `payroll_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const totalAmount = recipients.reduce(
       (sum: number, r: PayrollRecipient) => sum + parseFloat(r.amount as any),
@@ -114,7 +67,7 @@ async function runPayrollHandler(request: Request) {
     );
 
     console.log(
-      `💰 Running payroll batch: ${recipients.length} recipients, ${totalAmount} USDC total`
+      `💰 Running payroll batch: ${recipients.length} recipients, ${totalAmount} USDC total, payer wallet kind: ${walletProvider.kind}`
     );
 
     // Create the batch record up front so it's trackable even mid-run
@@ -122,7 +75,7 @@ async function runPayrollHandler(request: Request) {
       data: {
         batchRef,
         payerSCA,
-        payerWalletId,
+        payerWalletId: walletProvider.kind, // was a Circle walletId; now the wallet kind, Circle wallet lookup happens inside the provider
         totalAmount,
         recipientCount: recipients.length,
         status: 'PROCESSING',
@@ -130,39 +83,61 @@ async function runPayrollHandler(request: Request) {
       },
     });
 
-    const circleClient = getCircleClient();
     const results: any[] = [];
+    let pendingSignatureCount = 0;
 
     // ── Pay each recipient sequentially ─────────────────────────────────────
-    // Sequential (not parallel) to avoid Circle wallet nonce collisions.
+    // Sequential (not parallel) to avoid wallet nonce collisions, same as before.
     for (const recipient of recipients as PayrollRecipient[]) {
-      try {
-        const txHash = await payOneRecipient(payerSCA, payerWalletId, recipient, circleClient);
+      const amountStr = parseFloat(recipient.amount as any).toFixed(6);
+      const outcome = await walletProvider.transferUSDC(
+        recipient.recipientSCA,
+        amountStr,
+        recipient.label || description || 'Payroll payment'
+      );
+
+      if (outcome.status === 'completed') {
         results.push({
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
           label: recipient.label || null,
           status: 'SUCCESS',
-          txHash,
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          txHash: outcome.txHash,
+          explorerUrl: `https://testnet.arcscan.app/tx/${outcome.txHash}`,
         });
-        console.log(`✅ Paid ${recipient.recipientSCA}: ${txHash}`);
-      } catch (err: any) {
+        console.log(`✅ Paid ${recipient.recipientSCA}: ${outcome.txHash}`);
+      } else if (outcome.status === 'pending_signature') {
+        pendingSignatureCount++;
+        results.push({
+          recipientSCA: recipient.recipientSCA,
+          amount: recipient.amount,
+          label: recipient.label || null,
+          status: 'PENDING_SIGNATURE',
+          requestId: outcome.requestId,
+        });
+        console.log(`⏳ Queued signature request for ${recipient.recipientSCA}: ${outcome.requestId}`);
+      } else {
         results.push({
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
           label: recipient.label || null,
           status: 'FAILED',
-          error: err.message,
+          error: outcome.error,
         });
-        console.error(`❌ Failed to pay ${recipient.recipientSCA}:`, err.message);
+        console.error(`❌ Failed to pay ${recipient.recipientSCA}:`, outcome.error);
       }
     }
 
     const successCount = results.filter((r) => r.status === 'SUCCESS').length;
     const failedCount = results.filter((r) => r.status === 'FAILED').length;
     const finalStatus =
-      failedCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL_FAILURE';
+      pendingSignatureCount > 0
+        ? 'AWAITING_SIGNATURES'
+        : failedCount === 0
+          ? 'COMPLETED'
+          : successCount === 0
+            ? 'FAILED'
+            : 'PARTIAL_FAILURE';
 
     const updatedBatch = await (prisma as any).payrollBatch.update({
       where: { id: batch.id },
@@ -171,11 +146,11 @@ async function runPayrollHandler(request: Request) {
         failedCount,
         status: finalStatus,
         results: results as any,
-        completedAt: new Date(),
+        completedAt: finalStatus === 'AWAITING_SIGNATURES' ? null : new Date(),
       },
     });
 
-    if (webhookUrl) {
+    if (webhookUrl && finalStatus !== 'AWAITING_SIGNATURES') {
       fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,7 +167,7 @@ async function runPayrollHandler(request: Request) {
     }
 
     console.log(
-      `✅ Payroll batch ${batchRef} complete: ${successCount}/${recipients.length} succeeded`
+      `✅ Payroll batch ${batchRef}: ${successCount} succeeded, ${pendingSignatureCount} awaiting signature, ${failedCount} failed`
     );
 
     return NextResponse.json({
@@ -203,8 +178,12 @@ async function runPayrollHandler(request: Request) {
       recipientCount: recipients.length,
       successCount,
       failedCount,
+      pendingSignatureCount,
       results,
-      message: `Payroll batch ${finalStatus} — ${successCount}/${recipients.length} payments succeeded, totalling ${totalAmount} USDC.`,
+      message:
+        finalStatus === 'AWAITING_SIGNATURES'
+          ? `${pendingSignatureCount} payment(s) need your wallet's approval before this batch completes — check /api/merchant/wallet/sign-requests.`
+          : `Payroll batch ${finalStatus} — ${successCount}/${recipients.length} payments succeeded, totalling ${totalAmount} USDC.`,
     });
   } catch (error: any) {
     console.error('❌ Payroll run error:', error);
@@ -212,11 +191,16 @@ async function runPayrollHandler(request: Request) {
   }
 }
 
-export const POST = withApiKeyOrMerchant(runPayrollHandler);
+export const POST = runPayrollHandler;
 
 // ── GET /api/payroll/run?batchRef=xxx — check a batch's status ───────────────
-async function getPayrollBatchHandler(request: Request) {
+async function getPayrollBatchHandler(request: NextRequest) {
   try {
+    const merchant = await resolveMerchant(request);
+    if (!merchant) {
+      return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const batchRef = searchParams.get('batchRef');
 
@@ -244,4 +228,4 @@ async function getPayrollBatchHandler(request: Request) {
   }
 }
 
-export const GET = withApiKeyOrMerchant(getPayrollBatchHandler);
+export const GET = getPayrollBatchHandler;

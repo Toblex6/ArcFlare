@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { prisma } from '@/src/lib/prisma';
 import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, NanoSettleSchema } from '@/lib/validation';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
@@ -312,7 +313,25 @@ async function mergedNanoSettleHandler(request: NextRequest) {
 
     const { agentSCA, merchantSCA, webhookUrl, forceSettle, autoSettle } = data;
 
+    // ── SECURITY: neither path previously verified the caller controls
+    // agentSCA or merchantSCA. autoSettle processes ALL unsettled pairs
+    // platform-wide — that's legitimate for trusted internal automation
+    // (cron/service key) but not for an arbitrary merchant's API key, so
+    // it's now restricted to internal service-key calls only. The explicit
+    // single-pair path gets an ownership check instead, since a specific
+    // caller is naming a specific pair.
+    const internalApiKey = request.headers.get('x-api-key');
+    const isInternalServiceCall = internalApiKey
+      ? !!(await (prisma as any).apiKey.findUnique({ where: { key: internalApiKey } }))
+      : false;
+
     if (autoSettle) {
+      if (!isInternalServiceCall) {
+        return NextResponse.json(
+          { success: false, error: 'autoSettle requires an internal service API key.' },
+          { status: 403 }
+        );
+      }
       const pairs = await getUnsettledPairs();
       const results = [];
 
@@ -345,6 +364,17 @@ async function mergedNanoSettleHandler(request: NextRequest) {
         { success: false, error: 'agentSCA and merchantSCA are required.' },
         { status: 400 }
       );
+    }
+
+    if (!isInternalServiceCall) {
+      const merchantOwnsIt = await verifyCallerControlsAddress(request, merchantSCA);
+      const agentOwnsIt = await verifyCallerControlsAddress(request, agentSCA);
+      if (!merchantOwnsIt && !agentOwnsIt) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control either party in this settlement (agentSCA or merchantSCA).' },
+          { status: 403 }
+        );
+      }
     }
 
     const preCheck = await prisma.nanoPayment.aggregate({

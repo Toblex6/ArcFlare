@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
             success: true,
             wallet: {
-                walletType: merchant.walletType,
+                walletProvider: merchant.walletProvider,
                 walletAddress: merchant.walletAddress,
                 circleWalletId: merchant.circleWalletId,
             },
@@ -51,31 +51,31 @@ export async function PATCH(req: NextRequest) {
         }
 
         const body = await req.json().catch(() => ({}));
-        const { walletType, externalAddress } = body;
+        const { walletProvider, externalAddress } = body;
 
-        if (walletType !== 'CIRCLE' && walletType !== 'EXTERNAL') {
-            return NextResponse.json({ success: false, error: 'walletType must be CIRCLE or EXTERNAL.' }, { status: 400 });
+        if (walletProvider !== 'CIRCLE' && walletProvider !== 'EXTERNAL') {
+            return NextResponse.json({ success: false, error: 'walletProvider must be CIRCLE or EXTERNAL.' }, { status: 400 });
         }
 
-        if (walletType === 'EXTERNAL') {
+        if (walletProvider === 'EXTERNAL') {
             if (!externalAddress || !isAddress(externalAddress)) {
                 return NextResponse.json({ success: false, error: 'A valid wallet address is required.' }, { status: 400 });
             }
 
             const updated = await prisma.merchant.update({
                 where: { id: merchant.id },
-                data: { walletType: 'EXTERNAL', walletAddress: externalAddress, circleWalletId: null },
+                data: { walletProvider: 'EXTERNAL', walletAddress: externalAddress, circleWalletId: null },
             });
 
             return NextResponse.json({
                 success: true,
                 message: 'Payout wallet switched to your external address. Future payments settle there directly.',
-                wallet: { walletType: updated.walletType, walletAddress: updated.walletAddress },
+                wallet: { walletProvider: updated.walletProvider, walletAddress: updated.walletAddress },
             });
         }
 
         // Switching TO Circle-managed
-        if (merchant.walletType === 'CIRCLE' && merchant.walletAddress) {
+        if (merchant.walletProvider === 'CIRCLE' && merchant.walletAddress) {
             return NextResponse.json({ success: false, error: 'You already have a Circle-managed wallet.' }, { status: 409 });
         }
 
@@ -87,13 +87,13 @@ export async function PATCH(req: NextRequest) {
 
         const updated = await prisma.merchant.update({
             where: { id: merchant.id },
-            data: { walletType: 'CIRCLE', walletAddress: wallet.address, circleWalletId: wallet.walletId },
+            data: { walletProvider: 'CIRCLE', walletAddress: wallet.address, circleWalletId: wallet.walletId },
         });
 
         return NextResponse.json({
             success: true,
             message: 'A new Circle-managed wallet has been created for your payouts.',
-            wallet: { walletType: updated.walletType, walletAddress: updated.walletAddress },
+            wallet: { walletProvider: updated.walletProvider, walletAddress: updated.walletAddress },
         });
     } catch (error: any) {
         console.error('Merchant wallet switch error:', error);

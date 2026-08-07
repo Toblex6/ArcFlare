@@ -2,14 +2,21 @@
 // Releases escrowed USDC to beneficiary when conditions are met.
 // Called by depositor confirming delivery, or admin releasing directly.
 //
-// AUTH: switched from withApiKey to withMerchantAuth to match create/route.ts
-// and the dashboard's session-cookie flow. The dashboard's fetch() calls never
-// sent an x-api-key header, so every Confirm Delivery / Dispute click 401'd
-// against the old withApiKey guard even though the merchant was logged in.
+// SECURITY FIX: previously executed confirmDelivery AS whatever callerSCA
+// was named in the request body, verifying party membership only AFTER
+// execution and only against our own DB. Because Circle's API executes on
+// behalf of any wallet address within our entity — not scoped by which
+// merchant "owns" it in our DB — this meant an authenticated merchant could
+// name a DIFFERENT party's SCA and the confirmation would actually execute
+// as them. Now verified via verifyCallerControlsAddress() BEFORE any
+// execution happens, and rejects up front if the caller doesn't control
+// the address they're claiming.
 
-import { NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
-import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
+import { NextResponse, NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
+import { resolveWalletProvider } from '@/lib/wallet/resolve';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -30,15 +37,10 @@ async function waitForCircleTx(
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
     const state = data?.transaction?.state;
-    if (state === 'COMPLETE' && data.transaction?.txHash) {
+    if (state === 'COMPLETE' && data?.transaction?.txHash) {
       return data.transaction.txHash;
     }
     if (state === 'FAILED') {
-      // Log the FULL transaction object — Circle usually includes an
-      // errorReason/errorDetails field once state is FAILED, and we were
-      // previously discarding it and throwing a generic message, which is
-      // why prior failures had to be diagnosed by elimination instead of
-      // read directly off the response.
       console.error(`❌ [${label}] Circle tx FAILED — full transaction object:`, JSON.stringify(data?.transaction, null, 2));
       throw new Error(
         `${label} transaction failed onchain.` +
@@ -50,9 +52,9 @@ async function waitForCircleTx(
   throw new Error(`${label} transaction timed out.`);
 }
 
-async function releaseHandler(request: Request, merchant: AuthedMerchant) {
+async function releaseHandler(request: NextRequest) {
   try {
-    const { reference, callerSCA, callerWalletId } = await request.json();
+    const { reference, callerSCA } = await request.json();
 
     if (!reference || !callerSCA) {
       return NextResponse.json(
@@ -61,7 +63,6 @@ async function releaseHandler(request: Request, merchant: AuthedMerchant) {
       );
     }
 
-    // Fetch escrow from DB
     const escrow = await (prisma as any).escrow.findUnique({ where: { reference } });
     if (!escrow) {
       return NextResponse.json({ success: false, error: 'Escrow not found.' }, { status: 404 });
@@ -79,28 +80,9 @@ async function releaseHandler(request: Request, merchant: AuthedMerchant) {
       );
     }
 
-    const circleClient = getCircleClient();
-
-    // ── Step 1: Confirm delivery from caller's SCA ────────────────────────
-    // This calls confirmDelivery(bytes32 id) on the escrow contract.
-    // If both parties confirm, contract auto-releases.
-    const confirmTx = await circleClient.createContractExecutionTransaction({
-      walletAddress: callerSCA,
-      blockchain: 'ARC-TESTNET' as any,
-      contractAddress: ESCROW_CONTRACT,
-      abiFunctionSignature: 'confirmDelivery(bytes32)',
-      abiParameters: [escrow.contractEscrowId],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
-
-    if (!confirmTx.data?.id) throw new Error('Confirm tx returned no ID.');
-    const txHash = await waitForCircleTx(circleClient, confirmTx.data.id, 'Release/confirm');
-    console.log(`✅ Delivery confirmed by ${callerSCA}. Tx: ${txHash}`);
-
-    // ── Step 2: Update DB status ──────────────────────────────────────────
+    // ── Party membership check FIRST, before any execution ────────────────
     const isDepositor = callerSCA.toLowerCase() === escrow.depositorSCA.toLowerCase();
     const isBeneficiary = callerSCA.toLowerCase() === escrow.beneficiarySCA.toLowerCase();
-
     if (!isDepositor && !isBeneficiary) {
       return NextResponse.json(
         { success: false, error: 'callerSCA is not a party to this escrow.' },
@@ -108,11 +90,63 @@ async function releaseHandler(request: Request, merchant: AuthedMerchant) {
       );
     }
 
+    // ── Ownership check SECOND, also before any execution ──────────────────
+    // Proves the authenticated caller actually controls callerSCA — this is
+    // the check that was missing entirely before.
+    const actor = await verifyCallerControlsAddress(request, callerSCA);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the wallet named in callerSCA.' },
+        { status: 403 }
+      );
+    }
+
+    // ── Execute confirmDelivery(bytes32) ────────────────────────────────────
+    let txHash: string;
+    if (actor.type === 'merchant') {
+      // Full WalletProvider abstraction — supports Circle and external wallets.
+      const walletProvider = await resolveWalletProvider(actor.id);
+      const result = await walletProvider.executeContract({
+        contractAddress: ESCROW_CONTRACT,
+        abiFunctionSignature: 'confirmDelivery(bytes32)',
+        args: [escrow.contractEscrowId],
+      });
+      if (result.status === 'failed') {
+        return NextResponse.json({ success: false, error: result.error }, { status: 500 });
+      }
+      if (result.status === 'pending_signature') {
+        return NextResponse.json({
+          success: true,
+          pendingSignature: true,
+          requestId: result.requestId,
+          message: 'Your wallet needs to approve this confirmation — check /api/merchant/wallet/sign-requests.',
+        });
+      }
+      txHash = result.txHash;
+    } else {
+      // Consumer or agent parties — these actor types don't have the
+      // Circle-vs-external abstraction (ConsumerAccount/AgentRegistry are
+      // Circle-only in this codebase today, by existing design, not a gap
+      // introduced here), so this stays a direct Circle execution — now
+      // gated by the ownership check above, which is the actual fix.
+      const circleClient = getCircleClient();
+      const confirmTx = await circleClient.createContractExecutionTransaction({
+        walletAddress: callerSCA,
+        blockchain: 'ARC-TESTNET' as any,
+        contractAddress: ESCROW_CONTRACT,
+        abiFunctionSignature: 'confirmDelivery(bytes32)',
+        abiParameters: [escrow.contractEscrowId],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      });
+      if (!confirmTx.data?.id) throw new Error('Confirm tx returned no ID.');
+      txHash = await waitForCircleTx(circleClient, confirmTx.data.id, 'Release/confirm');
+    }
+    console.log(`✅ Delivery confirmed by ${callerSCA} (verified ${actor.type} ${actor.id}). Tx: ${txHash}`);
+
     let newStatus = escrow.status;
     let depositorConfirmed = escrow.depositorConfirmed || isDepositor;
     let beneficiaryConfirmed = escrow.beneficiaryConfirmed || isBeneficiary;
 
-    // If both confirmed — mark as RELEASED
     if (depositorConfirmed && beneficiaryConfirmed) {
       newStatus = 'RELEASED';
     }
@@ -127,7 +161,6 @@ async function releaseHandler(request: Request, merchant: AuthedMerchant) {
       },
     });
 
-    // Fire webhook on full release
     if (newStatus === 'RELEASED' && escrow.webhookUrl) {
       fetch(escrow.webhookUrl, {
         method: 'POST',
@@ -162,4 +195,4 @@ async function releaseHandler(request: Request, merchant: AuthedMerchant) {
   }
 }
 
-export const POST = withMerchantAuth(releaseHandler as any);
+export const POST = releaseHandler;

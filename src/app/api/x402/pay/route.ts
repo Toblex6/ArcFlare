@@ -23,6 +23,15 @@ async function x402PayHandler(req: NextRequest) {
       );
     }
 
+    // resourceUrl can arrive as a bare relative path (e.g. "/api/agent/brain")
+    // for internal, same-deployment resources — GatewayClient.pay() needs an
+    // absolute URL though, so resolve it against this deployment's own origin
+    // when it isn't already absolute. External marketplace resourceUrls (full
+    // https:// URLs) pass through unchanged.
+    const resolvedResourceUrl = /^https?:\/\//i.test(resourceUrl)
+      ? resourceUrl
+      : new URL(resourceUrl, req.nextUrl.origin).toString();
+
     const merchant = await resolveMerchant(req);
 
     let PRIVATE_KEY: `0x${string}`;
@@ -45,7 +54,7 @@ async function x402PayHandler(req: NextRequest) {
       payerAddress = process.env.BUYER_ADDRESS || "unknown";
     }
 
-    console.log(`[x402 pay] Paying: ${resourceUrl}`);
+    console.log(`[x402 pay] Paying: ${resolvedResourceUrl}`);
     console.log(`[x402 pay] Buyer: ${payerAddress}${merchant ? ` (merchant ${merchant.id})` : " (internal service key)"}`);
 
     const client = new GatewayClient({
@@ -72,7 +81,7 @@ async function x402PayHandler(req: NextRequest) {
       console.warn("[x402 pay] Could not check balance:", balErr.message);
     }
 
-    const response = await client.pay(resourceUrl, {
+    const response = await client.pay(resolvedResourceUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: body || JSON.stringify({}),

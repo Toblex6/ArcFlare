@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
             jobCount,
         ] = await Promise.all([
             prisma.paymentLog.findMany({ select: { amount: true, status: true, timestamp: true } }),
-            (prisma as any).merchant.findMany({ select: { createdAt: true, walletType: true } }),
+            (prisma as any).merchant.findMany({ select: { createdAt: true, walletProvider: true } }),
             (prisma as any).consumerAccount.findMany({ select: { createdAt: true, walletType: true } }),
             (prisma as any).circleWallet.findMany({ select: { createdAt: true } }),
             (prisma as any).agentRegistry.count(),
@@ -52,8 +52,8 @@ export async function GET(req: NextRequest) {
         const successRate =
             payments.length > 0 ? (successfulPayments.length / payments.length) * 100 : 0;
 
-        const merchantWalletsCircle = merchants.filter((m: any) => m.walletType === 'CIRCLE').length;
-        const merchantWalletsExternal = merchants.filter((m: any) => m.walletType === 'EXTERNAL').length;
+        const merchantWalletsCircle = merchants.filter((m: any) => m.walletProvider === 'CIRCLE').length;
+        const merchantWalletsExternal = merchants.filter((m: any) => m.walletProvider !== 'CIRCLE').length;
         const consumerWalletsCircle = consumers.filter((c: any) => c.walletType === 'CIRCLE').length;
         const consumerWalletsExternal = consumers.filter((c: any) => c.walletType === 'EXTERNAL').length;
 

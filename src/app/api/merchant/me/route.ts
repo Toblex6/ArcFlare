@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
         email: merchant.email,
         businessName: merchant.businessName,
         createdAt: merchant.createdAt,
-        walletType: merchant.walletType,
+        walletProvider: merchant.walletProvider,
         walletAddress: merchant.walletAddress,
         // Show masked key — full key was shown only at signup
         apiKeyHint: `${merchant.apiKey.slice(0, 16)}...`,

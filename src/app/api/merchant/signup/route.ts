@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     if (!allowed) return limitResponse;
 
     const body = await req.json().catch(() => ({}));
-    const { email, businessName, password, walletType, externalAddress } = body;
+    const { email, businessName, password, walletProvider, externalAddress } = body;
 
     if (!email || !businessName || !password) {
       return NextResponse.json(
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const resolvedWalletType = walletType === 'EXTERNAL' ? 'EXTERNAL' : 'CIRCLE';
+    const resolvedWalletType = walletProvider === 'EXTERNAL' ? 'EXTERNAL' : 'CIRCLE';
 
     if (resolvedWalletType === 'EXTERNAL') {
       if (!externalAddress || !isAddress(externalAddress)) {
@@ -56,8 +56,8 @@ export async function POST(req: NextRequest) {
 
     const walletFields =
       resolvedWalletType === 'EXTERNAL'
-        ? { walletType: 'EXTERNAL', walletAddress: externalAddress, circleWalletId: null }
-        : { walletType: 'CIRCLE', walletAddress: null, circleWalletId: null }; // Circle wallet is created at verification
+        ? { walletProvider: 'EXTERNAL', walletAddress: externalAddress, circleWalletId: null }
+        : { walletProvider: 'CIRCLE', walletAddress: null, circleWalletId: null }; // Circle wallet is created at verification
 
     const merchant = existing
       ? await (prisma as any).merchant.update({

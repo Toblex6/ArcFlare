@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { parseUnits, keccak256, toBytes } from 'viem';
 
@@ -27,7 +28,7 @@ async function waitForCircleTx(
     await new Promise((r) => setTimeout(r, 2500));
     const { data } = await client.getTransaction({ id: txId });
     const state = data?.transaction?.state;
-    if (state === 'COMPLETE' && data.transaction?.txHash) {
+    if (state === 'COMPLETE' && data?.transaction?.txHash) {
       return data.transaction.txHash;
     }
     if (state === 'FAILED') {
@@ -62,6 +63,40 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
           hint: 'depositorWalletId is the Circle wallet UUID — get it from GET /api/agent/status',
         },
         { status: 400 }
+      );
+    }
+
+    // ── SECURITY: verify the caller actually controls depositorSCA before ──
+    // spending anything on their behalf. Was previously trusted outright.
+    const actor = await verifyCallerControlsAddress(request as any, depositorSCA);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the wallet named in depositorSCA.' },
+        { status: 403 }
+      );
+    }
+    if (actor.type !== 'merchant' || actor.id !== merchant.id) {
+      return NextResponse.json(
+        { success: false, error: 'depositorSCA must belong to the authenticated merchant creating this escrow.' },
+        { status: 403 }
+      );
+    }
+
+    // ── Honest boundary: this route does approve() + createEscrow() as two
+    // sequential contract calls, which is fine for Circle (instant,
+    // custodial) but genuinely can't be automated atomically for a plain
+    // EOA external wallet without either a multicall contract or session
+    // delegation — neither exists yet. Rather than silently queue a
+    // two-step signature flow that isn't actually wired to resume itself,
+    // this is stated plainly instead of faked.
+    const merchantRecord = await prisma.merchant.findUnique({ where: { id: merchant.id } });
+    if (merchantRecord && merchantRecord.walletProvider !== 'CIRCLE') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Creating escrow from an external wallet is not supported yet — this action requires two sequential onchain approvals (approve + createEscrow) that need session-key delegation to automate safely. Use a Circle-managed wallet for escrow creation for now.',
+        },
+        { status: 501 }
       );
     }
 

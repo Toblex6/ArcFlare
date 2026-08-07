@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     // Provision the payout wallet now — only for merchants who chose Circle-managed.
     // EXTERNAL merchants already have their walletAddress set at signup, nothing to do.
     let walletUpdate: { walletAddress?: string; circleWalletId?: string } = {};
-    if (merchant.walletType === 'CIRCLE') {
+    if (merchant.walletProvider === 'CIRCLE') {
       try {
         const wallet = await createAccountWallet(merchant.businessName);
         walletUpdate = { walletAddress: wallet.address, circleWalletId: wallet.walletId };
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
         id: updated.id,
         email: updated.email,
         businessName: updated.businessName,
-        walletType: updated.walletType,
+        walletProvider: updated.walletProvider,
         walletAddress: updated.walletAddress,
         createdAt: updated.createdAt,
       },

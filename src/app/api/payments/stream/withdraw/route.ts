@@ -1,8 +1,15 @@
 // src/app/api/payments/stream/withdraw/route.ts
+//
+// SECURITY FIX: previously had NO party-membership check at all (didn't even
+// verify receiverSCA matched stream.receiverSCA) and no ownership
+// verification — any caller with a valid internal API key could withdraw
+// from any stream by naming any receiverSCA. Both fixed below.
 
-import { NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
-import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { NextResponse, NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { resolveWalletProvider } from '@/lib/wallet/resolve';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http } from 'viem';
 
@@ -87,7 +94,7 @@ async function getStreamIdFromReceipt(txHash: string): Promise<`0x${string}`> {
   );
 }
 
-async function withdrawHandler(request: Request) {
+async function withdrawHandler(request: NextRequest) {
   try {
     const { reference, receiverSCA } = await request.json();
 
@@ -119,6 +126,23 @@ async function withdrawHandler(request: Request) {
       return NextResponse.json({ success: false, error: 'Stream has no txHash.' }, { status: 400 });
     }
 
+    // ── Membership check — was completely missing before ───────────────────
+    if (receiverSCA.toLowerCase() !== stream.receiverSCA.toLowerCase()) {
+      return NextResponse.json(
+        { success: false, error: 'receiverSCA is not the receiver of this stream.' },
+        { status: 403 }
+      );
+    }
+
+    // ── Ownership check — proves the caller actually controls receiverSCA ──
+    const actor = await verifyCallerControlsAddress(request, receiverSCA);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the wallet named in receiverSCA.' },
+        { status: 403 }
+      );
+    }
+
     // Calculate available
     const now = Date.now();
     const elapsedSeconds = (now - new Date(stream.startedAt).getTime()) / 1000;
@@ -135,22 +159,41 @@ async function withdrawHandler(request: Request) {
     // Get bytes32 streamId
     const contractStreamId = await getStreamIdFromReceipt(stream.txHash);
 
-    const circleClient = getCircleClient();
-
-    const withdrawTx = await circleClient.createContractExecutionTransaction({
-      walletAddress: receiverSCA,
-      blockchain: 'ARC-TESTNET' as any,
-      contractAddress: STREAM_CONTRACT,
-      abiFunctionSignature: 'withdraw(bytes32)',
-      abiParameters: [contractStreamId],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
-
-    if (!withdrawTx.data?.id) {
-      throw new Error('Circle withdraw transaction returned no ID.');
+    let txHash: string;
+    if (actor.type === 'merchant') {
+      const walletProvider = await resolveWalletProvider(actor.id);
+      const result = await walletProvider.executeContract({
+        contractAddress: STREAM_CONTRACT,
+        abiFunctionSignature: 'withdraw(bytes32)',
+        args: [contractStreamId],
+      });
+      if (result.status === 'failed') {
+        return NextResponse.json({ success: false, error: result.error }, { status: 500 });
+      }
+      if (result.status === 'pending_signature') {
+        return NextResponse.json({
+          success: true,
+          pendingSignature: true,
+          requestId: result.requestId,
+          message: 'Your wallet needs to approve this withdrawal — check /api/merchant/wallet/sign-requests.',
+        });
+      }
+      txHash = result.txHash;
+    } else {
+      const circleClient = getCircleClient();
+      const withdrawTx = await circleClient.createContractExecutionTransaction({
+        walletAddress: receiverSCA,
+        blockchain: 'ARC-TESTNET' as any,
+        contractAddress: STREAM_CONTRACT,
+        abiFunctionSignature: 'withdraw(bytes32)',
+        abiParameters: [contractStreamId],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      });
+      if (!withdrawTx.data?.id) {
+        throw new Error('Circle withdraw transaction returned no ID.');
+      }
+      txHash = await waitForCircleTx(circleClient, withdrawTx.data.id);
     }
-
-    const txHash = await waitForCircleTx(circleClient, withdrawTx.data.id);
 
     const newTotalStreamed = stream.totalStreamed + available;
     const isCompleted = newTotalStreamed >= stream.totalDeposited;

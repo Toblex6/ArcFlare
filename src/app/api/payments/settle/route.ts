@@ -7,7 +7,8 @@ import { prisma } from '@/src/lib/prisma';
 import { createWalletClient, createPublicClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet } from 'viem/chains';
-import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
+import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
+import { resolveConsumerSession } from '@/lib/middleware/withConsumerAuth';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
@@ -148,6 +149,41 @@ async function mergedSettleHandler(request: NextRequest) {
     // 4. Fetch Payment Data & Expiry Check
     const payment = await prisma.paymentLog.findUnique({ where: { reference } });
     if (!payment) throw new Error('Payment not found after lock');
+
+    // ── SECURITY: ownership guard — added because withApiKeyOrAnySession
+    // only checks "is this a valid credential," never "does this credential
+    // own THIS payment." Any authenticated merchant or consumer could
+    // previously settle any OTHER party's payment just by knowing its
+    // reference. Internal service ApiKey calls (agent-to-agent automation)
+    // are still allowed through unrestricted — that's a legitimate,
+    // trusted pattern, not the gap being closed here.
+    const internalApiKey = request.headers.get('x-api-key');
+    const isInternalServiceCall = internalApiKey
+      ? !!(await (prisma as any).apiKey.findUnique({ where: { key: internalApiKey } }))
+      : false;
+
+    if (!isInternalServiceCall) {
+      const callerMerchant = await resolveMerchant(request).catch(() => null);
+      const callerConsumerWallet = await resolveConsumerSession(request).catch(() => null);
+
+      const merchantOwnsIt = callerMerchant && payment.merchantId === callerMerchant.id;
+      const consumerOwnsIt =
+        callerConsumerWallet &&
+        payment.senderEmail?.toLowerCase() === callerConsumerWallet.toLowerCase();
+
+      if (!merchantOwnsIt && !consumerOwnsIt) {
+        // Not attempting to restore the pre-lock status here — it wasn't
+        // captured before the lock ran. Left in PROCESSING_ONCHAIN
+        // deliberately: this file's own stale-lock recovery (5 minutes,
+        // see step 3 above) already reclaims exactly this state, so this
+        // self-heals via existing logic rather than needing a new path.
+        return NextResponse.json(
+          { success: false, error: 'You are not a party to this payment.' },
+          { status: 403 }
+        );
+      }
+    }
+
     if (payment.expiresAt && new Date() > payment.expiresAt) {
       await prisma.paymentLog.update({ where: { reference }, data: { status: 'EXPIRED' } });
       return NextResponse.json(

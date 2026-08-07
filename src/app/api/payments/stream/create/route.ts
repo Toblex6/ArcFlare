@@ -1,11 +1,22 @@
-// src/app/api/payments/stream/route.ts
+// src/app/api/payments/stream/create/route.ts
 // Creates a USDC payment stream on Arc Testnet.
 // USDC drips from sender to receiver per second via ArcFlareStream contract.
 // Uses Circle SCA wallets and CCTP V2 USDC on Arc L1.
+//
+// NOTE: src/app/api/payments/stream/route.ts (POST) is a near-duplicate of
+// this create logic with no internal callers found anywhere in the
+// codebase — flagged for removal, not touched here since this file is the
+// more complete canonical version (has both create and list).
+//
+// SECURITY: added ownership verification for senderSCA (was trusted
+// outright). Same multi-step (approve + createStream) atomicity limitation
+// as escrow/create applies — external-wallet senders aren't supported yet,
+// stated plainly below rather than faked.
 
-import { NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
-import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { NextResponse, NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { withApiKey } from '@/lib/middleware/withApiKey';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { parseUnits } from 'viem';
 
@@ -37,7 +48,7 @@ async function waitForCircleTx(
   throw new Error('Stream transaction polling timed out.');
 }
 
-async function createStreamHandler(request: Request) {
+async function createStreamHandler(request: NextRequest) {
   try {
     const {
       senderSCA, // Circle SCA wallet address of sender
@@ -62,6 +73,31 @@ async function createStreamHandler(request: Request) {
         { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment.' },
         { status: 500 }
       );
+    }
+
+    // ── Ownership check — proves the caller actually controls senderSCA ────
+    const actor = await verifyCallerControlsAddress(request, senderSCA);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the wallet named in senderSCA.' },
+        { status: 403 }
+      );
+    }
+
+    // ── Honest boundary — same reasoning as escrow/create: two sequential
+    // contract calls can't be automated atomically for a plain EOA without
+    // session delegation, which doesn't exist yet.
+    if (actor.type === 'merchant') {
+      const merchantRecord = await prisma.merchant.findUnique({ where: { id: actor.id } });
+      if (merchantRecord && merchantRecord.walletProvider !== 'CIRCLE') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Creating a stream from an external wallet is not supported yet — this action requires two sequential onchain approvals (approve + createStream) that need session-key delegation to automate safely. Use a Circle-managed wallet for stream creation for now.',
+          },
+          { status: 501 }
+        );
+      }
     }
 
     const circleClient = getCircleClient();
