@@ -30,16 +30,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const resolvedWalletType = walletProvider === 'EXTERNAL' ? 'EXTERNAL' : 'CIRCLE';
-
-    if (resolvedWalletType === 'EXTERNAL') {
-      if (!externalAddress || !isAddress(externalAddress)) {
-        return NextResponse.json(
-          { success: false, error: 'A valid wallet address is required for external payouts.' },
-          { status: 400 }
-        );
-      }
-    }
+    // SECURITY: previously accepted a raw, unverified externalAddress at
+    // signup — before any authentication even exists, before there's a
+    // merchant session to prove ownership against. Every merchant now
+    // starts on a Circle-managed wallet; connecting an external wallet
+    // (MetaMask/WalletConnect/Coinbase) happens after signup, authenticated,
+    // via SIWE at /api/merchant/wallet/connect — the only place ownership
+    // can actually be proven.
+    const walletFields = { walletProvider: 'CIRCLE', walletAddress: null, circleWalletId: null };
 
     const existing = await (prisma as any).merchant.findUnique({ where: { email } });
 
@@ -53,11 +51,6 @@ export async function POST(req: NextRequest) {
     const passwordHash = await bcrypt.hash(password, 12);
     const verificationCode = generateVerificationCode();
     const verificationCodeExpiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000);
-
-    const walletFields =
-      resolvedWalletType === 'EXTERNAL'
-        ? { walletProvider: 'EXTERNAL', walletAddress: externalAddress, circleWalletId: null }
-        : { walletProvider: 'CIRCLE', walletAddress: null, circleWalletId: null }; // Circle wallet is created at verification
 
     const merchant = existing
       ? await (prisma as any).merchant.update({

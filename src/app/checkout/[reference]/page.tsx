@@ -3,15 +3,17 @@
 // Page-level chrome only — all payment logic, wallet connection, and
 // on-chain verification stays in CheckoutWidget (unchanged). This file
 // turns the widget's existing lifecycle events into a real payment
-// timeline and a premium post-payment confirmation screen.
+// timeline, and — once a payment settles — renders the same URL as a real
+// invoice via the Invoice component, instead of a separate route. That's
+// the "automatically becomes an invoice page" behavior: no new page, no
+// new flow, just a different branch of the same component tree.
 //
-// Honesty note: the widget's onEvent contract doesn't distinguish "wallet
-// is signing" from "verifying on-chain" — both fire under one
-// payment_pending event. Rather than fabricate that split, this page
-// collapses them into one truthful "Confirming Payment" step. Likewise,
-// there's no receipt-generation event or PDF endpoint yet, so the
-// "Download Receipt" action is a real disabled affordance (not a fake
-// working button) until the Invoice UI ships.
+// Honesty notes (carried over from the timeline pass, still true here):
+//   - payment_pending covers both "wallet is signing" and "verifying
+//     on-chain" — the widget doesn't distinguish them, so neither does this
+//     page. One truthful "Confirming Payment" step, not two fabricated ones.
+//   - Invoice.tsx documents its own omissions (no tax/discount/line-items/
+//     customer name — none of that exists in the data model).
 
 'use client';
 
@@ -20,6 +22,7 @@ import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import { arcTestnet } from '@/src/lib/wagmi';
 import CheckoutWidget, { PaymentLogData, CheckoutEvent } from '@/src/components/CheckoutWidget';
+import Invoice, { InvoiceData } from '@/src/components/Invoice';
 
 type Phase = 'awaiting' | 'wallet_connected' | 'confirming' | 'settled';
 
@@ -34,15 +37,25 @@ const STEPS: { key: Phase; label: string; description: string }[] = [
 
 type StepStatus = 'complete' | 'active' | 'upcoming' | 'error';
 
+// The verify endpoint now returns issuedAt/settledAt/expiresAt alongside
+// the fields CheckoutWidget's PaymentLogData already knows about (see
+// verify/[reference]/route.ts's additive formatResponse change). Widening
+// the type here — not touching CheckoutWidget.tsx — is a TS-only change;
+// the extra fields are already present on the real JSON payload at runtime.
+type EnrichedPayment = PaymentLogData & {
+  issuedAt?: string | null;
+  settledAt?: string | null;
+  expiresAt?: string | null;
+};
+
 export default function CheckoutPage() {
   const params = useParams<{ reference: string }>();
   const reference = params?.reference;
 
-  const [payment, setPayment] = useState<PaymentLogData | null>(null);
+  const [payment, setPayment] = useState<EnrichedPayment | null>(null);
   const [phase, setPhase] = useState<Phase>('awaiting');
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [referrer, setReferrer] = useState<string | null>(null);
 
   useEffect(() => {
@@ -59,7 +72,7 @@ export default function CheckoutPage() {
   const handleEvent = (event: CheckoutEvent) => {
     switch (event.type) {
       case 'status':
-        setPayment(event.payment);
+        setPayment(event.payment as EnrichedPayment);
         if (event.payment.status === 'SUCCESS') setPhase('settled');
         break;
       case 'wallet_connected':
@@ -73,7 +86,7 @@ export default function CheckoutPage() {
         break;
       case 'payment_success':
         setHasError(false);
-        setPayment(event.payment);
+        setPayment(event.payment as EnrichedPayment);
         setPhase('settled');
         break;
       case 'payment_error':
@@ -96,12 +109,24 @@ export default function CheckoutPage() {
     return 'upcoming';
   };
 
-  const copyTxHash = () => {
-    if (!payment?.arcTxHash) return;
-    navigator.clipboard.writeText(payment.arcTxHash);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const invoiceData: InvoiceData | null = payment
+    ? {
+      reference: payment.reference,
+      amount: payment.amount,
+      currency: payment.currency,
+      chain: payment.chain,
+      status: payment.status,
+      merchant: payment.merchant,
+      sender_email: payment.sender_email,
+      arcTxHash: payment.arcTxHash,
+      issuedAt: payment.issuedAt ?? payment.paid_at ?? null,
+      settledAt: payment.settledAt ?? null,
+      expiresAt: payment.expiresAt ?? null,
+      explorerUrl: payment.arcTxHash
+        ? `${arcTestnet.blockExplorers.default.url}/tx/${payment.arcTxHash}`
+        : arcTestnet.blockExplorers.default.url,
+    }
+    : null;
 
   return (
     <main
@@ -115,6 +140,7 @@ export default function CheckoutPage() {
     >
       {/* Header */}
       <div
+        className="no-print"
         style={{
           maxWidth: 1160,
           margin: '0 auto 32px',
@@ -172,250 +198,117 @@ export default function CheckoutPage() {
           alignItems: 'start',
         }}
       >
-        {/* LEFT — the reusable widget, untouched */}
-        <CheckoutWidget reference={reference} onEvent={handleEvent} />
+        {/* LEFT — the reusable widget, untouched. Hidden on print — the
+            wallet-connect/CCTP UI has no place on a printed invoice. */}
+        <div className="no-print">
+          <CheckoutWidget reference={reference} onEvent={handleEvent} />
+        </div>
 
-        {/* RIGHT — timeline + confirmation, page-owned */}
+        {/* RIGHT — timeline (pre-payment) or full invoice (post-payment) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Payment Timeline */}
-          <div
-            style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: 'clamp(20px, 3vw, 28px)' }}
-            role="status"
-            aria-live="polite"
-            aria-label="Payment progress"
-          >
-            <h3 style={{ fontSize: 'clamp(16px, 2vw, 18px)', fontWeight: 700, color: '#f0ece6', margin: '0 0 20px' }}>
-              Payment Progress
-            </h3>
+          {/* Payment Timeline — hidden once settled since the Invoice below
+              fully supersedes it visually. */}
+          {!isConfirmed && (
+            <div
+              className="no-print"
+              style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: 'clamp(20px, 3vw, 28px)' }}
+              role="status"
+              aria-live="polite"
+              aria-label="Payment progress"
+            >
+              <h3 style={{ fontSize: 'clamp(16px, 2vw, 18px)', fontWeight: 700, color: '#f0ece6', margin: '0 0 20px' }}>
+                Payment Progress
+              </h3>
 
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {STEPS.map((step, i) => {
-                const status = stepStatus(step.key);
-                const isLast = i === STEPS.length - 1;
-                const dotColor =
-                  status === 'complete' ? '#0d7c5f' : status === 'active' ? '#c8975a' : status === 'error' ? '#dc2626' : '#3d2e1a';
-                const textColor = status === 'upcoming' ? '#4b4035' : '#f0ece6';
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {STEPS.map((step, i) => {
+                  const status = stepStatus(step.key);
+                  const isLast = i === STEPS.length - 1;
+                  const dotColor =
+                    status === 'complete' ? '#0d7c5f' : status === 'active' ? '#c8975a' : status === 'error' ? '#dc2626' : '#3d2e1a';
+                  const textColor = status === 'upcoming' ? '#4b4035' : '#f0ece6';
 
-                return (
-                  <div key={step.key} style={{ display: 'flex', gap: 14 }} aria-current={status === 'active' ? 'step' : undefined}>
-                    {/* Dot + connecting line */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: '50%',
-                          background: status === 'upcoming' ? 'transparent' : dotColor,
-                          border: `2px solid ${dotColor}`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                          transition: 'background 0.2s, border-color 0.2s',
-                        }}
-                      >
-                        {status === 'complete' && <span style={{ color: '#0e0b08', fontSize: 11, fontWeight: 900 }}>✓</span>}
-                        {status === 'active' && (
-                          <span
+                  return (
+                    <div key={step.key} style={{ display: 'flex', gap: 14 }} aria-current={status === 'active' ? 'step' : undefined}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        <div
+                          style={{
+                            width: 22,
+                            height: 22,
+                            borderRadius: '50%',
+                            background: status === 'upcoming' ? 'transparent' : dotColor,
+                            border: `2px solid ${dotColor}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            transition: 'background 0.2s, border-color 0.2s',
+                          }}
+                        >
+                          {status === 'complete' && <span style={{ color: '#0e0b08', fontSize: 11, fontWeight: 900 }}>✓</span>}
+                          {status === 'active' && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#0e0b08' }} />}
+                          {status === 'error' && <span style={{ color: '#fff', fontSize: 11, fontWeight: 900 }}>!</span>}
+                        </div>
+                        {!isLast && (
+                          <div
                             style={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: '50%',
-                              background: '#0e0b08',
+                              width: 2,
+                              flex: 1,
+                              minHeight: 28,
+                              background: status === 'complete' ? '#0d7c5f' : '#2d2015',
+                              marginTop: 2,
+                              marginBottom: 2,
                             }}
                           />
                         )}
-                        {status === 'error' && <span style={{ color: '#fff', fontSize: 11, fontWeight: 900 }}>!</span>}
                       </div>
-                      {!isLast && (
-                        <div
-                          style={{
-                            width: 2,
-                            flex: 1,
-                            minHeight: 28,
-                            background: status === 'complete' ? '#0d7c5f' : '#2d2015',
-                            marginTop: 2,
-                            marginBottom: 2,
-                          }}
-                        />
-                      )}
+
+                      <div style={{ paddingBottom: isLast ? 0 : 20 }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, color: textColor, margin: '1px 0 2px' }}>
+                          {step.label}
+                          {status === 'active' && (
+                            <span style={{ color: '#c8975a', fontWeight: 500, marginLeft: 8, fontSize: 11 }}>In progress...</span>
+                          )}
+                          {status === 'error' && (
+                            <span style={{ color: '#f87171', fontWeight: 500, marginLeft: 8, fontSize: 11 }}>Failed — try again</span>
+                          )}
+                        </p>
+                        <p style={{ fontSize: 11.5, color: status === 'upcoming' ? '#3d332a' : '#6b5a45', margin: 0, lineHeight: 1.5 }}>
+                          {status === 'error' && errorMessage ? errorMessage : step.description}
+                        </p>
+                      </div>
                     </div>
-
-                    {/* Label + description */}
-                    <div style={{ paddingBottom: isLast ? 0 : 20 }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: textColor, margin: '1px 0 2px' }}>
-                        {step.label}
-                        {status === 'active' && (
-                          <span style={{ color: '#c8975a', fontWeight: 500, marginLeft: 8, fontSize: 11 }}>In progress...</span>
-                        )}
-                        {status === 'error' && (
-                          <span style={{ color: '#f87171', fontWeight: 500, marginLeft: 8, fontSize: 11 }}>Failed — try again</span>
-                        )}
-                      </p>
-                      <p style={{ fontSize: 11.5, color: status === 'upcoming' ? '#3d332a' : '#6b5a45', margin: 0, lineHeight: 1.5 }}>
-                        {status === 'error' && errorMessage ? errorMessage : step.description}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-
-          {/* Premium confirmation screen — replaces plain success message */}
-          {isConfirmed && payment ? (
-            <div
-              style={{
-                background: 'linear-gradient(180deg, rgba(13,124,95,0.08) 0%, rgba(26,20,16,1) 40%)',
-                border: '1px solid rgba(13,124,95,0.3)',
-                borderRadius: 24,
-                padding: 'clamp(24px, 4vw, 32px)',
-                textAlign: 'center',
-              }}
-            >
-              <div
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: '50%',
-                  background: 'rgba(6,182,212,0.12)',
-                  border: '2px solid #06b6d4',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 16px',
-                }}
-              >
-                <span style={{ fontSize: 26, color: '#06b6d4' }}>✓</span>
-              </div>
-
-              <p style={{ fontSize: 'clamp(18px, 2.5vw, 22px)', fontWeight: 800, color: '#f0ece6', margin: '0 0 4px' }}>
-                Payment Confirmed
-              </p>
-              <p style={{ fontSize: 13, color: '#8a7a68', margin: '0 0 4px' }}>
-                {payment.amount} {payment.currency} paid to {payment.merchant || 'FlareHQ Merchant'}
-              </p>
-              {payment.paid_at && (
-                <p style={{ fontSize: 11, color: '#4b4035', margin: '0 0 24px', fontFamily: 'monospace' }}>
-                  Settled {new Date(payment.paid_at).toLocaleString()}
-                </p>
-              )}
-
-              {payment.arcTxHash && (
-                <div
-                  style={{
-                    background: '#251c12',
-                    border: '1px solid #3d2e1a',
-                    borderRadius: 12,
-                    padding: '10px 14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    marginBottom: 20,
-                  }}
-                >
-                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#a89684', wordBreak: 'break-all', textAlign: 'left' }}>
-                    {payment.arcTxHash.slice(0, 14)}...{payment.arcTxHash.slice(-8)}
-                  </span>
-                  <button
-                    onClick={copyTxHash}
-                    aria-label="Copy transaction hash"
-                    style={{
-                      flexShrink: 0,
-                      background: copied ? 'rgba(13,124,95,0.15)' : 'transparent',
-                      border: `1px solid ${copied ? '#0d7c5f' : '#3d2e1a'}`,
-                      borderRadius: 8,
-                      padding: '5px 10px',
-                      color: copied ? '#0d7c5f' : '#a89684',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {copied ? '✓ Copied' : 'Copy'}
-                  </button>
-                </div>
-              )}
-
-              {/* Post-payment actions */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                {payment.arcTxHash && (
-                  <a
-                    href={`${arcTestnet.blockExplorers.default.url}/tx/${payment.arcTxHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      padding: '12px 0',
-                      borderRadius: 10,
-                      border: '1px solid #3d2e1a',
-                      background: '#251c12',
-                      color: '#f0ece6',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      textDecoration: 'none',
-                      textAlign: 'center',
-                    }}
-                  >
-                    View on Explorer ↗
-                  </a>
-                )}
-                <button
-                  disabled
-                  title="Coming soon — full invoice & receipt downloads are on the way"
-                  style={{
-                    padding: '12px 0',
-                    borderRadius: 10,
-                    border: '1px solid #2d2015',
-                    background: 'transparent',
-                    color: '#4b4035',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: 'not-allowed',
-                  }}
-                >
-                  Download Receipt
-                </button>
-              </div>
-
-              {referrer && (
-                <a
-                  href={referrer}
-                  style={{
-                    display: 'block',
-                    marginTop: 14,
-                    fontSize: 11,
-                    color: '#6b5a45',
-                    textDecoration: 'underline',
-                  }}
-                >
-                  ← Return to merchant
-                </a>
-              )}
-            </div>
-          ) : (
-            payment && (
-              <div style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: 'clamp(20px, 3vw, 24px)' }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, color: '#f0ece6', margin: '0 0 14px' }}>Order Summary</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#6b5a45', fontSize: 12 }}>Merchant</span>
-                    <span style={{ color: '#f0ece6', fontSize: 12 }}>{payment.merchant || 'FlareHQ Merchant'}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#6b5a45', fontSize: 12 }}>Reference</span>
-                    <span style={{ color: '#f0ece6', fontSize: 11, fontFamily: 'monospace' }}>{payment.reference}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid #2d2015' }}>
-                    <span style={{ color: '#6b5a45', fontSize: 12 }}>Amount Due</span>
-                    <span style={{ color: '#f0ece6', fontSize: 15, fontWeight: 800 }}>
-                      {payment.amount} <span style={{ color: '#c8975a', fontSize: 12 }}>{payment.currency}</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )
           )}
+
+          {/* Pre-payment order summary */}
+          {!isConfirmed && payment && (
+            <div className="no-print" style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: 'clamp(20px, 3vw, 24px)' }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, color: '#f0ece6', margin: '0 0 14px' }}>Order Summary</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#6b5a45', fontSize: 12 }}>Merchant</span>
+                  <span style={{ color: '#f0ece6', fontSize: 12 }}>{payment.merchant || 'FlareHQ Merchant'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#6b5a45', fontSize: 12 }}>Reference</span>
+                  <span style={{ color: '#f0ece6', fontSize: 11, fontFamily: 'monospace' }}>{payment.reference}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid #2d2015' }}>
+                  <span style={{ color: '#6b5a45', fontSize: 12 }}>Amount Due</span>
+                  <span style={{ color: '#f0ece6', fontSize: 15, fontWeight: 800 }}>
+                    {payment.amount} <span style={{ color: '#c8975a', fontSize: 12 }}>{payment.currency}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Post-payment — the page becomes an invoice */}
+          {isConfirmed && invoiceData && <Invoice payment={invoiceData} returnUrl={referrer} />}
         </div>
       </div>
     </main>

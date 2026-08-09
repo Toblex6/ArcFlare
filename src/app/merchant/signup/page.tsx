@@ -5,14 +5,12 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
-type Step = 'form' | 'wallet' | 'verify' | 'done';
+type Step = 'form' | 'verify' | 'done';
 
 export default function MerchantSignup() {
   const router = useRouter();
   const [step, setStep] = useState<Step>('form');
   const [form, setForm] = useState({ email: '', businessName: '', password: '', confirm: '' });
-  const [walletType, setWalletType] = useState<'CIRCLE' | 'EXTERNAL'>('CIRCLE');
-  const [externalAddress, setExternalAddress] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,26 +18,21 @@ export default function MerchantSignup() {
   const [copied, setCopied] = useState(false);
   const [resendMsg, setResendMsg] = useState<string | null>(null);
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.password !== form.confirm) {
       setError('Passwords do not match.');
-      return;
-    }
-    setError(null);
-    setStep('wallet');
-  };
-
-  const handleWalletSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (walletType === 'EXTERNAL' && !/^0x[a-fA-F0-9]{40}$/.test(externalAddress)) {
-      setError('Enter a valid wallet address (0x...).');
       return;
     }
     setLoading(true);
     setError(null);
 
     try {
+      // Every merchant starts on a Circle-managed wallet — connecting your
+      // own wallet (MetaMask, WalletConnect, Coinbase) happens after
+      // signing in, from Settings, where ownership can actually be proven
+      // by signing a message. There's no session to prove ownership
+      // against yet at this point in the flow.
       const res = await fetch('/api/merchant/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -47,8 +40,6 @@ export default function MerchantSignup() {
           email: form.email,
           businessName: form.businessName,
           password: form.password,
-          walletType,
-          externalAddress: walletType === 'EXTERNAL' ? externalAddress : undefined,
         }),
       });
       const data = await res.json();
@@ -205,9 +196,7 @@ export default function MerchantSignup() {
           </div>
 
           <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 20px' }}>
-            {walletType === 'CIRCLE'
-              ? 'You chose a Circle-managed payout wallet — you can withdraw funds anytime from your dashboard, or switch to your own wallet later in Settings.'
-              : 'Payments will settle directly to your own wallet — no withdrawal step needed.'}
+            You've got a Circle-managed payout wallet — withdraw anytime from your dashboard, or connect your own wallet (MetaMask, WalletConnect, Coinbase) anytime from Settings.
           </p>
 
           <button onClick={() => router.push('/merchant/login')} style={primaryBtnStyle(false)}>
@@ -267,82 +256,6 @@ export default function MerchantSignup() {
     );
   }
 
-  // ── Wallet choice screen ──────────────────────────────────────────────────
-  if (step === 'wallet') {
-    return (
-      <main style={shellStyle}>
-        <div style={{ width: '100%', maxWidth: 460 }}>
-          <div style={{ textAlign: 'center', marginBottom: 36 }}>
-            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
-            <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>How should you get paid?</h1>
-            <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>You can change this later in Settings.</p>
-          </div>
-
-          <div style={cardStyle}>
-            {error && (
-              <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 20 }}>
-                <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>❌ {error}</p>
-              </div>
-            )}
-
-            <form onSubmit={handleWalletSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <label
-                style={{
-                  display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer',
-                  background: walletType === 'CIRCLE' ? 'rgba(200,151,90,0.1)' : 'var(--surface-secondary)',
-                  border: `1px solid ${walletType === 'CIRCLE' ? 'var(--primary)' : 'var(--border)'}`,
-                  borderRadius: 12, padding: 16,
-                }}
-              >
-                <input type="radio" checked={walletType === 'CIRCLE'} onChange={() => setWalletType('CIRCLE')} style={{ marginTop: 3 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>
-                    Let FlareHQ manage my wallet (recommended)
-                  </p>
-                  <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
-                    We create a wallet for you automatically. Withdraw to any address anytime from your dashboard.
-                  </p>
-                </div>
-              </label>
-
-              <label
-                style={{
-                  display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer',
-                  background: walletType === 'EXTERNAL' ? 'rgba(200,151,90,0.1)' : 'var(--surface-secondary)',
-                  border: `1px solid ${walletType === 'EXTERNAL' ? 'var(--primary)' : 'var(--border)'}`,
-                  borderRadius: 12, padding: 16,
-                }}
-              >
-                <input type="radio" checked={walletType === 'EXTERNAL'} onChange={() => setWalletType('EXTERNAL')} style={{ marginTop: 3 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>
-                    Use my own wallet
-                  </p>
-                  <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--text-secondary)' }}>
-                    Payments settle directly to an address you already control. No withdrawal step needed.
-                  </p>
-                  {walletType === 'EXTERNAL' && (
-                    <input
-                      type="text"
-                      placeholder="0x..."
-                      value={externalAddress}
-                      onChange={(e) => setExternalAddress(e.target.value)}
-                      style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 13 }}
-                    />
-                  )}
-                </div>
-              </label>
-
-              <button type="submit" disabled={loading} style={primaryBtnStyle(loading)}>
-                {loading ? 'Creating account...' : 'Continue →'}
-              </button>
-            </form>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
   // ── Signup form ───────────────────────────────────────────────────────────
   return (
     <main style={shellStyle}>
@@ -380,8 +293,8 @@ export default function MerchantSignup() {
               </div>
             ))}
 
-            <button type="submit" style={primaryBtnStyle(false)}>
-              Continue →
+            <button type="submit" disabled={loading} style={primaryBtnStyle(loading)}>
+              {loading ? 'Creating account...' : 'Create Account →'}
             </button>
           </form>
 

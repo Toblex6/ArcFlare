@@ -80,5 +80,21 @@ function formatResponse(payment: any) {
     // on-chain transaction hash once verify-onchain confirms a real
     // transfer; it's null until then, not a randomly generated placeholder.
     arcTxHash: payment.arcTxHash || null,
+
+    // ── Additive, invoice-only fields ──────────────────────────────────
+    // paid_at above is preserved unchanged for existing consumers
+    // (CheckoutWidget, the checkout page timeline). These three are new
+    // and only read by the Invoice component:
+    //   issuedAt  — when the payment record was created (payment.timestamp,
+    //               same underlying value as paid_at, just honestly named)
+    //   settledAt — when it actually settled. Only payment.updatedAt gets
+    //               bumped by verify-onchain, so this is the one field
+    //               that's genuinely different from issuedAt when a payment
+    //               is created and paid at different times. Null until paid.
+    //   expiresAt — the real link-expiry deadline already stored on
+    //               PaymentLog, reused honestly as the invoice's due date.
+    issuedAt: payment.timestamp,
+    settledAt: hasSettled ? payment.updatedAt : null,
+    expiresAt: payment.expiresAt || null,
   };
 }

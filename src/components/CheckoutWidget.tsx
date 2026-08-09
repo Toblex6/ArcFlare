@@ -13,6 +13,16 @@
 // though only one method ("wallet") is wired today. Adding CCTP later
 // means adding a new entry to PAYMENT_METHODS + a new method component —
 // not another redesign of this file or the pages that use it.
+//
+// FIX: injected() throws wagmi's raw internal "Provider not found.
+// Version: @wagmi/core@x.x.x" error when clicked in a browser with no
+// wallet extension. That's correct behavior from wagmi, but showing the
+// raw internal string to a real customer is a bad experience. The button
+// itself is intentionally NOT hidden pre-emptively — some wallets register
+// via EIP-6963 events rather than window.ethereum, so a naive
+// availability check could hide a connector that actually works. Instead,
+// the error message shown after a failed click is translated into
+// something a non-technical payer can act on.
 
 'use client';
 
@@ -71,6 +81,18 @@ const CCTP_SOURCE_DOMAINS = [
     { domain: 2, label: 'Optimism' },
     { domain: 7, label: 'Polygon' },
 ];
+
+// Translates wagmi's raw connect() errors into copy a real payer can act
+// on. Only touches the specific "no provider in this browser" case — any
+// other error (user rejected the request, wrong network, etc.) still shows
+// through with its own message, unchanged from before.
+function friendlyConnectError(err: { message?: string; name?: string } | null | undefined): string {
+    const msg = err?.message || '';
+    if (msg.toLowerCase().includes('provider not found')) {
+        return 'No wallet extension detected in this browser. Try WalletConnect to pay from your phone, or scan the QR code above.';
+    }
+    return msg || 'Could not connect. Make sure you have a wallet app installed.';
+}
 
 interface CheckoutWidgetProps {
     reference: string;
@@ -365,7 +387,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             ))}
                             {connectError && (
                                 <p style={{ color: '#f87171', fontSize: 11, margin: '4px 0 0' }}>
-                                    ⚠️ {connectError.message || 'Could not connect. Make sure you have a wallet app installed.'}
+                                    ⚠️ {friendlyConnectError(connectError)}
                                 </p>
                             )}
                         </div>

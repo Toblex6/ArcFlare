@@ -3,15 +3,11 @@ import { getCircleClient, createContractTransaction } from '@/lib/circle/client'
 import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
-// SECURITY: this route was completely unauthenticated — anyone who could
-// guess a jobId + Circle walletId could trigger a real USDC approve+fund
-// transaction. Gated with the existing withApiKeyOrMerchant wrapper as an
-// immediate fix. This does NOT yet verify the caller actually owns
-// clientWalletId — that's the deeper identity-resolution fix still being
-// designed (see handoff notes). This patch closes the "fully open to the
-// internet" hole; the "which merchant does this walletId really belong to"
-// hole is still open pending that design.
+// SECURITY: fully closed now. Previously resolved clientWalletId to any
+// address in our Circle entity and executed as it, without checking it
+// matched the job's actual client or that the caller controlled it.
 async function fundJobHandler(req: NextRequest) {
   try {
     const { jobId, clientWalletId } = await req.json();
@@ -27,6 +23,17 @@ async function fundJobHandler(req: NextRequest) {
     const clientAddress = wallet.data?.wallet?.address;
     if (!clientAddress) {
       return NextResponse.json({ error: 'Invalid client wallet' }, { status: 400 });
+    }
+
+    // Membership: this wallet must actually be the job's client.
+    if (clientAddress.toLowerCase() !== job.clientSCA.toLowerCase()) {
+      return NextResponse.json({ error: 'clientWalletId does not resolve to this job\'s client.' }, { status: 403 });
+    }
+
+    // Ownership: the caller must actually control that address.
+    const actor = await verifyCallerControlsAddress(req, clientAddress);
+    if (!actor) {
+      return NextResponse.json({ error: 'You do not control this job\'s client wallet.' }, { status: 403 });
     }
 
     // Approve USDC

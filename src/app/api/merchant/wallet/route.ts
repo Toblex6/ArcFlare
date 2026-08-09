@@ -40,6 +40,12 @@ export async function GET(req: NextRequest) {
 }
 
 // PATCH — switch payout wallet type
+// SECURITY: previously allowed setting walletProvider: 'EXTERNAL' with a
+// bare, unverified address — no proof of ownership. That's exactly what
+// the SIWE flow in /api/merchant/wallet/connect exists to replace. This
+// route now only handles switching back TO Circle (which needs no
+// ownership proof of anything external); switching to an external wallet
+// must go through /connect.
 export async function PATCH(req: NextRequest) {
     try {
         const { allowed, response: limitResponse } = await checkRateLimit(req, 'withdraw'); // reuse the strict tier — this touches payout routing
@@ -51,27 +57,16 @@ export async function PATCH(req: NextRequest) {
         }
 
         const body = await req.json().catch(() => ({}));
-        const { walletProvider, externalAddress } = body;
+        const { walletProvider } = body;
 
-        if (walletProvider !== 'CIRCLE' && walletProvider !== 'EXTERNAL') {
-            return NextResponse.json({ success: false, error: 'walletProvider must be CIRCLE or EXTERNAL.' }, { status: 400 });
-        }
-
-        if (walletProvider === 'EXTERNAL') {
-            if (!externalAddress || !isAddress(externalAddress)) {
-                return NextResponse.json({ success: false, error: 'A valid wallet address is required.' }, { status: 400 });
-            }
-
-            const updated = await prisma.merchant.update({
-                where: { id: merchant.id },
-                data: { walletProvider: 'EXTERNAL', walletAddress: externalAddress, circleWalletId: null },
-            });
-
-            return NextResponse.json({
-                success: true,
-                message: 'Payout wallet switched to your external address. Future payments settle there directly.',
-                wallet: { walletProvider: updated.walletProvider, walletAddress: updated.walletAddress },
-            });
+        if (walletProvider !== 'CIRCLE') {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: 'This endpoint only switches back to a Circle-managed wallet. To connect an external wallet (MetaMask, WalletConnect, Coinbase), use GET/POST /api/merchant/wallet/connect — it requires signing a message to prove ownership.',
+                },
+                { status: 400 }
+            );
         }
 
         // Switching TO Circle-managed
@@ -81,7 +76,7 @@ export async function PATCH(req: NextRequest) {
 
         // Note: if they previously had a Circle wallet, switched away, and are switching back,
         // this provisions a brand-new Circle wallet rather than restoring the old one — the old
-        // wallet ID was overwritten to null when they switched to EXTERNAL, so it's not recoverable
+        // wallet ID was overwritten to null when they switched away, so it's not recoverable
         // through this flow. Flag this to the merchant clearly in the confirmation UI.
         const wallet = await createAccountWallet(merchant.businessName);
 

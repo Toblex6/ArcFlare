@@ -4,9 +4,10 @@
 // Step 2 (POST /respond): Validator submits response (100 = passed, 0 = failed)
 // Step 3 (GET /status): Anyone reads validation status onchain
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 
@@ -95,7 +96,7 @@ async function waitForTx(
 
 // ─── POST /api/agent/validation ───────────────────────────────────────────────
 // Handles both request and respond actions via "action" field
-async function validationHandler(request: Request) {
+async function validationHandler(request: NextRequest) {
   try {
     const body = await request.json();
     const { action } = body;
@@ -162,6 +163,15 @@ async function validationHandler(request: Request) {
         );
       }
 
+      // Ownership check — caller must actually control ownerSCA.
+      const requestActor = await verifyCallerControlsAddress(request, ownerSCA);
+      if (!requestActor) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the wallet named in ownerSCA.' },
+          { status: 403 }
+        );
+      }
+
       const requestURI = `ipfs://arcflare-validation-${agentId}-${requestTag}`;
       const requestHash = keccak256(
         toHex(`flarehq_validation_agent_${agentId}_${requestTag}_${Date.now()}`)
@@ -208,6 +218,20 @@ async function validationHandler(request: Request) {
             error: 'validatorSCA, requestHash, passed (boolean) and tag are required.',
           },
           { status: 400 }
+        );
+      }
+
+      // Ownership check — caller must actually control validatorSCA.
+      // NOTE: can't verify this validatorSCA matches whoever the original
+      // request named as validator — there's no ValidationRequest table
+      // storing that, only the onchain event. A real membership check here
+      // needs that stored (or an onchain read of validationRequest data
+      // before responding), not built as part of this pass.
+      const respondActor = await verifyCallerControlsAddress(request, validatorSCA);
+      if (!respondActor) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the wallet named in validatorSCA.' },
+          { status: 403 }
         );
       }
 

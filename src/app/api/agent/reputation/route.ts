@@ -3,9 +3,10 @@
 // Per ERC-8004: agent owners CANNOT record reputation for their own agents.
 // The validator wallet must be different from the owner wallet.
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { keccak256, toHex } from 'viem';
 
@@ -40,7 +41,7 @@ async function waitForTx(
 // ─── POST /api/agent/reputation ───────────────────────────────────────────────
 // Records reputation feedback from a validator for an agent.
 // Body: { agentId, validatorSCA, score (0-100), tag, circleWalletId }
-async function reputationHandler(request: Request) {
+async function reputationHandler(request: NextRequest) {
   try {
     const {
       agentId, // ERC-8004 tokenId e.g. "68210"
@@ -88,6 +89,17 @@ async function reputationHandler(request: Request) {
           error: 'Per ERC-8004, agent owners cannot record reputation for their own agents.',
         },
         { status: 400 }
+      );
+    }
+
+    // Ownership check — no fixed party list to check membership against
+    // (any third party can validate per ERC-8004), but the caller must
+    // actually control the address they're posting feedback as.
+    const actor = await verifyCallerControlsAddress(request, validatorSCA);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the wallet named in validatorSCA.' },
+        { status: 403 }
       );
     }
 
