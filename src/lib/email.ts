@@ -32,3 +32,26 @@ export async function sendVerificationEmail(email: string, businessName: string,
     throw new Error('Failed to send verification email.');
   }
 }
+
+export async function sendPasswordResetEmail(email: string, businessName: string, code: string) {
+  const { error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: email,
+    subject: `${code} is your FlareHQ password reset code`,
+    html: `
+      <div style="font-family: Inter, system-ui, sans-serif; background:#0e0b08; color:#f0ece6; padding:32px; border-radius:16px; max-width:480px; margin:0 auto;">
+        <h2 style="margin:0 0 8px;">Reset your FlareHQ password</h2>
+        <p style="color:#8a7560; font-size:14px;">Hi ${businessName}, use the code below to set a new password. If you didn't request this, you can safely ignore this email — your password won't change.</p>
+        <div style="background:#1a1410; border:1px solid #c8975a; border-radius:12px; padding:20px; text-align:center; margin:20px 0;">
+          <span style="font-size:32px; font-weight:800; letter-spacing:8px; color:#c8975a;">${code}</span>
+        </div>
+        <p style="color:#6b5a45; font-size:12px;">This code expires in 15 minutes.</p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    console.error('[email] Resend error:', error);
+    throw new Error('Failed to send password reset email.');
+  }
+}

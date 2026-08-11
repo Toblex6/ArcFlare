@@ -14,7 +14,8 @@
 // hover states or fixed pixel widths that would overflow a narrow viewport.
 
 import React, { useState } from 'react';
-import { useAccount, useConnect, useDisconnect, useSignMessage } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, useSwitchChain } from 'wagmi';
+import { arcTestnet } from '@/lib/wagmi';
 
 interface WalletConnectPanelProps {
   onConnected?: (result: { walletProvider: string; walletAddress: string }) => void;
@@ -37,21 +38,44 @@ function guessWalletKind(connectorName: string): string {
 }
 
 export default function WalletConnectPanel({ onConnected }: WalletConnectPanelProps) {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector: activeConnector } = useAccount();
   const { connectors, connect, isPending: isConnecting, error: connectError } = useConnect();
   const { disconnect } = useDisconnect();
   const { signMessageAsync, isPending: isSigning } = useSignMessage();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
 
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [networkMismatch, setNetworkMismatch] = useState(false);
 
   const handleLinkWallet = async () => {
     if (!address) return;
     setLinking(true);
     setError(null);
     setSuccess(null);
+    setNetworkMismatch(false);
     try {
+      // Explicitly switch chains first, with a clear fallback — same
+      // defensive pattern already proven in the checkout page. Many
+      // wallets (especially mobile, via WalletConnect) won't silently
+      // add/switch to an unrecognized custom chain like Arc Testnet on
+      // their own, which is exactly why "change chain" from inside
+      // MetaMask's own UI does nothing — MetaMask can only switch between
+      // chains it already knows about, and nothing was ever asking it to
+      // add Arc Testnet in the first place.
+      if (chainId !== arcTestnet.id) {
+        try {
+          await switchChainAsync({ chainId: arcTestnet.id });
+        } catch {
+          setNetworkMismatch(true);
+          setError('Your wallet could not switch networks automatically. Add Arc Testnet manually — details below — then try again.');
+          setLinking(false);
+          return;
+        }
+      }
+
       // Step 1 — get a nonce challenge, tied to this merchant's session
       // via the merchant_token cookie (sent automatically, same-origin).
       const challengeRes = await fetch(`/api/merchant/wallet/connect?address=${address}`);
@@ -59,10 +83,19 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
       if (!challengeData.success) throw new Error(challengeData.error);
 
       // Step 2 — sign the challenge message with the connected wallet.
-      const signature = await signMessageAsync({ message: challengeData.message });
+      // Race against a timeout so a hung wallet popup (closed without
+      // responding, extension stalls, etc.) can never leave this stuck on
+      // "waiting for signature" forever — the promise from some wallets
+      // simply never resolves or rejects in that case.
+      const signature = await Promise.race([
+        signMessageAsync({ message: challengeData.message }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out waiting for your wallet to respond. Check your wallet app/extension and try again.')), 60000)
+        ),
+      ]);
 
       // Step 3 — verify + link.
-      const connectorName = connectors.find((c) => c.uid)?.name || 'MetaMask';
+      const connectorName = activeConnector?.name || 'MetaMask';
       const walletKind = guessWalletKind(connectorName);
 
       const verifyRes = await fetch('/api/merchant/wallet/connect', {
@@ -187,6 +220,31 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
         <p style={{ color: 'var(--danger)', fontSize: 'clamp(11px, 1vw, 13px)', margin: 0, wordBreak: 'break-word' }}>
           ❌ {error || connectError?.message}
         </p>
+      )}
+      {networkMismatch && (
+        <div style={{ background: 'var(--surface-secondary)', border: '1px solid var(--border)', borderRadius: 12, padding: 'clamp(10px, 1.5vw, 14px)' }}>
+          <p style={{ color: 'var(--primary)', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 700, margin: '0 0 8px' }}>
+            Add this network manually in your wallet:
+          </p>
+          {[
+            ['Network Name', 'Arc Testnet'],
+            ['Chain ID', String(arcTestnet.id)],
+            ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
+            ['Currency Symbol', 'ARC'],
+            ['Block Explorer', arcTestnet.blockExplorers.default.url],
+          ].map(([label, value]) => (
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 'clamp(10px, 0.9vw, 12px)', color: 'var(--text-secondary)', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+              <span>{label}</span>
+              <span
+                style={{ color: 'var(--text)', fontFamily: 'monospace', cursor: 'pointer', wordBreak: 'break-all', textAlign: 'right' }}
+                onClick={() => navigator.clipboard.writeText(value)}
+                title="Tap to copy"
+              >
+                {value}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
       {success && (
         <p style={{ color: 'var(--success)', fontSize: 'clamp(11px, 1vw, 13px)', margin: 0, wordBreak: 'break-word' }}>

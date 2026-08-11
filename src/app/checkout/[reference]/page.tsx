@@ -291,7 +291,7 @@ export default function CheckoutPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#6b5a45', fontSize: 12 }}>Merchant</span>
-                  <span style={{ color: '#f0ece6', fontSize: 12 }}>{payment.merchant || 'FlareHQ Merchant'}</span>
+                  <span style={{ color: '#f0ece6', fontSize: 12 }}>{payment.merchant_username ? `@${payment.merchant_username}` : (payment.merchant || 'FlareHQ Merchant')}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#6b5a45', fontSize: 12 }}>Reference</span>

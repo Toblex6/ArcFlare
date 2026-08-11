@@ -154,6 +154,15 @@ export default function MerchantLogin() {
               />
             </div>
 
+            <div style={{ textAlign: 'right', marginTop: -6 }}>
+              <a
+                href="/merchant/forgot-password"
+                style={{ color: 'var(--text-secondary)', fontSize: 12, textDecoration: 'none' }}
+              >
+                Forgot password?
+              </a>
+            </div>
+
             <button
               type="submit"
               disabled={loading}

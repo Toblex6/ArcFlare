@@ -32,7 +32,7 @@ export async function GET(
       return NextResponse.json({
         status: true,
         message: 'Verification successful (Cached Testnet Ledger)',
-        data: formatResponse(payment),
+        data: await formatResponse(payment),
       });
     }
 
@@ -42,7 +42,7 @@ export async function GET(
         payment.status === 'SUCCESS'
           ? 'Verification successful'
           : 'Payment is pending block confirmation',
-      data: formatResponse(payment),
+      data: await formatResponse(payment),
     });
   } catch (error: any) {
     console.error('Verify error:', error);
@@ -62,8 +62,24 @@ function fireWebhook(url: string, payload: object) {
   }).catch((err) => console.error('Webhook delivery failed:', err.message));
 }
 
-function formatResponse(payment: any) {
+async function formatResponse(payment: any) {
   const hasSettled = payment.status === 'SUCCESS';
+
+  // Live username lookup, resolved fresh every time via merchantId — NOT
+  // stored on PaymentLog itself. `payment.merchant` (below) stays exactly
+  // as it's always been (businessName, used as a join key elsewhere in the
+  // dashboard) so nothing that already depends on it can break. This is
+  // purely additive: a display-preference hint for the checkout UI, absent
+  // whenever merchantId is missing or the merchant hasn't set a username.
+  let merchantUsername: string | null = null;
+  if (payment.merchantId) {
+    const m = await prisma.merchant.findUnique({
+      where: { id: payment.merchantId },
+      select: { username: true },
+    });
+    merchantUsername = (m as any)?.username || null;
+  }
+
   return {
     id: payment.id,
     reference: payment.reference,
@@ -74,6 +90,7 @@ function formatResponse(payment: any) {
     status: payment.status,
     sender_email: payment.senderEmail || null,
     merchant: payment.merchant || null,
+    merchant_username: merchantUsername,
     merchantSCA: payment.merchantSCA || null,
     paid_at: payment.timestamp,
     // Real data only — no fabricated telemetry. arcTxHash is the actual

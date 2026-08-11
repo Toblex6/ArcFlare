@@ -19,7 +19,7 @@ model PaymentLog {
   merchant         String
   status           String
   arcTxHash        String?
-  cctpSourceTxHash String? @unique
+  cctpSourceTxHash String?   @unique
   webhookUrl       String?
   timestamp        DateTime  @default(now())
   expiresAt        DateTime?
@@ -179,12 +179,16 @@ model Merchant {
   verificationCode          String?
   verificationCodeExpiresAt DateTime?
   verified                  Boolean   @default(false)
+  resetCode                 String?
+  resetCodeExpiresAt        DateTime?
 
   // Payout wallet — Circle-managed by default, or a connected external signer.
+  // Open string, not a two-value enum: "CIRCLE" | "METAMASK" | "WALLETCONNECT" |
+  // "COINBASE" | "SAFE" | "DELEGATED_SESSION" (future). Each maps to a
+  // WalletProvider implementation in src/lib/wallet/ — see resolve.ts.
   walletProvider   String    @default("CIRCLE")
   walletAddress    String?   // SCA address (Circle) or connected EOA (external)
   circleWalletId   String?   // Circle wallet ID, only set when walletProvider = CIRCLE
-
 }
 
 model WalletSignatureRequest {
@@ -336,14 +340,14 @@ model PayrollBatch {
 }
 
 model X402EoaWallet {
-  id             String   @id @default(uuid())
-  address        String   @unique
-  encryptedKey   String   // AES-256-GCM ciphertext (was plaintext "privateKey" — never shipped that way)
-  keyIv          String   // GCM initialization vector, base64
-  keyAuthTag     String   // GCM auth tag, base64
-  merchantId     String?  @unique // one wallet per merchant for now; null only for pre-migration rows
-  label          String?
-  createdAt      DateTime @default(now())
+  id           String   @id @default(uuid())
+  address      String   @unique
+  encryptedKey String   // AES-256-GCM ciphertext (was plaintext "privateKey" — never shipped that way)
+  keyIv        String   // GCM initialization vector, base64
+  keyAuthTag   String   // GCM auth tag, base64
+  merchantId   String?  @unique // one wallet per merchant for now; null only for pre-migration rows
+  label        String?
+  createdAt    DateTime @default(now())
 
   @@map("x402_eoa_wallets")
 }

@@ -241,7 +241,7 @@ const GROQ_TOOLS = AGENT_TOOLS.map((t) => ({
 }));
 
 // ── TOOL EXECUTORS ────────────────────────────────────────────────────────────
-async function executeTool(name: string, input: any): Promise<any> {
+async function executeTool(name: string, input: any, baseUrl: string): Promise<any> {
   const headers = {
     "Content-Type": "application/json",
     "x-api-key": INTERNAL_API_KEY,
@@ -251,7 +251,7 @@ async function executeTool(name: string, input: any): Promise<any> {
     // ── 1. A2A Direct Payment ─────────────────────────────────────────────────
     case "agent_pay_agent": {
       const payerAgentSCA = input.payerAgentSCA || process.env.AGENT_OWNER_WALLET_ADDRESS;
-      const initRes = await fetch(`${API_BASE}/api/payments/initialize`, {
+      const initRes = await fetch(`${baseUrl}/api/payments/initialize`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -264,7 +264,7 @@ async function executeTool(name: string, input: any): Promise<any> {
       const initData = await initRes.json();
       if (!initData.success) return { error: initData.error };
 
-      const settleRes = await fetch(`${API_BASE}/api/payments/settle`, {
+      const settleRes = await fetch(`${baseUrl}/api/payments/settle`, {
         method: "POST",
         headers,
         body: JSON.stringify({ reference: initData.reference }),
@@ -282,7 +282,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 2. Create ERC-8183 Job ────────────────────────────────────────────────
     case "create_agent_job": {
-      const res = await fetch(`${API_BASE}/api/jobs`, {
+      const res = await fetch(`${baseUrl}/api/jobs`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -301,7 +301,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 3. Submit Job Deliverable ─────────────────────────────────────────────
     case "submit_job_deliverable": {
-      const res = await fetch(`${API_BASE}/api/jobs`, {
+      const res = await fetch(`${baseUrl}/api/jobs`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -316,7 +316,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 4. Complete or Reject Job ─────────────────────────────────────────────
     case "complete_or_reject_job": {
-      const res = await fetch(`${API_BASE}/api/jobs`, {
+      const res = await fetch(`${baseUrl}/api/jobs`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -332,7 +332,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 5. Agent Payroll ──────────────────────────────────────────────────────
     case "run_agent_payroll": {
-      const res = await fetch(`${API_BASE}/api/payroll/run`, {
+      const res = await fetch(`${baseUrl}/api/payroll/run`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -346,7 +346,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 6. Agent Subscription ─────────────────────────────────────────────────
     case "setup_agent_subscription": {
-      const res = await fetch(`${API_BASE}/api/payments/scheduled`, {
+      const res = await fetch(`${baseUrl}/api/payments/scheduled`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -363,7 +363,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 7. Generate Invoice ───────────────────────────────────────────────────
     case "generate_agent_invoice": {
-      const res = await fetch(`${API_BASE}/api/payments/initialize`, {
+      const res = await fetch(`${baseUrl}/api/payments/initialize`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -387,7 +387,7 @@ async function executeTool(name: string, input: any): Promise<any> {
 
     // ── 8. Cross-chain Routing ────────────────────────────────────────────────
     case "route_cross_chain": {
-      const res = await fetch(`${API_BASE}/api/cctp/transfer`, {
+      const res = await fetch(`${baseUrl}/api/cctp/transfer`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -471,21 +471,21 @@ async function executeTool(name: string, input: any): Promise<any> {
     case "check_agent_status": {
       if (input.type === "payment") {
         const res = await fetch(
-          `${API_BASE}/api/payments/verify/${input.reference}`,
+          `${baseUrl}/api/payments/verify/${input.reference}`,
           { headers }
         );
         return res.json();
       }
       if (input.type === "job") {
         const res = await fetch(
-          `${API_BASE}/api/jobs?jobId=${input.reference}`,
+          `${baseUrl}/api/jobs?jobId=${input.reference}`,
           { headers }
         );
         return res.json();
       }
       if (input.type === "subscription") {
         const res = await fetch(
-          `${API_BASE}/api/payments/scheduled?reference=${input.reference}`,
+          `${baseUrl}/api/payments/scheduled?reference=${input.reference}`,
           { headers }
         );
         return res.json();
@@ -537,7 +537,8 @@ async function saveMemory(sessionId: string, message: any) {
 async function runBrain(
   userMessage: string,
   sessionId: string,
-  agentContext: string
+  agentContext: string,
+  baseUrl: string
 ): Promise<{ response: string; toolsUsed: string[]; results: any[] }> {
   const toolsUsed: string[] = [];
   const results: any[] = [];
@@ -674,7 +675,7 @@ IMPORTANT:
       // model can react to and explain, instead of crashing the request.
       let result: any;
       try {
-        result = await executeTool(name, args);
+        result = await executeTool(name, args, baseUrl);
       } catch (toolErr: any) {
         console.error(`[brain] Tool ${name} threw:`, toolErr);
         result = { error: toolErr?.message || "Tool execution failed unexpectedly." };
@@ -715,8 +716,17 @@ const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
     return NextResponse.json({ success: false, error: "GROQ_API_KEY not configured" }, { status: 500 });
   }
 
+  // Derived per-request from the actual incoming host, not a module-level
+  // constant that could silently point at the wrong environment (was
+  // defaulting to "https://flarehq.xyz" whenever NEXT_PUBLIC_API_BASE
+  // wasn't set — every internal tool call, self-payments included, would
+  // hit production instead of wherever this request actually landed).
+  const forwardedProto = req.headers.get("x-forwarded-proto") || "https";
+  const host = req.headers.get("host") || "";
+  const baseUrl = host ? `${forwardedProto}://${host}` : API_BASE;
+
   console.log(`[brain] ${sessionId}: ${message.slice(0, 80)}`);
-  const { response, toolsUsed, results } = await runBrain(message, sessionId, context);
+  const { response, toolsUsed, results } = await runBrain(message, sessionId, context, baseUrl);
 
   return NextResponse.json({
     success: true,

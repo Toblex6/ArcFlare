@@ -129,7 +129,7 @@ export default function AgentBrainPage() {
                 method: "POST",
                 headers: authHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
-                    resourceUrl: `${API_BASE}/api/agent/brain`,
+                    resourceUrl: `${window.location.origin}/api/agent/brain`,
                     eoaAddress,
                     body: JSON.stringify({ message, sessionId }),
                 }),

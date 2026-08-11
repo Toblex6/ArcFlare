@@ -34,6 +34,16 @@ export default function TransactionsPage() {
   const [payments, setPayments] = useState<PaymentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copiedRef, setCopiedRef] = useState<string | null>(null);
+
+  // Built from the browser's own origin, not an env var that might not be
+  // set correctly — same reasoning as the resourceUrl fix in agent-brain.
+  const copyPaymentLink = (reference: string) => {
+    const link = `${window.location.origin}/checkout/${reference}`;
+    navigator.clipboard.writeText(link);
+    setCopiedRef(reference);
+    setTimeout(() => setCopiedRef((prev) => (prev === reference ? null : prev)), 2000);
+  };
 
   useEffect(() => {
     fetch('/api/payments/all')
@@ -89,7 +99,8 @@ export default function TransactionsPage() {
                       <th className="text-left pb-3 pr-4">Chain</th>
                       <th className="text-left pb-3 pr-4">Payload Value</th>
                       <th className="text-left pb-3 pr-4">Status</th>
-                      <th className="text-left pb-3">Onchain Tx</th>
+                      <th className="text-left pb-3 pr-4">Onchain Tx</th>
+                      <th className="text-left pb-3">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -146,6 +157,18 @@ export default function TransactionsPage() {
                             </span>
                           ) : (
                             <span className="text-slate-400">Not yet onchain</span>
+                          )}
+                        </td>
+                        <td className="py-4">
+                          {payment.status === 'PENDING' ? (
+                            <button
+                              onClick={() => copyPaymentLink(payment.reference)}
+                              className="text-[10px] font-bold px-2 py-1 rounded border border-cyan-100 text-cyan-700 bg-cyan-50 hover:bg-cyan-100 transition-colors"
+                            >
+                              {copiedRef === payment.reference ? 'Copied ✓' : 'Copy Link'}
+                            </button>
+                          ) : (
+                            <span className="text-slate-300 text-[10px]">—</span>
                           )}
                         </td>
                       </tr>
@@ -223,6 +246,15 @@ export default function TransactionsPage() {
                         <span className="text-slate-400 italic">Not yet onchain</span>
                       )}
                     </div>
+
+                    {payment.status === 'PENDING' && (
+                      <button
+                        onClick={() => copyPaymentLink(payment.reference)}
+                        className="w-full text-center text-[11px] font-bold py-2 rounded-lg border border-cyan-100 text-cyan-700 bg-cyan-50 active:bg-cyan-100"
+                      >
+                        {copiedRef === payment.reference ? 'Copied ✓' : '🔗 Copy Payment Link'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
