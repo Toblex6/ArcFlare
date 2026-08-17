@@ -39,7 +39,9 @@ export async function GET(request: NextRequest) {
         color: { dark: '#0f172a', light: '#ffffff' },
     });
 
-    return new NextResponse(pngBuffer, {
+    // Buffer isn't a valid BodyInit — wrap in Uint8Array (NextResponse
+    // accepts it, and it copies without an extra allocation).
+    return new NextResponse(new Uint8Array(pngBuffer), {
         headers: {
             'Content-Type': 'image/png',
             'Cache-Control': 'public, max-age=3600',

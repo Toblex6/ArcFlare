@@ -6,14 +6,18 @@
 // Both paths resolve to the same thing: a merchantId attached to the request,
 // so every downstream route can scope data without caring which auth method
 // was used.
+//
+// Secrets fail closed: if MERCHANT_JWT_SECRET / CONSUMER_JWT_SECRET are not
+// configured, no session resolves and no token is accepted. There are no
+// hardcoded fallbacks.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { jwtVerify } from 'jose';
+import { tryJwtSecret } from '@/lib/auth/secrets';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
-);
+const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
+const CONSUMER_JWT_SECRET = tryJwtSecret('CONSUMER_JWT_SECRET');
 
 export interface AuthedMerchant {
   id: string;
@@ -34,13 +38,16 @@ export async function resolveMerchant(req: NextRequest): Promise<AuthedMerchant 
 
   // ── Path B: dashboard cookie session ────────────────────────────────────
   const token = req.cookies.get('merchant_token')?.value;
-  if (token) {
+  if (token && JWT_SECRET) {
     try {
       const { payload } = await jwtVerify(token, JWT_SECRET);
       const merchant = await (prisma as any).merchant.findUnique({
         where: { id: payload.merchantId as string },
       });
-      if (merchant && merchant.active) {
+      // Cookie tokens are only issued to verified+active merchants (see
+      // merchant/login), but re-check both here so deactivation or a
+      // verification-state change takes effect before the token expires.
+      if (merchant && merchant.active && merchant.verified) {
         return { id: merchant.id, email: merchant.email, businessName: merchant.businessName };
       }
     } catch {
@@ -88,11 +95,8 @@ export async function resolveInitializeCaller(req: NextRequest): Promise<Resolve
 
   // Consumer session — Flow's send/request flow, no API key involved
   const consumerToken = req.cookies.get('consumer_token')?.value;
-  if (consumerToken) {
+  if (consumerToken && CONSUMER_JWT_SECRET) {
     try {
-      const CONSUMER_JWT_SECRET = new TextEncoder().encode(
-        process.env.CONSUMER_JWT_SECRET || 'flarehq-consumer-secret-change-on-mainnet'
-      );
       const { payload } = await jwtVerify(consumerToken, CONSUMER_JWT_SECRET);
       return { type: 'consumer', consumerWalletAddress: payload.walletAddress as string };
     } catch {
@@ -128,10 +132,15 @@ export function withApiKeyOrMerchant(handler: (req: NextRequest) => Promise<Next
     }
 
     const token = req.cookies.get('merchant_token')?.value;
-    if (token) {
+    if (token && JWT_SECRET) {
       try {
-        await jwtVerify(token, JWT_SECRET);
-        return handler(req);
+        const { payload } = await jwtVerify(token, JWT_SECRET);
+        const merchant = await (prisma as any).merchant.findUnique({
+          where: { id: payload.merchantId as string },
+        });
+        if (merchant && merchant.active && merchant.verified) {
+          return handler(req);
+        }
       } catch {
         // fall through to 401 below
       }
@@ -164,21 +173,23 @@ export function withApiKeyOrAnySession(handler: (req: NextRequest) => Promise<Ne
     }
 
     const merchantToken = req.cookies.get('merchant_token')?.value;
-    if (merchantToken) {
+    if (merchantToken && JWT_SECRET) {
       try {
-        await jwtVerify(merchantToken, JWT_SECRET);
-        return handler(req);
+        const { payload } = await jwtVerify(merchantToken, JWT_SECRET);
+        const merchant = await (prisma as any).merchant.findUnique({
+          where: { id: payload.merchantId as string },
+        });
+        if (merchant && merchant.active && merchant.verified) {
+          return handler(req);
+        }
       } catch {
         // fall through
       }
     }
 
     const consumerToken = req.cookies.get('consumer_token')?.value;
-    if (consumerToken) {
+    if (consumerToken && CONSUMER_JWT_SECRET) {
       try {
-        const CONSUMER_JWT_SECRET = new TextEncoder().encode(
-          process.env.CONSUMER_JWT_SECRET || 'flarehq-consumer-secret-change-on-mainnet'
-        );
         await jwtVerify(consumerToken, CONSUMER_JWT_SECRET);
         return handler(req);
       } catch {

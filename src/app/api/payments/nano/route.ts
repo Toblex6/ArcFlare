@@ -5,6 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { withApiKeyOrMerchant } from '@/src/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/src/lib/wallet/verifyCallerControlsAddress';
 import {
   recordNanoPayment,
   getUnsettledBalance,
@@ -35,6 +36,23 @@ async function nanoHandler(request: Request) {
       return NextResponse.json(
         { success: false, error: 'Amount must be greater than 0.' },
         { status: 400 }
+      );
+    }
+
+    // ── SECURITY: the caller must control at least one side of this
+    // charge. This debt row debits agentSCA's wallet at settlement time,
+    // so an unrelated merchant must not be able to open charges against
+    // an agent they don't own. (Merchants control their own deployed
+    // agents via verifyCallerControlsAddress.)
+    const controlsAgent = await verifyCallerControlsAddress(request as any, agentSCA);
+    const controlsMerchant = await verifyCallerControlsAddress(request as any, merchantSCA);
+    if (!controlsAgent && !controlsMerchant) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'You do not control either party in this charge (agentSCA or merchantSCA).',
+        },
+        { status: 403 }
       );
     }
 

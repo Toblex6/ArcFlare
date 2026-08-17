@@ -72,7 +72,7 @@ async function recoverStaleLocks(agentSCA: string, merchantSCA: string) {
       senderEmail: 'nano-batch-system',
       agentSCA,
       merchant: merchantSCA,
-      createdAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
+      timestamp: { lt: new Date(Date.now() - 5 * 60 * 1000) },
     },
   });
 
@@ -99,7 +99,7 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
       senderEmail: 'nano-batch-system',
     },
     orderBy: {
-      createdAt: 'asc',
+      timestamp: 'asc',
     },
   });
 
@@ -219,7 +219,7 @@ async function settleOnchain(agentSCA: string, merchantSCA: string, webhookUrl?:
       destinationAddress: merchantSCA,
       amounts: [amountStr],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
+    } as any);
   } catch (nativeError: any) {
     transferTx = await circleClient.createContractExecutionTransaction({
       walletId: payerWalletId,
@@ -228,7 +228,7 @@ async function settleOnchain(agentSCA: string, merchantSCA: string, webhookUrl?:
       abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [merchantSCA, amountScaled],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
+    } as any);
   }
 
   if (!transferTx?.data?.id) {

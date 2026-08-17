@@ -83,4 +83,13 @@ console.log("");
 console.log("Deployment complete. Add these to your environment:");
 console.log(`JOB_ESCROW_CONTRACT_ADDRESS=${jobEscrowAddress}`);
 console.log(`SPEND_LIMIT_CONTRACT_ADDRESS=${spendLimitAddress}`);
-console.log(`ARCFLARE_ESCROW_CONTRACT_ADDRESS=${jobEscrowAddress}`);
+console.log("");
+console.log(
+  "WARNING: do NOT set ARCFLARE_ESCROW_CONTRACT_ADDRESS to the ArcFlareJobEscrow address."
+);
+console.log(
+  "ARCFLARE_ESCROW_CONTRACT_ADDRESS must point at the LEGACY escrow contract " +
+    "(0xEb810aeD24D2314dB7471E44bf6DE89f017631E0 or 0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F on Arc Testnet) " +
+    "that the payments/escrow routes call with an incompatible ABI (refundExpired etc). " +
+    "Pointing it at ArcFlareJobEscrow makes every escrow route throw onchain ABI errors."
+);

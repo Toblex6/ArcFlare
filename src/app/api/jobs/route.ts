@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits } from 'viem';
 
@@ -229,6 +230,14 @@ async function jobsHandler(request: Request) {
         );
       }
 
+      // The job's client wallet pays the escrow — the caller must control it.
+      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the clientSCA wallet.' },
+          { status: 403 }
+        );
+      }
+
       const now = await publicClient.getBlock();
       const expiredAt = now.timestamp + BigInt(deadlineHours * 3600);
 
@@ -291,6 +300,14 @@ async function jobsHandler(request: Request) {
         );
       }
 
+      // setBudget is signed by the provider — the caller must control it.
+      if (!(await verifyCallerControlsAddress(request as any, providerSCA))) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the providerSCA wallet.' },
+          { status: 403 }
+        );
+      }
+
       const amountWei = BigInt(Math.round(parseFloat(amountUSDC) * 1_000_000));
 
       const tx = await circleClient.createContractExecutionTransaction({
@@ -326,6 +343,14 @@ async function jobsHandler(request: Request) {
         return NextResponse.json(
           { success: false, error: 'jobId, clientSCA and amountUSDC are required.' },
           { status: 400 }
+        );
+      }
+
+      // approve spends the client's USDC allowance — caller must control it.
+      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the clientSCA wallet.' },
+          { status: 403 }
         );
       }
 
@@ -367,6 +392,14 @@ async function jobsHandler(request: Request) {
         );
       }
 
+      // fund moves the client's escrowed USDC — caller must control it.
+      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the clientSCA wallet.' },
+          { status: 403 }
+        );
+      }
+
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: 'ARC-TESTNET' as any,
@@ -399,6 +432,14 @@ async function jobsHandler(request: Request) {
         return NextResponse.json(
           { success: false, error: 'jobId, providerSCA and deliverable are required.' },
           { status: 400 }
+        );
+      }
+
+      // submit is signed by the provider — caller must control it.
+      if (!(await verifyCallerControlsAddress(request as any, providerSCA))) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the providerSCA wallet.' },
+          { status: 403 }
         );
       }
 
@@ -438,6 +479,15 @@ async function jobsHandler(request: Request) {
         return NextResponse.json(
           { success: false, error: 'jobId and clientSCA are required.' },
           { status: 400 }
+        );
+      }
+
+      // complete releases the client's escrowed payment — caller must
+      // control the client wallet that posted the job.
+      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+        return NextResponse.json(
+          { success: false, error: 'You do not control the clientSCA wallet.' },
+          { status: 403 }
         );
       }
 
@@ -484,6 +534,13 @@ async function jobsHandler(request: Request) {
         message: `Job #${jobId} completed — status: ${statusName}. Payment of ${budgetUSDC} USDC released to provider.`,
       });
     }
+
+    // All valid actions return above — unreachable, keeps the wrapper's
+    // Promise<NextResponse> contract honest.
+    return NextResponse.json(
+      { success: false, error: `action must be one of: ${validActions.join(', ')}` },
+      { status: 400 }
+    );
   } catch (error: any) {
     console.error('❌ Jobs route error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

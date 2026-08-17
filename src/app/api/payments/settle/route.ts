@@ -171,6 +171,42 @@ async function mergedSettleHandler(request: NextRequest) {
         callerConsumerWallet &&
         payment.senderEmail?.toLowerCase() === callerConsumerWallet.toLowerCase();
 
+      // Extra merchant guard: a merchant may settle their own payment row,
+      // but only when the payer is not a third-party wallet. When
+      // senderEmail IS a real 0x address, Path B debits that wallet's
+      // Circle account — so the settling caller must control it, or the
+      // row is only legitimate for the internal service path (checked
+      // above). This closes the "merchant creates a payment naming a
+      // victim's address as payer, then settles" drain.
+      const payerIsAddress =
+        !!payment.senderEmail?.startsWith('0x') &&
+        payment.senderEmail.toLowerCase() !== 'pending@checkout';
+      if (callerMerchant && merchantOwnsIt && payerIsAddress) {
+        const merchantRecord = await (prisma as any).merchant.findUnique({
+          where: { id: callerMerchant.id },
+        });
+        const controlsPayer =
+          merchantRecord?.walletAddress?.toLowerCase() === payment.senderEmail?.toLowerCase();
+        const ownsPayerAgent =
+          !controlsPayer &&
+          (await (prisma as any).agentRegistry.findFirst({
+            where: {
+              merchantId: callerMerchant.id,
+              scaAddress: { equals: payment.senderEmail, mode: 'insensitive' },
+            },
+          }));
+        if (!controlsPayer && !ownsPayerAgent) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'You are not a party to this payment: its payer is a wallet you do not control.',
+            },
+            { status: 403 }
+          );
+        }
+      }
+
       if (!merchantOwnsIt && !consumerOwnsIt) {
         // Not attempting to restore the pre-lock status here — it wasn't
         // captured before the lock ran. Left in PROCESSING_ONCHAIN

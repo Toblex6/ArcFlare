@@ -17,8 +17,10 @@ async function extractPdfText(url: string): Promise<string> {
   const buffer = Buffer.from(await res.arrayBuffer());
 
   // Lazy import — pdf-parse pulls in extra deps we don't want loaded for
-  // evidence types that never touch a PDF.
-  const pdfParse = (await import('pdf-parse')).default;
+  // evidence types that never touch a PDF. The ESM build exports the
+  // parser directly (no `.default`); the CJS build has `.default`.
+  const pdfParseModule: any = await import('pdf-parse');
+  const pdfParse = pdfParseModule.default ?? pdfParseModule;
   const parsed = await pdfParse(buffer);
   return parsed.text.trim();
 }

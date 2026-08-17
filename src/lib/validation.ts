@@ -13,7 +13,11 @@ const usdcAmount = z
 // ── /api/payments/initialize ──────────────────────────────────────────────────
 export const InitializeSchema = z.object({
   amount: z.union([z.string(), z.number()]).transform(String).pipe(usdcAmount),
-  currency: z.string().min(1).max(10).default('USDC'),
+  // Strict USDC-only enum: exact match, uppercase, no fuzzy/case-insensitive
+  // acceptance. Other currencies are NOT deployable yet (SwapPool has no
+  // liquidity, the EURC path isn't wired into settle/verify) — expanding
+  // this enum is a future task when multi-currency actually goes live.
+  currency: z.enum(['USDC']).default('USDC'),
   email: z.string().email().optional(),
   merchant: z.string().min(1).max(100).optional(),
   agentSCA: scaAddress.optional(),

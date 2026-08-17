@@ -41,6 +41,16 @@ export const CCTP_DEST_CHAINS = [
 let cachedAdapter: ReturnType<typeof createCircleWalletsAdapter> | null = null;
 let cachedKit: BridgeKit | null = null;
 
+// The @circle-fin/adapter-circle-wallets and @circle-fin/bridge-kit package
+// versions in this repo don't line up at the type level (the adapter's
+// exported type isn't assignable to Bridge Kit's Adapter interface), but
+// the runtime shape is what Bridge Kit expects. Cast once here so call
+// sites stay typed.
+function toBridgeAdapter(adapter: ReturnType<typeof createCircleWalletsAdapter>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return adapter as any;
+}
+
 function getKitAndAdapter() {
   if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
     throw new Error(
@@ -56,7 +66,7 @@ function getKitAndAdapter() {
   if (!cachedKit) {
     cachedKit = new BridgeKit();
   }
-  return { kit: cachedKit, adapter: cachedAdapter };
+  return { kit: cachedKit, adapter: toBridgeAdapter(cachedAdapter) };
 }
 
 // In-memory store for in-flight bridge results, keyed by a reference we

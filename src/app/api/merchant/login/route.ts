@@ -4,10 +4,9 @@ import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import bcrypt from 'bcryptjs';
 import { SignJWT } from 'jose';
+import { requireJwtSecret } from '@/src/lib/auth/secrets';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
-);
+const JWT_SECRET = requireJwtSecret('MERCHANT_JWT_SECRET');
 
 export async function POST(req: NextRequest) {
   try {

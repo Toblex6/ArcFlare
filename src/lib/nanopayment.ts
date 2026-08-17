@@ -14,16 +14,19 @@ export async function recordNanoPayment({
   agentSCA,
   merchantSCA,
   amount,
+  description,
 }: {
   agentSCA: string;
   merchantSCA: string;
   amount: number;
+  description?: string;
 }) {
   const nano = await prisma.nanoPayment.create({
     data: {
       agentSCA,
       merchantSCA,
       amount,
+      description,
       settled: false,
     },
   });

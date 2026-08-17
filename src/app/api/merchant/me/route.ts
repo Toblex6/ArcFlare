@@ -3,15 +3,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { jwtVerify } from 'jose';
+import { tryJwtSecret } from '@/src/lib/auth/secrets';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
-);
+const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
 export async function GET(req: NextRequest) {
   try {
     const token = req.cookies.get('merchant_token')?.value;
-    if (!token) {
+    if (!token || !JWT_SECRET) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
 

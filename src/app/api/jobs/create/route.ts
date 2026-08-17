@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, waitForTransaction } from '@/lib/circle/client';
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, decodeEventLog } from 'viem';
 import { arcTestnet } from 'viem/chains';
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 
@@ -43,12 +43,39 @@ async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
     });
     const txHash = await waitForTransaction(createTx.data?.id!, 'create job');
 
-    const nextJobId = (await publicClient.readContract({
-      address: AGENTIC_COMMERCE_CONTRACT,
-      abi: agenticCommerceAbi as any,
-      functionName: 'jobCounter',
-    })) as bigint;
-    const jobId = nextJobId - 1n;
+    // Read the JobCreated event out of the receipt rather than guessing
+    // `jobCounter - 1`. The counter can only move forward, so reading it
+    // after the tx is fine — but it's a derived value, whereas the event
+    // carries the exact id the contract assigned this tx.
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as `0x${string}` });
+    const jobCreatedLog = receipt.logs.find(
+      (log) => log.address.toLowerCase() === AGENTIC_COMMERCE_CONTRACT.toLowerCase()
+    );
+    let jobId: bigint | null = null;
+    try {
+      const parsed = jobCreatedLog
+        ? decodeEventLog({
+            abi: agenticCommerceAbi as any,
+            data: jobCreatedLog.data,
+            topics: jobCreatedLog.topics,
+            eventName: 'JobCreated',
+          })
+        : null;
+      if (parsed?.args) {
+        const args = parsed.args as any;
+        jobId = BigInt(args.jobId ?? args.id ?? 0);
+      }
+    } catch (e) {
+      console.warn('JobCreated decode failed — falling back to jobCounter - 1:', e);
+    }
+    if (jobId === null || jobId === 0n) {
+      const nextJobId = (await publicClient.readContract({
+        address: AGENTIC_COMMERCE_CONTRACT,
+        abi: agenticCommerceAbi as any,
+        functionName: 'jobCounter',
+      })) as bigint;
+      jobId = nextJobId - 1n;
+    }
 
     const job = await prisma.erc8183Job.create({
       data: {

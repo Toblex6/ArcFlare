@@ -43,6 +43,19 @@ export async function verifyCallerControlsAddress(
     if (record?.walletAddress?.toLowerCase() === normalized) {
       return { type: "merchant", id: merchant.id, walletAddress: record.walletAddress };
     }
+    // A merchant also controls any agent they deployed (AgentRegistry rows
+    // carry the owning merchantId). This is what lets a merchant operate
+    // their own agents' wallets without holding a service key, while an
+    // unrelated merchant's agent stays out of reach.
+    const ownedAgent = await (prisma as any).agentRegistry.findFirst({
+      where: {
+        merchantId: merchant.id,
+        scaAddress: { equals: claimedAddress, mode: "insensitive" },
+      },
+    });
+    if (ownedAgent) {
+      return { type: "merchant", id: merchant.id, walletAddress: ownedAgent.scaAddress };
+    }
   }
 
   // Consumer session (wallet-first, consumer_token cookie — the JWT itself
@@ -63,7 +76,8 @@ export async function verifyCallerControlsAddress(
   const apiKey = req.headers.get("x-api-key");
   if (apiKey) {
     const keyRecord = await (prisma as any).apiKey.findUnique({ where: { key: apiKey } });
-    if (keyRecord) {
+    // Deactivated keys must not impersonate agents.
+    if (keyRecord && keyRecord.active) {
       const agent = await (prisma as any).agentRegistry.findFirst({
         where: { scaAddress: { equals: claimedAddress, mode: "insensitive" } },
       });

@@ -38,7 +38,7 @@ export async function waitForTransaction(
       const state = data?.transaction?.state;
 
       if (state === 'COMPLETE') {
-        const txHash = data.transaction.txHash;
+        const txHash = data?.transaction?.txHash;
         if (!txHash) {
           throw new Error(`${label} completed but no txHash returned`);
         }

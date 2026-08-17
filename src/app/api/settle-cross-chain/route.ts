@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { createWalletClient, http, publicActions } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/src/lib/prisma';
+import { checkRateLimit } from '@/src/lib/ratelimit';
 
 // Official Circle Iris Testnet API Endpoint Sandbox
 const CIRCLE_IRIS_API = 'https://iris-api-sandbox.circle.com/v1/attestations';
@@ -38,8 +37,31 @@ const TRANSMITTER_ABI = [
   },
 ] as const;
 
+// Internal-service-only: this endpoint fires real CCTP attestation
+// redemption transactions with the admin key and mutates payment rows,
+// so it must NOT be callable by the public web (it was previously
+// completely unauthenticated). Callers must present an ACTIVE internal
+// service API key (the same pool the settle route's internal bypass
+// uses), and the key is checked against the DB rather than env.
+async function isInternalServiceCall(request: Request) {
+  const key = request.headers.get('x-api-key');
+  if (!key) return false;
+  const record = await (prisma as any).apiKey.findUnique({ where: { key } });
+  return !!record && record.active === true;
+}
+
 export async function POST(request: Request) {
   try {
+    const { allowed, response: limitResponse } = await checkRateLimit(request as any, 'payments');
+    if (!allowed) return limitResponse;
+
+    if (!(await isInternalServiceCall(request))) {
+      return NextResponse.json(
+        { success: false, error: 'Internal service endpoint. Active API key required.' },
+        { status: 401 }
+      );
+    }
+
     // 1. Ingest payment reference, target hash, and raw source event message bytes
     const { reference, messageHash, rawMessage } = await request.json();
 

@@ -53,3 +53,4 @@ yarn-error.log*
 dev.db
 cloudflared.exe
 arc-nanopayments/
+opencode.json

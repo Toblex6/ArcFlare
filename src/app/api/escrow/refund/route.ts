@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/src/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -24,7 +25,7 @@ async function waitForCircleTx(client: ReturnType<typeof getCircleClient>, txId:
         await new Promise((r) => setTimeout(r, 2500));
         const { data } = await client.getTransaction({ id: txId });
         const state = data?.transaction?.state;
-        if (state === 'COMPLETE' && data.transaction?.txHash) return data.transaction.txHash;
+        if (state === 'COMPLETE' && data?.transaction?.txHash) return data.transaction.txHash;
         if (state === 'FAILED') {
             console.error('❌ [Refund] Circle tx FAILED — full transaction object:', JSON.stringify(data?.transaction, null, 2));
             throw new Error(`Refund transaction failed onchain.` + (data?.transaction?.errorReason ? ` Reason: ${data.transaction.errorReason}` : ''));
@@ -51,6 +52,13 @@ async function refundHandler(request: Request, merchant: AuthedMerchant) {
         }
         if (!escrow.contractEscrowId) {
             return NextResponse.json({ success: false, error: 'This escrow has no contractEscrowId recorded and cannot be refunded onchain.' }, { status: 400 });
+        }
+        // The contract already enforces depositor-only; this check is
+        // authentication (does the merchant ACTUALLY control callerSCA,
+        // or are they just claiming a victim's address?).
+        const controls = await verifyCallerControlsAddress(request as any, callerSCA);
+        if (!controls) {
+            return NextResponse.json({ success: false, error: 'You do not control callerSCA.' }, { status: 403 });
         }
         if (callerSCA.toLowerCase() !== escrow.depositorSCA.toLowerCase()) {
             return NextResponse.json({ success: false, error: 'Only the depositor can reclaim an expired escrow.' }, { status: 403 });

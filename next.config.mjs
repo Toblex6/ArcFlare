@@ -19,8 +19,9 @@ if (process.env.ARC_ADMIN_PRIVATE_KEY) {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    // Allows production builds to succeed if test utilities contain minor type issues
-    ignoreBuildErrors: true,
+    // tsc --noEmit is now clean repo-wide (was 113 errors when this flag
+    // was added) — keep the gate ON so type regressions fail the build.
+    ignoreBuildErrors: false,
   },
   async headers() {
     return [

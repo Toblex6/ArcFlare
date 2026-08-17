@@ -270,6 +270,13 @@ async function validationHandler(request: NextRequest) {
         message: `Validation response submitted — ${passed ? 'PASSED ✅' : 'FAILED ❌'} (tag: ${tag})`,
       });
     }
+
+    // All valid actions return above — unreachable, keeps the wrapper's
+    // Promise<NextResponse> contract honest.
+    return NextResponse.json(
+      { success: false, error: `action must be one of: create, respond` },
+      { status: 400 }
+    );
   } catch (error: any) {
     console.error('❌ Validation error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

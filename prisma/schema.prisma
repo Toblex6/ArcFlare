@@ -269,6 +269,7 @@ model Erc8183Job {
   agentId         String?
   merchantId      String?  // owning merchant — null only for legacy/pre-scoping rows
   agent           Agent?   @relation(fields: [agentId], references: [id])
+  applications    JobApplication[]
 
   @@index([jobId])
   @@index([clientSCA])
@@ -276,6 +277,21 @@ model Erc8183Job {
   @@index([evaluatorSCA])
   @@index([status])
   @@map("erc8183_jobs")
+}
+
+model JobApplication {
+  id               String       @id @default(cuid())
+  jobId            BigInt
+  applicantAddress String
+  proposedAmount   String?
+  pitch            String
+  portfolioLinks   String[]     @default([])
+  createdAt        DateTime     @default(now())
+  job              Erc8183Job   @relation(fields: [jobId], references: [jobId])
+
+  @@unique([jobId, applicantAddress])
+  @@index([jobId])
+  @@map("job_applications")
 }
 
 model Erc8183JobEvent {

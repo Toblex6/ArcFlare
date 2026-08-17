@@ -1,12 +1,13 @@
 // src/lib/middleware/withConsumerAuth.ts
 import { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
+import { tryJwtSecret } from '@/lib/auth/secrets';
 
-const CONSUMER_JWT_SECRET = new TextEncoder().encode(
-  process.env.CONSUMER_JWT_SECRET || 'flarehq-consumer-secret-change-on-mainnet'
-);
-
+// Fail closed: no secret configured -> no session -> 401. There is no
+// fallback secret that would silently mint/accept tokens.
 export async function resolveConsumerSession(req: NextRequest): Promise<string | null> {
+  const CONSUMER_JWT_SECRET = tryJwtSecret('CONSUMER_JWT_SECRET');
+  if (!CONSUMER_JWT_SECRET) return null;
   const token = req.cookies.get('consumer_token')?.value;
   if (!token) return null;
   try {

@@ -124,7 +124,8 @@ export default function AgentsPage() {
       if (!data.success) throw new Error(data.error);
       setDeployResult(data);
       // Refresh agent list
-      const d2 = await r2.json();
+      const listRes = await fetch('/api/agent/list');
+      const d2 = await listRes.json();
       if (d2.success) setAgents(d2.agents || []);
     } catch (e: any) {
       setDeployError(e.message);

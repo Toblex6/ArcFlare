@@ -15,7 +15,7 @@ export const supportedChains = {
   },
 
   arc: {
-    chainId: 78600,
+    chainId: 5042002, // verified live: eth_chainId = 0x4cef52
     name: 'Arc Testnet',
   },
 };

@@ -5,7 +5,7 @@ import { injected, walletConnect } from 'wagmi/connectors';
 import { defineChain } from 'viem';
 
 export const arcTestnet = defineChain({
-  id: 78600,
+  id: 5042002, // verified live: rpc.testnet.arc.network eth_chainId = 0x4cef52
 
   name: 'Arc Testnet',
 

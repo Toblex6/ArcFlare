@@ -65,19 +65,19 @@ function fireWebhook(url: string, payload: object) {
 async function formatResponse(payment: any) {
   const hasSettled = payment.status === 'SUCCESS';
 
-  // Live username lookup, resolved fresh every time via merchantId — NOT
-  // stored on PaymentLog itself. `payment.merchant` (below) stays exactly
+  // Live merchant-name lookup, resolved fresh every time via merchantId —
+  // NOT stored on PaymentLog itself. `payment.merchant` (below) stays exactly
   // as it's always been (businessName, used as a join key elsewhere in the
   // dashboard) so nothing that already depends on it can break. This is
-  // purely additive: a display-preference hint for the checkout UI, absent
-  // whenever merchantId is missing or the merchant hasn't set a username.
+  // purely additive: a display hint for the checkout UI, absent whenever
+  // merchantId is missing.
   let merchantUsername: string | null = null;
   if (payment.merchantId) {
     const m = await prisma.merchant.findUnique({
       where: { id: payment.merchantId },
-      select: { username: true },
+      select: { businessName: true },
     });
-    merchantUsername = (m as any)?.username || null;
+    merchantUsername = (m as any)?.businessName || null;
   }
 
   return {

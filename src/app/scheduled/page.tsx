@@ -64,7 +64,8 @@ export default function ScheduledPaymentsPage() {
     setListLoading(true);
     setListError(null);
     try {
-      const data = await res.json();
+      const listRes = await fetch('/api/payments/scheduled');
+      const data = await listRes.json();
       if (!data.success) throw new Error(data.error);
       setSchedules(data.scheduledPayments || []);
     } catch (e: any) {

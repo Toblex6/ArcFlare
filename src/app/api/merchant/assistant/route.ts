@@ -7,16 +7,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { jwtVerify } from "jose";
+import { tryJwtSecret } from "@/src/lib/auth/secrets";
 
-const JWT_SECRET = new TextEncoder().encode(
-    process.env.MERCHANT_JWT_SECRET || "arcflare-merchant-secret-change-on-mainnet"
-);
+const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 async function getMerchantFromCookie(req: NextRequest) {
     const token = req.cookies.get("merchant_token")?.value;
-    if (!token) return null;
+    if (!token || !JWT_SECRET) return null;
     const { payload } = await jwtVerify(token, JWT_SECRET);
     const merchantId = payload.merchantId as string;
     return prisma.merchant.findUnique({ where: { id: merchantId } });

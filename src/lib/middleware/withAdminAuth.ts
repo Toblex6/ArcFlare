@@ -6,26 +6,26 @@
 
 import { NextRequest } from 'next/server';
 import { jwtVerify, SignJWT } from 'jose';
+import { requireJwtSecret, tryJwtSecret } from '@/lib/auth/secrets';
 
-const ADMIN_JWT_SECRET = new TextEncoder().encode(
-    process.env.ADMIN_JWT_SECRET || 'flarehq-admin-secret-change-in-production'
-);
-
+// Fail closed: no secret configured -> never an admin session.
 export async function resolveAdminSession(req: NextRequest): Promise<boolean> {
-    const token = req.cookies.get('admin_token')?.value;
-    if (!token) return false;
-    try {
-        const { payload } = await jwtVerify(token, ADMIN_JWT_SECRET);
-        return payload.role === 'admin';
-    } catch {
-        return false;
-    }
+  const ADMIN_JWT_SECRET = tryJwtSecret('ADMIN_JWT_SECRET');
+  if (!ADMIN_JWT_SECRET) return false;
+  const token = req.cookies.get('admin_token')?.value;
+  if (!token) return false;
+  try {
+    const { payload } = await jwtVerify(token, ADMIN_JWT_SECRET);
+    return payload.role === 'admin';
+  } catch {
+    return false;
+  }
 }
 
 export async function issueAdminToken(): Promise<string> {
-    return new SignJWT({ role: 'admin' })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setIssuedAt()
-        .setExpirationTime('12h')
-        .sign(ADMIN_JWT_SECRET);
+  return new SignJWT({ role: 'admin' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('12h')
+    .sign(requireJwtSecret('ADMIN_JWT_SECRET'));
 }

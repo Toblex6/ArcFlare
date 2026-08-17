@@ -10,10 +10,9 @@ import { jwtVerify } from 'jose';
 import { isAddress, parseUnits } from 'viem';
 import { createContractTransaction, getWalletBalance } from '@/src/lib/circle/client';
 import { erc20TransferAbi, USDC_CONTRACT, USDC_DECIMALS } from '@/src/lib/wallet/erc20';
+import { tryJwtSecret } from "@/src/lib/auth/secrets";
 
-const JWT_SECRET = new TextEncoder().encode(
-    process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
-);
+const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
 export async function POST(req: NextRequest) {
     try {
@@ -21,7 +20,7 @@ export async function POST(req: NextRequest) {
         if (!allowed) return limitResponse;
 
         const token = req.cookies.get('merchant_token')?.value;
-        if (!token) {
+        if (!token || !JWT_SECRET) {
             return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
         }
 

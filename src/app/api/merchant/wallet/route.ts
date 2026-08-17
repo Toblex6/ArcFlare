@@ -5,14 +5,13 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { jwtVerify } from 'jose';
 import { isAddress } from 'viem';
 import { createAccountWallet } from '@/src/lib/circle/client';
+import { tryJwtSecret } from '@/src/lib/auth/secrets';
 
-const JWT_SECRET = new TextEncoder().encode(
-    process.env.MERCHANT_JWT_SECRET || 'flarehq-merchant-secret-change-on-mainnet'
-);
+const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
 async function getMerchantFromCookie(req: NextRequest) {
     const token = req.cookies.get('merchant_token')?.value;
-    if (!token) return null;
+    if (!token || !JWT_SECRET) return null;
     const { payload } = await jwtVerify(token, JWT_SECRET);
     const merchantId = payload.merchantId as string;
     return prisma.merchant.findUnique({ where: { id: merchantId } });

@@ -4,6 +4,8 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { useSignMessage } from "wagmi";
+import type { Address } from "viem";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain";
 
@@ -33,6 +35,7 @@ interface ChainOption {
 
 export default function ConsumerApp() {
   const router = useRouter();
+  const { signMessageAsync } = useSignMessage();
   const [view, setView] = useState<View>("home");
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
@@ -135,17 +138,37 @@ export default function ConsumerApp() {
     setOnboardingError(null);
     setCreatingWallet(true);
     try {
+      // 1. Get a challenge from the server (nonce cookie + SIWE-style
+      // message). The challenge is bound to the address being claimed, so
+      // a signature for one address can't be replayed against another.
+      const challengeRes = await fetch(`/api/consumer/session?nonce=1&address=${trimmed}`);
+      const challengeData = await challengeRes.json();
+      if (!challengeData.success || !challengeData.message) {
+        throw new Error(challengeData.error || "Could not start wallet connection.");
+      }
+
+      // 2. Ask the user's wallet (MetaMask etc.) to sign the challenge
+      // message from the address they typed. If they don't control that
+      // address, the wallet refuses — nothing is sent to the server.
+      const signature = await signMessageAsync({
+        message: challengeData.message,
+        account: trimmed as Address,
+      });
+
+      // 3. Exchange signature → session cookie.
       const res = await fetch("/api/consumer/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: trimmed }),
+        body: JSON.stringify({ walletAddress: trimmed, message: challengeData.message, signature }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
       setWalletAddress(data.account.walletAddress);
       setView("home");
     } catch (e: any) {
-      setOnboardingError(e.message);
+      const message =
+        e?.shortMessage || (e?.message?.includes("User rejected") ? "Signature was cancelled." : e?.message);
+      setOnboardingError(message || "Could not connect that wallet.");
     } finally {
       setCreatingWallet(false);
     }

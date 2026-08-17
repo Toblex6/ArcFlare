@@ -1,15 +1,15 @@
 // src/lib/middleware/withApiKey.ts
+// Internal-service-key gate: the x-api-key (header or query param) must
+// match an ACTIVE row in the ApiKey table. There is no method-level bypass —
+// GET is gated exactly like every other verb, so protected read endpoints
+// are not silently public.
+
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export function withApiKey(handler: (req: NextRequest) => Promise<NextResponse>) {
   return async (req: NextRequest): Promise<NextResponse> => {
     try {
-      // Allow GET requests to bypass API key check (e.g., public endpoints)
-      if (req.method === "GET") {
-        return await handler(req);
-      }
-
       // Extract API key from header or query param
       const nextUrl = new URL(req.url);
       const apiKey = req.headers.get("x-api-key") ?? nextUrl.searchParams.get("apiKey");
@@ -21,14 +21,14 @@ export function withApiKey(handler: (req: NextRequest) => Promise<NextResponse>)
         );
       }
 
-      // Validate API key in database
+      // Validate API key in database — inactive/deactivated keys must not authenticate
       const apiKeyRecord = await (prisma as any).apiKey.findUnique({
         where: { key: apiKey },
       });
 
-      if (!apiKeyRecord) {
+      if (!apiKeyRecord || !apiKeyRecord.active) {
         return NextResponse.json(
-          { success: false, error: "Invalid API key." },
+          { success: false, error: "Invalid or deactivated API key." },
           { status: 403 }
         );
       }

@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
 // ── POST /api/payments/scheduled — create a new recurring payment ────────────
 async function createScheduledHandler(request: Request) {
@@ -29,6 +30,21 @@ async function createScheduledHandler(request: Request) {
           error: 'payerSCA, receiverSCA, amount and intervalDays are required.',
         },
         { status: 400 }
+      );
+    }
+
+    // ── SECURITY: the recurring debit comes FROM payerSCA's wallet, so
+    // the caller must control it. Without this, any authenticated caller
+    // could schedule debits against any victim wallet (or the shared
+    // default wallet via the null-wallet fallback).
+    const controlsPayer = await verifyCallerControlsAddress(request as any, payerSCA);
+    if (!controlsPayer) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'You do not control the payer wallet (payerSCA) this schedule would debit.',
+        },
+        { status: 403 }
       );
     }
 
@@ -99,19 +115,32 @@ async function listScheduledHandler(request: Request) {
     const payerSCA = searchParams.get('payerSCA');
     const status = searchParams.get('status');
 
-    const where: any = {};
-    if (payerSCA) where.payerSCA = payerSCA;
-    if (status) where.status = status;
+    // ── SECURITY: scope the listing to schedules the caller controls.
+    // Without this, any authenticated caller (API key, cookie, consumer
+    // session) can read everyone's recurring payment schedules.
+    const controlled = await verifyCallerControlsAddress(request as any, payerSCA || '0x0');
+    const controlledSet = controlled
+      ? new Set([controlled.walletAddress.toLowerCase()])
+      : new Set<string>();
 
     const schedules = await (prisma as any).scheduledPayment.findMany({
-      where,
+      where: {
+        ...(status ? { status } : {}),
+        ...(payerSCA && !controlled ? { payerSCA: '___none___' } : {}),
+      },
       orderBy: { nextRunAt: 'asc' },
+    });
+
+    const filtered = schedules.filter((s: any) => {
+      if (!s.payerSCA) return false;
+      if (payerSCA) return s.payerSCA.toLowerCase() === payerSCA.toLowerCase();
+      return controlledSet.has(s.payerSCA.toLowerCase());
     });
 
     return NextResponse.json({
       success: true,
-      count: schedules.length,
-      scheduledPayments: schedules,
+      count: filtered.length,
+      scheduledPayments: filtered,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -129,6 +158,28 @@ async function cancelScheduledHandler(request: Request) {
       return NextResponse.json(
         { success: false, error: 'reference is required.' },
         { status: 400 }
+      );
+    }
+
+    const existing = await (prisma as any).scheduledPayment.findUnique({
+      where: { reference },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, error: 'Scheduled payment not found.' },
+        { status: 404 }
+      );
+    }
+
+    // ── SECURITY: only the controller of the payer wallet may cancel it.
+    const controlsPayer = await verifyCallerControlsAddress(request as any, existing.payerSCA);
+    if (!controlsPayer) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'You do not control the payer wallet of this scheduled payment.',
+        },
+        { status: 403 }
       );
     }
 
