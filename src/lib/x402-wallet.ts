@@ -93,3 +93,18 @@ export async function getBuyerWalletAddress(merchantId: string): Promise<string 
     });
     return wallet?.address ?? null;
 }
+
+/**
+ * Read-only private-key accessor. Unlike getOrCreateBuyerWallet, this NEVER
+ * provisions a new wallet — it returns null when the merchant has none.
+ * Use it when the key MUST match an already-existing on-chain address
+ * (e.g. signing rejectSubmission as the job poster), where auto-creating a
+ * fresh wallet would silently produce a key for the WRONG address.
+ * The returned key is decrypted and must never be logged or serialized.
+ */
+export async function getBuyerWalletPrivateKey(merchantId: string): Promise<`0x${string}` | null> {
+    const existing = await (prisma as any).x402EoaWallet.findUnique({ where: { merchantId } });
+    if (!existing) return null;
+    const privateKey = decrypt(existing.encryptedKey, existing.keyIv, existing.keyAuthTag) as `0x${string}`;
+    return privateKey;
+}

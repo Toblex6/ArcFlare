@@ -7,8 +7,9 @@
 
 import { createContractTransaction } from "@/lib/circle/client";
 import { WalletProvider, WalletExecutionResult, ContractCallParams, Eip712TypedDataPayload } from "./provider";
+import { getUsdcAddress } from "@/lib/tokens/supportedTokens";
 
-const USDC_CONTRACT = "0x3600000000000000000000000000000000000000"; // Arc Testnet USDC — confirmed constant
+const USDC_CONTRACT = getUsdcAddress(); // Arc Testnet USDC (ERC-20 interface) — centralized in supportedTokens.ts
 
 export class CircleWalletProvider implements WalletProvider {
   readonly kind = "CIRCLE";

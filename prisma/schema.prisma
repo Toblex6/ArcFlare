@@ -228,6 +228,28 @@ model Job {
   agent       Agent    @relation(fields: [agentId], references: [id])
 }
 
+model JobNanopaymentStream {
+  id               String   @id @default(cuid())
+  jobId            String   @unique
+  streamId         String
+  workerAddress    String
+  totalBudget      String
+  trancheCount     Int
+  tranchesReleased Int      @default(0)
+  closedAt         DateTime?
+  createdAt        DateTime @default(now())
+}
+
+model JobNanopaymentTranche {
+  id               String   @id @default(cuid())
+  jobId            String
+  requirementIndex Int
+  txHash           String
+  createdAt        DateTime @default(now())
+
+  @@unique([jobId, requirementIndex])
+}
+
 model Erc8183Job {
   id              String   @id @default(uuid())
   jobId           BigInt   @unique

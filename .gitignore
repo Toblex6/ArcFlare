@@ -45,6 +45,9 @@ yarn-error.log*
 
 # Generated Prisma Client
 /src/generated/client
+# Hardhat build artifacts
+/artifacts/
+/cache/
 # Sentry Config File
 .env.sentry-build-plugin
 dev.db
