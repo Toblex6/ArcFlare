@@ -24,6 +24,33 @@ const MERCHANT_KEY = process.env.RELAYER_PRIVATE_KEY || '';
 const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
 
 const provider = new ethers.JsonRpcProvider(RPC);
+
+// RPC resilience: Arc testnet providers intermittently reset node TLS
+// connections (ECONNRESET / bad record MAC) and QuickNode free tier returns
+// -32011 "request limit reached". Retry transient errors with backoff at the
+// transport level so the whole suite (every eth_call/eth_getBalance) benefits.
+{
+  const origSend = provider.send.bind(provider);
+  provider.send = async (method, params) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await origSend(method, params);
+      } catch (e) {
+        const msg = String(e?.message ?? e);
+        const infoCode = String(e?.info?.error?.code ?? e?.error?.code ?? '');
+        const retriable =
+          msg.includes('limit reached') || msg.includes('ECONNRESET') ||
+          msg.includes('TIMEOUT') || msg.includes('bad record mac') ||
+          msg.includes('request timeout') || msg.includes('connection') ||
+          msg.includes('socket') || infoCode.includes('-32011') ||
+          infoCode.includes('-32005') || infoCode.includes('429');
+        if (!retriable || attempt >= 6) throw e;
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+      }
+    }
+  };
+}
+
 const merchant = new ethers.Wallet(MERCHANT_KEY, provider);
 const MERCHANT_ADDR = merchant.address;
 
@@ -156,10 +183,12 @@ async function main() {
   const eoaBalAfterFund = await balAt(MERCHANT_ADDR, afterBlock);
   const fundDebit = Number(eoaBalBefore - eoaBalAfterFund) / 1e6;
   const fundFee = fundDebit - Number(total) / 1e6;
-  // Arc testnet USDC (FiatTokenProxy 0x3600..) charges per-interaction fees:
-  // flat ~0.001553 on EOA->EOA transfers, ~0.0012 on approve, plus an extra
-  // ~12% on transfers INTO contract addresses. So the EOA debit > total.
-  ok('EOA debited total + token fees (debit-total in 0.015..0.025)', fundFee > 0.015 && fundFee < 0.025, `debit ${fundDebit.toFixed(4)} (total ${Number(total)/1e6}, fee ${fundFee.toFixed(4)})`);
+  // Arc testnet USDC charges per-target fees (rate varies by target address
+  // and schedule — measured 2026-08-18: EOA->EOA flat 0.001028, EOA->contract
+  // 0.0022..0.0044 for the swap pool but ~12% for this payroll contract).
+  // Do NOT assert a fee band here — the real invariant is checked next line
+  // (escrow holds the EXACT total regardless of what the EOA was debited).
+  ok('EOA debited total + token fees (any non-negative fee)', fundFee >= 0, `debit ${fundDebit.toFixed(4)} (total ${Number(total)/1e6}, fee ${fundFee.toFixed(4)})`);
   console.log(`  [fee-obs] fund-tx fee: ${fundFee.toFixed(4)} (approve+transfer+contract-bound)`);
   ok('contract escrow holds total', (await balAt(PAYROLL, afterBlock)) === contractBalBefore + total);
 
@@ -250,8 +279,10 @@ async function main() {
   const cancelTx = await payroll.cancelBatch(batchIdC);
   const cancelReceipt = await cancelTx.wait();
   const refundDelta = Number((await balAt(MERCHANT_ADDR, cancelReceipt.blockNumber)) - eoaBalJustBeforeCancel) / 1e6;
-  // Refund lands but the token eats an inbound fee (~0.0014 for 0.003):
-  ok('merchant received refund (0.001..0.0031, inbound fee eaten)', refundDelta > 0.001 && refundDelta < 0.0031, `credit ${refundDelta.toFixed(4)}`);
+  // The token eats an inbound fee on the credit (rate varies — measured
+  // 0.0014 for 0.003). Do NOT assert a band; the exact invariant is the
+  // escrow-empty check below, this just confirms the merchant got credit.
+  ok('merchant received refund (any positive credit)', refundDelta > 0, `credit ${refundDelta.toFixed(4)}`);
   console.log(`  [fee-obs] cancel-refund credit: ${refundDelta.toFixed(4)} (tx ${cancelReceipt.hash.slice(0,12)}, event amount 0.003)`);
   ok('escrow empty after cancel', (await usdc.balanceOf(PAYROLL)) === contractBalBefore);
   const cancelled = await payroll.batches(batchIdC);

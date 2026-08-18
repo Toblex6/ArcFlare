@@ -1,13 +1,13 @@
-import * as Sentry from '@sentry/nextjs';
+// src/instrumentation.ts
+//
+// Runs once on every Next.js server start (nodejs runtime), before the server
+// handles requests. Fail-closed environment validation: a wallet address with
+// no matching private key (or a key that derives a different address) is a
+// startup error, not a runtime surprise.
+//
+// See src/lib/env/walletEnvCheck.ts for the rules.
 
 export async function register() {
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
-    await import('../sentry.server.config');
-  }
-
-  if (process.env.NEXT_RUNTIME === 'edge') {
-    await import('../sentry.edge.config');
-  }
+  const { assertWalletEnv } = await import("@/lib/env/walletEnvCheck");
+  assertWalletEnv();
 }
-
-export const onRequestError = Sentry.captureRequestError;

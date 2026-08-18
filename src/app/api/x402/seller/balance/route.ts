@@ -39,10 +39,10 @@ async function getWalletUsdcBalance(address: `0x${string}`): Promise<string> {
 
 async function getBalanceHandler(request: Request) {
   const { searchParams } = new URL(request.url);
-  const address = searchParams.get("sellerAddress") || process.env.SELLER_ADDRESS || process.env.SELLER_WALLET_ADDRESS;
+  const address = searchParams.get("sellerAddress") || process.env.SELLER_ADDRESS;
 
   if (!address) {
-    return NextResponse.json({ error: "sellerAddress not provided and SELLER_WALLET_ADDRESS not configured" }, { status: 500 });
+    return NextResponse.json({ error: "sellerAddress not provided and SELLER_ADDRESS not configured" }, { status: 500 });
   }
 
   const sellerAddress = address as `0x${string}`;

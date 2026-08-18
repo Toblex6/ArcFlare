@@ -30,9 +30,9 @@ import { prisma } from "@/lib/prisma";
 // The seller that x402 settlements are paid to (payTo). MUST be the address
 // whose private key we hold (SELLER_PRIVATE_KEY / the withdraw path) —
 // otherwise settlements land in an unreachable gateway wallet. The key-owned
-// pair is SELLER_ADDRESS + SELLER_PRIVATE_KEY; SELLER_WALLET_ADDRESS is kept
-// as a fallback for environments that only define the old variable.
-export const sellerAddress = (process.env.SELLER_ADDRESS ?? process.env.SELLER_WALLET_ADDRESS) as `0x${string}`;
+// pair is SELLER_ADDRESS + SELLER_PRIVATE_KEY; the startup env validation
+// (src/lib/env/walletEnvCheck.ts) rejects a signer address without a key.
+export const sellerAddress = process.env.SELLER_ADDRESS as `0x${string}`;
 
 const facilitator = new BatchFacilitatorClient({
   url: "https://gateway-api-testnet.circle.com",

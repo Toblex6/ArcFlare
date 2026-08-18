@@ -80,11 +80,12 @@ async function main() {
 
     const buyerBalBefore = Number(await erc20.balanceOf(buyerAddress)) / 1e6;
     if (buyerBalBefore < 0.3) {
-      // fund the fresh buyer EOA from the relayer (fee token: EOA→EOA flat ~0.001553)
+      // fund the fresh buyer EOA from the relayer (fee token: EOA→EOA flat
+      // 0.001028 measured 2026-08-18 — rate not asserted anywhere)
       const topUp = ethers.parseUnits('0.6', 6);
       const tx = await erc20.transfer(buyerAddress, topUp);
       await tx.wait();
-      console.log(`  funded buyer EOA +0.6 USDC (tx ${tx.hash.slice(0, 12)}, flat fee ~0.0016)`);
+      console.log(`  funded buyer EOA +0.6 USDC (tx ${tx.hash.slice(0, 12)}, flat fee ~0.0010)`);
     } else {
       console.log(`  buyer EOA already funded (${buyerBalBefore.toFixed(4)} USDC)`);
     }

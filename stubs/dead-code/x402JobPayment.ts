@@ -1,5 +1,23 @@
 /**
- * x402JobPayment.ts
+ * x402JobPayment.ts — ⚠️ DEAD CODE — STALE SHAPE, DO NOT REVIVE AS-IS.
+ *
+ * This file predates the current x402 middleware and was never wired to a
+ * route. It is kept only for reference. Specifically STALE (all three would
+ * fail to compile today):
+ *   - `withGateway({ payerAddress, tokenAddress, amount, memo })` (line 106):
+ *     the options-object shape no longer exists. Current withGateway() is a
+ *     route wrapper: withGateway(handler, price, endpoint) returning
+ *     NextResponse (src/lib/x402.ts:123). Live settlement primitives are
+ *     paymentRequiredResponse / verifyPayment / settlePayment.
+ *   - `@/lib/auth/verifyCallerControlsAddress` import: the live module is
+ *     @/lib/wallet/verifyCallerControlsAddress with a different signature.
+ *   - checkSpendAllowed/recordSpend: live signatures are positional
+ *     (agentAddress, amount) — the object form here no longer exists.
+ * Jobs today settle via their OWN direct Circle/contract ERC-8183 flow
+ * (see docs/settlement-architecture.md) — not via x402. Do not reintroduce
+ * this file's shape anywhere.
+ *
+ * (Original header preserved below for context.)
  *
  * Wraps job funding and release as x402-negotiated payments, using your
  * EXISTING withGateway() from src/lib/x402.ts. This file does not modify

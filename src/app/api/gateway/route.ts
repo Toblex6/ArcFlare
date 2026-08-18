@@ -14,7 +14,7 @@ const ARC_TESTNET_CHAIN = 'ARC-TESTNET';
 async function getBalanceHandler(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const sellerAddress = searchParams.get('sellerAddress') || process.env.SELLER_ADDRESS || process.env.SELLER_WALLET_ADDRESS;
+    const sellerAddress = searchParams.get('sellerAddress') || process.env.SELLER_ADDRESS;
 
     if (!sellerAddress) {
       return NextResponse.json(
@@ -54,7 +54,7 @@ async function withdrawHandler(request: Request) {
   try {
     const { sellerAddress, payoutAddress, amount } = await request.json();
 
-    const resolvedSeller = sellerAddress || process.env.SELLER_ADDRESS || process.env.SELLER_WALLET_ADDRESS;
+    const resolvedSeller = sellerAddress || process.env.SELLER_ADDRESS;
     const resolvedPayout = payoutAddress || process.env.PAYOUT_WALLET_ADDRESS;
 
     if (!resolvedSeller || !resolvedPayout || !amount) {
@@ -62,7 +62,7 @@ async function withdrawHandler(request: Request) {
         {
           success: false,
           error:
-            'sellerAddress, payoutAddress and amount are required (or set SELLER_WALLET_ADDRESS / PAYOUT_WALLET_ADDRESS env vars).',
+            'sellerAddress, payoutAddress and amount are required (or set SELLER_ADDRESS / PAYOUT_WALLET_ADDRESS env vars).',
         },
         { status: 400 }
       );

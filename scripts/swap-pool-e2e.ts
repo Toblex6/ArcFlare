@@ -5,8 +5,10 @@
 //   addLiquidity -> removeLiquidity round-trip.
 //
 // Measures USDC/EURC transfer-fee behavior on every hop (debit vs credit) —
-// Arc testnet USDC charges fees (flat EOA->EOA, ~12.3% extra into contract
-// addresses), EURC behavior is measured here for the first time.
+// Arc testnet USDC charges per-target fees (measured 2026-08-18: EOA→EOA flat
+// 0.001028; EOA→contract ~0.0022–0.0044; contract→EOA recipient short
+// ~0.0014–0.0022; EURC fee-free). Assertions use real balance deltas, never a
+// fee-rate assumption; getQuote() is left as exact constant-product math.
 //
 // Run:  npx tsx scripts/swap-pool-e2e.ts
 

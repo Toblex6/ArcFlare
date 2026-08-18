@@ -1,5 +1,22 @@
 /**
- * payrollExecution.ts
+ * payrollExecution.ts — ⚠️ DEAD CODE — STALE SHAPE, DO NOT REVIVE AS-IS.
+ *
+ * Superseded by the LIVE src/lib/payroll/payrollExecution.ts (re-wired
+ * 2026-08-18 against the current middleware). This copy is kept only for
+ * reference. Stale specifically:
+ *   - `withGateway({ payerAddress, tokenAddress, amount, memo })` (line 114):
+ *     the options-object shape no longer exists. Current withGateway() is a
+ *     route wrapper (handler, price, endpoint); the live payroll path uses
+ *     the shared primitives paymentRequiredResponse / verifyPayment /
+ *     settlePayment directly, adds the seller-gateway sweep, and returns a
+ *     NextResponse on every path. Do not reintroduce this shape.
+ *   - `@/lib/auth/verifyCallerControlsAddress` import no longer exists
+ *     (live: @/lib/wallet/verifyCallerControlsAddress).
+ *   - checkSpendAllowed/recordSpend object-form calls are stale (live
+ *     signatures are positional).
+ * The live route /api/payroll/fund is a thin wrapper over the live module.
+ *
+ * (Original header preserved below for context.)
  *
  * Backend wiring for ArcFlarePayroll.sol. Single-party flow (merchant pays
  * own team) — simpler than job escrow since there's no counterparty-trust
