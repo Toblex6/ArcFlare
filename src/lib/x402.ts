@@ -44,7 +44,7 @@ function sanitizeBigInts(obj: any): any {
   return obj;
 }
 
-function buildRequirements(price: string) {
+export function buildRequirements(price: string) {
   const amount = Math.round(parseFloat(price.replace("$", "")) * 1_000_000);
   return {
     scheme: "exact" as const,
@@ -59,6 +59,60 @@ function buildRequirements(price: string) {
       verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
     },
   };
+}
+
+// Shared 402-challenge response builder. withGateway and the payroll fund
+// route (which needs to interleave a spend-limit pre-flight between verify
+// and settle, so it can't use the middleware wholesale) must emit identical
+// challenge formats — the client-side GatewayClient parses this header.
+export function paymentRequiredResponse(endpoint: string, price: string): NextResponse {
+  const requirements = buildRequirements(price);
+  const paymentRequired = {
+    x402Version: 2,
+    resource: {
+      url: endpoint,
+      description: `Paid resource (${price} USDC)`,
+      mimeType: "application/json",
+    },
+    accepts: [requirements],
+  };
+  return new NextResponse(JSON.stringify({}), {
+    status: 402,
+    headers: {
+      "Content-Type": "application/json",
+      "PAYMENT-REQUIRED": Buffer.from(
+        JSON.stringify(sanitizeBigInts(paymentRequired))
+      ).toString("base64"),
+    },
+  });
+}
+
+// verify and settle as SEPARATE steps: verify is a pure view call (no funds
+// move), so callers like the payroll fund route can run a spend-limit
+// pre-flight between the two and reject cleanly BEFORE the agent's money
+// leaves its wallet. withGateway stays on the combined path.
+export async function verifyPayment(
+  paymentPayload: any,
+  price: string
+): Promise<{ isValid: boolean; invalidReason?: string; payer?: string }> {
+  const requirements = buildRequirements(price);
+  const verifyResult = await facilitator.verify(paymentPayload, requirements);
+  if (!verifyResult.isValid) {
+    return { isValid: false, invalidReason: verifyResult.invalidReason };
+  }
+  return { isValid: true, payer: verifyResult.payer ?? undefined };
+}
+
+export async function settlePayment(
+  paymentPayload: any,
+  price: string
+): Promise<{ settled: boolean; transaction?: string; errorReason?: string }> {
+  const requirements = buildRequirements(price);
+  const settleResult = await facilitator.settle(paymentPayload, requirements);
+  if (!settleResult.success) {
+    return { settled: false, errorReason: settleResult.errorReason };
+  }
+  return { settled: true, transaction: settleResult.transaction };
 }
 
 export function withGateway(
@@ -80,24 +134,7 @@ export function withGateway(
     // ── No payment — return 402 ────────────────────────────────────────────
     if (!paymentSignatureHeader) {
       console.log(`[x402] 402 required: ${endpoint} (${price})`);
-      const paymentRequired = {
-        x402Version: 2,
-        resource: {
-          url: endpoint,
-          description: `Paid resource (${price} USDC)`,
-          mimeType: "application/json",
-        },
-        accepts: [requirements],
-      };
-      return new NextResponse(JSON.stringify({}), {
-        status: 402,
-        headers: {
-          "Content-Type": "application/json",
-          "PAYMENT-REQUIRED": Buffer.from(
-            JSON.stringify(sanitizeBigInts(paymentRequired))
-          ).toString("base64"),
-        },
-      });
+      return paymentRequiredResponse(endpoint, price);
     }
 
     // ── Payment present — decode, verify, settle ──────────────────────────

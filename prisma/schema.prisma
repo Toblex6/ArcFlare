@@ -495,3 +495,24 @@ model DisputeAnalysis {
   @@index([reference])
   @@index([reference, version])
 }
+
+// A settle-then-reject event: x402 settlement succeeded (money moved to the
+// relayer) but the on-chain spend-limit record (checkAndRecordSpend) reverted
+// because a concurrent spend pushed the agent over cap in the race window.
+// Durable audit trail + auto-refund tracking — see src/lib/jobs/settlementRecovery.ts.
+model StuckSettlement {
+  id               String   @id @default(cuid())
+  agentAddress     String
+  amount           String
+  jobCriteriaId    String
+  gatewayRef       String
+  settlementTxHash String
+  failureReason    String
+  status           String   @default("PENDING_REFUND") // PENDING_REFUND | REFUNDED | REFUND_FAILED | PENDING_REVIEW
+  refundTxHash     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([agentAddress, status])
+  @@index([status])
+}
