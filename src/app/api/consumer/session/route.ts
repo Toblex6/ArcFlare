@@ -18,11 +18,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { SignJWT, jwtVerify } from 'jose';
+import { jwtVerify } from 'jose';
 import { isAddress, verifyMessage } from 'viem';
 import { randomBytes } from 'crypto';
 import { createAccountWallet } from '@/src/lib/circle/client';
 import { requireJwtSecret, tryJwtSecret } from '@/src/lib/auth/secrets';
+import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
 
 const NONCE_COOKIE = 'consumer_connect_nonce';
 
@@ -42,15 +43,7 @@ function buildChallengeMessage(domain: string, address: string, nonce: string): 
 }
 
 async function issueSession(account: { id: string; walletAddress: string }) {
-  const JWT_SECRET = requireJwtSecret('CONSUMER_JWT_SECRET');
-  const token = await new SignJWT({
-    consumerId: account.id,
-    walletAddress: account.walletAddress,
-  })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('30d')
-    .sign(JWT_SECRET);
+  const token = await issueConsumerSessionToken(account.id, account.walletAddress);
 
   const response = NextResponse.json({
     success: true,

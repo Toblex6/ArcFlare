@@ -213,8 +213,20 @@ model ConsumerAccount {
   circleWalletId String?
   walletSetId    String?   // needed to provision this same SCA address on additional chains (e.g. for bridging)
   email          String?   @unique // optional — recovery/notifications only, never required
+  telegramUserId String?   @unique // Telegram bot identity (Telegram users are consumer_token accounts)
+  onboardingSource String? // "telegram" | "web" | etc — how this account was created
   createdAt      DateTime  @default(now())
   lastSeenAt     DateTime  @default(now())
+}
+
+model TelegramWithdrawalIntent {
+  id                 String   @id @default(cuid())
+  telegramUserId     String   @unique
+  destinationAddress String
+  amount             String   @default("ALL") // decimal USDC string, or "ALL" = full balance
+  createdAt          DateTime @default(now())
+
+  @@map("telegram_withdrawal_intents")
 }
 
 model Job {

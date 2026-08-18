@@ -1,5 +1,9 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Database migrations
+
+Prisma Migrate is the source of truth for the schema (see `prisma/migrations/`). The build step runs `prisma migrate deploy` (via `npm run build`) — never `prisma db push` on deployed environments. For local schema changes: `prisma migrate dev --name <change>`, commit the generated migration, and deploys apply it idempotently.
+
 ## Getting Started
 
 First, run the development server:

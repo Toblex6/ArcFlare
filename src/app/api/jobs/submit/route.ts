@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, createContractTransaction } from '@/lib/circle/client';
 import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
-import { withApiKeyOrMerchant } from '@/lib/middleware/withMerchantAuth';
+import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { keccak256, toHex } from 'viem';
 
@@ -60,4 +60,4 @@ async function submitJobHandler(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-export const POST = withApiKeyOrMerchant(submitJobHandler);
+export const POST = withApiKeyOrAnySession(submitJobHandler);
