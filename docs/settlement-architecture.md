@@ -62,6 +62,19 @@ shared primitives `paymentRequiredResponse` / `verifyPayment` / `settlePayment`
   (`createContractTransaction` approve + fund), signed via Circle's contract
   API. No x402, no withGateway. The dead-code `stubs/dead-code/x402JobPayment.ts`
   proposal (jobs via x402) was never wired.
+- **Agent-to-agent payments** (`/api/agents/[id]/pay`, 2026-08-18): direct
+  on-chain settlement, Jobs-pattern boundary — structured A2A payment with
+  on-chain state. The payer agent's per-agent x402 payment EOA
+  (`X402EoaWallet.agentRegistryId`, key AES-256-GCM at rest) does a NATIVE
+  USDC value-send to the recipient address — measured fee-free (cost =
+  amount + gas only), so the transfer mechanism carries no fee-rate
+  assumption. Spend-limit (ArcFlareSpendLimit via `spendLimitEnforcer`)
+  pre-flights and records BEFORE the transfer (A2A is irreversible — the
+  cap can never be exceeded by the route), then the recipient's real
+  on-chain credit delta is verified at the receipt block and the PaymentLog
+  row carries the actual `arcTxHash`. Not x402: no 402 challenge, no Gateway
+  batch, no seller sweep — `gatewayReference` holds the spend-record tx
+  instead.
 
 ## 3. x402 is an adapter/protocol layer, not a ledger
 

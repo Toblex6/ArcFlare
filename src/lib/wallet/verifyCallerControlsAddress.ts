@@ -59,14 +59,26 @@ export async function verifyCallerControlsAddress(
     // carry the owning merchantId). This is what lets a merchant operate
     // their own agents' wallets without holding a service key, while an
     // unrelated merchant's agent stays out of reach.
-    const ownedAgent = await (prisma as any).agentRegistry.findFirst({
-      where: {
-        merchantId: merchant.id,
-        scaAddress: { equals: claimedAddress, mode: "insensitive" },
-      },
+    const ownedAgents = await (prisma as any).agentRegistry.findMany({
+      where: { merchantId: merchant.id },
     });
+    const ownedAgent = ownedAgents.find(
+      (a: any) => a.scaAddress?.toLowerCase() === normalized
+    );
     if (ownedAgent) {
       return { type: "merchant", id: merchant.id, walletAddress: ownedAgent.scaAddress };
+    }
+    // And a merchant controls its agents' payment EOAs (x402_eoa_wallets
+    // rows keyed by agentRegistryId — the wallets agent-to-agent payments
+    // are signed from, same trust boundary as the buyer EOA above).
+    const agentPaymentEoa = await (prisma as any).x402EoaWallet.findFirst({
+      where: {
+        agentRegistryId: { in: ownedAgents.map((a: any) => a.id) },
+        address: { equals: claimedAddress, mode: "insensitive" },
+      },
+    });
+    if (agentPaymentEoa) {
+      return { type: "merchant", id: merchant.id, walletAddress: agentPaymentEoa.address };
     }
   }
 

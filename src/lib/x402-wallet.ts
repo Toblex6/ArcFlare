@@ -108,3 +108,56 @@ export async function getBuyerWalletPrivateKey(merchantId: string): Promise<`0x$
     const privateKey = decrypt(existing.encryptedKey, existing.keyIv, existing.keyAuthTag) as `0x${string}`;
     return privateKey;
 }
+
+// ── agent payment wallets ────────────────────────────────────────────────
+//
+// Same pattern as the per-merchant buyer wallets above, keyed by
+// AgentRegistry.id instead of merchantId. Each agent gets exactly one EOA
+// from which it pays (agent-to-agent payments, spend-limit enforced). The
+// key is encrypted at rest with the same X402_WALLET_ENCRYPTION_KEY.
+
+/** Returns the agent's payment EOA, creating one if it doesn't exist yet. */
+export async function getOrCreateAgentWallet(
+    agentRegistryId: number
+): Promise<{ address: string; privateKey: `0x${string}` }> {
+    const existing = await (prisma as any).x402EoaWallet.findUnique({ where: { agentRegistryId } });
+
+    if (existing) {
+        const privateKey = decrypt(existing.encryptedKey, existing.keyIv, existing.keyAuthTag) as `0x${string}`;
+        return { address: existing.address, privateKey };
+    }
+
+    const privateKey = generatePrivateKey();
+    const account = privateKeyToAccount(privateKey);
+    const { ciphertext, iv, authTag } = encrypt(privateKey);
+
+    await (prisma as any).x402EoaWallet.create({
+        data: {
+            address: account.address,
+            encryptedKey: ciphertext,
+            keyIv: iv,
+            keyAuthTag: authTag,
+            agentRegistryId,
+            label: `Agent payment EOA (registry id ${agentRegistryId})`,
+        },
+    });
+
+    return { address: account.address, privateKey };
+}
+
+/** Address only — safe for API responses, never decrypts the key. */
+export async function getAgentWalletAddress(agentRegistryId: number): Promise<string | null> {
+    const wallet = await (prisma as any).x402EoaWallet.findUnique({
+        where: { agentRegistryId },
+        select: { address: true },
+    });
+    return wallet?.address ?? null;
+}
+
+/** Read-only key accessor; returns null when the agent has no wallet yet. */
+export async function getAgentWalletPrivateKey(agentRegistryId: number): Promise<`0x${string}` | null> {
+    const existing = await (prisma as any).x402EoaWallet.findUnique({ where: { agentRegistryId } });
+    if (!existing) return null;
+    const privateKey = decrypt(existing.encryptedKey, existing.keyIv, existing.keyAuthTag) as `0x${string}`;
+    return privateKey;
+}

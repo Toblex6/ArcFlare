@@ -390,14 +390,15 @@ model PayrollBatch {
 }
 
 model X402EoaWallet {
-  id           String   @id @default(uuid())
-  address      String   @unique
-  encryptedKey String   // AES-256-GCM ciphertext (was plaintext "privateKey" — never shipped that way)
-  keyIv        String   // GCM initialization vector, base64
-  keyAuthTag   String   // GCM auth tag, base64
-  merchantId   String?  @unique // one wallet per merchant for now; null only for pre-migration rows
-  label        String?
-  createdAt    DateTime @default(now())
+  id              String   @id @default(uuid())
+  address         String   @unique
+  encryptedKey    String   // AES-256-GCM ciphertext (was plaintext "privateKey" — never shipped that way)
+  keyIv           String   // GCM initialization vector, base64
+  keyAuthTag      String   // GCM auth tag, base64
+  merchantId      String?  @unique // one wallet per merchant for now; null only for pre-migration rows
+  agentRegistryId Int?     @unique // one wallet per agent (agent payments); mutually exclusive with merchantId
+  label           String?
+  createdAt       DateTime @default(now())
 
   @@map("x402_eoa_wallets")
 }
