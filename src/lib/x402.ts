@@ -27,7 +27,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { prisma } from "@/lib/prisma";
 
-export const sellerAddress = process.env.SELLER_WALLET_ADDRESS as `0x${string}`;
+// The seller that x402 settlements are paid to (payTo). MUST be the address
+// whose private key we hold (SELLER_PRIVATE_KEY / the withdraw path) —
+// otherwise settlements land in an unreachable gateway wallet. The key-owned
+// pair is SELLER_ADDRESS + SELLER_PRIVATE_KEY; SELLER_WALLET_ADDRESS is kept
+// as a fallback for environments that only define the old variable.
+export const sellerAddress = (process.env.SELLER_ADDRESS ?? process.env.SELLER_WALLET_ADDRESS) as `0x${string}`;
 
 const facilitator = new BatchFacilitatorClient({
   url: "https://gateway-api-testnet.circle.com",

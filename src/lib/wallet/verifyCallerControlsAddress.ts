@@ -43,6 +43,18 @@ export async function verifyCallerControlsAddress(
     if (record?.walletAddress?.toLowerCase() === normalized) {
       return { type: "merchant", id: merchant.id, walletAddress: record.walletAddress };
     }
+    // A merchant also controls its auto-provisioned x402 buyer EOA (the
+    // wallet GatewayClient.pay() signs x402 payments from — the merchant's
+    // encrypted key is stored in x402_eoa_wallets). Without this, a merchant
+    // paying via its buyer EOA would fail caller-control on x402-settled
+    // routes (e.g. payroll funding).
+    const buyerWallet = await (prisma as any).x402EoaWallet.findUnique({
+      where: { merchantId: merchant.id },
+      select: { address: true },
+    });
+    if (buyerWallet?.address?.toLowerCase() === normalized) {
+      return { type: "merchant", id: merchant.id, walletAddress: buyerWallet.address };
+    }
     // A merchant also controls any agent they deployed (AgentRegistry rows
     // carry the owning merchantId). This is what lets a merchant operate
     // their own agents' wallets without holding a service key, while an

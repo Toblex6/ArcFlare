@@ -14,6 +14,7 @@
 
 import { Contract } from "ethers";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
+import { prisma } from "@/lib/prisma";
 
 const SPEND_LIMIT_CONTRACT_ADDRESS = process.env.SPEND_LIMIT_CONTRACT_ADDRESS ?? "";
 
@@ -62,4 +63,34 @@ export async function checkSpendAllowed(params: SpendCheckParams): Promise<Spend
   }
 
   return { allowed: true };
+}
+
+/**
+ * Backend bookkeeping AFTER a spend has succeeded on-chain. The on-chain
+ * total is already recorded by checkAndRecordSpend() — this writes a durable
+ * audit row (PaymentLog) so backend-side queries can see per-agent spend
+ * history. Mirrors the role of the dead-code recordSpend (task/counterparty
+ * ledgers) without the per-task schema: payroll is a single-funder flow with
+ * no taskId/counterparty, so only the on-chain cap layer and this audit row
+ * engage — exactly the approved Batch 4-5 design.
+ *
+ * Fire-and-forget: a failed audit row must never gate the payment outcome.
+ */
+export async function recordSpend(params: SpendCheckParams): Promise<void> {
+  const { agentAddress, amount } = params;
+  await prisma.paymentLog
+    .create({
+      data: {
+        reference: `spend_${agentAddress.toLowerCase()}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        amount: Number(amount) / 1e6,
+        currency: "USDC",
+        chain: "Arc Testnet x402",
+        senderEmail: agentAddress,
+        merchant: "payroll/x402-spend-record",
+        status: "SUCCESS",
+        arcTxHash: null,
+        gatewayReference: null,
+      },
+    })
+    .catch((e: any) => console.error("[spendLimitEnforcer] recordSpend row failed:", e.message));
 }
