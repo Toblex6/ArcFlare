@@ -94,19 +94,36 @@ export async function verifyCallerControlsAddress(
     }
   }
 
-  // Agent (identified by internal service ApiKey + an agentId the caller
-  // asserts — the ApiKey proves "you're a legitimate service caller," the
-  // AgentRegistry lookup proves "this SCA really belongs to that agent.")
+  // Agent (identified by internal service ApiKey — the ApiKey table holds
+  // SERVICE keys only; merchant keys live on the Merchant row and are
+  // resolved by resolveMerchant above, so this branch is only ever reached
+  // with an internal key).
+  //
+  // An API key does NOT grant control of an arbitrary AgentRegistry address.
+  // Control comes from an explicit authenticated owner/agent context tied to
+  // the merchant/agent relationship. The internal service key may therefore
+  // act as exactly ONE agent: the platform's own (AGENT_OWNER_WALLET_ADDRESS).
+  // Any other claimed address — a tenant's agent, a consumer wallet, a
+  // merchant's agent — returns null and the caller rejects the request.
+  // (Previously any active ApiKey could claim ANY AgentRegistry SCA, which
+  // let an LLM prompt schedule recurring debits or job execution against
+  // another tenant's agent wallet — the cross-tenant agent-control exploit.)
   const apiKey = req.headers.get("x-api-key");
   if (apiKey) {
     const keyRecord = await (prisma as any).apiKey.findUnique({ where: { key: apiKey } });
     // Deactivated keys must not impersonate agents.
     if (keyRecord && keyRecord.active) {
-      const agent = await (prisma as any).agentRegistry.findFirst({
-        where: { scaAddress: { equals: claimedAddress, mode: "insensitive" } },
-      });
-      if (agent) {
-        return { type: "agent", id: String(agent.id), walletAddress: agent.scaAddress };
+      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || "").toLowerCase();
+      if (platformAgent && normalized === platformAgent) {
+        const agent = await (prisma as any).agentRegistry.findFirst({
+          where: { scaAddress: { equals: claimedAddress, mode: "insensitive" } },
+        });
+        if (agent) {
+          return { type: "agent", id: String(agent.id), walletAddress: agent.scaAddress };
+        }
+        // The platform agent address with no registry row is still the
+        // internal key's own identity — the key IS its credential.
+        return { type: "agent", id: "platform", walletAddress: platformAgent };
       }
     }
   }

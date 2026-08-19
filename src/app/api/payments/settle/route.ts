@@ -19,7 +19,7 @@ const IRIS_API = 'https://iris-api-sandbox.circle.com/v2';
 const USDC_ARC = '0x3600000000000000000000000000000000000000';
 
 // SCA Defaults
-const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
+
 const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
 const DEFAULT_MERCHANT_SCA =
   process.env.MERCHANT_SCA_ADDRESS || '0x902C565bE31c146a79350387C1f77d6896814B58';
@@ -105,7 +105,126 @@ async function mergedSettleHandler(request: NextRequest) {
     const { reference, messageHash } = data;
     fallbackReference = reference;
 
-    // 3. Atomic Lock with Stale Lock Recovery (5 minutes) across ALL transient states
+    // ── 3. Load the row and authorize the caller BEFORE taking the lock ──────
+    // An unauthorized caller gets an early 403 and the row stays exactly as
+    // it was. (Previously the guard ran AFTER the atomic lock, so every
+    // rejected call parked the row in PROCESSING_ONCHAIN and burned its
+    // 5-minute stale-lock window — a rolling denial of settlement.)
+    const preflight = await prisma.paymentLog.findUnique({ where: { reference } });
+    if (!preflight) {
+      return NextResponse.json(
+        { success: false, error: 'Payment reference not found.' },
+        { status: 404 }
+      );
+    }
+
+    // ── SECURITY: unconditional payer-control guard ──────────────────────────
+    // withApiKeyOrAnySession (above) only proves "is this a valid credential,"
+    // never "does this credential own THIS payment." This guard runs for
+    // EVERY caller — internal service keys included:
+    //   - merchant: must own the row AND control its payer (their own payout
+    //     wallet or a registered agent). A merchant naming a stranger's
+    //     wallet as payer gets 403 — the "merchant names a victim as payer"
+    //     drain. A merchant settling their OWN row whose payer is not a real
+    //     0x address ('pending@checkout' link rows) also gets 403: those rows
+    //     are finalized only by the customer paying on-chain and
+    //     /api/payments/verify-onchain, never by settle debiting a shared
+    //     platform default wallet.
+    //   - consumer: must be the payer themselves (senderEmail == their wallet).
+    //   - internal service key (agent/brain): may only settle a payment whose
+    //     payer is the platform's own agent (AGENT_OWNER_WALLET_ADDRESS).
+    //     The public checkout trigger is gone (deleted 2026-08-19 — the
+    //     checkout UI settles from the customer's own wallet via
+    //     verify-onchain), so no unauthenticated call can name ANY payer and
+    //     debit DEFAULT_PAYER_WALLET_ID or any agent's custodial wallet.
+    const internalApiKey = request.headers.get('x-api-key');
+    const serviceKey = internalApiKey
+      ? await (prisma as any).apiKey.findUnique({ where: { key: internalApiKey } })
+      : null;
+    // Active check: a revoked key must not satisfy this branch (M5).
+    const isInternalServiceCall = !!(serviceKey && serviceKey.active);
+
+    const callerMerchant = isInternalServiceCall
+      ? null
+      : await resolveMerchant(request).catch(() => null);
+    const callerConsumerWallet = isInternalServiceCall
+      ? null
+      : await resolveConsumerSession(request).catch(() => null);
+
+    const merchantOwnsIt = callerMerchant && preflight.merchantId === callerMerchant.id;
+    const consumerOwnsIt =
+      callerConsumerWallet &&
+      preflight.senderEmail?.toLowerCase() === callerConsumerWallet.toLowerCase();
+
+    const payerIsAddress =
+      !!preflight.senderEmail?.startsWith('0x') &&
+      preflight.senderEmail.toLowerCase() !== 'pending@checkout';
+
+    let payerAuthorized = false;
+
+    if (isInternalServiceCall) {
+      // The internal key may only ever debit the platform's own agent wallet
+      // (agent/brain pays from AGENT_OWNER_WALLET_ADDRESS). Any other payer —
+      // a consumer wallet, a third-party agent SCA, or the platform-default
+      // fallback wallets — is rejected: none of them authorized the debit.
+      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || '').toLowerCase();
+      payerAuthorized =
+        !!platformAgent && payerIsAddress && preflight.senderEmail.toLowerCase() === platformAgent;
+    } else if (payerIsAddress) {
+      // Consumer: they ARE the payer — settling their own send is legitimate.
+      if (consumerOwnsIt) {
+        payerAuthorized = true;
+      } else if (callerMerchant && merchantOwnsIt) {
+        // Merchant: the payer must be their own payout wallet or one of
+        // their registered agents. Same rule as before, now structured so
+        // every caller class is held to it.
+        const merchantRecord = await (prisma as any).merchant.findUnique({
+          where: { id: callerMerchant.id },
+        });
+        const controlsPayer =
+          merchantRecord?.walletAddress?.toLowerCase() === preflight.senderEmail?.toLowerCase();
+        const ownsPayerAgent =
+          !controlsPayer &&
+          (await (prisma as any).agentRegistry.findFirst({
+            where: {
+              merchantId: callerMerchant.id,
+              scaAddress: { equals: preflight.senderEmail, mode: 'insensitive' },
+            },
+          }));
+        payerAuthorized = controlsPayer || !!ownsPayerAgent;
+      }
+    }
+    // NOTE: there is deliberately no branch for a merchant settling their own
+    // row whose payer is NOT a real address. 'pending@checkout' rows used to
+    // be settleable by the owning merchant, which let a self-registered
+    // merchant create a link row and settle it against the shared platform
+    // default-payer wallet (a drain: the audit's C1 escape hatch). No
+    // legitimate caller needed it — the real checkout path is customer-pays-
+    // onchain → verify-onchain, which marks rows SUCCESS without settle.
+
+    if (!payerAuthorized) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'You are not a party to this payment: its payer is a wallet you do not control.',
+        },
+        { status: 403 }
+      );
+    }
+
+    if (preflight.expiresAt && new Date() > preflight.expiresAt) {
+      await prisma.paymentLog.update({
+        where: { reference },
+        data: { status: 'EXPIRED' },
+      });
+      return NextResponse.json(
+        { success: false, error: 'Payment reference has expired.' },
+        { status: 400 }
+      );
+    }
+
+    // ── 4. Atomic Lock with Stale Lock Recovery (5 minutes) across ALL transient states
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const lock = await prisma.paymentLog.updateMany({
       where: {
@@ -146,122 +265,10 @@ async function mergedSettleHandler(request: NextRequest) {
       );
     }
 
-    // 4. Fetch Payment Data & Expiry Check
+    // 5. Fetch Payment Data (post-lock — the lock may have reclaimed a stale
+    // transient state, so re-read the authoritative row).
     const payment = await prisma.paymentLog.findUnique({ where: { reference } });
     if (!payment) throw new Error('Payment not found after lock');
-
-    // ── SECURITY: unconditional payer-control guard ──────────────────────────
-    // withApiKeyOrAnySession (above) only proves "is this a valid credential,"
-    // never "does this credential own THIS payment." This guard runs for
-    // EVERY caller — internal service keys included:
-    //   - merchant: must own the row AND control its payer (their own payout
-    //     wallet or a registered agent). A merchant naming a stranger's
-    //     wallet as payer gets 403 — the "merchant names a victim as payer"
-    //     drain.
-    //   - consumer: must be the payer themselves (senderEmail == their wallet).
-    //   - internal service key (/api/checkout/pay, agent/brain): may only
-    //     settle a payment whose payer is the platform's own agent
-    //     (AGENT_OWNER_WALLET_ADDRESS). The public checkout trigger cannot
-    //     name ANY payer — the checkout UI settles from the customer's own
-    //     wallet via verify-onchain, never from platform funds. The previous
-    //     code skipped this entire block for internal keys, letting an
-    //     unauthenticated /api/checkout/pay call settle any PENDING row and
-    //     debit DEFAULT_PAYER_WALLET_ID or any agent's custodial wallet.
-    const internalApiKey = request.headers.get('x-api-key');
-    const serviceKey = internalApiKey
-      ? await (prisma as any).apiKey.findUnique({ where: { key: internalApiKey } })
-      : null;
-    // Active check: a revoked key must not satisfy this branch (M5).
-    const isInternalServiceCall = !!(serviceKey && serviceKey.active);
-
-    const callerMerchant = isInternalServiceCall
-      ? null
-      : await resolveMerchant(request).catch(() => null);
-    const callerConsumerWallet = isInternalServiceCall
-      ? null
-      : await resolveConsumerSession(request).catch(() => null);
-
-    const merchantOwnsIt = callerMerchant && payment.merchantId === callerMerchant.id;
-    const consumerOwnsIt =
-      callerConsumerWallet &&
-      payment.senderEmail?.toLowerCase() === callerConsumerWallet.toLowerCase();
-
-    const payerIsAddress =
-      !!payment.senderEmail?.startsWith('0x') &&
-      payment.senderEmail.toLowerCase() !== 'pending@checkout';
-
-    let payerAuthorized = false;
-
-    if (isInternalServiceCall) {
-      // The internal key may only ever debit the platform's own agent wallet
-      // (agent/brain pays from AGENT_OWNER_WALLET_ADDRESS). Any other payer —
-      // a consumer wallet, a third-party agent SCA, or the platform-default
-      // fallback wallets — is rejected: none of them authorized the debit.
-      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || '').toLowerCase();
-      payerAuthorized =
-        !!platformAgent && payerIsAddress && payment.senderEmail.toLowerCase() === platformAgent;
-    } else if (payerIsAddress) {
-      // Consumer: they ARE the payer — settling their own send is legitimate.
-      if (consumerOwnsIt) {
-        payerAuthorized = true;
-      } else if (callerMerchant && merchantOwnsIt) {
-        // Merchant: the payer must be their own payout wallet or one of
-        // their registered agents. Same rule as before, now structured so
-        // every caller class is held to it.
-        const merchantRecord = await (prisma as any).merchant.findUnique({
-          where: { id: callerMerchant.id },
-        });
-        const controlsPayer =
-          merchantRecord?.walletAddress?.toLowerCase() === payment.senderEmail?.toLowerCase();
-        const ownsPayerAgent =
-          !controlsPayer &&
-          (await (prisma as any).agentRegistry.findFirst({
-            where: {
-              merchantId: callerMerchant.id,
-              scaAddress: { equals: payment.senderEmail, mode: 'insensitive' },
-            },
-          }));
-        payerAuthorized = controlsPayer || !!ownsPayerAgent;
-      }
-    } else if (callerMerchant && merchantOwnsIt) {
-      // Platform-default payer ('pending@checkout' / merchant-link defaults,
-      // which are not real addresses): a merchant settling their own request
-      // link is the intended platform-funded checkout flow — preserved.
-      // Consumers can never match here (their wallet is a real 0x address),
-      // and the internal key is restricted to the platform's own agent above.
-      payerAuthorized = true;
-    }
-
-    if (!payerAuthorized) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            'You are not a party to this payment: its payer is a wallet you do not control.',
-        },
-        { status: 403 }
-      );
-    }
-
-    if (!isInternalServiceCall && !merchantOwnsIt && !consumerOwnsIt) {
-      // Not attempting to restore the pre-lock status here — it wasn't
-      // captured before the lock ran. Left in PROCESSING_ONCHAIN
-      // deliberately: this file's own stale-lock recovery (5 minutes,
-      // see step 3 above) already reclaims exactly this state, so this
-      // self-heals via existing logic rather than needing a new path.
-      return NextResponse.json(
-        { success: false, error: 'You are not a party to this payment.' },
-        { status: 403 }
-      );
-    }
-
-    if (payment.expiresAt && new Date() > payment.expiresAt) {
-      await prisma.paymentLog.update({ where: { reference }, data: { status: 'EXPIRED' } });
-      return NextResponse.json(
-        { success: false, error: 'Payment reference has expired.' },
-        { status: 400 }
-      );
-    }
 
     // ── PATH A: CROSS-CHAIN CCTP SETTLEMENT ─────────────────────────────────
     if (messageHash) {
@@ -332,20 +339,29 @@ async function mergedSettleHandler(request: NextRequest) {
     // ── PATH B: ON-CHAIN USDC TRANSFER (M2M / SCA) ──────────────────────────
     console.log(`💸 Processing On-chain SCA Settlement for ${reference}`);
 
-    const payerSCA = payment.senderEmail?.startsWith('0x')
-      ? payment.senderEmail
-      : DEFAULT_PAYER_SCA;
-    let payerWalletId = DEFAULT_PAYER_WALLET_ID;
+    // The payer-control guard above guarantees this is a real 0x address the
+    // caller is authorized to debit — never 'pending@checkout', never a
+    // merchant-named stranger, never an arbitrary agent SCA.
+    const payerSCA = payment.senderEmail;
+    if (!payerSCA?.startsWith('0x')) {
+      throw new Error(
+        `Payment ${reference} has no on-chain payer — refusing to debit a shared default wallet.`
+      );
+    }
 
     // Resolve which Circle wallet actually signs for this address.
     // Order of precedence:
-    //   1. ConsumerAccount — this is where Flow's "created wallet" consumers
-    //      are registered with their real per-user circleWalletId. This was
-    //      previously skipped entirely, so every consumer payment silently
-    //      settled from one shared DEFAULT_PAYER_WALLET_ID regardless of
-    //      who was actually paying.
+    //   1. ConsumerAccount — where Flow's "created wallet" consumers are
+    //      registered with their real per-user circleWalletId.
     //   2. AgentRegistry — AI-agent (M2M) wallets, a separate feature.
-    //   3. DEFAULT_PAYER_WALLET_ID — legacy/demo fallback only.
+    //   3. Platform default — ONLY for the platform's own agent
+    //      (AGENT_OWNER_WALLET_ADDRESS): that agent IS the platform default
+    //      wallet's signer (brain agent_pay_agent / A2A payments). Any other
+    //      payer with no bound wallet fails closed instead of silently
+    //      debiting a shared pool — that silent debit was the class of bug
+    //      behind the C1 merchant drain and the agent-without-wallet cases.
+    let payerWalletId: string | undefined;
+
     const consumerAccount = await (prisma as any).consumerAccount.findUnique({
       where: { walletAddress: payerSCA },
     });
@@ -368,6 +384,16 @@ async function mergedSettleHandler(request: NextRequest) {
         where: { scaAddress: payerSCA },
       });
       if (agentRecord?.circleWalletId) payerWalletId = agentRecord.circleWalletId;
+    }
+
+    if (!payerWalletId) {
+      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || '').toLowerCase();
+      if (payerSCA.toLowerCase() !== platformAgent) {
+        throw new Error(
+          `No Circle wallet is bound to payer ${payerSCA} — refusing to debit a shared default wallet.`
+        );
+      }
+      payerWalletId = DEFAULT_PAYER_WALLET_ID;
     }
 
     // Resolve the real merchant payout wallet. Falls back to the platform

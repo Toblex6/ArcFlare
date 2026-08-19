@@ -37,9 +37,19 @@ export async function POST(req: NextRequest) {
     let resolvedAgent = null;
 
     if (agentSCA) {
-      resolvedAgent = await (prisma as any).agentRegistry.findUnique({
-        where: { scaAddress: agentSCA },
-      });
+      // The platform's own agent (AGENT_OWNER_WALLET_ADDRESS) has no
+      // registry row — the internal service key IS its credential. Allow
+      // internal callers (agent/brain) to pay from it directly; everyone
+      // else must name a registered agent they own.
+      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || '').toLowerCase();
+      const isPlatformAgent =
+        caller.type === 'internal' && agentSCA.toLowerCase() === platformAgent;
+
+      resolvedAgent = isPlatformAgent
+        ? { scaAddress: agentSCA }
+        : await (prisma as any).agentRegistry.findUnique({
+            where: { scaAddress: agentSCA },
+          });
 
       if (!resolvedAgent) {
         return NextResponse.json(

@@ -72,8 +72,6 @@ const AGENT_TOOLS = [
     input_schema: {
       type: "object",
       properties: {
-        clientSCA: { type: "string" },
-        clientWalletId: { type: "string" },
         providerSCA: { type: "string", description: "Agent being hired" },
         evaluatorSCA: { type: "string", description: "Who judges the work (can be same as client)" },
         amountUSDC: { type: "string" },
@@ -106,7 +104,6 @@ const AGENT_TOOLS = [
       properties: {
         jobId: { type: "string" },
         evaluatorSCA: { type: "string" },
-        evaluatorWalletId: { type: "string" },
         verdict: { type: "string", enum: ["complete", "reject"] },
         reason: { type: "string" },
       },
@@ -120,8 +117,6 @@ const AGENT_TOOLS = [
     input_schema: {
       type: "object",
       properties: {
-        payerSCA: { type: "string" },
-        payerWalletId: { type: "string" },
         recipients: {
           type: "array",
           items: {
@@ -144,7 +139,6 @@ const AGENT_TOOLS = [
     input_schema: {
       type: "object",
       properties: {
-        payerSCA: { type: "string" },
         serviceAgentSCA: { type: "string", description: "Agent/service being subscribed to" },
         amountUSDC: { type: "string" },
         intervalDays: { type: "number", description: "1=daily, 7=weekly, 30=monthly" },
@@ -175,8 +169,6 @@ const AGENT_TOOLS = [
     input_schema: {
       type: "object",
       properties: {
-        senderSCA: { type: "string" },
-        senderWalletId: { type: "string" },
         destinationAddress: { type: "string" },
         amount: { type: "string" },
         sourceChain: { type: "string" },
@@ -193,7 +185,6 @@ const AGENT_TOOLS = [
       type: "object",
       properties: {
         agentTokenId: { type: "string" },
-        validatorWalletAddress: { type: "string" },
         score: { type: "number", description: "0-100 reputation score" },
         tag: { type: "string", description: "e.g. successful_delivery, late_delivery, rejected_work" },
       },
@@ -291,10 +282,13 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
         headers,
         body: JSON.stringify({
           action: "create",
-          clientSCA: input.clientSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
-          clientWalletId: input.clientWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          // Pinned server-side: the platform agent is the only client the
+          // brain may act as. The LLM can no longer name another tenant's
+          // agent as the payer of a job (cross-tenant agent-control fix).
+          clientSCA: process.env.AGENT_OWNER_WALLET_ADDRESS,
+          clientWalletId: process.env.AGENT_OWNER_WALLET_ID,
           providerSCA: input.providerSCA,
-          evaluatorSCA: input.evaluatorSCA || input.clientSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
+          evaluatorSCA: input.evaluatorSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
           amountUSDC: input.amountUSDC,
           description: input.description,
           deadlineHours: input.deadlineHours || 24,
@@ -327,7 +321,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
           action: input.verdict === "complete" ? "complete" : "reject",
           jobId: input.jobId,
           evaluatorSCA: input.evaluatorSCA,
-          evaluatorWalletId: input.evaluatorWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          evaluatorWalletId: process.env.AGENT_OWNER_WALLET_ID,
           reason: input.reason,
         }),
       });
@@ -340,8 +334,8 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
         method: "POST",
         headers,
         body: JSON.stringify({
-          payerSCA: input.payerSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
-          payerWalletId: input.payerWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          payerSCA: process.env.AGENT_OWNER_WALLET_ADDRESS,
+          payerWalletId: process.env.AGENT_OWNER_WALLET_ID,
           recipients: input.recipients,
         }),
       });
@@ -354,7 +348,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
         method: "POST",
         headers,
         body: JSON.stringify({
-          payerSCA: input.payerSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
+          payerSCA: process.env.AGENT_OWNER_WALLET_ADDRESS,
           receiverSCA: input.serviceAgentSCA,
           amount: input.amountUSDC,
           intervalDays: input.intervalDays,
@@ -395,8 +389,8 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
         method: "POST",
         headers,
         body: JSON.stringify({
-          senderSCA: input.senderSCA || process.env.AGENT_OWNER_WALLET_ADDRESS,
-          senderWalletId: input.senderWalletId || process.env.AGENT_OWNER_WALLET_ID,
+          senderSCA: process.env.AGENT_OWNER_WALLET_ADDRESS,
+          senderWalletId: process.env.AGENT_OWNER_WALLET_ID,
           destinationAddress: input.destinationAddress,
           amount: input.amount,
           sourceChain: input.sourceChain || "ARC-TESTNET",
@@ -415,8 +409,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
       const feedbackHash = keccak256(toHex(input.tag));
       const score = Math.max(0, Math.min(100, input.score));
 
-      const validatorAddress = input.validatorWalletAddress ||
-        process.env.AGENT_VALIDATOR_WALLET_ADDRESS;
+      const validatorAddress = process.env.AGENT_VALIDATOR_WALLET_ADDRESS;
 
       if (!validatorAddress) {
         return { error: "Validator wallet not configured. Run setup script first." };
