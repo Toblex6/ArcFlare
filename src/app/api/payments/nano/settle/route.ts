@@ -152,7 +152,12 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
   return null;
 }
 
-async function settleOnchain(agentSCA: string, merchantSCA: string, webhookUrl?: string) {
+async function settleOnchain(
+  agentSCA: string,
+  merchantSCA: string,
+  webhookUrl?: string,
+  isInternalServiceCall = false
+) {
   await recoverStaleLocks(agentSCA, merchantSCA);
 
   const resumedTx = await resumeExistingTransaction(agentSCA, merchantSCA);
@@ -160,10 +165,34 @@ async function settleOnchain(agentSCA: string, merchantSCA: string, webhookUrl?:
 
   const circleClient = getCircleClient();
 
-  let payerWalletId = DEFAULT_PAYER_WALLET_ID;
-  if (agentSCA !== DEFAULT_PAYER_SCA) {
+  // ── SECURITY (C1-class): the payer wallet is EXPLICITLY resolved, never
+  // defaulted. The previous `let payerWalletId = DEFAULT_PAYER_WALLET_ID`
+  // assignment-default silently debited the shared platform wallet whenever
+  // the caller's agentSCA equalled the default payer SCA — an attacker who
+  // controlled only merchantSCA could drain the platform wallet in one
+  // force-settled batch. Now:
+  //   • the platform default wallet is reachable ONLY from the platform's
+  //     internal service key, and only for the default payer SCA itself
+  //     (compared case-insensitively — scaAddress preserves casing, and
+  //     mixed-case variants of the default address must not bypass);
+  //   • every other payer resolves through AgentRegistry (case-insensitive
+  //     scaAddress lookup) with NO fallback — a payer without a registered
+  //     Circle wallet fails closed instead of inheriting the default.
+  const agentSCANormalized = agentSCA.toLowerCase();
+  const isPlatformDefaultPayer =
+    agentSCANormalized === DEFAULT_PAYER_SCA.toLowerCase();
+
+  let payerWalletId: string | null = null;
+  if (isPlatformDefaultPayer) {
+    if (!isInternalServiceCall) {
+      throw new Error(
+        `CRITICAL: refusing to debit the shared platform default wallet for payer ${agentSCA} — only the platform's internal service key may settle for the default payer.`
+      );
+    }
+    payerWalletId = DEFAULT_PAYER_WALLET_ID;
+  } else {
     const agentRecord = await prisma.agentRegistry.findFirst({
-      where: { scaAddress: agentSCA },
+      where: { scaAddress: { equals: agentSCA, mode: "insensitive" } },
     });
     if (!agentRecord?.circleWalletId) {
       throw new Error(`CRITICAL: No Circle wallet registered for agent SCA ${agentSCA}`);
@@ -340,7 +369,7 @@ async function mergedNanoSettleHandler(request: NextRequest) {
         if (!summary.shouldSettle) continue;
 
         try {
-          const res = await settleOnchain(pair.agentSCA, pair.merchantSCA, webhookUrl);
+          const res = await settleOnchain(pair.agentSCA, pair.merchantSCA, webhookUrl, true);
           results.push({ ...pair, ...res, success: true });
         } catch (err: any) {
           results.push({ ...pair, success: false, error: err.message });
@@ -367,11 +396,17 @@ async function mergedNanoSettleHandler(request: NextRequest) {
     }
 
     if (!isInternalServiceCall) {
-      const merchantOwnsIt = await verifyCallerControlsAddress(request, merchantSCA);
+      // ── SECURITY (C1-class): the caller must control the PAYER side of
+      // this settlement, not either party. agentSCA is the wallet that gets
+      // debited — letting a caller who controls only merchantSCA settle a
+      // pair whose payer is the shared platform default wallet drained
+      // DEFAULT_PAYER_WALLET_ID to the attacker (assignment-default shape
+      // at settleOnchain, now removed). Merchant-side control alone can no
+      // longer name a payer it doesn't own.
       const agentOwnsIt = await verifyCallerControlsAddress(request, agentSCA);
-      if (!merchantOwnsIt && !agentOwnsIt) {
+      if (!agentOwnsIt) {
         return NextResponse.json(
-          { success: false, error: 'You do not control either party in this settlement (agentSCA or merchantSCA).' },
+          { success: false, error: 'You do not control the payer (agentSCA) of this settlement.' },
           { status: 403 }
         );
       }
@@ -395,7 +430,7 @@ async function mergedNanoSettleHandler(request: NextRequest) {
       );
     }
 
-    const settlement = await settleOnchain(agentSCA, merchantSCA, webhookUrl);
+    const settlement = await settleOnchain(agentSCA, merchantSCA, webhookUrl, isInternalServiceCall);
 
     return NextResponse.json({
       success: true,

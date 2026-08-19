@@ -250,7 +250,7 @@ export default function NanoPaymentsPage() {
   const [activeTab, setActiveTab] = useState<"record" | "x402">("record");
 
   // ── Traditional Nanopayments State ──────────────────────────────────
-  const [agentSCA, setAgentSCA] = useState("0x7a8214dad7630a7a39054e0121acdbc7a65821c9");
+  const [agentSCA, setAgentSCA] = useState("");
   const [merchantSCA, setMerchantSCA] = useState("");
   const [amount, setAmount] = useState("0.0001");
   const [description, setDescription] = useState("1 API call");

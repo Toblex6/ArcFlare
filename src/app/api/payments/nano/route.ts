@@ -6,12 +6,18 @@
 import { NextResponse } from 'next/server';
 import { withApiKeyOrMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/src/lib/wallet/verifyCallerControlsAddress';
+import { prisma } from '@/lib/prisma';
 import {
   recordNanoPayment,
   getUnsettledBalance,
   getBatchSummary,
   NANO_BATCH_THRESHOLD_USDC,
 } from '@/src/lib/nanopayment';
+
+// The platform's shared default payer (same identity as settle/route.ts) —
+// reachable ONLY from the internal service key; a merchant may never name
+// it as the payer of a charge it controls.
+const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
 
 async function nanoHandler(request: Request) {
   try {
@@ -39,18 +45,26 @@ async function nanoHandler(request: Request) {
       );
     }
 
-    // ── SECURITY: the caller must control at least one side of this
-    // charge. This debt row debits agentSCA's wallet at settlement time,
-    // so an unrelated merchant must not be able to open charges against
-    // an agent they don't own. (Merchants control their own deployed
-    // agents via verifyCallerControlsAddress.)
+    // ── SECURITY (C1-class): the caller must control the PAYER side of
+    // this charge — agentSCA is the wallet that gets debited at settlement
+    // time. The previous either-party guard let a caller who controlled
+    // only merchantSCA open charges against the shared platform default
+    // payer and then force-settle them to drain DEFAULT_PAYER_WALLET_ID.
+    // Now: a merchant must own the agent it charges against (or its own
+    // wallet when acting as its own agent), and the platform default payer
+    // is reachable only from the platform's internal service key.
     const controlsAgent = await verifyCallerControlsAddress(request as any, agentSCA);
-    const controlsMerchant = await verifyCallerControlsAddress(request as any, merchantSCA);
-    if (!controlsAgent && !controlsMerchant) {
+    const apiKey = request.headers.get('x-api-key');
+    const isInternalServiceCall = apiKey
+      ? !!(await (prisma as any).apiKey.findUnique({ where: { key: apiKey } }))
+      : false;
+    const isPlatformDefaultPayer =
+      agentSCA.toLowerCase() === DEFAULT_PAYER_SCA.toLowerCase();
+    if (!controlsAgent && !(isInternalServiceCall && isPlatformDefaultPayer)) {
       return NextResponse.json(
         {
           success: false,
-          error: 'You do not control either party in this charge (agentSCA or merchantSCA).',
+          error: 'You do not control the payer (agentSCA) of this charge.',
         },
         { status: 403 }
       );

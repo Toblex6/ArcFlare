@@ -30,11 +30,28 @@
 //   registered agent/platform agent) and refuses to persist what it cannot
 //   bind.
 //
+//   EXPLOIT 4 (nano assignment-default drain — the C1-class variant):
+//   /api/payments/nano/settle used `let payerWalletId =
+//   DEFAULT_PAYER_WALLET_ID` with a conditional override — the assignment-
+//   default shape, invisible to the `|| DEFAULT` regex. Any caller who
+//   controlled EITHER party could POST /api/payments/nano with agentSCA =
+//   the platform default payer SCA (0x7a8214…), then force-settle the pair
+//   to drain the shared platform wallet to their own merchantSCA.
+//   Closed-proof: merchant-key nano create → 403 (payer-side control
+//   required, default payer internal-only); a poisoned pre-existing row
+//   force-settled by a merchant key → 403, row untouched, receiver
+//   on-chain balance provably unchanged; mixed-case default SCA → 403
+//   (case-insensitive identity); internal key still passes the guard and
+//   resolves the default wallet (fail-closed on empty batch, no funds
+//   moved).
+//
 //   STATIC PROOFS: brain tool schemas/executors expose no payer/wallet
 //   fields (regex matches the codebase's real unquoted schema syntax and
 //   includes evaluatorSCA); settle has no DEFAULT_PAYER_SCA fallback and no
 //   merchant non-address branch; scheduled/run has no DEFAULT fallback and
-//   fails closed on null; wallet check's ApiKey branch is platform-agent-only.
+//   fails closed on null; nano/settle has no assignment-default initializer
+//   (only the internal-key-gated explicit binding) and no either-party
+//   guard; wallet check's ApiKey branch is platform-agent-only.
 //
 // Usage: node scripts/audit-repro.mjs [baseUrl]
 
@@ -349,6 +366,120 @@ async function exploit3() {
   console.log('  (bare-wallet merchant deleted)');
 }
 
+// ── EXPLOIT 4: nano assignment-default drain (C1-class variant) ─────────────
+async function exploit4() {
+  console.log('\n═══ EXPLOIT 4: nano/settle assignment-default wallet drain ═══');
+  console.log('(repro: agentSCA = platform default payer + own merchantSCA → force-settle)');
+
+  const rpc = process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network';
+  const USDC = '0x3600000000000000000000000000000000000000';
+  async function erc20Balance(address) {
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'eth_call',
+        params: [{ to: USDC, data: `0x70a08231000000000000000000000000${address.slice(2).toLowerCase()}` }, 'latest'],
+      }),
+    });
+    const out = await res.json();
+    if (out.error) throw new Error(out.error.message);
+    return BigInt(out.result);
+  }
+
+  const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
+
+  const attacker = await prisma.merchant.create({
+    data: {
+      email: `nano_attacker_${Date.now()}@test.local`,
+      businessName: 'Nano Attacker Store',
+      passwordHash: 'x',
+      apiKey: `arc_live_nano_repro_${Date.now()}`,
+      verified: true,
+      active: true,
+      walletAddress: `0x${'d'.repeat(40)}`,
+    },
+  });
+  const attackerKey = attacker.apiKey;
+  ok('fresh nano attacker merchant created', !!attacker.id);
+
+  // (a) THE OLD CHAIN STEP 1: record a charge whose PAYER is the platform
+  // default wallet, receiver = attacker's own merchant wallet. The old
+  // either-party guard accepted this because the attacker controls
+  // merchantSCA. Post-fix: payer-side control required → 403.
+  const createRes = await post('/api/payments/nano', {
+    agentSCA: DEFAULT_PAYER_SCA,
+    merchantSCA: attacker.walletAddress,
+    amount: '0.0001',
+    description: 'audit-repro nano drain',
+  }, { 'x-api-key': attackerKey });
+  const createData = await j(createRes);
+  ok('merchant-key nano create with platform default payer → 403', createRes.status === 403, `got ${createRes.status}: ${JSON.stringify(createData).slice(0, 200)}`);
+  ok('rejection = payer-control guard message', typeof createData.error === 'string' && createData.error.includes('You do not control the payer (agentSCA)'), JSON.stringify(createData).slice(0, 200));
+  const createRows = await prisma.nanoPayment.count({ where: { agentSCA: DEFAULT_PAYER_SCA, merchantSCA: attacker.walletAddress } });
+  ok('no NanoPayment row created', createRows === 0, `rows ${createRows}`);
+
+  // (b) THE OLD CHAIN STEP 2 (even with a pre-existing row — e.g. one
+  // recorded before the fix): force-settle the pair with a merchant key.
+  // Old settleOnchain resolved payerWalletId = DEFAULT_PAYER_WALLET_ID and
+  // drained it. Post-fix: merchant key → 403 at the guard, row untouched.
+  const poisoned = await prisma.nanoPayment.create({
+    data: {
+      agentSCA: DEFAULT_PAYER_SCA,
+      merchantSCA: attacker.walletAddress,
+      amount: 0.5,
+      description: 'audit-repro nano drain (pre-existing row)',
+      settled: false,
+    },
+  });
+  ok('poisoned pre-existing NanoPayment row created', !!poisoned.id);
+  const before = await erc20Balance(attacker.walletAddress);
+
+  const settleRes = await post('/api/payments/nano/settle', {
+    agentSCA: DEFAULT_PAYER_SCA,
+    merchantSCA: attacker.walletAddress,
+    forceSettle: true,
+  }, { 'x-api-key': attackerKey });
+  const settleData = await j(settleRes);
+  ok('merchant-key force-settle of default-payer pair → 403', settleRes.status === 403, `got ${settleRes.status}: ${JSON.stringify(settleData).slice(0, 200)}`);
+  ok('rejection = payer-control guard message', typeof settleData.error === 'string' && settleData.error.includes('You do not control the payer (agentSCA)'), JSON.stringify(settleData).slice(0, 200));
+  const rowAfter = await prisma.nanoPayment.findUnique({ where: { id: poisoned.id } });
+  ok('row untouched: still unsettled, no batchRef', rowAfter?.settled === false && rowAfter?.batchRef === null, JSON.stringify({ settled: rowAfter?.settled, batchRef: rowAfter?.batchRef }));
+  const after = await erc20Balance(attacker.walletAddress);
+  ok('no funds moved: receiver balance unchanged', before === after, `before ${before} after ${after}`);
+
+  // (c) CASE-SENSITIVITY: scaAddress preserves casing — a mixed-case
+  // variant of the default payer must NOT bypass the identity check.
+  const mixed = await post('/api/payments/nano', {
+    agentSCA: `0x7A8214DAD7630A7A39054E0121ACDBC7A65821C9`,
+    merchantSCA: attacker.walletAddress,
+    amount: '0.0001',
+    description: 'audit-repro nano drain (mixed case)',
+  }, { 'x-api-key': attackerKey });
+  ok('mixed-case default payer SCA → 403 (case-insensitive identity)', mixed.status === 403, `got ${mixed.status}: ${JSON.stringify(await j(mixed)).slice(0, 200)}`);
+
+  // (d) POSITIVE CONTROL: the internal service key is the ONLY caller that
+  // may settle for the platform default payer. The poisoned row is gone by
+  // now, so settleOnchain resolves the default wallet then fails closed on
+  // the empty batch — proving the internal path is NOT blocked without
+  // actually moving funds.
+  await prisma.nanoPayment.delete({ where: { id: poisoned.id } }).catch(() => { });
+  const internalRes = await post('/api/payments/nano/settle', {
+    agentSCA: DEFAULT_PAYER_SCA,
+    merchantSCA: attacker.walletAddress,
+    forceSettle: true,
+  }, { 'x-api-key': INTERNAL_KEY });
+  const internalData = await j(internalRes);
+  ok('internal-key settle of default-payer pair → NOT 403 (guard passes)',
+    internalRes.status !== 403 && internalRes.status !== 401, `got ${internalRes.status}: ${JSON.stringify(internalData).slice(0, 200)}`);
+  ok('internal path resolves default wallet, fails closed on empty batch',
+    typeof internalData.error === 'string' && internalData.error.includes('No pending payments found'), JSON.stringify(internalData).slice(0, 200));
+
+  await prisma.nanoPayment.deleteMany({ where: { description: { contains: 'audit-repro nano' } } }).catch(() => { });
+  await prisma.merchant.delete({ where: { id: attacker.id } }).catch(() => { });
+  console.log('  (poisoned row + attacker merchant deleted)');
+}
+
 // ── STATIC PROOFS ─────────────────────────────────────────────────────────
 function staticProofs() {
   console.log('\n═══ STATIC PROOFS (code-level) ═══');
@@ -423,6 +554,39 @@ function staticProofs() {
   ok('scheduled/create: DEFAULT_PAYER_WALLET_ID only as explicit platform-agent binding',
     /DEFAULT_PAYER_WALLET_ID/.test(createSrc) &&
     /controlsPayer\.walletAddress\.toLowerCase\(\) === platformAgent/.test(createSrc));
+
+  // nano: the C1-class ASSIGNMENT-DEFAULT shape (Opus 5 follow-up). The
+  // old `let payerWalletId = DEFAULT_PAYER_WALLET_ID` initializer with a
+  // conditional override was invisible to the `|| DEFAULT` regex — check
+  // for the initializer form, the either-party guard, and the identity
+  // comparison directly. The fixed code MAY still assign
+  // DEFAULT_PAYER_WALLET_ID — but only inside the internal-key-gated
+  // platform-default branch (the explicit binding, like scheduled/create).
+  const nanoSettleSrc = fs.readFileSync(`${root}/src/app/api/payments/nano/settle/route.ts`, 'utf8');
+  const nanoCreateSrc = fs.readFileSync(`${root}/src/app/api/payments/nano/route.ts`, 'utf8');
+  const nanoSettleCode = stripComments(nanoSettleSrc);
+  const nanoCreateCode = stripComments(nanoCreateSrc);
+  ok('nano/settle: no `let payerWalletId = DEFAULT` initializer (assignment-default shape gone)',
+    !/let payerWalletId\s*=\s*DEFAULT_PAYER_WALLET_ID/.test(nanoSettleCode));
+  ok('nano/settle: DEFAULT only via internal-key-gated explicit binding',
+    /payerWalletId = DEFAULT_PAYER_WALLET_ID/.test(nanoSettleCode) &&
+    /if \(!isInternalServiceCall\)/.test(nanoSettleCode) &&
+    /refusing to debit the shared platform default wallet/.test(nanoSettleCode));
+  ok('nano/settle: platform-default identity compared case-insensitively',
+    /agentSCANormalized === DEFAULT_PAYER_SCA\.toLowerCase\(\)/.test(nanoSettleCode));
+  ok('nano/settle: AgentRegistry payer lookup case-insensitive',
+    /scaAddress: \{ equals: agentSCA, mode: "insensitive" \}/.test(nanoSettleCode));
+  ok('nano/settle: no either-party guard (merchantOwnsIt gone)',
+    !/merchantOwnsIt/.test(nanoSettleCode) &&
+    /You do not control the payer \(agentSCA\) of this settlement/.test(nanoSettleCode));
+  ok('nano/create: no either-party guard (controlsMerchant gone)',
+    !/controlsMerchant/.test(nanoCreateCode) &&
+    /You do not control the payer \(agentSCA\) of this charge/.test(nanoCreateCode));
+  ok('nano/create: platform default payer reachable only via internal key',
+    /isInternalServiceCall && isPlatformDefaultPayer/.test(nanoCreateCode));
+  const nanoUiSrc = fs.readFileSync(`${root}/src/app/nano/page.tsx`, 'utf8');
+  ok('nano UI: agentSCA no longer prefilled with the platform default payer',
+    !/useState\("0x7a8214dad7630a7a39054e0121acdbc7a65821c9"\)/.test(nanoUiSrc));
 }
 
 async function main() {
@@ -440,6 +604,7 @@ async function main() {
   await exploit1();
   await exploit2();
   await exploit3();
+  await exploit4();
 
   // Cleanup any leftover repro rows.
   for (const ref of cleanupRefs) {
@@ -447,6 +612,7 @@ async function main() {
   }
   await prisma.scheduledPayment.deleteMany({ where: { description: { contains: 'audit-repro' } } }).catch(() => { });
   await prisma.paymentLog.deleteMany({ where: { description: { contains: 'audit-repro' } } }).catch(() => { });
+  await prisma.nanoPayment.deleteMany({ where: { description: { contains: 'audit-repro' } } }).catch(() => { });
 
   console.log('\n──────────────────────────────────────────────────────────────');
   console.log(`PASS: ${passed}  FAIL: ${failed}`);
