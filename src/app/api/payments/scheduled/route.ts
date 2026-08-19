@@ -8,12 +8,16 @@ import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
+// The platform agent's signing wallet — same explicit resolution as settle
+// Path B. Never used as a blanket fallback for arbitrary payers: it is only
+// bound to a schedule whose payer is the verified platform agent.
+const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
+
 // ── POST /api/payments/scheduled — create a new recurring payment ────────────
 async function createScheduledHandler(request: Request) {
   try {
     const {
       payerSCA,
-      payerWalletId,
       receiverSCA,
       amount,
       intervalDays,
@@ -48,11 +52,24 @@ async function createScheduledHandler(request: Request) {
       );
     }
 
-    // Resolve the real Circle wallet ID for payerSCA up front, instead of
-    // leaving payerWalletId null and letting /scheduled/run silently fall
-    // back to one shared default wallet for every recurring payment.
-    let resolvedPayerWalletId = payerWalletId;
-    if (!resolvedPayerWalletId) {
+    // Resolve the Circle wallet that ACTUALLY signs for payerSCA, from the
+    // bound records only — the body's payerWalletId is deliberately ignored.
+    // A caller-supplied wallet ID was a free-choice debit vector: this route
+    // previously persisted `payerWalletId` from the body (or null), and
+    // /scheduled/run silently fell back to DEFAULT_PAYER_WALLET_ID for null
+    // rows — the C1-class drain. The wallet must be BOUND to the payer:
+    //   - consumer                  → ConsumerAccount.circleWalletId
+    //   - merchant's own wallet     → Merchant.circleWalletId
+    //   - platform agent (internal) → DEFAULT_PAYER_WALLET_ID (its signing
+    //     wallet — same explicit resolution as settle Path B, NOT a fallback)
+    //   - registered agent          → AgentRegistry.circleWalletId
+    //   - x402 buyer/agent EOAs     → no Circle-custodied wallet → refused
+    // Chosen variant (of Opus's two): resolve correctly for agent payers at
+    // creation AND refuse to persist a row with no bound wallet — belt and
+    // braces, so /scheduled/run can fail closed on null with no legacy holes.
+    let resolvedPayerWalletId: string | undefined;
+
+    if (controlsPayer.type === 'consumer') {
       const consumerAccount = await (prisma as any).consumerAccount.findUnique({
         where: { walletAddress: payerSCA },
       });
@@ -67,9 +84,43 @@ async function createScheduledHandler(request: Request) {
         );
       }
 
-      if (consumerAccount?.circleWalletId) {
-        resolvedPayerWalletId = consumerAccount.circleWalletId;
+      resolvedPayerWalletId = consumerAccount?.circleWalletId || undefined;
+    } else if (controlsPayer.type === 'merchant') {
+      const merchant = await (prisma as any).merchant.findUnique({
+        where: { id: controlsPayer.id },
+      });
+      if (merchant?.walletAddress?.toLowerCase() === payerSCA.toLowerCase()) {
+        resolvedPayerWalletId = merchant.circleWalletId || undefined;
       }
+      // A merchant claiming its x402 buyer EOA or an agent payment EOA
+      // resolves to nothing — those EOAs are not Circle-custodied and can
+      // never be auto-debited; refused below.
+    } else if (controlsPayer.type === 'agent') {
+      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || '').toLowerCase();
+      if (controlsPayer.walletAddress.toLowerCase() === platformAgent) {
+        // The platform agent's signing wallet IS the platform default —
+        // same explicit resolution settle/route.ts Path B uses. This is a
+        // verified identity binding, not a fallback for arbitrary payers.
+        resolvedPayerWalletId = DEFAULT_PAYER_WALLET_ID;
+      } else {
+        const agentRecord = await (prisma as any).agentRegistry.findFirst({
+          where: { scaAddress: { equals: payerSCA, mode: 'insensitive' } },
+        });
+        resolvedPayerWalletId = agentRecord?.circleWalletId || undefined;
+      }
+    }
+
+    if (!resolvedPayerWalletId) {
+      // Fail closed at CREATION: never persist a schedule that can only pay
+      // by falling back to the shared platform wallet. /scheduled/run also
+      // refuses null rows, but nothing here should ever produce one.
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Payer ${payerSCA} has no Circle-custodied wallet bound to it — refusing to persist a recurring payment that cannot pay. Set up the payer's wallet first.`,
+        },
+        { status: 400 }
+      );
     }
 
     const reference = `sched_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -82,7 +133,7 @@ async function createScheduledHandler(request: Request) {
       data: {
         reference,
         payerSCA,
-        payerWalletId: resolvedPayerWalletId || null,
+        payerWalletId: resolvedPayerWalletId,
         receiverSCA,
         amount: parseFloat(amount),
         intervalDays: parseInt(intervalDays),

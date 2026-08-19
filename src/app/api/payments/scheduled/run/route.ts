@@ -4,7 +4,6 @@ import { withApiKey } from '@/lib/middleware/withApiKey';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const USDC_ARC = '0x3600000000000000000000000000000000000000';
-const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -31,7 +30,20 @@ async function waitForCircleTx(
 }
 
 async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof getCircleClient>) {
-  const walletId = scheduled.payerWalletId || DEFAULT_PAYER_WALLET_ID;
+  // FAIL CLOSED — no shared-default fallback, ever. A schedule with no
+  // explicitly resolved payer wallet must not execute: the C1-class drain
+  // used `payerWalletId || DEFAULT_PAYER_WALLET_ID` to debit the shared
+  // platform wallet for arbitrary payers. Creation resolves the wallet
+  // (ConsumerAccount / AgentRegistry / platform agent) and refuses to
+  // persist a row it cannot bind — a null payerWalletId here means a row
+  // from before that rule, or a payer with no Circle-custodied wallet;
+  // either way it stays unpaid until the payer is bound.
+  if (!scheduled.payerWalletId) {
+    throw new Error(
+      `Scheduled payment ${scheduled.reference} has no resolved payer wallet (payerWalletId is null) — refusing to execute against a shared default.`
+    );
+  }
+  const walletId = scheduled.payerWalletId;
   const amountStr = scheduled.amount.toFixed(6);
 
   let txHash: string;

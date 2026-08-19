@@ -103,11 +103,10 @@ const AGENT_TOOLS = [
       type: "object",
       properties: {
         jobId: { type: "string" },
-        evaluatorSCA: { type: "string" },
         verdict: { type: "string", enum: ["complete", "reject"] },
         reason: { type: "string" },
       },
-      required: ["jobId", "evaluatorSCA", "verdict"],
+      required: ["jobId", "verdict"],
     },
   },
   {
@@ -314,13 +313,17 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
 
     // ── 4. Complete or Reject Job ─────────────────────────────────────────────
     case "complete_or_reject_job": {
+      // SECURITY: the evaluator is ALWAYS the platform agent. The LLM can
+      // pick a verdict/reason, but never the signing identity — /api/jobs
+      // doesn't consume evaluatorSCA today, but if it ever does, this is
+      // pinned before that day arrives (same fix pattern as agent_pay_agent).
       const res = await fetch(`${baseUrl}/api/jobs`, {
         method: "POST",
         headers,
         body: JSON.stringify({
           action: input.verdict === "complete" ? "complete" : "reject",
           jobId: input.jobId,
-          evaluatorSCA: input.evaluatorSCA,
+          evaluatorSCA: process.env.AGENT_OWNER_WALLET_ADDRESS,
           evaluatorWalletId: process.env.AGENT_OWNER_WALLET_ID,
           reason: input.reason,
         }),

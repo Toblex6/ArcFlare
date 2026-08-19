@@ -50,9 +50,18 @@ shared primitives `paymentRequiredResponse` / `verifyPayment` / `settlePayment`
 
 **What is NOT x402 (verified — do not "assume beyond what's wired"):**
 
-- **Checkout** (`/api/checkout/pay`, `/api/payments/initialize`, `/api/payments/settle`):
-  PaymentLog-driven **direct Circle settlement**. PATH B transfers via Circle
-  wallet (consumer/agent registry → fallback `DEFAULT_PAYER_WALLET_ID`);
+- **Checkout** (`/api/payments/initialize`, `/api/payments/settle`):
+  PaymentLog-driven **direct Circle settlement**. PATH B transfers via the
+  payer's resolved Circle wallet (ConsumerAccount/AgentRegistry; platform
+  agent → `DEFAULT_PAYER_WALLET_ID` — an explicit identity binding, fail-
+  closed: a payer with no bound wallet is refused, never silently debited
+  from the shared default). The old `/api/checkout/pay` trigger was deleted
+  (2026-08-19) — the checkout UI settles from the customer's own wallet via
+  `/api/payments/verify-onchain`. Recurring payments (`/api/payments/scheduled`)
+  resolve their payer wallet at creation (consumer/merchant/agent/platform
+  agent) and refuse to persist unbound rows; `/api/payments/scheduled/run`
+  fails closed on null `payerWalletId` — no `DEFAULT_PAYER_WALLET_ID`
+  fallback anywhere.
   PATH A is CCTP bridging via `MESSAGE_TRANSMITTER_V2.receiveMessage` signed
   with `ARC_ADMIN_PRIVATE_KEY`. No `payment-signature` header, no withGateway.
   (A prior session summary assumed Checkout used withGateway — this is

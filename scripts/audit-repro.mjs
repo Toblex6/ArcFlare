@@ -20,9 +20,21 @@
 //   the same victim agent also 403; positive control (internal key +
 //   AGENT_OWNER_WALLET_ADDRESS) still works.
 //
+//   EXPLOIT 3 (scheduled/run shared-default drain — the C1 survivor):
+//   a scheduled row with payerWalletId null used to pay receiverSCA from
+//   DEFAULT_PAYER_WALLET_ID at every tick (creation persisted null for
+//   agent/merchant payers; the brain's setup_agent_subscription produced
+//   exactly this shape). Closed-proof: a poisoned null-wallet row is
+//   REFUSED by /scheduled/run (receiver balance provably unchanged), and
+//   creation now resolves the payer's bound wallet (consumer/merchant/
+//   registered agent/platform agent) and refuses to persist what it cannot
+//   bind.
+//
 //   STATIC PROOFS: brain tool schemas/executors expose no payer/wallet
-//   fields; settle has no DEFAULT_PAYER_SCA fallback and no merchant
-//   non-address branch; wallet check's ApiKey branch is platform-agent-only.
+//   fields (regex matches the codebase's real unquoted schema syntax and
+//   includes evaluatorSCA); settle has no DEFAULT_PAYER_SCA fallback and no
+//   merchant non-address branch; scheduled/run has no DEFAULT fallback and
+//   fails closed on null; wallet check's ApiKey branch is platform-agent-only.
 //
 // Usage: node scripts/audit-repro.mjs [baseUrl]
 
@@ -228,6 +240,12 @@ async function exploit2() {
   const legitData = await j(legit);
   ok('positive control: internal key + platform agent → 200', legit.status === 200, `got ${legit.status}: ${JSON.stringify(legitData).slice(0, 200)}`);
   ok('ScheduledPayment row created for the platform agent', !!legitData.scheduledPayment?.reference, JSON.stringify(legitData).slice(0, 200));
+  // The wallet must be EXPLICITLY resolved at creation — a null
+  // payerWalletId is the exact field that used to fall through to the
+  // shared default at run time (the C1-class drain).
+  const platformWallet = await platformAgentWalletId();
+  ok('positive control: payerWalletId explicitly resolved (non-null)', !!legitData.scheduledPayment?.payerWalletId, `payerWalletId ${JSON.stringify(legitData.scheduledPayment?.payerWalletId)}`);
+  ok('positive control: payerWalletId = settle\'s platform-agent wallet (same convention)', legitData.scheduledPayment?.payerWalletId === platformWallet, `row ${legitData.scheduledPayment?.payerWalletId} vs settle ${platformWallet}`);
   await prisma.scheduledPayment.delete({
     where: { reference: legitData.scheduledPayment.reference },
   }).catch(() => { });
@@ -236,6 +254,99 @@ async function exploit2() {
   // The same shape through the brain: setup_agent_subscription with a
   // tenant agent's SCA as payer is no longer expressible — the tool schema
   // has no payerSCA field at all (verified statically below).
+}
+
+// The platform agent's signing wallet per settle/route.ts Path B convention
+// (grep'd live from the source so this cannot drift from the code).
+async function platformAgentWalletId() {
+  const settleSrc = fs.readFileSync(`${process.cwd()}/src/app/api/payments/settle/route.ts`, 'utf8');
+  const m = settleSrc.match(/const DEFAULT_PAYER_WALLET_ID = '([0-9a-f-]+)'/);
+  return m ? m[1] : null;
+}
+
+// ── EXPLOIT 3: scheduled/run default-wallet drain (C1 survivor) ─────────────
+async function exploit3() {
+  console.log('\n═══ EXPLOIT 3: scheduled/run shared-default-wallet drain ═══');
+  console.log('(repro: brain setup_agent_subscription shape + a null-wallet row tick)');
+
+  const rpc = process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network';
+  const USDC = '0x3600000000000000000000000000000000000000';
+  async function erc20Balance(address) {
+    const res = await fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'eth_call',
+        params: [{ to: USDC, data: `0x70a08231000000000000000000000000${address.slice(2).toLowerCase()}` }, 'latest'],
+      }),
+    });
+    const out = await res.json();
+    if (out.error) throw new Error(out.error.message);
+    return BigInt(out.result);
+  }
+
+  // (a) THE OLD DRAIN ROW SHAPE: a scheduled payment whose payerWalletId
+  // is null (pre-fix creation persisted null for agent/merchant payers).
+  // /scheduled/run used to pay `payerWalletId || DEFAULT_PAYER_WALLET_ID` —
+  // debiting the shared platform wallet for whoever the (model-controlled)
+  // receiverSCA said. Post-fix: run must refuse, and no funds may move.
+  const receiver = `0x${'f'.repeat(40)}`;
+  const before = await erc20Balance(receiver);
+  const poisoned = await prisma.scheduledPayment.create({
+    data: {
+      reference: `sched_repro_null_${Date.now()}`,
+      payerSCA: PLATFORM_AGENT,
+      payerWalletId: null,
+      receiverSCA: receiver,
+      amount: 1.0,
+      intervalDays: 1,
+      nextRunAt: new Date(Date.now() - 60_000),
+      description: 'audit-repro null-wallet run',
+      status: 'ACTIVE',
+    },
+  });
+  ok('poisoned null-payerWalletId row created (legacy shape)', !!poisoned.id);
+
+  const runRes = await post('/api/payments/scheduled/run', {}, { 'x-api-key': INTERNAL_KEY });
+  const runData = await j(runRes);
+  console.log(`  /scheduled/run → ${runRes.status}: ${JSON.stringify(runData).slice(0, 300)}`);
+  ok('run route responds 200 (per-row results)', runRes.status === 200, `got ${runRes.status}`);
+  const mine = (runData.results || []).find((r) => r.reference === poisoned.reference);
+  ok('poisoned row reported FAILED (not executed)', mine && mine.success === false, JSON.stringify(mine));
+  ok('failure reason = no resolved payer wallet', mine && typeof mine.error === 'string' && mine.error.includes('no resolved payer wallet'), JSON.stringify(mine));
+  const after = await erc20Balance(receiver);
+  ok('no funds moved: receiver balance unchanged (0)', before === after && before === 0n, `before ${before} after ${after}`);
+  await prisma.scheduledPayment.delete({ where: { reference: poisoned.reference } }).catch(() => { });
+
+  // (b) CREATION FAIL-CLOSED: a payer with no Circle-custodied wallet
+  // bound to it can no longer persist a schedule at all (pre-fix this
+  // persisted payerWalletId: null and drained the default at run time).
+  const bareMerchant = await prisma.merchant.create({
+    data: {
+      email: `bare_${Date.now()}@test.local`,
+      businessName: 'Bare Wallet Store',
+      passwordHash: 'x',
+      apiKey: `arc_live_repro_bare_${Date.now()}`,
+      verified: true,
+      active: true,
+      walletAddress: `0x${'9'.repeat(40)}`,
+      circleWalletId: null,
+    },
+  });
+  const bareCreate = await post('/api/payments/scheduled', {
+    payerSCA: bareMerchant.walletAddress,
+    receiverSCA: receiver,
+    amount: '1.0',
+    intervalDays: 1,
+    startImmediately: false,
+  }, { 'x-api-key': bareMerchant.apiKey });
+  const bareData = await j(bareCreate);
+  ok('merchant payer without bound Circle wallet → 400 at creation', bareCreate.status === 400, `got ${bareCreate.status}: ${JSON.stringify(bareData).slice(0, 200)}`);
+  ok('rejection = refusing to persist an unbound schedule', typeof bareData.error === 'string' && bareData.error.includes('refusing to persist'), JSON.stringify(bareData).slice(0, 200));
+  const bareRows = await prisma.scheduledPayment.count({ where: { payerSCA: bareMerchant.walletAddress } });
+  ok('no ScheduledPayment row persisted', bareRows === 0, `rows ${bareRows}`);
+  await prisma.merchant.delete({ where: { id: bareMerchant.id } }).catch(() => { });
+  console.log('  (bare-wallet merchant deleted)');
 }
 
 // ── STATIC PROOFS ─────────────────────────────────────────────────────────
@@ -258,10 +369,29 @@ function staticProofs() {
     /preflight/.test(settleSrc) && /BEFORE taking the lock/.test(settleSrc));
 
   // brain: no LLM-controlled payer/wallet fields survive in schemas/executors.
-  const badBrainFields = /input\.(clientSCA|clientWalletId|payerSCA|payerWalletId|senderSCA|senderWalletId|evaluatorWalletId|validatorWalletAddress)\b/;
-  const badBrainSchemaProps = /"(clientSCA|clientWalletId|payerSCA|payerWalletId|senderSCA|senderWalletId|evaluatorWalletId|validatorWalletAddress)"/;
+  // Schema properties are UNQUOTED in this codebase (clientSCA: {...}) and
+  // the schema props are the ones with OBJECT values (`{ type: ... }`), so
+  // the property regex anchors on `\s*:\s*{` — executor payload keys
+  // (`payerSCA: process.env…`) don't match. A quoted-only or unanchored
+  // regex can never fire or false-fires — both were Opus 5 findings.
+  const BAD_FIELDS =
+    'clientSCA|clientWalletId|payerSCA|payerWalletId|senderSCA|senderWalletId|evaluatorWalletId|validatorWalletAddress';
+  // evaluatorSCA is deliberately NOT in the global lists: create_agent_job
+  // legitimately lets the client name the judge of the job. The flagged
+  // tool was complete_or_reject_job (the executor SIGNING as evaluator) —
+  // that is scoped-checked below.
+  const badBrainFields = new RegExp(`input\\.(${BAD_FIELDS})\\b`);
+  const badBrainSchemaProps = new RegExp(`^\\s*(${BAD_FIELDS})\\s*:\\s*\\{`, 'm');
   ok('brain: executors no longer read LLM payer/wallet inputs', !badBrainFields.test(brainSrc));
   ok('brain: tool schemas no longer expose payer/wallet fields', !badBrainSchemaProps.test(brainSrc));
+
+  // complete_or_reject_job: evaluator identity pinned server-side.
+  const completeTool = brainSrc.match(/name: "complete_or_reject_job"[\s\S]*?\n  \},/)?.[0] || '';
+  const completeCase = brainSrc.match(/case "complete_or_reject_job":[\s\S]*?\n    \}/)?.[0] || '';
+  ok('brain: complete_or_reject_job schema exposes NO evaluator fields', !/evaluatorSCA|evaluatorWalletId/.test(completeTool), completeTool.slice(0, 200));
+  ok('brain: complete_or_reject_job executor reads NO input.evaluator*', !/input\.evaluator/.test(completeCase), completeCase.slice(0, 200));
+  ok('brain: complete_or_reject_job evaluator pinned to the platform agent',
+    /evaluatorSCA: process\.env\.AGENT_OWNER_WALLET_ADDRESS/.test(completeCase));
 
   // wallet check: ApiKey branch is platform-agent-only.
   ok('wallet check: ApiKey branch scoped to AGENT_OWNER_WALLET_ADDRESS',
@@ -271,6 +401,28 @@ function staticProofs() {
   // initialize: platform agent usable by internal callers without a row.
   ok('initialize: platform agent exempt from registry lookup for internal callers',
     /isPlatformAgent/.test(initializeSrc) && /caller\.type === 'internal'/.test(initializeSrc));
+
+  // scheduled: no shared-default fallback survives anywhere. The source
+  // still *documents* the removed fallback in a comment (line ~35: "used
+  // `payerWalletId || DEFAULT_PAYER_WALLET_ID` …"), so strip comments
+  // before asserting — these checks must prove CODE state, not prose.
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const runSrc = stripComments(fs.readFileSync(`${root}/src/app/api/payments/scheduled/run/route.ts`, 'utf8'));
+  const createSrc = fs.readFileSync(`${root}/src/app/api/payments/scheduled/route.ts`, 'utf8');
+  ok('scheduled/run: DEFAULT_PAYER_WALLET_ID constant gone', !/DEFAULT_PAYER_WALLET_ID/.test(runSrc));
+  ok('scheduled/run: fails closed on null payerWalletId',
+    /if \(!scheduled\.payerWalletId\)/.test(runSrc) &&
+    /refusing to execute against a shared default/.test(runSrc));
+  ok('scheduled/run: no `|| DEFAULT` fallback pattern', !/\|\|\s*DEFAULT_PAYER_WALLET_ID/.test(runSrc));
+  ok('scheduled/create: resolves agent payers (AgentRegistry) at creation',
+    /agentRegistry/.test(createSrc) && /controlsPayer\.type === 'agent'/.test(createSrc));
+  ok('scheduled/create: refuses to persist unbound payers',
+    /refusing to persist a recurring payment that cannot pay/.test(createSrc));
+  ok('scheduled/create: body-supplied payerWalletId no longer accepted',
+    !/^\s*payerWalletId,/m.test(createSrc));
+  ok('scheduled/create: DEFAULT_PAYER_WALLET_ID only as explicit platform-agent binding',
+    /DEFAULT_PAYER_WALLET_ID/.test(createSrc) &&
+    /controlsPayer\.walletAddress\.toLowerCase\(\) === platformAgent/.test(createSrc));
 }
 
 async function main() {
@@ -287,6 +439,7 @@ async function main() {
   staticProofs();
   await exploit1();
   await exploit2();
+  await exploit3();
 
   // Cleanup any leftover repro rows.
   for (const ref of cleanupRefs) {
