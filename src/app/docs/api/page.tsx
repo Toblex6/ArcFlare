@@ -26,7 +26,7 @@ export default function ApiDocsPage() {
     {
       title: 'Streaming Payments',
       endpoints: [
-        'POST /api/payments/stream',
+        'POST /api/payments/stream/create',
         'POST /api/payments/stream/stop',
         'POST /api/payments/stream/withdraw',
       ],

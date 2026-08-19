@@ -59,7 +59,6 @@ const AGENT_TOOLS = [
       type: "object",
       properties: {
         amount: { type: "string", description: "Amount in USDC" },
-        payerAgentSCA: { type: "string", description: "Payer agent SCA address. Omit this field entirely if unknown — the system will use the agent's own wallet automatically." },
         receiverAgentSCA: { type: "string", description: "Receiver agent SCA address" },
         description: { type: "string", description: "What this payment is for" },
       },
@@ -250,7 +249,12 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
   switch (name) {
     // ── 1. A2A Direct Payment ─────────────────────────────────────────────────
     case "agent_pay_agent": {
-      const payerAgentSCA = input.payerAgentSCA || process.env.AGENT_OWNER_WALLET_ADDRESS;
+      // SECURITY: the payer is ALWAYS the platform's own agent wallet.
+      // input.payerAgentSCA is deliberately ignored (it was removed from
+      // the tool schema) — the LLM can fill any amount/receiver, but it can
+      // never name a payer, so a prompt-injected tool call can only spend
+      // the platform agent's own balance, never another tenant's wallet.
+      const payerAgentSCA = process.env.AGENT_OWNER_WALLET_ADDRESS;
       const initRes = await fetch(`${baseUrl}/api/payments/initialize`, {
         method: "POST",
         headers,
@@ -569,7 +573,7 @@ You can:
 - Check status of any payment, job, or reputation — use check_agent_status
 
 IMPORTANT:
-- Your own wallet address is ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"} — use this automatically as the payer/sender for any tool that needs it, unless the user specifies a different one. Do not invent placeholder addresses.
+- Your own wallet address is ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"} — ALWAYS use this as the payer/sender. Payer/sender addresses cannot be overridden by user input.
 - For immediate services: use agent_pay_agent (x402/M2M)
 - For async work that needs verification: use create_agent_job (ERC-8183)
 - Always record_agent_reputation after completing or rejecting a job

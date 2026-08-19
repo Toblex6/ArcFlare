@@ -1,10 +1,11 @@
 // scripts/checkout-e2e.mjs
 // Local Checkout readiness proof against the EXISTING payment foundation.
 // Proves: initialize -> PaymentLog -> hosted/embed checkout resolve ->
-// onchain payment + verify-onchain -> /api/checkout/pay -> settle ->
-// verify -> unauthorized-settle rejection -> duplicate/concurrent-settle
-// idempotency. Uses only existing testnet/dev credentials. No new tables,
-// no state machine changes, no contracts, no real funds.
+// onchain payment + verify-onchain -> unauthorized-settle rejection ->
+// duplicate/concurrent-settle idempotency -> C1 fail-closed checkout/pay
+// (no settlement without an authorized payer) -> C2 agentSCA ownership.
+// Uses only existing testnet/dev credentials. No new tables, no state
+// machine changes, no contracts, no real funds.
 //
 // Usage: node scripts/checkout-e2e.mjs [baseUrl]
 
@@ -273,7 +274,7 @@ async function main() {
   const dupPayData = await j(dupPay);
   ok('checkout/pay 409 on settled payment', dupPay.status === 409, `got ${dupPay.status}: ${JSON.stringify(dupPayData).slice(0, 200)}`);
 
-  // 9. Initialize payment B + anonymous settle -> 401, then checkout/pay path B.
+  // 9. Path B via /api/checkout/pay is now FAIL-CLOSED.
   console.log('\n[8] path B via /api/checkout/pay');
   const initB = await post('/api/payments/initialize', {
     amount: AMOUNT, currency: 'USDC', direction: 'request', merchant: merchantA.businessName,
@@ -285,41 +286,127 @@ async function main() {
   row = await paymentRow(refB);
   ok('PaymentLog B still PENDING after anonymous settle', row?.status === 'PENDING', row?.status);
 
-  if (!pathBFeasible) {
-    console.log(`  ⚠️ default payer wallet has ${defaultPayerBal.usdc} testnet USDC (< ${AMOUNT}) — checkout/pay would fail at Circle.`);
-    console.log(`  Calling checkout/pay anyway once to record the exact honest failure.`);
-    results.push({ name: 'path B executed', pass: false, detail: 'default payer wallet unfunded' });
-    failed++;
-  }
+  // The audit (C1) proved this call used to settle ANY PENDING row from the
+  // platform's DEFAULT_PAYER_WALLET_ID with no caller identity at all. The
+  // unconditional payer-control guard in settle now rejects every internal-
+  // key settlement whose payer is not the platform's own agent
+  // (AGENT_OWNER_WALLET_ADDRESS) — this merchant request link has no
+  // authorized payer, so it must fail closed with 403 and no funds move.
   const payRes = await post('/api/checkout/pay', { reference: refB });
   const payData = await j(payRes);
   console.log(`  checkout/pay → ${payRes.status}: ${JSON.stringify(payData).slice(0, 300)}`);
   row = await paymentRow(refB);
-  if (payRes.status === 200) {
-    ok('checkout/pay 200', true);
-    ok('settlementType ONCHAIN_SCA_TRANSFER', payData.settlementType === 'ONCHAIN_SCA_TRANSFER', payData.settlementType);
-    ok('arcTxHash returned', !!payData.arcTxHash);
-    ok('PaymentLog B SUCCESS', row?.status === 'SUCCESS', row?.status);
-    ok('circleTxId recorded', !!row?.circleTxId);
-    snapshot('after path B', row);
-    results.push({ name: 'path B executed', pass: true });
-    const txHashB = payData.arcTxHash || row?.arcTxHash;
-    if (txHashB) console.log(`    txHash: ${txHashB}`);
-  } else {
-    ok('checkout/pay 200', false, `got ${payRes.status}: ${JSON.stringify(payData).slice(0, 300)}`);
-    snapshot('path B failure state', row);
+  ok('unauthenticated checkout/pay rejected 403', payRes.status === 403, `got ${payRes.status}`);
+  ok('rejection is the payer-control guard message', typeof payData.error === 'string' && payData.error.includes('payer is a wallet you do not control'), JSON.stringify(payData).slice(0, 200));
+  ok('no settlement happened (no SUCCESS / arcTxHash / circleTxId)', row?.status !== 'SUCCESS' && !row?.arcTxHash && !row?.circleTxId, JSON.stringify({ status: row?.status, arcTxHash: row?.arcTxHash, circleTxId: row?.circleTxId }));
+  // (The atomic lock flipped the row to PROCESSING_ONCHAIN before the guard;
+  // the existing 5-minute stale-lock recovery reclaims it — same designed
+  // behavior as the other settle-side 403 paths.)
+  console.log(`    (designed: row left ${row?.status} — 5-min stale-lock recovery reclaims it)`);
+
+  // 10. Non-caller-controlled payers are rejected through checkout/pay.
+  console.log('\n[9] checkout/pay on PENDING rows with non-caller-controlled payers → 403');
+  {
+    // (a) "merchant names a victim as payer" shape: a row whose payer is a
+    // real 0x address the platform does not control (the audit's
+    // settle/route.ts:178-186 guard case, created directly with the exact
+    // shape initialize produces for such rows). Two separate rows — the
+    // first guard rejection flips the row to PROCESSING_ONCHAIN (lock), so
+    // a second settle attempt would hit the lock's 409, not the guard.
+    const victimPayer = `0x${'a'.repeat(40)}`;
+    const refV = `arc_ref_victim_${Date.now()}`;
+    const refV2 = `arc_ref_victim2_${Date.now()}`;
+    await prisma.paymentLog.create({
+      data: {
+        reference: refV, amount: AMOUNT, currency: 'USDC', chain: 'Arc Testnet v1.0',
+        senderEmail: victimPayer, direction: 'request', merchant: merchantA.businessName,
+        merchantId: merchantA.id, merchantSCA: merchantA.walletAddress,
+        status: 'PENDING',
+      },
+    });
+    await prisma.paymentLog.create({
+      data: {
+        reference: refV2, amount: AMOUNT, currency: 'USDC', chain: 'Arc Testnet v1.0',
+        senderEmail: victimPayer, direction: 'request', merchant: merchantA.businessName,
+        merchantId: merchantA.id, merchantSCA: merchantA.walletAddress,
+        status: 'PENDING',
+      },
+    });
+    // Merchant's own key: the merchant does not control the payer → 403
+    // (this guard now runs unconditionally, no internal key needed).
+    const mRes = await post('/api/payments/settle', { reference: refV }, { 'x-api-key': keyA });
+    const mData = await j(mRes);
+    ok('merchant-key settle of victim-payer row rejected 403', mRes.status === 403, `got ${mRes.status}: ${JSON.stringify(mData).slice(0, 200)}`);
+    ok('merchant-key rejection is the payer-control guard message', typeof mData.error === 'string' && mData.error.includes('payer is a wallet you do not control'), JSON.stringify(mData).slice(0, 200));
+    ok('victim row not settled', (await paymentRow(refV))?.status !== 'SUCCESS');
+    await prisma.paymentLog.delete({ where: { reference: refV } }).catch(() => { });
+    const vRes = await post('/api/checkout/pay', { reference: refV2 });
+    const vData = await j(vRes);
+    ok('checkout/pay on victim-payer row rejected 403', vRes.status === 403, `got ${vRes.status}: ${JSON.stringify(vData).slice(0, 200)}`);
+    ok('victim row not settled', (await paymentRow(refV2))?.status !== 'SUCCESS');
+    await prisma.paymentLog.delete({ where: { reference: refV2 } }).catch(() => { });
+
+    // (b) "consumer request drain" shape: merchantId null, payer
+    // 'pending@checkout', merchantSCA = the requester's OWN wallet (what a
+    // consumer direction:'request' initialize produces). The audit's C1
+    // exploit chain: the platform default payer used to fund THIS row.
+    const drainSCA = `0x${'b'.repeat(40)}`;
+    const refDrain = `arc_ref_drain_${Date.now()}`;
+    await prisma.paymentLog.create({
+      data: {
+        reference: refDrain, amount: AMOUNT, currency: 'USDC', chain: 'Arc Testnet v1.0',
+        senderEmail: 'pending@checkout', direction: 'request', merchant: 'consumer-request',
+        status: 'PENDING', merchantSCA: drainSCA,
+      },
+    });
+    const dRes = await post('/api/checkout/pay', { reference: refDrain });
+    const dData = await j(dRes);
+    ok('checkout/pay on consumer-request drain row rejected 403', dRes.status === 403, `got ${dRes.status}: ${JSON.stringify(dData).slice(0, 200)}`);
+    ok('drain row not settled', (await paymentRow(refDrain))?.status !== 'SUCCESS');
+    await prisma.paymentLog.delete({ where: { reference: refDrain } }).catch(() => { });
   }
 
-  // 10. Duplicate checkout/pay on settled payment B -> 409.
-  console.log('\n[9] duplicate checkout/pay on settled payment B');
-  if (payRes.status === 200) {
-    const dupPayB = await post('/api/checkout/pay', { reference: refB });
-    const dupPayBData = await j(dupPayB);
-    ok('checkout/pay B 409 on settled payment', dupPayB.status === 409, `got ${dupPayB.status}: ${JSON.stringify(dupPayBData).slice(0, 200)}`);
+  // 11. C2 — cross-tenant agentSCA drain is rejected at initialize.
+  console.log('\n[10] initialize agentSCA ownership (C2)');
+  const agentToken = `${Date.now()}`;
+  const victimAgent = await prisma.agentRegistry.create({
+    data: {
+      name: 'victim agent', tokenId: `${agentToken}v`, scaAddress: `0x${'c'.repeat(40)}`,
+      ownerNode: merchantB.walletAddress, status: 'REGISTERED', merchantId: merchantB.id,
+    },
+  });
+  const controlAgent = await prisma.agentRegistry.create({
+    data: {
+      name: 'control agent', tokenId: `${agentToken}c`, scaAddress: `0x${'d'.repeat(40)}`,
+      ownerNode: merchantA.walletAddress, status: 'REGISTERED', merchantId: merchantA.id,
+    },
+  });
+  try {
+    const before = await prisma.paymentLog.count();
+    const xInit = await post('/api/payments/initialize', {
+      amount: AMOUNT, currency: 'USDC', direction: 'request', merchant: merchantA.businessName,
+      agentSCA: victimAgent.scaAddress,
+    }, { 'x-api-key': keyA });
+    const xData = await j(xInit);
+    const after = await prisma.paymentLog.count();
+    ok('merchant naming ANOTHER tenant\'s agentSCA rejected 403', xInit.status === 403, `got ${xInit.status}: ${JSON.stringify(xData).slice(0, 200)}`);
+    ok('no PaymentLog row created for the rejected initialize', after === before, `rows ${before} → ${after}`);
+    const okInit = await post('/api/payments/initialize', {
+      amount: AMOUNT, currency: 'USDC', direction: 'request', merchant: merchantA.businessName,
+      agentSCA: controlAgent.scaAddress,
+    }, { 'x-api-key': keyA });
+    const okData = await j(okInit);
+    ok('merchant naming their OWN agentSCA accepted 200', okInit.status === 200, `got ${okInit.status}: ${JSON.stringify(okData).slice(0, 200)}`);
+    const okRow = okData.reference ? await paymentRow(okData.reference) : null;
+    ok('own-agent row payer = the agent SCA', okRow?.senderEmail?.toLowerCase() === controlAgent.scaAddress.toLowerCase(), okRow?.senderEmail);
+    if (okData.reference) await prisma.paymentLog.delete({ where: { reference: okData.reference } }).catch(() => { });
+  } finally {
+    await prisma.agentRegistry.delete({ where: { id: victimAgent.id } }).catch(() => { });
+    await prisma.agentRegistry.delete({ where: { id: controlAgent.id } }).catch(() => { });
   }
 
-  // 11. Unauthorized settlement — merchant B settling merchant A's payment -> 403.
-  console.log('\n[10] unauthorized settlement (merchant B key on merchant A payment)');
+  // 12. Unauthorized settlement — merchant B settling merchant A's payment -> 403.
+  console.log('\n[11] unauthorized settlement (merchant B key on merchant A payment)');
   const initC = await post('/api/payments/initialize', {
     amount: AMOUNT, currency: 'USDC', direction: 'request', merchant: merchantA.businessName,
   }, { 'x-api-key': keyA });
@@ -331,8 +418,8 @@ async function main() {
   row = await paymentRow(refC);
   console.log(`    (designed behavior: row left ${row?.status} — stale-lock recovery reclaims it after 5 min)`);
 
-  // 12. Concurrent settlement — two simultaneous checkout/pay calls.
-  console.log('\n[11] concurrent settlement (two simultaneous checkout/pay calls)');
+  // 13. Concurrent settlement — two simultaneous checkout/pay calls.
+  console.log('\n[12] concurrent settlement (two simultaneous checkout/pay calls)');
   const initD = await post('/api/payments/initialize', {
     amount: AMOUNT, currency: 'USDC', direction: 'request', merchant: merchantA.businessName,
   }, { 'x-api-key': keyA });
@@ -346,13 +433,14 @@ async function main() {
   const d1 = await j(c1);
   const d2 = await j(c2);
   console.log(`  responses: ${JSON.stringify([{ s: c1.status, b: d1 }, { s: c2.status, b: d2 }]).slice(0, 400)}`);
-  ok('exactly one winner (200), one 409 lock rejection', codes[0] === 409 && codes[1] === 200, `codes ${codes}`);
+  // Post-fix both calls must fail: one at the payer-control guard (403), the
+  // other at the atomic lock (409). Exactly one wins the lock; neither can
+  // settle a row whose payer is not authorized.
+  ok('exactly one lock winner (403 guard), one 409 lock rejection', codes[0] === 403 && codes[1] === 409, `codes ${codes}`);
   const loser = c1.status === 409 ? d1 : d2;
-  // The loser can be rejected by either guard: checkout/pay's own status
-  // gate (if the winner's lock already flipped the row) or settle's atomic
-  // lock ("Payment already processing or settled."). Both are valid.
   ok('loser rejected with a 409 idempotency message', loser.error === 'Payment already processing or settled.' || loser.error === 'Payment is not in a payable state.', JSON.stringify(loser).slice(0, 200));
   row = await paymentRow(refD);
+  ok('no settlement happened (status not SUCCESS)', row?.status !== 'SUCCESS', row?.status);
   console.log(`  final state of concurrent ref: ${row?.status}`);
 
   // 13. Summary.

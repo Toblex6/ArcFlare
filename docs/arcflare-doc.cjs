@@ -316,7 +316,7 @@ const doc = new Document({
         kv('USDC on Arc Testnet', '0x3600000000000000000000000000000000000000'),
         kv('Iris API V2', 'https://iris-api-sandbox.circle.com/v2'),
         kv('ArcFlareEscrow', '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F'),
-        kv('ArcFlareStream', '0xc9BbeDFb142b6306c34838a39521c894F3dbc872'),
+        kv('ArcFlareStream (NOT YET DEPLOYED)', '0xc9BbeDFb142b6306c34838a39521c894F3dbc872'),
         kv('ERC-8004 IdentityRegistry', '0x8004A818BFB912233c491871b3d84c89A494BD9e'),
         kv('Developer Wallet', '0x902C565bE31c146a79350387C1f77d6896814B58'),
 
@@ -483,9 +483,9 @@ const doc = new Document({
         bullet('refundEscrow(escrowId) — admin refunds depositor on valid dispute'),
 
         h2('4.2 ArcFlareStream.sol'),
-        kv('Address', '0xc9BbeDFb142b6306c34838a39521c894F3dbc872'),
+        kv('Address', '0xc9BbeDFb142b6306c34838a39521c894F3dbc872 (NOT YET DEPLOYED)'),
         kv('Network', 'Arc Testnet (Chain ID 5042002)'),
-        p('Streaming payment contract. USDC drips per second. Key functions:'),
+        p('Streaming payment contract (source absent from repo — planned, not live). USDC drips per second. Key functions:'),
         bullet('createStream(receiver, ratePerSecond, totalDeposited, ref) → bytes32 streamId'),
         bullet('withdraw(streamId) — receiver withdraws earned USDC'),
         bullet('stopStream(streamId) — sender stops stream, refund calculated'),

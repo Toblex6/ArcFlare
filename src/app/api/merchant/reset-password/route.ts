@@ -36,6 +36,20 @@ export async function POST(req: NextRequest) {
       merchant.resetCodeExpiresAt > new Date();
 
     if (!valid) {
+      // Brute-force counter (H9): burn the code after 5 failed attempts.
+      // Same response either way so a caller can't distinguish "wrong code"
+      // from "code nearly right".
+      if (merchant) {
+        const attempts = (merchant.resetCodeAttempts ?? 0) + 1;
+        const burnData: any = { resetCodeAttempts: attempts };
+        if (attempts >= 5) {
+          burnData.resetCode = null;
+          burnData.resetCodeExpiresAt = null;
+        }
+        await (prisma as any).merchant
+          .update({ where: { email }, data: burnData })
+          .catch(() => {});
+      }
       return NextResponse.json(
         { success: false, error: 'Invalid or expired reset code.' },
         { status: 400 }
@@ -46,7 +60,7 @@ export async function POST(req: NextRequest) {
 
     await (prisma as any).merchant.update({
       where: { email },
-      data: { passwordHash, resetCode: null, resetCodeExpiresAt: null },
+      data: { passwordHash, resetCode: null, resetCodeExpiresAt: null, resetCodeAttempts: 0 },
     });
 
     return NextResponse.json({

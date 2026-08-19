@@ -1224,7 +1224,7 @@ const makeShadow = () => ({
     '✅ Circle SCA wallet provisioning on ARC-TESTNET — agents get real wallets',
     '✅ ERC-8004 identity registration on Arc — every agent has an onchain identity',
     '✅ ArcFlareEscrow.sol at 0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F',
-    '✅ ArcFlareStream.sol at 0xc9BbeDFb142b6306c34838a39521c894F3dbc872',
+    '✅ ArcFlareStream.sol at 0xc9BbeDFb142b6306c34838a39521c894F3dbc872 — NOT YET DEPLOYED (planned)',
     '✅ Week 1 security hardening — rate limiting, Zod validation, webhook signatures, idempotency keys',
     '✅ Stream create → stop → withdraw — end-to-end confirmed working on Arc Testnet',
     '✅ Nanopayments — 10 × 0.0001 USDC → batch settled in one tx confirmed',

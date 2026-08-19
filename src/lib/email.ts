@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { randomInt } from 'node:crypto';
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
@@ -6,7 +7,10 @@ const resend = new Resend(process.env.RESEND_API_KEY!);
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'FlareHQ <onboarding@resend.dev>';
 
 export function generateVerificationCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // Cryptographically secure — Math.random() output is recoverable from a
+  // handful of samples, which would let an attacker predict a victim's
+  // 6-digit email-verification / password-reset code (H9).
+  return randomInt(100000, 1000000).toString();
 }
 
 export async function sendVerificationEmail(email: string, businessName: string, code: string) {

@@ -150,38 +150,64 @@ async function mergedSettleHandler(request: NextRequest) {
     const payment = await prisma.paymentLog.findUnique({ where: { reference } });
     if (!payment) throw new Error('Payment not found after lock');
 
-    // ── SECURITY: ownership guard — added because withApiKeyOrAnySession
-    // only checks "is this a valid credential," never "does this credential
-    // own THIS payment." Any authenticated merchant or consumer could
-    // previously settle any OTHER party's payment just by knowing its
-    // reference. Internal service ApiKey calls (agent-to-agent automation)
-    // are still allowed through unrestricted — that's a legitimate,
-    // trusted pattern, not the gap being closed here.
+    // ── SECURITY: unconditional payer-control guard ──────────────────────────
+    // withApiKeyOrAnySession (above) only proves "is this a valid credential,"
+    // never "does this credential own THIS payment." This guard runs for
+    // EVERY caller — internal service keys included:
+    //   - merchant: must own the row AND control its payer (their own payout
+    //     wallet or a registered agent). A merchant naming a stranger's
+    //     wallet as payer gets 403 — the "merchant names a victim as payer"
+    //     drain.
+    //   - consumer: must be the payer themselves (senderEmail == their wallet).
+    //   - internal service key (/api/checkout/pay, agent/brain): may only
+    //     settle a payment whose payer is the platform's own agent
+    //     (AGENT_OWNER_WALLET_ADDRESS). The public checkout trigger cannot
+    //     name ANY payer — the checkout UI settles from the customer's own
+    //     wallet via verify-onchain, never from platform funds. The previous
+    //     code skipped this entire block for internal keys, letting an
+    //     unauthenticated /api/checkout/pay call settle any PENDING row and
+    //     debit DEFAULT_PAYER_WALLET_ID or any agent's custodial wallet.
     const internalApiKey = request.headers.get('x-api-key');
-    const isInternalServiceCall = internalApiKey
-      ? !!(await (prisma as any).apiKey.findUnique({ where: { key: internalApiKey } }))
-      : false;
+    const serviceKey = internalApiKey
+      ? await (prisma as any).apiKey.findUnique({ where: { key: internalApiKey } })
+      : null;
+    // Active check: a revoked key must not satisfy this branch (M5).
+    const isInternalServiceCall = !!(serviceKey && serviceKey.active);
 
-    if (!isInternalServiceCall) {
-      const callerMerchant = await resolveMerchant(request).catch(() => null);
-      const callerConsumerWallet = await resolveConsumerSession(request).catch(() => null);
+    const callerMerchant = isInternalServiceCall
+      ? null
+      : await resolveMerchant(request).catch(() => null);
+    const callerConsumerWallet = isInternalServiceCall
+      ? null
+      : await resolveConsumerSession(request).catch(() => null);
 
-      const merchantOwnsIt = callerMerchant && payment.merchantId === callerMerchant.id;
-      const consumerOwnsIt =
-        callerConsumerWallet &&
-        payment.senderEmail?.toLowerCase() === callerConsumerWallet.toLowerCase();
+    const merchantOwnsIt = callerMerchant && payment.merchantId === callerMerchant.id;
+    const consumerOwnsIt =
+      callerConsumerWallet &&
+      payment.senderEmail?.toLowerCase() === callerConsumerWallet.toLowerCase();
 
-      // Extra merchant guard: a merchant may settle their own payment row,
-      // but only when the payer is not a third-party wallet. When
-      // senderEmail IS a real 0x address, Path B debits that wallet's
-      // Circle account — so the settling caller must control it, or the
-      // row is only legitimate for the internal service path (checked
-      // above). This closes the "merchant creates a payment naming a
-      // victim's address as payer, then settles" drain.
-      const payerIsAddress =
-        !!payment.senderEmail?.startsWith('0x') &&
-        payment.senderEmail.toLowerCase() !== 'pending@checkout';
-      if (callerMerchant && merchantOwnsIt && payerIsAddress) {
+    const payerIsAddress =
+      !!payment.senderEmail?.startsWith('0x') &&
+      payment.senderEmail.toLowerCase() !== 'pending@checkout';
+
+    let payerAuthorized = false;
+
+    if (isInternalServiceCall) {
+      // The internal key may only ever debit the platform's own agent wallet
+      // (agent/brain pays from AGENT_OWNER_WALLET_ADDRESS). Any other payer —
+      // a consumer wallet, a third-party agent SCA, or the platform-default
+      // fallback wallets — is rejected: none of them authorized the debit.
+      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || '').toLowerCase();
+      payerAuthorized =
+        !!platformAgent && payerIsAddress && payment.senderEmail.toLowerCase() === platformAgent;
+    } else if (payerIsAddress) {
+      // Consumer: they ARE the payer — settling their own send is legitimate.
+      if (consumerOwnsIt) {
+        payerAuthorized = true;
+      } else if (callerMerchant && merchantOwnsIt) {
+        // Merchant: the payer must be their own payout wallet or one of
+        // their registered agents. Same rule as before, now structured so
+        // every caller class is held to it.
         const merchantRecord = await (prisma as any).merchant.findUnique({
           where: { id: callerMerchant.id },
         });
@@ -195,29 +221,38 @@ async function mergedSettleHandler(request: NextRequest) {
               scaAddress: { equals: payment.senderEmail, mode: 'insensitive' },
             },
           }));
-        if (!controlsPayer && !ownsPayerAgent) {
-          return NextResponse.json(
-            {
-              success: false,
-              error:
-                'You are not a party to this payment: its payer is a wallet you do not control.',
-            },
-            { status: 403 }
-          );
-        }
+        payerAuthorized = controlsPayer || !!ownsPayerAgent;
       }
+    } else if (callerMerchant && merchantOwnsIt) {
+      // Platform-default payer ('pending@checkout' / merchant-link defaults,
+      // which are not real addresses): a merchant settling their own request
+      // link is the intended platform-funded checkout flow — preserved.
+      // Consumers can never match here (their wallet is a real 0x address),
+      // and the internal key is restricted to the platform's own agent above.
+      payerAuthorized = true;
+    }
 
-      if (!merchantOwnsIt && !consumerOwnsIt) {
-        // Not attempting to restore the pre-lock status here — it wasn't
-        // captured before the lock ran. Left in PROCESSING_ONCHAIN
-        // deliberately: this file's own stale-lock recovery (5 minutes,
-        // see step 3 above) already reclaims exactly this state, so this
-        // self-heals via existing logic rather than needing a new path.
-        return NextResponse.json(
-          { success: false, error: 'You are not a party to this payment.' },
-          { status: 403 }
-        );
-      }
+    if (!payerAuthorized) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'You are not a party to this payment: its payer is a wallet you do not control.',
+        },
+        { status: 403 }
+      );
+    }
+
+    if (!isInternalServiceCall && !merchantOwnsIt && !consumerOwnsIt) {
+      // Not attempting to restore the pre-lock status here — it wasn't
+      // captured before the lock ran. Left in PROCESSING_ONCHAIN
+      // deliberately: this file's own stale-lock recovery (5 minutes,
+      // see step 3 above) already reclaims exactly this state, so this
+      // self-heals via existing logic rather than needing a new path.
+      return NextResponse.json(
+        { success: false, error: 'You are not a party to this payment.' },
+        { status: 403 }
+      );
     }
 
     if (payment.expiresAt && new Date() > payment.expiresAt) {

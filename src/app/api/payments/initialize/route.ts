@@ -51,6 +51,26 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // Ownership gate: a merchant may only name an agent THEY registered.
+      // Without this, any verified merchant could create a payment whose
+      // payer is another tenant's agent — settle Path B then debits the
+      // victim agent's custodial Circle wallet and pays the attacker
+      // (cross-tenant custodial drain). Internal calls are trusted and
+      // unchanged; consumers can never name an agent as payer (the consumer
+      // branch below overwrites senderEmail with the session wallet).
+      if (caller.type === 'merchant' && caller.merchant) {
+        if (resolvedAgent.merchantId !== caller.merchant.id) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'You can only create payments from agents you own. This agent belongs to another merchant.',
+            },
+            { status: 403 }
+          );
+        }
+      }
+
       resolvedSenderEmail = agentSCA;
     }
 

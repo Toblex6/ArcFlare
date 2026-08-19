@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
       await (prisma as any).merchant.update({
         where: { email },
-        data: { resetCode, resetCodeExpiresAt },
+        data: { resetCode, resetCodeExpiresAt, resetCodeAttempts: 0 },
       });
 
       await sendPasswordResetEmail(email, merchant.businessName, resetCode).catch((e) => {

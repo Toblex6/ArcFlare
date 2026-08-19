@@ -218,7 +218,9 @@ async function main() {
     const rogue = await post('/api/payments/settle', { reference: data.reference }, { 'x-api-key': keyB });
     const rogueData = await j(rogue);
     ok('403 party rejection', rogue.status === 403, `got ${rogue.status}: ${JSON.stringify(rogueData).slice(0, 160)}`);
-    ok('explicit party error message', rogueData.error === 'You are not a party to this payment.', rogueData.error);
+    // Either "not a party" message is correct — the payer-control guard now
+    // runs first and its message also names the party requirement.
+    ok('explicit party error message', typeof rogueData.error === 'string' && rogueData.error.startsWith('You are not a party to this payment'), rogueData.error);
     const row = await paymentRow(data.reference);
     console.log(`    (designed: row now ${row?.status} — 5-min stale-lock recovery; cleanup deletes it)`);
   }
@@ -335,12 +337,16 @@ async function main() {
   console.log('\n[idempotency] duplicate settle on SUCCESS → 409, no second debit');
   {
     const { res, data } = await initPayment(keyA);
-    const pay = await post('/api/checkout/pay', { reference: data.reference });
-    ok('first checkout/pay settles 200', pay.status === 200, `got ${pay.status}`);
+    // Since the C1 fix, checkout/pay (internal key) can no longer settle any
+    // row whose payer is not the platform's own agent — so the settle-path
+    // idempotency contract is exercised through the merchant's own key, which
+    // owns this request link (the intended platform-funded flow).
+    const pay = await post('/api/payments/settle', { reference: data.reference }, { 'x-api-key': keyA });
+    ok('first merchant-key settle 200', pay.status === 200, `got ${pay.status}`);
     const row = await paymentRow(data.reference);
     ok('row SUCCESS', row?.status === 'SUCCESS', row?.status);
     const balAfterFirst = await balanceUsdc(merchantA.walletAddress);
-    const dup = await post('/api/checkout/pay', { reference: data.reference });
+    const dup = await post('/api/payments/settle', { reference: data.reference }, { 'x-api-key': keyA });
     const dupData = await j(dup);
     ok('duplicate settle 409', dup.status === 409, `got ${dup.status}: ${JSON.stringify(dupData).slice(0, 160)}`);
     const rowAfter = await paymentRow(data.reference);
@@ -349,13 +355,13 @@ async function main() {
     ok('no second debit (merchant balance unchanged)', Math.abs(balAfterDup - balAfterFirst) < 0.000001, `delta ${(balAfterDup - balAfterFirst).toFixed(6)}`);
   }
 
-  console.log('\n[idempotency] true concurrent checkout/pay → exactly one settles');
+  console.log('\n[idempotency] true concurrent merchant-key settle → exactly one settles');
   {
     const { res, data } = await initPayment(keyA);
     const balBefore = await balanceUsdc(merchantA.walletAddress);
     const [c1, c2] = await Promise.all([
-      post('/api/checkout/pay', { reference: data.reference }),
-      post('/api/checkout/pay', { reference: data.reference }),
+      post('/api/payments/settle', { reference: data.reference }, { 'x-api-key': keyA }),
+      post('/api/payments/settle', { reference: data.reference }, { 'x-api-key': keyA }),
     ]);
     const codes = [c1.status, c2.status];
     ok('exactly one 200 and one 409', codes.includes(200) && codes.includes(409), `codes ${codes}`);
@@ -409,7 +415,10 @@ async function main() {
     const verify = await get(`/api/payments/verify/${data.reference}`);
     const vData = await j(verify);
     ok('pre-attempt status still reads PENDING (documented behavior)', vData.data?.status === 'PENDING', vData.data?.status);
-    const pay = await post('/api/checkout/pay', { reference: data.reference });
+    // Merchant's own key (owns the row): reaches the expiry check. checkout/pay
+    // can no longer get past the payer-control guard, so it can't be used to
+    // demonstrate the EXPIRED transition anymore.
+    const pay = await post('/api/payments/settle', { reference: data.reference }, { 'x-api-key': keyA });
     const payData = await j(pay);
     const rowAfter = await paymentRow(data.reference);
     ok('settle attempt on expired → 400', pay.status === 400, `got ${pay.status}: ${JSON.stringify(payData).slice(0, 160)}`);

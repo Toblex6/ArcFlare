@@ -181,6 +181,7 @@ model Merchant {
   verified                  Boolean   @default(false)
   resetCode                 String?
   resetCodeExpiresAt        DateTime?
+  resetCodeAttempts         Int       @default(0) // brute-force counter; code burns at 5 failed attempts
 
   // Payout wallet — Circle-managed by default, or a connected external signer.
   // Open string, not a two-value enum: "CIRCLE" | "METAMASK" | "WALLETCONNECT" |

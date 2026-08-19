@@ -19,7 +19,7 @@ export default function MerchantDocsPage() {
     {
       title: 'Streaming Payments',
       description: 'Create continuous USDC payment streams.',
-      code: 'POST /api/payments/stream',
+      code: 'POST /api/payments/stream/create',
     },
     {
       title: 'Nanopayments',

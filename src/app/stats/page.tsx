@@ -269,7 +269,7 @@ export default function PublicStatsPage() {
                   address: '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F',
                 },
                 {
-                  name: 'ArcFlareStream.sol',
+                  name: 'ArcFlareStream.sol (not yet deployed)',
                   address: '0xc9BbeDFb142b6306c34838a39521c894F3dbc872',
                 },
               ].map((c) => (
