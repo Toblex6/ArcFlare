@@ -31,6 +31,22 @@ interface PayrollRecipient {
   label?: string; // e.g. "Employee ID: EMP-204"
 }
 
+// H8 hardening: every recipient amount must be a positive decimal with at
+// most 6 decimals — NaN/negative/malformed/"1e3"/excess-precision inputs
+// are rejected instead of being silently toFixed(6)-coerced.
+const AMOUNT_RE = /^\d+(\.\d{1,6})?$/;
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+const MAX_RECIPIENTS_PER_BATCH = 200;
+
+/** Returns a normalized amount string, or null when invalid. */
+function normalizeAmount(raw: unknown): string | null {
+  const str = typeof raw === "string" || typeof raw === "number" ? String(raw).trim() : "";
+  if (!AMOUNT_RE.test(str)) return null;
+  const n = parseFloat(str);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return str;
+}
+
 // ── POST /api/payroll/run ─────────────────────────────────────────────────────
 async function runPayrollHandler(request: NextRequest) {
   try {
@@ -39,7 +55,7 @@ async function runPayrollHandler(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
     }
 
-    const { recipients, webhookUrl, description } = await request.json();
+    const { recipients, webhookUrl, description, idempotencyKey } = await request.json();
 
     if (!Array.isArray(recipients) || recipients.length === 0) {
       return NextResponse.json(
@@ -57,10 +73,64 @@ async function runPayrollHandler(request: NextRequest) {
       );
     }
 
+    if (recipients.length > MAX_RECIPIENTS_PER_BATCH) {
+      return NextResponse.json(
+        { success: false, error: `Too many recipients — max ${MAX_RECIPIENTS_PER_BATCH} per batch.` },
+        { status: 400 }
+      );
+    }
+
+    // ── H8: strict per-recipient validation ──
+    const normalized: PayrollRecipient[] = [];
+    for (const recipient of recipients) {
+      if (!recipient || typeof recipient !== 'object') {
+        return NextResponse.json({ success: false, error: 'Each recipient must be an object.' }, { status: 400 });
+      }
+      const sca = typeof recipient.recipientSCA === 'string' ? recipient.recipientSCA.trim() : '';
+      if (!ADDRESS_RE.test(sca)) {
+        return NextResponse.json(
+          { success: false, error: `recipientSCA "${recipient.recipientSCA}" is not a valid address.` },
+          { status: 400 }
+        );
+      }
+      const amount = normalizeAmount(recipient.amount);
+      if (amount === null) {
+        return NextResponse.json(
+          { success: false, error: `recipient ${sca}: amount "${recipient.amount}" is invalid — use a positive number with up to 6 decimals.` },
+          { status: 400 }
+        );
+      }
+      normalized.push({ recipientSCA: sca, amount, label: typeof recipient.label === 'string' ? recipient.label : undefined });
+    }
+    recipients.length = 0;
+    recipients.push(...normalized);
+
+    // ── H8: idempotency — a retried POST with the same idempotencyKey must
+    // replay the ORIGINAL batch, never pay the recipients again. The batch
+    // record is created only if the deterministic batchRef is unused; a
+    // unique-violation race (concurrent duplicate) also replays.
+    const idemRef = idempotencyKey ? `payroll_idem_${String(idempotencyKey).slice(0, 120)}` : null;
+    if (idemRef) {
+      const existing = await (prisma as any).payrollBatch.findUnique({ where: { batchRef: idemRef } });
+      if (existing) {
+        return NextResponse.json({
+          success: true,
+          replayed: true,
+          batchRef: existing.batchRef,
+          status: existing.status,
+          totalAmount: existing.totalAmount,
+          recipientCount: existing.recipientCount,
+          successCount: existing.successCount,
+          failedCount: existing.failedCount,
+          results: existing.results ?? [],
+        });
+      }
+    }
+
     const walletProvider = await resolveWalletProvider(merchant.id);
     const payerSCA = await walletProvider.getAddress();
 
-    const batchRef = `payroll_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const batchRef = idemRef ?? `payroll_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const totalAmount = recipients.reduce(
       (sum: number, r: PayrollRecipient) => sum + parseFloat(r.amount as any),
       0
@@ -71,17 +141,41 @@ async function runPayrollHandler(request: NextRequest) {
     );
 
     // Create the batch record up front so it's trackable even mid-run
-    const batch = await (prisma as any).payrollBatch.create({
-      data: {
-        batchRef,
-        payerSCA,
-        payerWalletId: walletProvider.kind, // was a Circle walletId; now the wallet kind, Circle wallet lookup happens inside the provider
-        totalAmount,
-        recipientCount: recipients.length,
-        status: 'PROCESSING',
-        webhookUrl: webhookUrl || null,
-      },
-    });
+    let batch: any;
+    try {
+      batch = await (prisma as any).payrollBatch.create({
+        data: {
+          batchRef,
+          payerSCA,
+          payerWalletId: walletProvider.kind, // was a Circle walletId; now the wallet kind, Circle wallet lookup happens inside the provider
+          totalAmount,
+          recipientCount: recipients.length,
+          status: 'PROCESSING',
+          webhookUrl: webhookUrl || null,
+          merchantId: merchant.id,
+        },
+      });
+    } catch (createError: any) {
+      // Unique batchRef violation = a concurrent identical request won the
+      // race — replay its batch instead of double-paying.
+      if (idemRef && createError?.code === 'P2002') {
+        const winner = await (prisma as any).payrollBatch.findUnique({ where: { batchRef: idemRef } });
+        if (winner) {
+          return NextResponse.json({
+            success: true,
+            replayed: true,
+            batchRef: winner.batchRef,
+            status: winner.status,
+            totalAmount: winner.totalAmount,
+            recipientCount: winner.recipientCount,
+            successCount: winner.successCount,
+            failedCount: winner.failedCount,
+            results: winner.results ?? [],
+          });
+        }
+      }
+      throw createError;
+    }
 
     const results: any[] = [];
     let pendingSignatureCount = 0;
@@ -89,7 +183,7 @@ async function runPayrollHandler(request: NextRequest) {
     // ── Pay each recipient sequentially ─────────────────────────────────────
     // Sequential (not parallel) to avoid wallet nonce collisions, same as before.
     for (const recipient of recipients as PayrollRecipient[]) {
-      const amountStr = parseFloat(recipient.amount as any).toFixed(6);
+      const amountStr = String(recipient.amount);
       const outcome = await walletProvider.transferUSDC(
         recipient.recipientSCA,
         amountStr,
@@ -211,8 +305,10 @@ async function getPayrollBatchHandler(request: NextRequest) {
       );
     }
 
-    const batch = await (prisma as any).payrollBatch.findUnique({
-      where: { batchRef },
+    // H8: tenant-scoped — a merchant may only read its OWN batches (the
+    // merchantId is stamped at creation). Cross-tenant lookups 404.
+    const batch = await (prisma as any).payrollBatch.findFirst({
+      where: { batchRef, merchantId: merchant.id },
     });
 
     if (!batch) {

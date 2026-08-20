@@ -18,6 +18,19 @@ import { prisma } from "@/lib/prisma";
 
 const SPEND_LIMIT_CONTRACT_ADDRESS = process.env.SPEND_LIMIT_CONTRACT_ADDRESS ?? "";
 
+// ── H3 default limit ──────────────────────────────────────────────────────────
+// A freshly provisioned agent payment EOA must NEVER sit in the contract's
+// "no limit configured = no cap enforced" state (the bootstrap first-caller-
+// becomes-owner slot is exactly what an attacker would front-run). Every new
+// agent wallet gets an explicit default cap signed by the RELAYER the moment
+// it is created — the relayer becomes the limit owner, an attacker can no
+// longer bootstrap, and the agent is never uncapped by default. Merchants
+// then raise/lower the cap via POST /api/agents/[id]/policy (owner-gated).
+// Product decision: 100 USDC per 24h rolling window (fail-safe default; the
+// merchant raises it explicitly for larger flows).
+export const DEFAULT_AGENT_SPEND_CAP_USDC = 100;
+export const DEFAULT_AGENT_SPEND_WINDOW_SECONDS = 24 * 60 * 60;
+
 const SPEND_LIMIT_ABI = [
   "function wouldExceedLimit(address agent, uint256 amount) external view returns (bool)",
   "function checkAndRecordSpend(address agent, uint256 amount) external",
@@ -30,6 +43,58 @@ export function getSpendLimitContract(): Contract {
     throw new Error("SPEND_LIMIT_CONTRACT_ADDRESS is not configured — deploy ArcFlareSpendLimit.sol first");
   }
   return new Contract(SPEND_LIMIT_CONTRACT_ADDRESS, SPEND_LIMIT_ABI, getRelayerSigner());
+}
+
+/**
+ * H3 — secures the bootstrap slot for a NEW agent payment wallet. Called at
+ * provisioning time (getOrCreateAgentWallet creation branch). The relayer
+ * signs the default setLimit, so the relayer becomes the on-chain limit
+ * owner BEFORE any attacker can call setLimit(agent, ...) first and become
+ * owner themselves (the contract's first-caller-wins bootstrap). If the
+ * slot was already taken by a non-relayer, the default cannot be applied —
+ * that's a front-run and is flagged for review; the setAgentPolicy guard
+ * will refuse policy changes for that wallet.
+ *
+ * Never throws to the caller: provisioning must not fail because the chain
+ * is flaky. A failure leaves the wallet without a default (rare, and
+ * backstopped by the setAgentPolicy front-run guard), logged loudly.
+ */
+export async function ensureAgentDefaultSpendLimit(agentAddress: string): Promise<void> {
+  try {
+    const contract = getSpendLimitContract();
+    const limit = await contract.getLimit(agentAddress);
+    if (limit?.owner && limit.owner !== "0x0000000000000000000000000000000000000000") {
+      const relayer = await getRelayerSigner().getAddress();
+      if (limit.owner.toLowerCase() !== relayer.toLowerCase()) {
+        console.error(
+          `[spendLimitEnforcer] FRONT-RUN: agent ${agentAddress.slice(0, 10)}… limit owner is ${limit.owner}, not the relayer — refusing to touch it.`
+        );
+        prisma.stuckSettlement
+          .create({
+            data: {
+              agentAddress,
+              amount: "0",
+              jobCriteriaId: "agent-wallet-provisioning",
+              gatewayRef: "none",
+              settlementTxHash: "none",
+              failureReason: `spend-limit bootstrap front-run: owner is ${limit.owner}, expected the relayer`,
+            },
+          })
+          .catch(() => {});
+      }
+      return;
+    }
+    const cap = BigInt(DEFAULT_AGENT_SPEND_CAP_USDC) * 1_000_000n;
+    const tx = await contract.setLimit(agentAddress, cap, BigInt(DEFAULT_AGENT_SPEND_WINDOW_SECONDS));
+    await tx.wait();
+    console.log(
+      `[spendLimitEnforcer] default limit set for agent EOA ${agentAddress.slice(0, 10)}… (${DEFAULT_AGENT_SPEND_CAP_USDC} USDC / ${DEFAULT_AGENT_SPEND_WINDOW_SECONDS}s)`
+    );
+  } catch (e: any) {
+    console.error(
+      `[spendLimitEnforcer] failed to set default spend limit for ${agentAddress.slice(0, 10)}…: ${e?.message ?? e}`
+    );
+  }
 }
 
 export interface SpendCheckParams {

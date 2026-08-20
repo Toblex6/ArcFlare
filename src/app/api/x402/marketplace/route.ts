@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
+import { assertSafeTargetUrl } from '@/lib/security/ssrfGuard';
 
 function slugify(name: string): string {
     return name
@@ -23,6 +24,10 @@ function slugify(name: string): string {
  */
 export async function checkTargetUrlReachable(targetUrl: string): Promise<{ ok: boolean; detail: string }> {
     try {
+        const ssrfCheck = await assertSafeTargetUrl(targetUrl);
+        if (!ssrfCheck.ok) {
+            return { ok: false, detail: `targetUrl rejected by SSRF guard: ${ssrfCheck.reason}.` };
+        }
         const res = await fetch(targetUrl, { method: 'HEAD', signal: AbortSignal.timeout(6000) });
         if (res.status === 405) {
             // Some APIs reject HEAD but are otherwise fine — not a reason to block publishing.
@@ -68,6 +73,14 @@ async function createListingHandler(request: Request, merchant: AuthedMerchant) 
         } catch {
             return NextResponse.json(
                 { success: false, error: 'targetUrl must be a valid, absolute URL.' },
+                { status: 400 }
+            );
+        }
+
+        const ssrfCheck = await assertSafeTargetUrl(targetUrl);
+        if (!ssrfCheck.ok) {
+            return NextResponse.json(
+                { success: false, error: `targetUrl rejected: ${ssrfCheck.reason}.` },
                 { status: 400 }
             );
         }

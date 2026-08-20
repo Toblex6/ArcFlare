@@ -25,6 +25,15 @@ export interface AuthedMerchant {
   businessName: string;
 }
 
+// M18 — a cookie token is only valid for the account's CURRENT session
+// version. Tokens without the claim (issued before 0008_merchant_session_version)
+// and tokens issued before the latest password reset are rejected, so a
+// stolen cookie dies the moment the password changes.
+function sessionVersionMatches(payload: unknown, merchant: { sessionVersion?: number | null }): boolean {
+  const expected = merchant.sessionVersion ?? 0;
+  return (payload as any)?.sessionVersion === expected;
+}
+
 export async function resolveMerchant(req: NextRequest): Promise<AuthedMerchant | null> {
   // ── Path A: API key (developer calls, curl, server-to-server) ──────────
   const apiKey = req.headers.get('x-api-key');
@@ -47,7 +56,8 @@ export async function resolveMerchant(req: NextRequest): Promise<AuthedMerchant 
       // Cookie tokens are only issued to verified+active merchants (see
       // merchant/login), but re-check both here so deactivation or a
       // verification-state change takes effect before the token expires.
-      if (merchant && merchant.active && merchant.verified) {
+      // M18: a stale session version (pre-reset token) is rejected too.
+      if (merchant && merchant.active && merchant.verified && sessionVersionMatches(payload, merchant)) {
         return { id: merchant.id, email: merchant.email, businessName: merchant.businessName };
       }
     } catch {
@@ -138,7 +148,7 @@ export function withApiKeyOrMerchant(handler: (req: NextRequest) => Promise<Next
         const merchant = await (prisma as any).merchant.findUnique({
           where: { id: payload.merchantId as string },
         });
-        if (merchant && merchant.active && merchant.verified) {
+        if (merchant && merchant.active && merchant.verified && sessionVersionMatches(payload, merchant)) {
           return handler(req);
         }
       } catch {
@@ -179,7 +189,7 @@ export function withApiKeyOrAnySession(handler: (req: NextRequest) => Promise<Ne
         const merchant = await (prisma as any).merchant.findUnique({
           where: { id: payload.merchantId as string },
         });
-        if (merchant && merchant.active && merchant.verified) {
+        if (merchant && merchant.active && merchant.verified && sessionVersionMatches(payload, merchant)) {
           return handler(req);
         }
       } catch {

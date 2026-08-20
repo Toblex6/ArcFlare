@@ -9,7 +9,13 @@
 import { ethers } from 'ethers';
 
 const BASE = process.argv[2] || 'http://localhost:3199';
-const API_KEY = process.env.TEST_API_KEY || 'arc_live_fa8d822ac7713302ea287a183a15cacdbfcb5d1a5477fae2';
+// No inline fallback: the previous hardcoded default was a live ApiKey row and
+// this file is committed to a public repo. Rotated 2026-08-20; read from env only.
+const API_KEY = process.env.TEST_API_KEY;
+if (!API_KEY) {
+  console.error('TEST_API_KEY not set — put the service key in .env.local and run with it in env.');
+  process.exit(1);
+}
 
 let passed = 0;
 let failed = 0;

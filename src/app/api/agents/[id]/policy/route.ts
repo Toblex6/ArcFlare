@@ -21,7 +21,7 @@ async function policyHandler(req: NextRequest, ctx: { params: Promise<{ id: stri
   }
 
   if (req.method === "GET") {
-    return getAgentPolicy(agentId);
+    return getAgentPolicy(req, agentId);
   }
   if (req.method === "POST") {
     const body = await req.json().catch(() => null);

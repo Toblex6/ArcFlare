@@ -48,11 +48,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Issue JWT — 7 day expiry
+    // Issue JWT — 7 day expiry. Carries the account's sessionVersion so the
+    // middleware can reject sessions issued before a password reset (M18).
     const token = await new SignJWT({
       merchantId: merchant.id,
       email: merchant.email,
       businessName: merchant.businessName,
+      sessionVersion: merchant.sessionVersion ?? 0,
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()

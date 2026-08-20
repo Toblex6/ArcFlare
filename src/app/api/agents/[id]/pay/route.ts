@@ -14,8 +14,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { executeAgentToAgentPayment } from "@/lib/agents/agentPay";
+import { checkRateLimit } from "@/lib/ratelimit";
 
 async function payHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const { allowed, response: limitResponse } = await checkRateLimit(req, "payments");
+  if (!allowed) return limitResponse!;
   const { id } = await ctx.params;
   const agentId = Number(id);
   if (!Number.isInteger(agentId) || agentId <= 0) {

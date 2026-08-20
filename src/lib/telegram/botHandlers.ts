@@ -242,6 +242,16 @@ export async function handleWithdraw(
  * /confirm — executes a previously stored withdrawal intent (see
  * handleWithdraw). The transfer itself reuses the settlement engine's
  * transfer pattern (transferUsdc in src/lib/circle/transfers.ts).
+ *
+ * DOUBLE-WITHDRAWAL PROTECTION (H6): Telegram retries undelivered webhook
+ * POSTs with the SAME update_id, so /confirm can arrive twice. The intent
+ * row is claimed ATOMICALLY first (status PENDING → EXECUTING via a
+ * conditional updateMany — exactly one /confirm wins the claim), the
+ * transfer carries a deterministic Circle idempotency key derived from the
+ * intent, and the intent is deleted only after the transfer confirms.
+ * A retry during an in-flight transfer gets "already processing" instead
+ * of a second transfer; a failed transfer rolls the intent back to
+ * PENDING so the user can retry.
  */
 export async function handleConfirmWithdraw(telegramUserId: string): Promise<BotReply> {
   const intent = await prisma.telegramWithdrawalIntent.findUnique({ where: { telegramUserId } });
@@ -252,6 +262,16 @@ export async function handleConfirmWithdraw(telegramUserId: string): Promise<Bot
   if (Date.now() - intent.createdAt.getTime() > WITHDRAWAL_TTL_MS) {
     await prisma.telegramWithdrawalIntent.delete({ where: { telegramUserId } });
     return { text: `That withdrawal request expired. Send /withdraw <address> [amount] to start a new one.` };
+  }
+
+  // Atomic claim: exactly one /confirm (or webhook retry) may execute the
+  // transfer. A claim failure means another attempt is in flight.
+  const claim = await prisma.telegramWithdrawalIntent.updateMany({
+    where: { telegramUserId, status: 'PENDING' },
+    data: { status: 'EXECUTING' },
+  });
+  if (claim.count === 0) {
+    return { text: `That withdrawal is already being processed. It will land on-chain shortly.` };
   }
 
   const account = await prisma.consumerAccount.findFirst({ where: { telegramUserId } });
@@ -276,6 +296,7 @@ export async function handleConfirmWithdraw(telegramUserId: string): Promise<Bot
       walletAddress: account.walletAddress,
       destinationAddress: intent.destinationAddress,
       amount,
+      idempotencyKey: `telegram-withdraw-${telegramUserId}-${intent.createdAt.getTime()}`,
     });
     await prisma.telegramWithdrawalIntent.delete({ where: { telegramUserId } });
     return {
@@ -286,6 +307,11 @@ export async function handleConfirmWithdraw(telegramUserId: string): Promise<Bot
       parseMode: 'Markdown',
     };
   } catch (err) {
+    // Roll the claim back so the user can retry (/confirm again) — only a
+    // failure releases the intent; a retry mid-flight never re-transfers.
+    await prisma.telegramWithdrawalIntent
+      .updateMany({ where: { telegramUserId, status: 'EXECUTING' }, data: { status: 'PENDING' } })
+      .catch(() => {});
     return { text: `Withdrawal failed: ${(err as Error).message} — send /confirm again to retry, or /cancel.` };
   }
 }

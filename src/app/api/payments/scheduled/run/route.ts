@@ -81,23 +81,74 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
 }
 
 // ── POST /api/payments/scheduled/run ──────────────────────────────────────────
+//
+// DOUBLE-PAYMENT PROTECTION (H7): two concurrent /run calls (or a retry
+// while one is still executing) must never both pay the same scheduled row.
+// Each due row is claimed ATOMICALLY (status ACTIVE → PROCESSING via a
+// conditional updateMany keyed on id + status) before it is executed. Only
+// the runner whose claim succeeded processes the row; a concurrent runner
+// sees 0 claimed rows and skips them. A row left PROCESSING by a crashed
+// runner is reclaimed after STALE_CLAIM_MS (lastRunAt is stamped at claim
+// time, so a crashed run can't block the row forever).
+const STALE_CLAIM_MS = 5 * 60 * 1000;
+
 async function runScheduledHandler(request: Request) {
   try {
     const now = new Date();
 
-    const dueScheduled = await (prisma as any).scheduledPayment.findMany({
+    const candidates = await (prisma as any).scheduledPayment.findMany({
       where: {
-        status: 'ACTIVE',
         nextRunAt: { lte: now },
+        OR: [
+          { status: 'ACTIVE' },
+          // Stale PROCESSING rows (left behind by a crashed runner) are
+          // reclaimable; fresh PROCESSING rows belong to a live runner.
+          { status: 'PROCESSING', lastRunAt: { lte: new Date(now.getTime() - STALE_CLAIM_MS) } },
+        ],
       },
     });
 
-    console.log(`⏰ Found ${dueScheduled.length} due scheduled payment(s)`);
+    console.log(`⏰ Found ${candidates.length} due scheduled payment(s)`);
+
+    if (candidates.length === 0) {
+      return NextResponse.json({
+        success: true,
+        checkedAt: now.toISOString(),
+        dueCount: 0,
+        executedCount: 0,
+        failedCount: 0,
+        results: [],
+      });
+    }
 
     const circleClient = getCircleClient();
     const results: any[] = [];
+    let executedCount = 0;
+    let failedCount = 0;
 
-    for (const scheduled of dueScheduled) {
+    for (const scheduled of candidates) {
+      // Per-row ATOMIC claim. Exactly one runner can flip this row into
+      // PROCESSING; a concurrent runner's updateMany matches 0 rows and
+      // skips it — no double payment. Stale PROCESSING rows are only
+      // reclaimable if their claim stamp is old enough (crash recovery).
+      const claim = await (prisma as any).scheduledPayment.updateMany({
+        where: {
+          id: scheduled.id,
+          status: scheduled.status,
+          ...(scheduled.status === 'PROCESSING' ? { lastRunAt: { lte: new Date(now.getTime() - STALE_CLAIM_MS) } } : {}),
+        },
+        data: { status: 'PROCESSING', lastRunAt: now },
+      });
+
+      if (claim.count === 0) {
+        results.push({
+          reference: scheduled.reference,
+          success: false,
+          error: 'skipped — already claimed by another runner',
+        });
+        continue;
+      }
+
       try {
         const txHash = await executeOnePayment(scheduled, circleClient);
 
@@ -138,24 +189,33 @@ async function runScheduledHandler(request: Request) {
           txHash,
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
         });
-
+        executedCount++;
         console.log(`✅ Executed scheduled payment ${scheduled.reference}: ${txHash}`);
       } catch (err: any) {
+        // Release the claim back to ACTIVE so the failure is retried on the
+        // next tick (prior behavior for failures), never double-success.
+        await (prisma as any).scheduledPayment
+          .updateMany({
+            where: { id: scheduled.id, status: 'PROCESSING' },
+            data: { status: 'ACTIVE' },
+          })
+          .catch(() => {});
         console.error(`❌ Failed scheduled payment ${scheduled.reference}:`, err.message);
         results.push({
           reference: scheduled.reference,
           success: false,
           error: err.message,
         });
+        failedCount++;
       }
     }
 
     return NextResponse.json({
       success: true,
       checkedAt: now.toISOString(),
-      dueCount: dueScheduled.length,
-      executedCount: results.filter((r) => r.success).length,
-      failedCount: results.filter((r) => !r.success).length,
+      dueCount: candidates.length,
+      executedCount,
+      failedCount,
       results,
     });
   } catch (error: any) {

@@ -480,6 +480,59 @@ async function exploit4() {
   console.log('  (poisoned row + attacker merchant deleted)');
 }
 
+// ── EXPLOIT 5 (H2): merchant api-key claims control of an arbitrary agent ──
+async function exploit5() {
+  console.log('\n═══ EXPLOIT 5: merchant api-key claims an arbitrary agent SCA ═══');
+  console.log('(repro: api key → verifyCallerControlsAddress must NOT bless a SCA the merchant does not own)');
+
+  // Use an existing registered agent that the attacker merchant does NOT own
+  // (ownerNode is required non-null — any row qualifies as a victim).
+  const victim = await prisma.agentRegistry.findFirst({ orderBy: { id: 'asc' } });
+  if (!victim) {
+    ok('H2: (skip) no AgentRegistry row available for live cross-tenant claim', true, 'no agent rows');
+    return;
+  }
+
+  const attacker = await prisma.merchant.create({
+    data: {
+      email: `h2_attacker_${Date.now()}@test.local`,
+      businessName: 'H2 Attacker Store',
+      passwordHash: 'x',
+      apiKey: `arc_live_h2_repro_${Date.now()}`,
+      verified: true,
+      active: true,
+      walletAddress: `0x${'e'.repeat(40)}`,
+    },
+  });
+  const attackerKey = attacker.apiKey;
+
+  // GET /api/agents/[id]/policy provisions the wallet and requires caller
+  // control of the agent. A merchant key with NO relation to the agent must
+  // get a 403, not the policy.
+  const policyRes = await fetch(`${BASE}/api/agents/${victim.id}/policy`, {
+    headers: { 'x-api-key': attackerKey },
+  });
+  const policyData = await j(policyRes);
+  ok('merchant api-key GET policy on another tenant\'s agent → 403',
+    policyRes.status === 403, `got ${policyRes.status}: ${JSON.stringify(policyData).slice(0, 200)}`);
+  ok('rejection = caller-control message', typeof policyData.error === 'string' && policyData.error.includes('does not control this agent'),
+    JSON.stringify(policyData).slice(0, 200));
+
+  // The pay route is the money path — same guard, must 403 before anything moves.
+  const payRes = await post(`/api/agents/${victim.id}/pay`, {
+    to: attacker.walletAddress,
+    amount: '0.0001',
+  }, { 'x-api-key': attackerKey });
+  const payData = await j(payRes);
+  ok('merchant api-key pay from another tenant\'s agent → 403',
+    payRes.status === 403, `got ${payRes.status}: ${JSON.stringify(payData).slice(0, 200)}`);
+  ok('pay rejection = caller-control message', typeof payData.error === 'string' && payData.error.includes('does not control this agent'),
+    JSON.stringify(payData).slice(0, 200));
+
+  await prisma.merchant.delete({ where: { id: attacker.id } }).catch(() => { });
+  console.log('  (attacker merchant deleted)');
+}
+
 // ── STATIC PROOFS ─────────────────────────────────────────────────────────
 function staticProofs() {
   console.log('\n═══ STATIC PROOFS (code-level) ═══');
@@ -587,6 +640,66 @@ function staticProofs() {
   const nanoUiSrc = fs.readFileSync(`${root}/src/app/nano/page.tsx`, 'utf8');
   ok('nano UI: agentSCA no longer prefilled with the platform default payer',
     !/useState\("0x7a8214dad7630a7a39054e0121acdbc7a65821c9"\)/.test(nanoUiSrc));
+
+  // ── H2 (batch 5): verifyCallerControlsAddress callers all null-check ────
+  // Every live call site must reject a null actor (defense in depth: the
+  // helper itself already fails closed on null). Scan every src/ file that
+  // calls it: strip comments, count CALLS vs `if (!x)` GUARDS, and require
+  // guards >= calls in each file. Guard variable names differ per site
+  // (actor / controlsPayer / requestActor / agentOwnsIt / …), so only the
+  // `if (!` shape is counted — the number of guards must cover the calls.
+  const h2Files = fs.readdirSync(`${root}/src`, { recursive: true })
+    .filter((p) => typeof p === 'string' && p.endsWith('.ts'))
+    .map((p) => `${root}/src/${p}`);
+  const unguarded = [];
+  let totalH2Calls = 0;
+  for (const file of h2Files) {
+    if (file.includes('verifyCallerControlsAddress.ts')) continue; // the helper itself — returns null
+    const code = stripComments(fs.readFileSync(file, 'utf8'));
+    const calls = (code.match(/verifyCallerControlsAddress\(/g) || []).length;
+    if (calls === 0) continue;
+    totalH2Calls += calls;
+    // Guards take several shapes: `if (!actor)`, `if (!controlsPayer && …)`,
+    // and inline `if (!(await verifyCallerControlsAddress(…)))`.
+    const guards = (code.match(/if \(!(?:await\b|\w+)/g) || []).length;
+    if (guards < calls) unguarded.push(`${file.split('/src/')[1]}: ${calls} calls, ${guards} guards`);
+  }
+  ok('H2: every caller rejects a null actor (guards >= calls in every file)',
+    unguarded.length === 0 && totalH2Calls >= 8,
+    `${totalH2Calls} calls, all guarded${unguarded.length ? ' — UNGUARDED: ' + unguarded.join('; ') : ''}`);
+  ok('H2: nano/settle guard is payer-side (agentOwnsIt)',
+    /You do not control the payer \(agentSCA\) of this settlement/.test(nanoSettleCode));
+
+  // ── H3 (batch 5): default spend limit + front-run guard ─────────────────
+  const enforcerSrc = fs.readFileSync(`${root}/src/lib/agents/spendLimitEnforcer.ts`, 'utf8');
+  const x402Src = fs.readFileSync(`${root}/src/lib/x402-wallet.ts`, 'utf8');
+  const agentPaySrc = fs.readFileSync(`${root}/src/lib/agents/agentPay.ts`, 'utf8');
+  ok('H3: provisioning sets a default spend limit via the relayer',
+    /ensureAgentDefaultSpendLimit/.test(enforcerSrc) &&
+    /setLimit\(agentAddress, cap, BigInt\(DEFAULT_AGENT_SPEND_WINDOW_SECONDS\)\)/.test(enforcerSrc));
+  ok('H3: provisioning hooks the default limit into wallet creation',
+    /ensureAgentDefaultSpendLimit\(account\.address\)/.test(x402Src));
+  ok('H3: setAgentPolicy refuses a front-run limit owner',
+    /Spend-limit ownership for this agent was taken by another address/.test(agentPaySrc) &&
+    /limit\.owner\.toLowerCase\(\) !== relayer\.toLowerCase\(\)/.test(agentPaySrc));
+  ok('H3: checkAndRecordSpend is only reachable from backend-signed callers',
+    !/checkAndRecordSpend/.test(fs.readFileSync(`${root}/src/app/api/payments/verify-onchain/route.ts`, 'utf8')) &&
+    !/checkAndRecordSpend/.test(nanoSettleCode) &&
+    !/checkAndRecordSpend/.test(createSrc));
+
+  // ── M18 (batch 5): session-version invalidation ─────────────────────────
+  const loginSrc = fs.readFileSync(`${root}/src/app/api/merchant/login/route.ts`, 'utf8');
+  const resetSrc = fs.readFileSync(`${root}/src/app/api/merchant/reset-password/route.ts`, 'utf8');
+  const middlewareSrc = fs.readFileSync(`${root}/src/lib/middleware/withMerchantAuth.ts`, 'utf8');
+  ok('M18: login token carries the session version',
+    /sessionVersion: merchant\.sessionVersion \?\? 0/.test(loginSrc));
+  ok('M18: reset-password bumps the session version',
+    /sessionVersion: \{ increment: 1 \}/.test(resetSrc));
+  ok('M18: middleware rejects stale/missing session-version claims',
+    /sessionVersionMatches\(payload, merchant\)/.test(middlewareSrc));
+  const migrationSql = fs.readFileSync(`${root}/prisma/migrations/0008_merchant_session_version/migration.sql`, 'utf8');
+  ok('M18: migration adds sessionVersion with default 0',
+    /ADD COLUMN "sessionVersion" INTEGER NOT NULL DEFAULT 0/.test(migrationSql));
 }
 
 async function main() {
@@ -605,6 +718,7 @@ async function main() {
   await exploit2();
   await exploit3();
   await exploit4();
+  await exploit5();
 
   // Cleanup any leftover repro rows.
   for (const ref of cleanupRefs) {

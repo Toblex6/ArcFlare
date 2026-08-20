@@ -51,6 +51,32 @@ import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 
 const PAYROLL_CONTRACT_ADDRESS = process.env.PAYROLL_CONTRACT_ADDRESS ?? "";
 
+// ── H10: sweep serialization ─────────────────────────────────────────────────
+// The seller-gateway balance is a shared pool: every settlement from every
+// payer lands there, and each fundPayrollViaX402 call sweeps ITS amount out
+// to the relayer. Two concurrent sweeps polling `totalBalance >= amount`
+// could each believe their credit landed, and the second withdraw would
+// then take funds that belong to the OTHER settlement (or revert, stranding
+// the first settlement). A module-level mutex serializes the whole
+// poll→withdraw sequence so exactly one sweep reads the balance at a time,
+// and the withdraw amount stays tied to THIS settlement's price.
+let sweepChain: Promise<unknown> = Promise.resolve();
+
+function serializeSweep<T>(fn: () => Promise<T>): Promise<T> {
+  const run = sweepChain.then(fn, fn);
+  sweepChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
+export interface SweepResult {
+  mintTxHash: string;
+  balanceBefore: string; // seller gateway totalBalance (6-dec units) before withdraw
+  balanceAfter: string; // after withdraw — attribution delta for audit
+}
+
 const ENDPOINT = "/api/payroll/fund";
 const MAX_RECIPIENTS = 200; // mirrors the on-chain cap in ArcFlarePayroll._createBatch
 
@@ -105,7 +131,7 @@ export interface PayrollRecipient {
  * before withdrawing. A timeout yields a clear error instead of a silent
  * race.
  */
-async function sweepSettledToRelayer(price: string): Promise<string> {
+async function sweepSettledToRelayer(price: string): Promise<SweepResult> {
   const sellerPrivateKey = process.env.SELLER_PRIVATE_KEY;
   if (!sellerPrivateKey) {
     throw new Error("SELLER_PRIVATE_KEY not configured — cannot sweep settled funds to the relayer");
@@ -125,25 +151,41 @@ async function sweepSettledToRelayer(price: string): Promise<string> {
   );
   const usdc = getUsdcAddress();
 
-  const deadline = Date.now() + 120_000; // Circle settles in backend batches; wait up to 2 min
-  let credited = false;
-  while (Date.now() < deadline) {
-    const total = BigInt(await batching.totalBalance(usdc, sellerEoa));
-    if (total >= amountUnits) {
-      credited = true;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-  if (!credited) {
-    throw new Error(`settled amount not credited to seller gateway wallet (${sellerEoa}) within 120s`);
-  }
+  return serializeSweep(async (): Promise<SweepResult> => {
+    // Re-read under the lock: another sweep can no longer race us, so the
+    // balance we see is the real, attributable state.
+    const balanceBefore = BigInt(await batching.totalBalance(usdc, sellerEoa));
 
-  const result = await gateway.withdraw(price, {
-    chain: "arcTestnet",
-    recipient: (await getRelayerSigner().getAddress()) as `0x${string}`,
+    const deadline = Date.now() + 120_000; // Circle settles in backend batches; wait up to 2 min
+    let credited = false;
+    while (Date.now() < deadline) {
+      const total = BigInt(await batching.totalBalance(usdc, sellerEoa));
+      if (total >= amountUnits) {
+        credited = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    if (!credited) {
+      throw new Error(`settled amount not credited to seller gateway wallet (${sellerEoa}) within 120s`);
+    }
+
+    const result = await gateway.withdraw(price, {
+      chain: "arcTestnet",
+      recipient: (await getRelayerSigner().getAddress()) as `0x${string}`,
+    });
+
+    // Attribution delta — the balance right after the withdraw. The sweep
+    // took exactly `price`; anything else arriving/leaving concurrently is
+    // visible here for the audit trail (payrollBatch results), never
+    // assumed away.
+    const balanceAfter = BigInt(await batching.totalBalance(usdc, sellerEoa));
+    return {
+      mintTxHash: result.mintTxHash,
+      balanceBefore: balanceBefore.toString(),
+      balanceAfter: balanceAfter.toString(),
+    };
   });
-  return result.mintTxHash;
 }
 
 /**
@@ -224,11 +266,18 @@ export async function fundPayrollViaX402(
 
   // 6. sweep the settled amount to the relayer EOA (settlement lands in the
   // seller's gateway wallet, but fundBatchFor is signed by the relayer).
-  // If the sweep fails the funds are safely held by the seller gateway —
-  // flag for review rather than losing the audit trail.
+  // Serialized (H10): concurrent sweeps never race the shared seller
+  // balance; the withdraw is exactly `price` and the balance delta is
+  // recorded for audit. If the sweep fails the funds are safely held by the
+  // seller gateway — flag for review rather than losing the audit trail.
   let sweepTxHash: string | undefined;
+  let sweepBalanceBefore: string | undefined;
+  let sweepBalanceAfter: string | undefined;
   try {
-    sweepTxHash = await sweepSettledToRelayer(price);
+    const sweep = await sweepSettledToRelayer(price);
+    sweepTxHash = sweep.mintTxHash;
+    sweepBalanceBefore = sweep.balanceBefore;
+    sweepBalanceAfter = sweep.balanceAfter;
   } catch (sweepError: any) {
     const recoveryId = await enqueueForReview({
       agentAddress: payer,
@@ -279,11 +328,24 @@ export async function fundPayrollViaX402(
   // 8. backend audit bookkeeping (never gates the response).
   await recordSpend({ agentAddress: payer, amount: totalAmount });
 
-  // 9. fund the batch on-chain.
+  // 9. fund the batch on-chain. The payroll contract pulls `totalAmount`
+  // from the relayer via transferFrom — Arc charges a per-target ERC-20 fee
+  // on that move (measured ~0.2% into contracts 2026-08-19; ~0.001028 flat
+  // EOA→EOA; never assume a rate). H11: the fee is MEASURED as the real
+  // relayer balance delta around the funding tx and recorded in the batch
+  // row + response, so the accounting is exact and auditable.
   const payroll = getPayrollContract();
   const addresses = recipients.map((r) => r.address);
   const amounts = recipients.map((r) => r.amount);
   await ensurePayrollAllowance(payer, tokenAddress, amounts);
+  const feeProvider = new (await import("ethers")).JsonRpcProvider(process.env.ARC_TESTNET_RPC);
+  const usdcView = new (await import("ethers")).Contract(
+    getUsdcAddress(),
+    ["function balanceOf(address) view returns (uint256)"],
+    feeProvider
+  );
+  const relayerAddress = await getRelayerSigner().getAddress();
+  const relayerBefore = BigInt(await usdcView.balanceOf(relayerAddress));
   let fundTx;
   try {
     fundTx = await payroll.fundBatchFor(payer, tokenAddress, addresses, amounts);
@@ -309,6 +371,15 @@ export async function fundPayrollViaX402(
   const fundReceipt = await fundTx.wait();
   const batchId = parseEventValue(fundReceipt, PAYROLL_ABI, "BatchFunded", "batchId");
 
+  // Measured fee: relayer debit minus the exact batch total. Positive =
+  // the ERC-20 interface fee on the transferFrom; recorded, never assumed.
+  const relayerAfter = BigInt(await usdcView.balanceOf(relayerAddress, { blockTag: fundReceipt.blockNumber }));
+  const actualDebit = relayerBefore - relayerAfter;
+  const feeMeasured = actualDebit > totalAmount ? actualDebit - totalAmount : 0n;
+  console.log(
+    `[payroll/fund] batch ${batchId}: total ${Number(totalAmount) / 1e6} USDC, relayer debit ${Number(actualDebit) / 1e6} USDC, measured fee ${Number(feeMeasured) / 1e6} USDC`
+  );
+
   // DB bookkeeping (never gates the response).
   const batchRef = `payroll-x402-${batchId}`;
   prisma.payrollBatch.create({
@@ -321,7 +392,15 @@ export async function fundPayrollViaX402(
       successCount: addresses.length,
       failedCount: 0,
       status: "FUNDED",
-      results: { batchId: batchId.toString(), fundTxHash: fundReceipt.hash, sweepTxHash },
+      results: {
+        batchId: batchId.toString(),
+        fundTxHash: fundReceipt.hash,
+        sweepTxHash,
+        sweepBalanceBefore,
+        sweepBalanceAfter,
+        feeMeasured: feeMeasured.toString(), // 6-dec units, measured on-chain
+        relayerDebit: actualDebit.toString(),
+      },
     },
   }).catch((e: any) => console.error("[payroll/fund] batch row failed:", e.message));
 
@@ -346,7 +425,8 @@ export async function fundPayrollViaX402(
     sweepTxHash,
     gatewayRef: settle.transaction,
     recipientCount: addresses.length,
-    message: `Payroll batch ${batchId} funded (${addresses.length} recipients, ${price} USDC).`,
+    feeMeasured: Number(feeMeasured) / 1e6,
+    message: `Payroll batch ${batchId} funded (${addresses.length} recipients, ${price} USDC, measured ERC-20 fee ${Number(feeMeasured) / 1e6} USDC).`,
   });
   response.headers.set(
     "PAYMENT-RESPONSE",

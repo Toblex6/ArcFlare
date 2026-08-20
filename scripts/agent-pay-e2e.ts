@@ -172,6 +172,40 @@ async function main() {
     ok('API-reported recipient credit matches on-chain', payBody.recipientCredit === recvDelta.toFixed(6),
       `api ${payBody.recipientCredit}`);
 
+    // ── M9: idempotency — a retried POST with the same idempotencyKey must
+    // replay the ORIGINAL outcome — never spend again, never burn the spend
+    // window twice, and always resolve to the same tx hash.
+    const idemKey = `e2e_idem_${Date.now()}`;
+    const recvBeforeI = Number(await erc20.balanceOf(recipientEoa)) / 1e6;
+    const i1 = await fetch(`${BASE}/api/agents/${payerAgentId}/pay`, {
+      method: 'POST',
+      headers: { cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: recipientEoa, amount: '0.25', idempotencyKey: idemKey }),
+    });
+    const i1b = await i1.json();
+    ok('M9: pay with idempotencyKey → 200 with tx hash', i1.status === 200 && /^0x[a-fA-F0-9]{64}$/.test(i1b.txHash ?? ''), `tx ${(i1b.txHash ?? '').slice(0, 12)}…`);
+
+    const i2 = await fetch(`${BASE}/api/agents/${payerAgentId}/pay`, {
+      method: 'POST',
+      headers: { cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: recipientEoa, amount: '0.25', idempotencyKey: idemKey }),
+    });
+    const i2b = await i2.json();
+    ok('M9: replay same key → 200 replayed with SAME tx hash', i2.status === 200 && i2b.replayed === true && i2b.txHash === i1b.txHash,
+      `replayed ${i2b.replayed}, tx ${i2b.txHash ?? 'none'}`);
+
+    const recvAfterI = Number(await erc20.balanceOf(recipientEoa)) / 1e6;
+    ok('M9: replay did NOT move funds twice', Math.abs(recvAfterI - recvBeforeI - 0.25) < 0.000001,
+      `credit ${(recvAfterI - recvBeforeI).toFixed(6)}`);
+
+    const idemLog = await prisma.paymentLog.findUnique({ where: { idempotencyKey: idemKey } });
+    ok('M9: single SUCCESS row for the key linked to the tx', !!idemLog && idemLog.status === 'SUCCESS' && idemLog.arcTxHash === i1b.txHash,
+      idemLog ? `status ${idemLog.status}` : 'no row');
+
+    const limitAfterI = await getSpendLimitContract().getLimit(agentEoa);
+    ok('M9: spend record charged exactly once', Math.abs(Number(limitAfterI.spentInWindow) / 1e6 - (Number(limitAfter.spentInWindow) / 1e6 + 0.25)) < 0.000001,
+      `spent ${Number(limitAfterI.spentInWindow) / 1e6}`);
+
     // ── over-cap rejection: spend-limit enforcement on the route ──────────
     const recvBefore2 = Number(await erc20.balanceOf(recipientEoa)) / 1e6;
     const overCapRes = await fetch(`${BASE}/api/agents/${payerAgentId}/pay`, {
@@ -185,7 +219,7 @@ async function main() {
     const recvAfter2 = Number(await erc20.balanceOf(recipientEoa)) / 1e6;
     ok('over-cap: NO funds moved', Math.abs(recvAfter2 - recvBefore2) < 0.000001, `recipient delta ${(recvAfter2 - recvBefore2).toFixed(6)}`);
     const limitAfter2 = await getSpendLimitContract().getLimit(agentEoa);
-    ok('over-cap: spentInWindow unchanged', Number(limitAfter2.spentInWindow) === Number(limitAfter.spentInWindow),
+    ok('over-cap: spentInWindow unchanged', Number(limitAfter2.spentInWindow) === Number(limitAfterI.spentInWindow),
       `spent ${Number(limitAfter2.spentInWindow) / 1e6}`);
     ok('over-cap: no new PaymentLog row with that amount', !(await prisma.paymentLog.findFirst({
       where: { reference: { startsWith: 'agentpay_' }, amount: 1.9 },

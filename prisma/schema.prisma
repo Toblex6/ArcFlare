@@ -190,6 +190,7 @@ model Merchant {
   walletProvider   String    @default("CIRCLE")
   walletAddress    String?   // SCA address (Circle) or connected EOA (external)
   circleWalletId   String?   // Circle wallet ID, only set when walletProvider = CIRCLE
+  sessionVersion   Int       @default(0) // M18 — bumped on password reset; invalidates all outstanding session tokens
 }
 
 model WalletSignatureRequest {
@@ -226,6 +227,7 @@ model TelegramWithdrawalIntent {
   destinationAddress String
   amount             String   @default("ALL") // decimal USDC string, or "ALL" = full balance
   createdAt          DateTime @default(now())
+  status             String   @default("PENDING") // "PENDING" | "EXECUTING" — atomic claim so a webhook retry can never double-withdraw
 
   @@map("telegram_withdrawal_intents")
 }
@@ -388,6 +390,9 @@ model PayrollBatch {
   webhookUrl     String?
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
+  merchantId     String?   // owning merchant (H8 tenant scoping); null for x402-funded rows
+
+  @@index([merchantId])
 }
 
 model X402EoaWallet {

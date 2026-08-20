@@ -10,6 +10,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withGateway } from '@/lib/x402';
+import { assertSafeTargetUrl } from '@/lib/security/ssrfGuard';
+import { checkRateLimit } from '@/lib/ratelimit';
 
 // Headers that must not be forwarded upstream (either hop-by-hop, or ours to strip
 // so the provider never sees the buyer's x402 payment proof).
@@ -30,6 +32,20 @@ async function buildProxyHandler(targetUrl: string) {
         });
 
         const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+
+        // SSRF guard (defense in depth — creation/publish already reject
+        // unsafe URLs; this re-checks so a DB-poisoned row can never make
+        // the server fetch an internal/metadata target).
+        const ssrfCheck = await assertSafeTargetUrl(targetUrl);
+        if (!ssrfCheck.ok) {
+            return NextResponse.json({
+                paymentStatus: 'settled',
+                upstreamOk: false,
+                upstreamStatus: null,
+                error: `Upstream target rejected by SSRF guard: ${ssrfCheck.reason}`,
+                data: null,
+            });
+        }
 
         // From here on, the buyer has already paid (this handler only runs after
         // withGateway settles). An upstream problem is the merchant's problem to
@@ -102,6 +118,8 @@ async function handleRequest(req: NextRequest, slug: string): Promise<NextRespon
 
 async function route(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
     const { slug } = await params;
+    const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
+    if (!allowed) return limitResponse;
     return handleRequest(req, slug);
 }
 

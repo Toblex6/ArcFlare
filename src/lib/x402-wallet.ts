@@ -142,6 +142,18 @@ export async function getOrCreateAgentWallet(
         },
     });
 
+    // H3 — a fresh agent EOA must never sit in the spend-limit contract's
+    // unowned/unlimited bootstrap slot: claim ownership + set a default cap
+    // via the relayer the moment the wallet is created (best-effort, never
+    // throws — a flaky chain leaves the setAgentPolicy front-run guard as
+    // the backstop).
+    try {
+        const { ensureAgentDefaultSpendLimit } = await import("@/lib/agents/spendLimitEnforcer");
+        await ensureAgentDefaultSpendLimit(account.address);
+    } catch (e: any) {
+        console.error(`[x402-wallet] default spend limit failed for agent ${agentRegistryId}: ${e?.message ?? e}`);
+    }
+
     return { address: account.address, privateKey };
 }
 

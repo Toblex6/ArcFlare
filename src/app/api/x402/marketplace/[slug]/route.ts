@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { checkTargetUrlReachable } from '../route';
+import { assertSafeTargetUrl } from '@/lib/security/ssrfGuard';
 
 const ALLOWED_STATUSES = ['DRAFT', 'PUBLISHED', 'SUSPENDED'];
 
@@ -90,6 +91,13 @@ export async function PATCH(
             } catch {
                 return NextResponse.json(
                     { success: false, error: 'targetUrl must be a valid, absolute URL.' },
+                    { status: 400 }
+                );
+            }
+            const ssrfCheck = await assertSafeTargetUrl(body.targetUrl);
+            if (!ssrfCheck.ok) {
+                return NextResponse.json(
+                    { success: false, error: `targetUrl rejected: ${ssrfCheck.reason}.` },
                     { status: 400 }
                 );
             }

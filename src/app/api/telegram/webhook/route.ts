@@ -30,6 +30,7 @@ import {
   handleGasRetry,
   type BotReply,
 } from '@/lib/telegram/botHandlers';
+import { trackUpdate } from '@/lib/telegram/webhookDedupe';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
@@ -42,6 +43,7 @@ if (!TELEGRAM_WEBHOOK_SECRET) {
 }
 
 interface TelegramUpdate {
+  update_id?: number;
   message?: {
     message_id: number;
     from: { id: number; first_name?: string; username?: string };
@@ -94,6 +96,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const message = update.message;
   if (!message?.text || !message.from || !message.chat) {
+    return NextResponse.json({ ok: true });
+  }
+
+  // Duplicate delivery of the same update (Telegram redelivers with the
+  // same update_id until it gets a 200) — respond ok without re-running the
+  // command (the handlers are idempotent anyway; this avoids the redundant
+  // round-trip and any re-entrancy on wallet-touching commands).
+  if (update.update_id !== undefined && trackUpdate(update.update_id)) {
     return NextResponse.json({ ok: true });
   }
 

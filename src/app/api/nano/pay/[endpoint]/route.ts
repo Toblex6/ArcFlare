@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withGateway } from "@/lib/x402";
+import { checkRateLimit } from "@/lib/ratelimit";
 
 // Price table – amounts in dollars (withGateway expects "$X.XX" format)
 const PRICE_TABLE: Record<string, string> = {
@@ -130,6 +131,8 @@ export async function POST(
   { params }: { params: Promise<{ endpoint: string }> }
 ) {
   const { endpoint } = await params;
+  const { allowed, response: limitResponse } = await checkRateLimit(req, "payments");
+  if (!allowed) return limitResponse;
   const price = PRICE_TABLE[endpoint];
   const resourceHandler = RESOURCE_HANDLERS[endpoint];
 

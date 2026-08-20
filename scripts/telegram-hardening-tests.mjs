@@ -268,10 +268,16 @@ async function main() {
     ok('NO transfer on the first message (balance unchanged)', Math.abs(destAfterWithdraw - destBefore) < 0.000001, `delta ${(destAfterWithdraw - destBefore).toFixed(6)}`);
 
     await update('/confirm', Number(TG_WITHDRAWER));
-    await new Promise((r) => setTimeout(r, 5000)); // allow Circle tx polling to settle
-    const destAfterConfirm = await balanceOf(destAddress);
+    // Circle settles asynchronously and the Arc RPC is intermittently slow —
+    // poll up to 90s for the outcome (transferUsdc itself polls up to 100s).
+    let destAfterConfirm = await balanceOf(destAddress);
+    let intentAfter = await prisma.telegramWithdrawalIntent.findUnique({ where: { telegramUserId: TG_WITHDRAWER } });
+    for (let i = 0; i < 18 && intentAfter && Math.abs(destAfterConfirm - destBefore - 0.001) >= 0.000001; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      destAfterConfirm = await balanceOf(destAddress);
+      intentAfter = await prisma.telegramWithdrawalIntent.findUnique({ where: { telegramUserId: TG_WITHDRAWER } });
+    }
     ok('transfer executed only after /confirm', Math.abs(destAfterConfirm - destBefore - 0.001) < 0.000001, `delta ${(destAfterConfirm - destBefore).toFixed(6)}`);
-    const intentAfter = await prisma.telegramWithdrawalIntent.findUnique({ where: { telegramUserId: TG_WITHDRAWER } });
     ok('intent cleared after execution', !intentAfter, 'intent still present');
     ok('source wallet debited', Math.abs((srcBefore - await balanceOf(DEFAULT_PAYER_SCA)) - 0.001) < 0.000001, `src delta ${(srcBefore - await balanceOf(DEFAULT_PAYER_SCA)).toFixed(6)}`);
 

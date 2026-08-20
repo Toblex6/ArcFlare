@@ -35,6 +35,12 @@ export interface TransferUsdcParams {
   walletAddress: string; // on-chain address of that wallet (fallback path signs by address)
   destinationAddress: string;
   amount: string; // decimal USDC string, e.g. "0.01"
+  idempotencyKey?: string; // accepted for callers' accounting; NOT forwarded —
+  // Circle's ARC-TESTNET endpoint rejects the idempotencyKey parameter
+  // ("API parameter invalid", verified 2026-08-19). Double-withdrawal
+  // protection therefore rests on the caller's atomic DB claim (Telegram
+  // intents: PENDING→EXECUTING updateMany), which the idempotency key was
+  // only ever a belt-and-suspenders layer on top of.
 }
 
 export async function transferUsdc({

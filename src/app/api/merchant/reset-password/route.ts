@@ -58,9 +58,18 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
 
+    // M18: bumping sessionVersion invalidates every outstanding session
+    // token (the middleware rejects tokens whose sessionVersion claim is
+    // stale), so a stolen pre-reset cookie dies at the reset boundary.
     await (prisma as any).merchant.update({
       where: { email },
-      data: { passwordHash, resetCode: null, resetCodeExpiresAt: null, resetCodeAttempts: 0 },
+      data: {
+        passwordHash,
+        resetCode: null,
+        resetCodeExpiresAt: null,
+        resetCodeAttempts: 0,
+        sessionVersion: { increment: 1 },
+      },
     });
 
     return NextResponse.json({

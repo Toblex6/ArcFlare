@@ -45,6 +45,7 @@ import { prisma } from "@/lib/prisma";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimitEnforcer";
+import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 import { enqueueForReview } from "@/lib/jobs/settlementRecovery";
 import { getUsdcAddress } from "@/lib/tokens/supportedTokens";
 
@@ -99,6 +100,70 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   const token = body?.token ? String(body.token) : getUsdcAddress();
   if (token.toLowerCase() !== getUsdcAddress().toLowerCase()) {
     return NextResponse.json({ error: `unsupported token ${token} — agent payments use native USDC` }, { status: 400 });
+  }
+
+  // ── M9 idempotency: a retried POST with the same idempotencyKey must
+  // replay the ORIGINAL outcome — never spend again (and never burn the
+  // spend-limit window twice). The unique PaymentLog.idempotencyKey claim
+  // is taken BEFORE the spend record; a concurrent duplicate hits P2002
+  // and replays the winner's row.
+  const idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim().slice(0, 120) : "";
+  let claimedLogId: string | null = null;
+
+  const replay = (row: any): NextResponse => {
+    if (row.status === "SUCCESS" && row.arcTxHash) {
+      return NextResponse.json({
+        success: true,
+        replayed: true,
+        agentId,
+        agentEoa: row.senderEmail,
+        amount: row.amount,
+        txHash: row.arcTxHash,
+        message: `Replay of agent payment (original tx ${row.arcTxHash}).`,
+      });
+    }
+    if (row.status === "SETTLEMENT_ERROR") {
+      return NextResponse.json(
+        {
+          error: "Agent payment previously failed during execution — retry with a NEW idempotency key.",
+          priorStatus: row.status,
+          txHash: row.arcTxHash ?? null,
+        },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json(
+      { error: "Agent payment with this idempotency key is already in progress." },
+      { status: 409 }
+    );
+  };
+
+  if (idempotencyKey) {
+    const existing = await (prisma as any).paymentLog.findUnique({ where: { idempotencyKey } }).catch(() => null);
+    if (existing) return replay(existing);
+    try {
+      const claim = await (prisma as any).paymentLog.create({
+        data: {
+          reference: `agentpay_idem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          idempotencyKey,
+          amount: Number(amount) / 1e6,
+          currency: "USDC",
+          chain: "Arc Testnet",
+          senderEmail: "pending-agent-pay",
+          merchant: agent.name,
+          agentSCA: agent.scaAddress ?? null,
+          direction: "send",
+          status: "PENDING",
+        },
+      });
+      claimedLogId = claim.id;
+    } catch (claimError: any) {
+      if (claimError?.code === "P2002") {
+        const winner = await (prisma as any).paymentLog.findUnique({ where: { idempotencyKey } }).catch(() => null);
+        if (winner) return replay(winner);
+      }
+      throw claimError;
+    }
   }
 
   // 1. the payer agent's payment EOA (auto-provisioned, key encrypted at rest).
@@ -160,22 +225,31 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
       settlementTxHash: recordTxHash,
       failureReason: `transfer reverted after spend record: ${sendError?.message ?? "revert"}`,
     });
-    prisma.paymentLog
-      .create({
-        data: {
-          reference: `agentpay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-          amount: Number(amount) / 1e6,
-          currency: "USDC",
-          chain: "Arc Testnet",
-          senderEmail: agentEoa,
-          merchant: agent.name,
-          agentSCA: agent.scaAddress ?? null,
-          direction: "send",
-          status: "SETTLEMENT_ERROR",
-          arcTxHash: null,
-        },
-      })
-      .catch((e: any) => console.error("[agentPay] error log row failed:", e.message));
+const errorRow: any = {
+      amount: Number(amount) / 1e6,
+      currency: "USDC",
+      chain: "Arc Testnet",
+      senderEmail: agentEoa,
+      merchant: agent.name,
+      agentSCA: agent.scaAddress ?? null,
+      direction: "send",
+      status: "SETTLEMENT_ERROR",
+      arcTxHash: null,
+    };
+    if (claimedLogId) {
+      prisma.paymentLog
+        .update({ where: { id: claimedLogId }, data: errorRow })
+        .catch((e: any) => console.error("[agentPay] error log update failed:", e.message));
+    } else {
+      prisma.paymentLog
+        .create({
+          data: {
+            reference: `agentpay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+            ...errorRow,
+          },
+        })
+        .catch((e: any) => console.error("[agentPay] error log row failed:", e.message));
+    }
     return NextResponse.json(
       {
         error: "Agent payment transfer failed after the spend record.",
@@ -202,22 +276,31 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
       settlementTxHash: receipt.hash,
       failureReason: `recipient credit ${Number(credit) / 1e6} USDC < amount ${Number(amount) / 1e6} USDC (delta check failed)`,
     });
-    prisma.paymentLog
-      .create({
-        data: {
-          reference: `agentpay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-          amount: Number(amount) / 1e6,
-          currency: "USDC",
-          chain: "Arc Testnet",
-          senderEmail: agentEoa,
-          merchant: agent.name,
-          agentSCA: agent.scaAddress ?? null,
-          direction: "send",
-          status: "SETTLEMENT_ERROR",
-          arcTxHash: receipt.hash,
-        },
-      })
-      .catch((e: any) => console.error("[agentPay] error log row failed:", e.message));
+const creditErrorRow: any = {
+      amount: Number(amount) / 1e6,
+      currency: "USDC",
+      chain: "Arc Testnet",
+      senderEmail: agentEoa,
+      merchant: agent.name,
+      agentSCA: agent.scaAddress ?? null,
+      direction: "send",
+      status: "SETTLEMENT_ERROR",
+      arcTxHash: receipt.hash,
+    };
+    if (claimedLogId) {
+      prisma.paymentLog
+        .update({ where: { id: claimedLogId }, data: creditErrorRow })
+        .catch((e: any) => console.error("[agentPay] error log update failed:", e.message));
+    } else {
+      prisma.paymentLog
+        .create({
+          data: {
+            reference: `agentpay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+            ...creditErrorRow,
+          },
+        })
+        .catch((e: any) => console.error("[agentPay] error log row failed:", e.message));
+    }
     return NextResponse.json(
       {
         error: "Agent payment sent but recipient credit verification failed.",
@@ -229,27 +312,38 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
     );
   }
 
-  // 7. ledger row — SUCCESS with the real on-chain hash.
-  prisma.paymentLog
-    .create({
-      data: {
-        reference: `agentpay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-        amount: Number(amount) / 1e6,
-        currency: "USDC",
-        chain: "Arc Testnet",
-        senderEmail: agentEoa,
-        merchant: agent.name,
-        agentSCA: agent.scaAddress ?? null,
-        direction: "send",
-        status: "SUCCESS",
-        arcTxHash: receipt.hash,
-        gatewayReference: recordTxHash,
-      },
-    })
-    .catch((e: any) => console.error("[agentPay] success log row failed:", e.message));
+// 7. ledger row — SUCCESS with the real on-chain hash (or update the
+  // idempotency claim with the final outcome).
+  const successRow: any = {
+    amount: Number(amount) / 1e6,
+    currency: "USDC",
+    chain: "Arc Testnet",
+    senderEmail: agentEoa,
+    merchant: agent.name,
+    agentSCA: agent.scaAddress ?? null,
+    direction: "send",
+    status: "SUCCESS",
+    arcTxHash: receipt.hash,
+    gatewayReference: recordTxHash,
+  };
+  if (claimedLogId) {
+    prisma.paymentLog
+      .update({ where: { id: claimedLogId }, data: successRow })
+      .catch((e: any) => console.error("[agentPay] success log update failed:", e.message));
+  } else {
+    prisma.paymentLog
+      .create({
+        data: {
+          reference: `agentpay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          ...successRow,
+        },
+      })
+      .catch((e: any) => console.error("[agentPay] success log row failed:", e.message));
+  }
 
   return NextResponse.json({
     success: true,
+    replayed: false,
     agentId,
     agentEoa,
     to,
@@ -257,19 +351,27 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
     txHash: receipt.hash,
     recipientCredit: (Number(credit) / 1e6).toFixed(6),
     spendRecordTx: recordTxHash,
+    idempotencyKey: idempotencyKey || undefined,
     message: `Agent ${agent.name} paid ${rawAmount} USDC to ${to}.`,
   });
 }
 
 /**
  * Reads the agent's current on-chain spend policy (cap, window, spent).
+ * Caller must control the agent — the policy response reveals the agent's
+ * payment EOA, which is the exact handle an attacker would need to front-run
+ * the limit's bootstrap slot, so it is not public.
  */
-export async function getAgentPolicy(agentId: number): Promise<NextResponse> {
+export async function getAgentPolicy(req: NextRequest, agentId: number): Promise<NextResponse> {
   const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
   if (!agent) {
     return NextResponse.json({ error: `agent ${agentId} not found` }, { status: 404 });
   }
   const wallet = await getOrCreateAgentWallet(agentId);
+  const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? wallet.address);
+  if (!actor) {
+    return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
+  }
   const limit = await getSpendLimitContract().getLimit(wallet.address);
   return NextResponse.json({
     agentId,
@@ -308,6 +410,26 @@ export async function setAgentPolicy(req: NextRequest, agentId: number, body: an
   const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? wallet.address);
   if (!actor) {
     return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
+  }
+
+  // H3 — bootstrap front-run guard: the contract's setLimit is first-caller-
+  // becomes-owner. The limit owner must be the platform relayer (which signs
+  // every setLimit and is set as owner at wallet provisioning); if someone
+  // else already claimed the slot, this merchant's policy change would
+  // silently fail on-chain (or, worse, be controlled by the attacker).
+  // Refuse loudly instead of reverting opaquely.
+  const limit = await getSpendLimitContract().getLimit(wallet.address);
+  if (limit?.owner && limit.owner !== "0x0000000000000000000000000000000000000000") {
+    const relayer = await getRelayerSigner().getAddress();
+    if (limit.owner.toLowerCase() !== relayer.toLowerCase()) {
+      return NextResponse.json(
+        {
+          error: "Spend-limit ownership for this agent was taken by another address — policy changes are disabled for this agent.",
+          detail: `On-chain limit owner is ${limit.owner}, expected the platform relayer. Contact support.`,
+        },
+        { status: 403 }
+      );
+    }
   }
 
   const tx = await getSpendLimitContract().setLimit(wallet.address, cap, BigInt(windowSeconds));

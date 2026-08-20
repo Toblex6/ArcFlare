@@ -53,6 +53,36 @@ export const CUSTODY_WALLET_VARS: string[] = [
   "AGENT_VALIDATOR_WALLET_ADDRESS",
 ];
 
+// ── M10: secrets + contract configuration ─────────────────────────────────────
+// Hard failures (the app is broken without them). Format checks are cheap
+// and catch paste errors (truncated keys, addresses with the wrong length,
+// secrets shipped as "changeme").
+export const REQUIRED_SECRETS: { keyVar: string; description: string; minLen?: number }[] = [
+  { keyVar: "X402_WALLET_ENCRYPTION_KEY", description: "AES-GCM key for agent payment EOAs at rest", minLen: 32 },
+  { keyVar: "CONSUMER_JWT_SECRET", description: "consumer session token signing", minLen: 32 },
+  { keyVar: "MERCHANT_JWT_SECRET", description: "merchant session token signing", minLen: 32 },
+  { keyVar: "INTERNAL_SETTLEMENT_API_KEY", description: "internal service-to-service settlements", minLen: 16 },
+  { keyVar: "TELEGRAM_BOT_TOKEN", description: "Telegram bot (withdraw confirmations)", minLen: 32 },
+  { keyVar: "TELEGRAM_WEBHOOK_SECRET", description: "Telegram webhook HMAC verification", minLen: 16 },
+];
+
+export const REQUIRED_CONTRACT_ADDRESSES: { addressVar: string; description: string }[] = [
+  { addressVar: "PAYROLL_CONTRACT_ADDRESS", description: "ArcFlarePayroll" },
+  { addressVar: "SPEND_LIMIT_CONTRACT_ADDRESS", description: "ArcFlareSpendLimit" },
+  { addressVar: "SWAP_POOL_CONTRACT_ADDRESS", description: "ArcFlareSwapPool" },
+  { addressVar: "JOB_ESCROW_CONTRACT_ADDRESS", description: "job escrow" },
+];
+
+export const OPTIONAL_ADDRESS_LISTS: { listVar: string; description: string }[] = [
+  { listVar: "SELLER_GATEWAY_TREASURY_ADDRESSES", description: "seller-gateway withdraw allowlist" },
+];
+
+export const REQUIRED_CIRCLE_CREDS: { keyVar: string; description: string }[] = [
+  { keyVar: "CIRCLE_API_KEY", description: "Circle API" },
+  { keyVar: "CIRCLE_WALLET_SET_ID", description: "Circle wallet set" },
+  { keyVar: "CIRCLE_ENTITY_SECRET", description: "Circle entity secret" },
+];
+
 const HEX_KEY_RE = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const PLACEHOLDER_RE = /^(0x)?(YOUR_|CHANGE|changeme|0000+)/;
@@ -115,6 +145,43 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
     const value = env[varName];
     if (value && !ADDRESS_RE.test(value)) {
       errors.push(`${varName}: invalid address format (Circle-custody SCA, no private key expected)`);
+    }
+  }
+
+  // M10 — hard-fail on missing/placeholder secrets, malformed contract
+  // addresses, and malformed allowlist entries.
+  for (const { keyVar, description, minLen } of REQUIRED_SECRETS) {
+    const value = env[keyVar];
+    if (!value || PLACEHOLDER_RE.test(value) || (minLen && value.length < minLen)) {
+      errors.push(`${keyVar}: missing, placeholder, or too short (${description})`);
+    }
+  }
+
+  for (const { addressVar, description } of REQUIRED_CONTRACT_ADDRESSES) {
+    const value = env[addressVar];
+    if (!value || !ADDRESS_RE.test(value)) {
+      errors.push(`${addressVar}: missing or invalid address (${description})`);
+    }
+  }
+
+  for (const { listVar, description } of OPTIONAL_ADDRESS_LISTS) {
+    const value = env[listVar];
+    if (!value) continue;
+    const entries = value.split(",").map((s) => s.trim()).filter(Boolean);
+    if (entries.length === 0) {
+      errors.push(`${listVar}: empty allowlist (${description})`);
+      continue;
+    }
+    const bad = entries.filter((e) => !ADDRESS_RE.test(e));
+    if (bad.length > 0) {
+      errors.push(`${listVar}: invalid allowlist entries (${description}): ${bad.join(", ")}`);
+    }
+  }
+
+  for (const { keyVar, description } of REQUIRED_CIRCLE_CREDS) {
+    const value = env[keyVar];
+    if (!value || PLACEHOLDER_RE.test(value) || value.length < 16) {
+      errors.push(`${keyVar}: missing or placeholder (${description})`);
     }
   }
 

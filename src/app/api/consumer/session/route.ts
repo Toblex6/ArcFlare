@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     const address = searchParams.get('address');
 
     if (address) {
-      const { allowed, response: limitResponse } = await checkRateLimit(req, 'default');
+      const { allowed, response: limitResponse } = await checkRateLimit(req, 'session');
       if (!allowed) return limitResponse;
 
       if (!isAddress(address)) {
@@ -126,7 +126,7 @@ export async function GET(req: NextRequest) {
 //   (signature must prove control of walletAddress against a nonce issued by GET)
 export async function POST(req: NextRequest) {
   try {
-    const { allowed, response: limitResponse } = await checkRateLimit(req, 'default');
+    const { allowed, response: limitResponse } = await checkRateLimit(req, 'session');
     if (!allowed) return limitResponse;
 
     const body = await req.json().catch(() => ({}));
