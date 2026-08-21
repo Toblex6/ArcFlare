@@ -71,6 +71,7 @@ export const REQUIRED_CONTRACT_ADDRESSES: { addressVar: string; description: str
   { addressVar: "SPEND_LIMIT_CONTRACT_ADDRESS", description: "ArcFlareSpendLimit" },
   { addressVar: "SWAP_POOL_CONTRACT_ADDRESS", description: "ArcFlareSwapPool" },
   { addressVar: "JOB_ESCROW_CONTRACT_ADDRESS", description: "job escrow" },
+  { addressVar: "ARC_FLARE_STREAM_CONTRACT_ADDRESS", description: "ArcFlareStream (nanopayments)" },
 ];
 
 export const OPTIONAL_ADDRESS_LISTS: { listVar: string; description: string }[] = [

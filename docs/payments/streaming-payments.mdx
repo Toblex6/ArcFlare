@@ -1,21 +1,110 @@
 ---
 title: "Streaming Payments"
 sidebarTitle: "Streaming Payments"
-description: "Real-time per-second USDC streams using ArcFlareStream."
+description: "Criterion-based nanopayment streams for jobs using ArcFlareStream."
 ---
 
-Stream funds continuously over time. Receivers can withdraw vested USDC at any time.
+Stream funds per-criterion as the reviewer confirms each requirement. The job's total budget is split deterministically across criteria (tranche per requirement) and released individually upon confirmation.
 
 ---
 
-## Creating a Stream
+## Creating a Nanopayment Stream
 
 ```typescript
-const stream = await flarehq.streams.create({
-  recipient: '0x71C...B39',
-  depositAmount: '500.00',
-  durationSeconds: 2592000, // 30 Days
+const stream = await fetch('/api/jobs/nanopay/open', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
+  body: JSON.stringify({
+    jobId: '181386',
+    criteria: {
+      jobId: '181386',
+      description: 'Complete backend implementation',
+      requirements: [
+        'Complete backend API implementation',
+        'Write unit tests for all endpoints',
+        'Deploy to staging and verify',
+      ],
+      deadlineUnix: Math.floor(Date.now() / 1000) + 86400,
+    },
+  }),
 });
-
-console.log('Stream ID:', stream.id);
+const { streamId, trancheCount, totalBudget, trancheAmounts } = await stream.json();
+console.log('Stream ID:', streamId);
 ```
+
+## Releasing a Tranche
+
+```typescript
+const rel = await fetch('/api/jobs/nanopay/release', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
+  body: JSON.stringify({ jobId: '181386', requirementIndex: 0 }),
+});
+console.log('Tranche 0 tx:', rel.txHash);
+```
+
+## Closing the Stream
+
+```typescript
+const close = await fetch('/api/jobs/nanopay/close', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
+  body: JSON.stringify({ jobId: '181386' }),
+});
+console.log('Closed:', close.closedAt);
+```
+
+## Checking Status
+
+```typescript
+const status = await fetch('/api/jobs/nanopay/status', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
+  body: JSON.stringify({ jobId: '181386' }),
+});
+console.log('On-chain released indexes:', status.status.onChain.releasedIndexes);
+```
+
+---
+
+## Authorization
+
+- **Open**: Job client (poster) — caller must control `job.clientSCA`
+- **Release**: Job client OR evaluator (authorized reviewer) — on-chain signer is always the poster's wallet
+- **Close**: Same as release
+- **Status**: Any authenticated caller with access to the job
+
+---
+
+## Tranche Accounting
+
+For a budget of 30,000 base units (0.03 USDC) and 3 criteria:
+
+| Criterion | Amount |
+|-----------|--------|
+| 0 | 10,000 |
+| 1 | 10,000 |
+| 2 | 10,000 (remainder added to last) |
+
+**Deterministic bigint math**: floor division, remainder added to the final tranche. Total released never exceeds budget.
+
+---
+
+## Contract
+
+**ArcFlareStream** on Arc Testnet: `0xd8ca3Bbc212F36666145fAa487D45742eA04A52B`  
+Deployment tx: `0x13a3879bcd6dd9ad9f97230f1cd25af949116a468b7e4bc67b7749909cad3009`  
+Bytecode verified (keccak match).
+
+Features:
+- ReentrancyGuard + SafeERC20
+- Poster-funded, poster-releases, no refund path
+- MAX_TRANCHES = 50
+- Events: `StreamOpened`, `TrancheReleased`, `StreamClosed`
+- Views: `getStream()`, `releasedTranches()`, `trancheAmounts()`
+
+---
+
+## Known Limitations
+
+Arc Testnet USDC applies a per-transfer fee to the recipient (~0.0014–0.0022 USDC for contract→EOA transfers, measured on payroll/swap contracts). This contract's bookkeeping tracks exact amounts; the worker's actual wallet gain is `amount - fee`. Verify deltas on mainnet.

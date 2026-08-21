@@ -251,6 +251,8 @@ model JobNanopaymentStream {
   totalBudget      String
   trancheCount     Int
   tranchesReleased Int      @default(0)
+  token            String
+  criteriaHash     String?
   closedAt         DateTime?
   createdAt        DateTime @default(now())
 }
