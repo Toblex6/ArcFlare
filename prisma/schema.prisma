@@ -70,18 +70,21 @@ model ApiListing {
   name            String
   description     String?
   categories      String[]  @default([])
-  pricePerRequest String    // "$X.XX" format, passed straight into withGateway() unchanged
+  pricePerRequest String?   // "$X.XX" format, passed straight into withGateway() unchanged — null for agent listings (hire uses separate flow)
   docsUrl         String?
-  targetUrl       String    // upstream API this listing proxies to once payment clears — not in the
-                              // original spec, but a listing can't actually gate anything without it
+  targetUrl       String?   // upstream API this listing proxies to once payment clears — null for agent listings
   status          String    @default("DRAFT") // "DRAFT" | "PUBLISHED" | "SUSPENDED"
   merchantId      String?   // owning provider — null only for legacy/pre-scoping rows
+  // Agent listing support — when present, this is an agent listing (hire action)
+  // instead of a service listing (pay-per-request proxy)
+  agentRegistryId Int?     // references AgentRegistry.id — when set, this is an agent listing
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   @@index([merchantId])
   @@index([status])
   @@index([slug])
+  @@index([agentRegistryId])
 }
 
 model ApiKey {

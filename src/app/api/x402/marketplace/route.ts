@@ -52,37 +52,72 @@ async function createListingHandler(request: Request, merchant: AuthedMerchant) 
             docsUrl,
             targetUrl, // the provider's real upstream API this listing proxies to
             slug: requestedSlug,
+            // Agent listing fields (optional)
+            agentRegistryId,
+            listingType = "service", // "service" | "agent"
         } = await request.json();
 
-        if (!name || !pricePerRequest || !targetUrl) {
-            return NextResponse.json(
-                { success: false, error: 'name, pricePerRequest, and targetUrl are required.' },
-                { status: 400 }
-            );
-        }
+        // Validate based on listing type
+        if (listingType === "agent") {
+            // Agent listing: requires agentRegistryId, no targetUrl required
+            if (!agentRegistryId) {
+                return NextResponse.json(
+                    { success: false, error: 'agentRegistryId is required for agent listings' },
+                    { status: 400 }
+                );
+            }
+            // Verify agent exists and belongs to this merchant
+            const agent = await (prisma as any).agentRegistry.findUnique({
+                where: { id: agentRegistryId },
+                select: { id: true, merchantId: true, status: true, scaAddress: true },
+            });
+            if (!agent) {
+                return NextResponse.json({ error: 'Agent not found' }, { status: 404 });
+            }
+            if (agent.merchantId !== merchant.id) {
+                return NextResponse.json(
+                    { error: 'You can only list agents you own' },
+                    { status: 403 }
+                );
+            }
+            if (agent.status !== "ACTIVE_AGENT_PROVISIONED") {
+                return NextResponse.json(
+                    { error: 'Agent must be ACTIVE_AGENT_PROVISIONED to be listed' },
+                    { status: 400 }
+                );
+            }
+        } else {
+            // Service listing (default): requires targetUrl
+            if (!name || !pricePerRequest || !targetUrl) {
+                return NextResponse.json(
+                    { success: false, error: 'name, pricePerRequest, and targetUrl are required for service listings.' },
+                    { status: 400 }
+                );
+            }
 
-        if (!/^\$\d+(\.\d+)?$/.test(pricePerRequest)) {
-            return NextResponse.json(
-                { success: false, error: 'pricePerRequest must look like "$0.01" (matches withGateway\'s expected format).' },
-                { status: 400 }
-            );
-        }
+            if (!/^\$\d+(\.\d+)?$/.test(pricePerRequest)) {
+                return NextResponse.json(
+                    { success: false, error: 'pricePerRequest must look like "$0.01" (matches withGateway\'s expected format).' },
+                    { status: 400 }
+                );
+            }
 
-        try {
-            new URL(targetUrl);
-        } catch {
-            return NextResponse.json(
-                { success: false, error: 'targetUrl must be a valid, absolute URL.' },
-                { status: 400 }
-            );
-        }
+            try {
+                new URL(targetUrl);
+            } catch {
+                return NextResponse.json(
+                    { success: false, error: 'targetUrl must be a valid, absolute URL.' },
+                    { status: 400 }
+                );
+            }
 
-        const ssrfCheck = await assertSafeTargetUrl(targetUrl);
-        if (!ssrfCheck.ok) {
-            return NextResponse.json(
-                { success: false, error: `targetUrl rejected: ${ssrfCheck.reason}.` },
-                { status: 400 }
-            );
+            const ssrfCheck = await assertSafeTargetUrl(targetUrl);
+            if (!ssrfCheck.ok) {
+                return NextResponse.json(
+                    { success: false, error: `targetUrl rejected: ${ssrfCheck.reason}.` },
+                    { status: 400 }
+                );
+            }
         }
 
         const baseSlug = slugify(requestedSlug || name);
@@ -108,11 +143,12 @@ async function createListingHandler(request: Request, merchant: AuthedMerchant) 
                 name,
                 description: description || null,
                 categories: Array.isArray(categories) ? categories : [],
-                pricePerRequest,
+                pricePerRequest: listingType === "service" ? pricePerRequest : (pricePerRequest || "$0.00"),
                 docsUrl: docsUrl || null,
-                targetUrl,
+                targetUrl: listingType === "service" ? targetUrl : (targetUrl || "https://agent.internal/hire"),
                 status: 'DRAFT',
                 merchantId: merchant.id,
+                agentRegistryId: listingType === "agent" ? agentRegistryId : null,
             },
         });
 
@@ -120,8 +156,12 @@ async function createListingHandler(request: Request, merchant: AuthedMerchant) 
             {
                 success: true,
                 listing,
-                payEndpoint: `/api/x402/marketplace/pay/${slug}`,
-                message: `Listing created as a draft. Check "My Listings" to publish it and make it live.`,
+                payEndpoint: listingType === "service" ? `/api/x402/marketplace/pay/${slug}` : null,
+                hireEndpoint: listingType === "agent" ? `/api/agents/${listing.agentRegistryId}/hire` : null,
+                cardEndpoint: listingType === "agent" ? `/api/agents/${listing.agentRegistryId}/card` : null,
+                message: listingType === "agent"
+                    ? `Agent listing created as a draft. Check "My Listings" to publish it and make it live.`
+                    : `Listing created as a draft. Check "My Listings" to publish it and make it live.`,
             },
             { status: 201 }
         );
@@ -143,8 +183,14 @@ export async function GET(request: NextRequest) {
         const category = searchParams.get('category');
         const provider = searchParams.get('provider'); // merchantId
         const search = searchParams.get('search');
+        const listingType = searchParams.get('type'); // "service" | "agent" | undefined (both)
 
         const where: any = { status: 'PUBLISHED' };
+        if (listingType === "service") {
+            where.agentRegistryId = null;
+        } else if (listingType === "agent") {
+            where.agentRegistryId = { not: null };
+        }
         if (category) where.categories = { has: category };
         if (provider) where.merchantId = provider;
         if (search) {
@@ -165,15 +211,59 @@ export async function GET(request: NextRequest) {
                 categories: true,
                 pricePerRequest: true,
                 docsUrl: true,
+                targetUrl: true,
+                status: true,
                 merchantId: true,
+                agentRegistryId: true,
                 createdAt: true,
-                // targetUrl intentionally excluded from public listing — buyers pay
-                // through /api/x402/marketplace/pay/[slug]; they don't need the
-                // upstream address, and providers may not want it public.
             },
         });
 
-        return NextResponse.json({ success: true, count: listings.length, listings });
+        // Enrich agent listings with agent data
+        const enriched = await Promise.all(
+            listings.map(async (listing: any) => {
+                if (listing.agentRegistryId) {
+                    const agent = await (prisma as any).agentRegistry.findUnique({
+                        where: { id: listing.agentRegistryId },
+                        select: {
+                            id: true,
+                            tokenId: true,
+                            scaAddress: true,
+                            name: true,
+                            status: true,
+                            reputation: true,
+                            skills: true,
+                            pricing: true,
+                        },
+                    });
+                    return {
+                        ...listing,
+                        type: "agent",
+                        agent: agent ? {
+                            id: agent.id,
+                            tokenId: agent.tokenId,
+                            scaAddress: agent.scaAddress,
+                            name: agent.name,
+                            status: agent.status,
+                            reputation: agent.reputation ?? 50,
+                            skills: agent.skills ?? [],
+                            pricing: agent.pricing ?? {},
+                            cardUrl: `/api/agents/${agent.id}/card`,
+                            hireUrl: `/api/agents/${agent.id}/hire`,
+                        } : null,
+                        hireUrl: `/api/agents/${listing.agentRegistryId}/hire`,
+                        cardUrl: `/api/agents/${listing.agentRegistryId}/card`,
+                    };
+                }
+                return {
+                    ...listing,
+                    type: "service",
+                    payEndpoint: `/api/x402/marketplace/pay/${listing.slug}`,
+                };
+            })
+        );
+
+        return NextResponse.json({ success: true, count: listings.length, listings: enriched });
     } catch (error: any) {
         console.error('[Marketplace] List error:', error);
         return NextResponse.json({ success: false, error: 'Internal Server Error' }, { status: 500 });

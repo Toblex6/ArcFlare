@@ -103,6 +103,19 @@ async function handleRequest(req: NextRequest, slug: string): Promise<NextRespon
         );
     }
 
+    // Agent listing: redirect to hire endpoint
+    if (listing.agentRegistryId) {
+        return NextResponse.json(
+            {
+                success: false,
+                error: 'Agent listings use the hire endpoint',
+                hireEndpoint: `/api/agents/${listing.agentRegistryId}/hire`,
+                cardEndpoint: `/api/agents/${listing.agentRegistryId}/card`,
+            },
+            { status: 400 }
+        );
+    }
+
     const proxyHandler = await buildProxyHandler(listing.targetUrl);
 
     const protectedHandler = withGateway(
