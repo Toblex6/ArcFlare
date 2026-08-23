@@ -64,6 +64,22 @@ async function postJson(url, body, cookie) {
   return { res, data: await res.json().catch(() => ({})) };
 }
 
+async function postJsonWithRpcRetry(url, body, cookie, retries = 3) {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const { res, data } = await postJson(url, body, cookie);
+    const msg = JSON.stringify(data).toLowerCase();
+    const isRpcFlake = msg.includes('bad record mac') || msg.includes('econnreset') || msg.includes('ssl routines') || msg.includes('alert bad record');
+    if (res.status === 500 && isRpcFlake && attempt < retries - 1) {
+      console.log(`  RPC flake on ${url} attempt ${attempt+1}, retrying...`);
+      await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      continue;
+    }
+    return { res, data };
+  }
+  // fallback
+  return postJson(url, body, cookie);
+}
+
 async function main() {
   console.log('── Agent Marketplace E2E ────────────────────────────────────');
   if (!(await (async () => { for (let i=0;i<60;i++){ try{ const r=await fetch(`${BASE}/api/payments/verify/__probe__`,{signal:AbortSignal.timeout(5000)}); if(r.status===404)return true; }catch{} await new Promise(r=>setTimeout(r,2000)); } return false; })())) { console.log('❌ dev server not reachable'); process.exitCode=1; return; }
@@ -112,6 +128,8 @@ async function main() {
     ok('agent deployed', deployRes.status === 200 && deployData.success, `${deployRes.status} ${deployData.error || ''}`);
     const agentId = deployData.agent?.id;
     const agentSca = deployData.wallets?.owner;
+    // Ensure discover?skill=testing finds this agent — give it a skill
+    await prisma.agentRegistry.update({ where: { id: agentId }, data: { skills: ["testing", "e2e"], description: "E2E Test Agent — discoverable via skill=testing" } });
     const agentTokenId = deployData.agent?.tokenId;
     ok('agent has SCA and tokenId', !!agentSca && !!agentTokenId, `sca=${agentSca} tokenId=${agentTokenId}`);
 
@@ -178,18 +196,13 @@ async function main() {
       ],
       deadlineHours: 24,
     };
-    const hireRes = await fetch(`${BASE}/api/agents/${agentId}/hire`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
-      body: JSON.stringify({
+    const { res: hireRes, data: hireData } = await postJsonWithRpcRetry(`/api/agents/${agentId}/hire`, {
         clientWalletId: merchant.circleWalletId,
         description: 'E2E test job for agent marketplace hiring',
         criteria,
-        budget: '0.01', // 0.01 USDC
+        budget: '0.01',
         maxRevisions: 2,
-      }),
-    });
-    const hireData = await hireRes.json();
+      }, merchantCookie);
     ok('hire job created', hireRes.status === 200 && hireData.success, `${hireRes.status} ${hireData.error || ''}`);
     const jobId = hireData.jobId;
     ok('hire returns jobId and next steps', !!hireData.jobId && !!hireData.nextSteps);
@@ -221,12 +234,7 @@ async function main() {
     // since the agent was deployed by the merchant
     // Use agent's Circle wallet for set-budget (provider is agent)
     const _agentForBudget = await prisma.agentRegistry.findUnique({ where: { id: agentId } });
-    const budgetRes = await fetch(`${BASE}/api/jobs/set-budget`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
-      body: JSON.stringify({ jobId, providerWalletId: _agentForBudget.circleWalletId, budget: '10000' }), // 0.01 USDC
-    });
-    const budgetData = await budgetRes.json();
+    const { res: budgetRes, data: budgetData } = await postJsonWithRpcRetry(`/api/jobs/set-budget`, { jobId, providerWalletId: _agentForBudget.circleWalletId, budget: '10000' }, merchantCookie);
     ok('set-budget ok', budgetRes.status === 200 && budgetData.success, `${budgetRes.status} ${budgetData.error || ''}`);
 
     // ── 5. Fund job ──────────────────────────────────────────────────────
@@ -253,21 +261,11 @@ async function main() {
       return `consumer_token=${token}`;
     })();
 
-    const submitRes = await fetch(`${BASE}/api/jobs/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: agentConsumerCookie },
-      body: JSON.stringify({ jobId, providerWalletId: _agentForBudget.circleWalletId, deliverableData: 'E2E test deliverable completed' }),
-    });
-    const submitData = await submitRes.json();
+    const { res: submitRes, data: submitData } = await postJsonWithRpcRetry(`/api/jobs/submit`, { jobId, providerWalletId: _agentForBudget.circleWalletId, deliverableData: 'E2E test deliverable completed' }, agentConsumerCookie);
     ok('submit work ok', submitRes.status === 200 && submitData.success, `${submitRes.status} ${submitData.error || ''}`);
 
     // ── 7. Complete job (release payment) ────────────────────────────────
-    const completeRes = await fetch(`${BASE}/api/jobs/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
-      body: JSON.stringify({ jobId, evaluatorWalletId: merchant.circleWalletId, reason: 'deliverable-approved' }),
-    });
-    const completeData = await completeRes.json();
+    const { res: completeRes, data: completeData } = await postJsonWithRpcRetry(`/api/jobs/complete`, { jobId, evaluatorWalletId: merchant.circleWalletId, reason: 'deliverable-approved' }, merchantCookie);
     ok('complete job ok', completeRes.status === 200 && completeData.success, `${completeRes.status} ${completeData.error || ''}`);
 
     // ── 8. Verify payment released ───────────────────────────────────────
