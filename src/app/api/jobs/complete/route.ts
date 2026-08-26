@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { keccak256, toHex } from 'viem';
+import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 
 // SECURITY: fully closed now. Previously executed as any wallet named in
 // evaluatorWalletId, without checking it against the job's actual evaluator
@@ -33,6 +34,19 @@ async function completeJobHandler(req: NextRequest) {
     const actor = await verifyCallerControlsAddress(req, evaluatorAddress);
     if (!actor) {
       return NextResponse.json({ error: 'You do not control this job\'s evaluator wallet.' }, { status: 403 });
+    }
+
+    // Build 2: validation-gated release — if this job has a validation policy, require PASS
+    const validationCheck = await isValidationSatisfiedForJob(BigInt(jobId));
+    if (!validationCheck.allowed) {
+      return NextResponse.json(
+        {
+          error: `Validation required — ${validationCheck.reason}`,
+          code: "VALIDATION_REQUIRED",
+          validationStatus: validationCheck.reason,
+        },
+        { status: 409 }
+      );
     }
 
     const reasonHash = keccak256(toHex(reason));

@@ -290,6 +290,7 @@ model Erc8183Job {
   merchantId      String?  // owning merchant — null only for legacy/pre-scoping rows
   agent           Agent?   @relation(fields: [agentId], references: [id])
   applications    JobApplication[]
+  validation      Erc8183JobValidation?
 
   @@index([jobId])
   @@index([clientSCA])
@@ -297,6 +298,25 @@ model Erc8183Job {
   @@index([evaluatorSCA])
   @@index([status])
   @@map("erc8183_jobs")
+}
+
+model Erc8183JobValidation {
+  id             String   @id @default(cuid())
+  jobId          BigInt   @unique
+  job            Erc8183Job @relation(fields: [jobId], references: [jobId], onDelete: Cascade)
+  validatorSCA   String
+  requestHash    String?  @unique
+  requestTxHash  String?
+  responseTxHash String?
+  status         String   @default("PENDING") // PENDING, REQUESTED, PASSED, FAILED
+  tag            String?
+  required       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([validatorSCA])
+  @@index([status])
+  @@map("erc8183_job_validations")
 }
 
 model JobApplication {
