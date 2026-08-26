@@ -31,7 +31,7 @@ const BASE: Record<string, string> = {
   RELAYER_PRIVATE_KEY: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
   ARC_ADMIN_PRIVATE_KEY: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
   ESCROW_ADMIN_PRIVATE_KEY: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
-  PRIVATE_KEY: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
+  // PRIVATE_KEY intentionally absent: deploy-time only, not required at startup.
   AGENT_OWNER_WALLET_ADDRESS: '0x7cf8ee2ab9c1aeb9cbae26511fb0cbda923ab15e',
   AGENT_VALIDATOR_WALLET_ADDRESS: '0xc3b50563e496a4e75a99dc45e4011d977032bb14',
   // M10 required secrets (throwaway, ≥ minLen): the validator only checks
@@ -65,7 +65,7 @@ expectFail('SELLER_WALLET_ADDRESS (legacy, no key) rejected',
   { ...BASE, SELLER_WALLET_ADDRESS: '0xa8d1d91384f2ab2edab9a58213b15635bf85c7f6' }, 'deprecated');
 expectFail('missing SELLER_PRIVATE_KEY rejected', { ...BASE, SELLER_PRIVATE_KEY: undefined }, 'SELLER_PRIVATE_KEY');
 expectFail('BUYER key/address mismatch rejected', { ...BASE, BUYER_PRIVATE_KEY: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' }, 'does not match');
-expectFail('placeholder key rejected', { ...BASE, PRIVATE_KEY: 'YOUR_DEPLOYER_PRIVATE_KEY' }, 'placeholder');
+expectFail('placeholder key rejected', { ...BASE, EOA_PRIVATE_KEY: 'YOUR_DEPLOYER_PRIVATE_KEY' }, 'placeholder');
 expectFail('malformed key rejected', { ...BASE, RELAYER_PRIVATE_KEY: '0x1234' }, 'RELAYER_PRIVATE_KEY');
 expectFail('missing key-only var rejected', { ...BASE, ESCROW_ADMIN_PRIVATE_KEY: undefined }, 'ESCROW_ADMIN_PRIVATE_KEY');
 expectFail('bad custody address format rejected', { ...BASE, AGENT_OWNER_WALLET_ADDRESS: 'not-an-address' }, 'AGENT_OWNER_WALLET_ADDRESS');
@@ -80,6 +80,10 @@ expectFail('missing CIRCLE_API_KEY rejected', { ...BASE, CIRCLE_API_KEY: undefin
 console.log('Positive case (clean base):');
 const clean = validateWalletEnv(BASE);
 ok('clean config passes', clean.ok, clean.errors.join('; ').slice(0, 80));
+
+console.log('Deploy-time-only var:');
+const noPrivateKey = validateWalletEnv({ ...BASE, PRIVATE_KEY: undefined });
+ok('absent PRIVATE_KEY does not fail (deploy-time only)', noPrivateKey.ok, noPrivateKey.errors.join('; ').slice(0, 80));
 
 console.log('Real merged env (.env + .env.local):');
 try {

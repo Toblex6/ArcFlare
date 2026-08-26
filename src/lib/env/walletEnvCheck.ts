@@ -41,7 +41,10 @@ export const KEY_ONLY: { keyVar: string; description: string }[] = [
   { keyVar: "RELAYER_PRIVATE_KEY", description: "relayer EOA (payroll/escrow/x402 settlement)" },
   { keyVar: "ARC_ADMIN_PRIVATE_KEY", description: "admin signer (settlement, CCTP, agent pay)" },
   { keyVar: "ESCROW_ADMIN_PRIVATE_KEY", description: "escrow admin signer (dispute resolution)" },
-  { keyVar: "PRIVATE_KEY", description: "hardhat deployer / generic signer" },
+  // NOTE: PRIVATE_KEY is deliberately NOT required here — it is a deploy-time
+  // variable consumed only by hardhat.config.js and scripts/deploy-*.mjs, which
+  // never run inside the Next.js server. Requiring it at startup broke hosting
+  // deploys that legitimately don't carry a deployer key.
 ];
 
 export const DEPRECATED_UNKEYED_SIGNER_VARS: { addressVar: string; description: string }[] = [
