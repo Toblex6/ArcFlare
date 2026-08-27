@@ -63,6 +63,60 @@ async function completeJobHandler(req: NextRequest) {
       data: { status: 'COMPLETED', reasonHash, txHashes: { push: txHash } },
     });
 
+    // Build 3 ledger: escrow release revenue for provider, linked to validation when gated
+    try {
+      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { getJobValidationPolicy } = await import("@/lib/jobs/jobValidationPolicy");
+      const providerAgentId = await resolveAgentIdBySca(job.providerSCA).catch(() => null);
+      if (providerAgentId) {
+        let jobValidationId: string | null = null;
+        try {
+          const pol = await getJobValidationPolicy(BigInt(jobId));
+          if (pol && pol.required) jobValidationId = pol.id;
+        } catch {}
+        recordLedgerEntry({
+          agentRegistryId: providerAgentId,
+          type: "JOB_ESCROW_RELEASE",
+          amount: BigInt(job.budget),
+          direction: "CREDIT",
+          jobId: BigInt(jobId),
+          jobValidationId,
+          txHash,
+          description: jobValidationId ? `validated release for job ${jobId}` : `release for job ${jobId}`,
+          metadata: jobValidationId ? { validationLinked: true } : undefined,
+        }).catch((e: any) => console.error("[ledger] release credit failed:", e.message));
+        // also record REVENUE for the same event (economic revenue) — separate type row on same tx
+        // Use txHash:type dedupe so both rows coexist on one tx
+        recordLedgerEntry({
+          agentRegistryId: providerAgentId,
+          type: "REVENUE",
+          amount: BigInt(job.budget),
+          direction: "CREDIT",
+          jobId: BigInt(jobId),
+          jobValidationId,
+          txHash,
+          description: `revenue from job ${jobId}`,
+        }).catch((e: any) => console.error("[ledger] revenue credit failed:", e.message));
+        // client side: deduct escrow lock effect already done at fund; optionally record subcontractor spend if client is agent
+        try {
+          const clientAgentId = await resolveAgentIdBySca(job.clientSCA).catch(() => null);
+          if (clientAgentId && clientAgentId !== providerAgentId) {
+            recordLedgerEntry({
+              agentRegistryId: clientAgentId,
+              type: "SUBCONTRACTOR_SPEND",
+              amount: BigInt(job.budget),
+              direction: "DEBIT",
+              counterpartyAgentId: providerAgentId,
+              jobId: BigInt(jobId),
+              jobValidationId,
+              txHash,
+              description: `subcontractor spend for job ${jobId}`,
+            }).catch(() => {});
+          }
+        } catch {}
+      }
+    } catch {}
+
     return NextResponse.json({ success: true, jobId, status: 'COMPLETED', txHash });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

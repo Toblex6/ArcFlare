@@ -68,6 +68,40 @@ async function releaseHandler(req: NextRequest) {
       txHash,
     });
 
+    // Build 3 ledger: stream revenue/spend
+    try {
+      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { readTrancheAmount } = await import("@/lib/contracts/streamContract");
+      const trancheAmt = await readTrancheAmount(BigInt(streamRecord.streamId), requirementIndex).catch(() => 0n);
+      const workerAgentId = await resolveAgentIdBySca(streamRecord.workerAddress).catch(() => null);
+      const posterAgentId = await resolveAgentIdBySca(job.clientSCA).catch(() => null);
+      if (workerAgentId && trancheAmt > 0n) {
+        recordLedgerEntry({
+          agentRegistryId: workerAgentId,
+          type: "STREAM_REVENUE",
+          amount: trancheAmt,
+          direction: "CREDIT",
+          jobId: BigInt(jobId),
+          streamId: streamRecord.streamId,
+          txHash,
+          description: `stream tranche ${requirementIndex} revenue`,
+        }).catch(() => {});
+      }
+      if (posterAgentId && trancheAmt > 0n) {
+        recordLedgerEntry({
+          agentRegistryId: posterAgentId,
+          type: "STREAM_SPEND",
+          amount: trancheAmt,
+          direction: "DEBIT",
+          counterpartyAgentId: workerAgentId ?? null,
+          jobId: BigInt(jobId),
+          streamId: streamRecord.streamId,
+          txHash,
+          description: `stream tranche ${requirementIndex} spend`,
+        }).catch(() => {});
+      }
+    } catch {}
+
     return NextResponse.json({
       success: true,
       jobId,

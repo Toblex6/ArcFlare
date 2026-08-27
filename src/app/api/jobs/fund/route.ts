@@ -59,6 +59,23 @@ async function fundJobHandler(req: NextRequest) {
       data: { status: 'FUNDED', txHashes: { push: [approveTx, fundTx] } },
     });
 
+    // Build 3 ledger: escrow lock for client if client is an agent
+    try {
+      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const clientAgentId = await resolveAgentIdBySca(job.clientSCA).catch(() => null);
+      if (clientAgentId) {
+        recordLedgerEntry({
+          agentRegistryId: clientAgentId,
+          type: "JOB_ESCROW_LOCK",
+          amount: BigInt(job.budget),
+          direction: "DEBIT",
+          jobId: BigInt(jobId),
+          txHash: fundTx,
+          description: `escrow lock for job ${jobId}`,
+        }).catch((e: any) => console.error("[ledger] fund lock failed:", e.message));
+      }
+    } catch {}
+
     return NextResponse.json({ success: true, jobId, status: 'FUNDED', approveTx, fundTx });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

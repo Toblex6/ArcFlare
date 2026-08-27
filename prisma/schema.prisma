@@ -38,6 +38,7 @@ model PaymentLog {
                              // (non-proxied payment) or not yet recorded.
   upstreamStatus   Int?      // The upstream's actual HTTP status code, for merchant debugging.
   updatedAt        DateTime? @updatedAt
+  ledgerEntries    AgentLedgerEntry[]
 
   @@index([listingId])
 }
@@ -62,6 +63,8 @@ model AgentRegistry {
   merchantId     String?        // owning merchant — null only for legacy/pre-scoping rows
   agents         Agent[]
   wallets        CircleWallet[]
+  ledgerEntries  AgentLedgerEntry[]
+  treasuryPolicy AgentTreasuryPolicy?
 }
 
 model ApiListing {
@@ -313,6 +316,7 @@ model Erc8183JobValidation {
   required       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  ledgerEntries  AgentLedgerEntry[]
 
   @@index([validatorSCA])
   @@index([status])
@@ -547,4 +551,54 @@ model StuckSettlement {
 
   @@index([agentAddress, status])
   @@index([status])
+}
+
+// ── Build 3: Economic Ledger + Treasury ────────────────────────────────────
+// Append-only accounting layer derived from authoritative PaymentLog / job /
+// on-chain events. PaymentLog remains the source of truth for whether money
+// moved; the ledger is the index for agent economics.
+
+model AgentLedgerEntry {
+  id                  String   @id @default(cuid())
+  agentRegistryId     Int
+  agent               AgentRegistry @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
+  type                String   // REVENUE | AGENT_PAYMENT | SUBCONTRACTOR_SPEND | JOB_ESCROW_LOCK | JOB_ESCROW_RELEASE | PAYROLL_SPEND | STREAM_REVENUE | STREAM_SPEND | GAS | REFUND | ADJUSTMENT
+  amount              String   // 6-decimal USDC integer string (bigint string) — never float
+  token               String   @default("USDC")
+  direction           String   // CREDIT | DEBIT
+  counterpartyAgentId Int?
+  paymentLogId        String?
+  paymentLog          PaymentLog? @relation(fields: [paymentLogId], references: [id])
+  jobId               BigInt?
+  jobValidationId     String?
+  jobValidation       Erc8183JobValidation? @relation(fields: [jobValidationId], references: [id])
+  streamId            String?
+  txHash              String?
+  dedupeKey           String   @unique // txHash:agentId:type when on-chain, else sourceType:sourceId:agentId:type
+  description         String?
+  metadata            Json?
+  createdAt           DateTime @default(now())
+
+  @@index([agentRegistryId, createdAt])
+  @@index([agentRegistryId, type])
+  @@index([txHash])
+  @@index([jobId])
+  @@index([jobValidationId])
+  @@map("agent_ledger_entries")
+}
+
+model AgentTreasuryPolicy {
+  id                           Int      @id @default(autoincrement())
+  agentRegistryId              Int      @unique
+  agent                        AgentRegistry @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
+  reserveMinimum               String   @default("0") // 6-dec units bigint string
+  maxSpendPerJob               String   @default("0") // 0 = no cap beyond spendLimit
+  maxSpendPerDay               String   @default("0")
+  maxSubcontractorSpendPerDay  String   @default("0")
+  autoPaySubcontractors        Boolean  @default(false)
+  reinvestPercent              Int      @default(0) // 0..100
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+
+  @@map("agent_treasury_policies")
 }

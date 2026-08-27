@@ -64,9 +64,13 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Agent | null>(null);
-  const [activeTab, setActiveTab] = useState<'registry' | 'reputation' | 'validation' | 'deploy'>(
+  const [activeTab, setActiveTab] = useState<'registry' | 'reputation' | 'validation' | 'deploy' | 'economics'>(
     'registry'
   );
+  const [ecoAgentId, setEcoAgentId] = useState('');
+  const [ecoData, setEcoData] = useState<any>(null);
+  const [ecoLoading, setEcoLoading] = useState(false);
+  const [ecoError, setEcoError] = useState<string|null>(null);
 
   // Deploy state
   const [deploying, setDeploying] = useState(false);
@@ -335,8 +339,8 @@ export default function AgentsPage() {
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-          {(['registry', 'reputation', 'validation', 'deploy'] as const).map((t) => (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' as const }}>
+          {(['registry', 'reputation', 'validation', 'deploy', 'economics'] as const).map((t) => (
             <button key={t} style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>
               {t === 'registry'
                 ? '🤖 Agent Registry'
@@ -344,7 +348,9 @@ export default function AgentsPage() {
                   ? '⭐ Reputation'
                   : t === 'validation'
                     ? '✅ Validation'
-                    : '⚡ Deploy Agent'}
+                    : t === 'economics'
+                      ? '💰 Economics'
+                      : '⚡ Deploy Agent'}
             </button>
           ))}
         </div>
@@ -805,6 +811,59 @@ export default function AgentsPage() {
                     View on ArcScan →
                   </a>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ECONOMICS TAB ── */}
+        {activeTab === 'economics' && (
+          <div style={S.card}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Agent Economics</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 16px' }}>Treasury, P&L and recent ledger entries (derived from on-chain events).</p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <input style={{ ...S.input, marginBottom: 0, flex: 1 }} value={ecoAgentId} onChange={e=>setEcoAgentId(e.target.value)} placeholder="Agent registry id (e.g. 1)" />
+              <button style={S.btn} disabled={ecoLoading} onClick={async()=>{
+                setEcoLoading(true); setEcoError(null);
+                try{ const r=await fetch(`/api/agents/${ecoAgentId}/ledger`); const d=await r.json(); if(!r.ok) throw new Error(d.error||'failed'); setEcoData(d); }catch(e:any){ setEcoError(e.message);} finally{ setEcoLoading(false); }
+              }}>{ecoLoading?'Loading...':'Load'}</button>
+            </div>
+            {ecoError && <p style={{ color:'var(--danger)', fontSize:12 }}>❌ {ecoError}</p>}
+            {ecoData && (
+              <div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:12 }}>
+                  {[
+                    ['Treasury', (Number(ecoData.treasury.treasuryBalance)/1e6).toFixed(6)+' USDC'],
+                    ['Available', (Number(ecoData.treasury.availableBalance)/1e6).toFixed(6)+' USDC'],
+                    ['Locked', (Number(ecoData.treasury.escrowLocked)/1e6).toFixed(6)+' USDC'],
+                    ['Revenue', (Number(ecoData.treasury.revenue)/1e6).toFixed(6)],
+                    ['Costs', (Number(ecoData.treasury.costs)/1e6).toFixed(6)],
+                    ['Profit', (Number(ecoData.treasury.profit)/1e6).toFixed(6)],
+                    ['Reinvest Reserved', (Number(ecoData.treasury.reinvestReserved)/1e6).toFixed(6)],
+                    ['Pending Income', (Number(ecoData.treasury.pendingIncome)/1e6).toFixed(6)],
+                    ['Entries', String(ecoData.treasury.entryCount)],
+                  ].map(([k,v])=>(
+                    <div key={k} style={{ background:'var(--surface-secondary)', borderRadius:8, padding:10 }}>
+                      <span style={S.label}>{k}</span>
+                      <p style={{ margin:0, fontSize:13, fontWeight:700 }}>{v}</p>
+                    </div>
+                  ))}
+                </div>
+                {ecoData.policy && (
+                  <div style={{ background:'var(--surface-secondary)', borderRadius:8, padding:10, marginBottom:12 }}>
+                    <span style={S.label}>Treasury Policy</span>
+                    <pre style={{ fontSize:11, margin:'6px 0 0', whiteSpace:'pre-wrap' }}>{JSON.stringify(ecoData.policy,null,2)}</pre>
+                  </div>
+                )}
+                <span style={S.label}>Recent entries</span>
+                <div style={{ display:'flex', flexDirection:'column' as const, gap:6, marginTop:6 }}>
+                  {(ecoData.recent||[]).map((e:any)=>(
+                    <div key={e.id} style={{ background:'var(--surface-secondary)', borderRadius:8, padding:8, fontSize:11, fontFamily:'monospace' }}>
+                      [{e.type}] {e.direction} {(Number(e.amount)/1e6).toFixed(6)} · {e.txHash?e.txHash.slice(0,14)+'…':e.dedupeKey} {e.jobValidationId?' · validation-linked':''}
+                    </div>
+                  ))}
+                  {(!ecoData.recent||ecoData.recent.length===0) && <p style={{ fontSize:12, color:'var(--text-secondary)' }}>No ledger entries yet.</p>}
+                </div>
               </div>
             )}
           </div>

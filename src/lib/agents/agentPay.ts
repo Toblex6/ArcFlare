@@ -341,6 +341,55 @@ const creditErrorRow: any = {
       .catch((e: any) => console.error("[agentPay] success log row failed:", e.message));
   }
 
+  // ── Build 3 ledger: outbound for payer, inbound for recipient if agent
+  try {
+    const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+    const recipientAgentId = await resolveAgentIdBySca(to).catch(() => null);
+    // PaymentLog linkage: find the success row we just created/updated
+    let paymentLogId: string | null = claimedLogId;
+    if (!paymentLogId) {
+      const pl = await (prisma as any).paymentLog.findFirst({ where: { arcTxHash: receipt.hash }, select: { id: true } }).catch(() => null);
+      paymentLogId = pl?.id ?? null;
+    }
+    // Defer lookup until after PaymentLog is committed: fire but don't gate response
+    setTimeout(async () => {
+      try {
+        if (!paymentLogId) {
+          const pl2 = await (prisma as any).paymentLog.findFirst({ where: { arcTxHash: receipt.hash }, select: { id: true } }).catch(() => null);
+          paymentLogId = pl2?.id ?? null;
+        }
+      } catch {}
+      try {
+        await recordLedgerEntry({
+          agentRegistryId: agentId,
+          type: "AGENT_PAYMENT",
+          amount,
+          direction: "DEBIT",
+          counterpartyAgentId: recipientAgentId ?? null,
+          paymentLogId,
+          txHash: receipt.hash,
+          description: `agent ${agent.name} -> ${to}`,
+        });
+      } catch (e: any) { console.error("[ledger] agent pay debit failed:", e.message); }
+      if (recipientAgentId) {
+        try {
+          await recordLedgerEntry({
+            agentRegistryId: recipientAgentId,
+            type: "REVENUE",
+            amount,
+            direction: "CREDIT",
+            counterpartyAgentId: agentId,
+            paymentLogId,
+            txHash: receipt.hash,
+            description: `revenue from agent ${agent.name}`,
+          });
+        } catch (e: any) { console.error("[ledger] agent pay credit failed:", e.message); }
+      }
+    }, 0);
+  } catch (e: any) {
+    console.error("[ledger] agent pay instrumentation error:", e.message);
+  }
+
   return NextResponse.json({
     success: true,
     replayed: false,
