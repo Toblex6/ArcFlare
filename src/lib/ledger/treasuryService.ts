@@ -57,8 +57,14 @@ export async function computeTreasuryView(agentRegistryId: number): Promise<Trea
     const amt = b(e.amount);
     const typ = String(e.type);
     byType[typ] = (byType[typ] ?? 0n) + amt;
-    if (e.direction === "CREDIT") totalCredit += amt;
-    else totalDebit += amt;
+    // Escrow lock/release are NOT costs/revenue — they are liquidity reservation.
+    // Counting them in totalDebit/CREDIT AND subtracting as escrowLocked double-counts.
+    // Treasury economics must count the lock exactly once via escrowLocked.
+    const isEscrowLock = typ === "JOB_ESCROW_LOCK" || typ === "JOB_ESCROW_RELEASE";
+    if (!isEscrowLock) {
+      if (e.direction === "CREDIT") totalCredit += amt;
+      else totalDebit += amt;
+    }
 
     if (typ === "JOB_ESCROW_LOCK") escrowLockedRaw += amt;
     if (typ === "JOB_ESCROW_RELEASE") escrowLockedRaw -= amt;

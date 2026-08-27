@@ -313,7 +313,7 @@ const creditErrorRow: any = {
   }
 
 // 7. ledger row — SUCCESS with the real on-chain hash (or update the
-  // idempotency claim with the final outcome).
+  // idempotency claim with the final outcome). Awaited before ledger so ledger can link.
   const successRow: any = {
     amount: Number(amount) / 1e6,
     currency: "USDC",
@@ -326,66 +326,55 @@ const creditErrorRow: any = {
     arcTxHash: receipt.hash,
     gatewayReference: recordTxHash,
   };
+  let paymentLogIdForLedger: string | null = claimedLogId;
   if (claimedLogId) {
-    prisma.paymentLog
-      .update({ where: { id: claimedLogId }, data: successRow })
-      .catch((e: any) => console.error("[agentPay] success log update failed:", e.message));
+    try { await prisma.paymentLog.update({ where: { id: claimedLogId }, data: successRow }); } catch (e: any) { console.error("[agentPay] success log update failed:", e.message); }
   } else {
-    prisma.paymentLog
-      .create({
+    try {
+      const created = await prisma.paymentLog.create({
         data: {
           reference: `agentpay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
           ...successRow,
         },
-      })
-      .catch((e: any) => console.error("[agentPay] success log row failed:", e.message));
+      });
+      paymentLogIdForLedger = created.id;
+    } catch (e: any) { console.error("[agentPay] success log row failed:", e.message); }
+    if (!paymentLogIdForLedger) {
+      const pl = await (prisma as any).paymentLog.findFirst({ where: { arcTxHash: receipt.hash }, select: { id: true } }).catch(() => null);
+      paymentLogIdForLedger = pl?.id ?? null;
+    }
   }
 
-  // ── Build 3 ledger: outbound for payer, inbound for recipient if agent
+  // ── Build 3 ledger: outbound for payer, inbound for recipient if agent — awaited before response
   try {
     const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
     const recipientAgentId = await resolveAgentIdBySca(to).catch(() => null);
-    // PaymentLog linkage: find the success row we just created/updated
-    let paymentLogId: string | null = claimedLogId;
-    if (!paymentLogId) {
-      const pl = await (prisma as any).paymentLog.findFirst({ where: { arcTxHash: receipt.hash }, select: { id: true } }).catch(() => null);
-      paymentLogId = pl?.id ?? null;
-    }
-    // Defer lookup until after PaymentLog is committed: fire but don't gate response
-    setTimeout(async () => {
-      try {
-        if (!paymentLogId) {
-          const pl2 = await (prisma as any).paymentLog.findFirst({ where: { arcTxHash: receipt.hash }, select: { id: true } }).catch(() => null);
-          paymentLogId = pl2?.id ?? null;
-        }
-      } catch {}
+    try {
+      await recordLedgerEntry({
+        agentRegistryId: agentId,
+        type: "AGENT_PAYMENT",
+        amount,
+        direction: "DEBIT",
+        counterpartyAgentId: recipientAgentId ?? null,
+        paymentLogId: paymentLogIdForLedger,
+        txHash: receipt.hash,
+        description: `agent ${agent.name} -> ${to}`,
+      });
+    } catch (e: any) { console.error("[ledger] agent pay debit failed:", e.message); }
+    if (recipientAgentId) {
       try {
         await recordLedgerEntry({
-          agentRegistryId: agentId,
-          type: "AGENT_PAYMENT",
+          agentRegistryId: recipientAgentId,
+          type: "REVENUE",
           amount,
-          direction: "DEBIT",
-          counterpartyAgentId: recipientAgentId ?? null,
-          paymentLogId,
+          direction: "CREDIT",
+          counterpartyAgentId: agentId,
+          paymentLogId: paymentLogIdForLedger,
           txHash: receipt.hash,
-          description: `agent ${agent.name} -> ${to}`,
+          description: `revenue from agent ${agent.name}`,
         });
-      } catch (e: any) { console.error("[ledger] agent pay debit failed:", e.message); }
-      if (recipientAgentId) {
-        try {
-          await recordLedgerEntry({
-            agentRegistryId: recipientAgentId,
-            type: "REVENUE",
-            amount,
-            direction: "CREDIT",
-            counterpartyAgentId: agentId,
-            paymentLogId,
-            txHash: receipt.hash,
-            description: `revenue from agent ${agent.name}`,
-          });
-        } catch (e: any) { console.error("[ledger] agent pay credit failed:", e.message); }
-      }
-    }, 0);
+      } catch (e: any) { console.error("[ledger] agent pay credit failed:", e.message); }
+    }
   } catch (e: any) {
     console.error("[ledger] agent pay instrumentation error:", e.message);
   }
