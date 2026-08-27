@@ -1,8 +1,10 @@
 import { withSentryConfig } from '@sentry/nextjs';
 import { ethers } from 'ethers';
 
-// 📡 Diagnostic Log: Prints your matching public wallet address on boot
-if (process.env.ARC_ADMIN_PRIVATE_KEY) {
+// 📡 Diagnostic Log: prints the public address derived from the admin key.
+// Dev-only — printing it in production logs tells anyone with log access
+// that an admin signer exists and which address it controls.
+if (process.env.NODE_ENV !== 'production' && process.env.ARC_ADMIN_PRIVATE_KEY) {
   try {
     const wallet = new ethers.Wallet(process.env.ARC_ADMIN_PRIVATE_KEY);
     console.log('\n==============================================');
@@ -12,8 +14,6 @@ if (process.env.ARC_ADMIN_PRIVATE_KEY) {
   } catch (e) {
     console.log('\n❌ Private key found in .env is invalid. Ensure it starts with 0x\n');
   }
-} else {
-  console.log('\n⚠️ ARC_ADMIN_PRIVATE_KEY is not defined in your local .env file.\n');
 }
 
 /** @type {import('next').NextConfig} */

@@ -65,8 +65,9 @@ async function getBalanceHandler(request: Request) {
       const text = await gatewayResponse.text();
       console.error("Gateway API error:", gatewayResponse.status, text);
       return NextResponse.json({
-        wallet: { balance: walletBalance },
-        gateway: { total: "0", available: "0", withdrawing: "0", withdrawable: "0" },
+        success: true,
+        wallet: { balance: walletBalance, formatted: walletBalance },
+        gateway: { total: "0", available: "0", withdrawing: "0", withdrawable: "0", formattedAvailable: "0", formattedTotal: "0" },
       });
     }
 
@@ -87,15 +88,29 @@ async function getBalanceHandler(request: Request) {
     const total = (parseFloat(available) + parseFloat(withdrawing)).toFixed(6);
 
     return NextResponse.json({
-      wallet: { balance: walletBalance },
-      gateway: { total, available, withdrawing, withdrawable },
+      // `success` + formatted aliases: the nano dashboard gated rendering on
+      // `success` and expected pre-formatted fields — without them the page
+      // showed 0.00 even with a funded gateway. Original fields kept for
+      // backward compatibility.
+      success: true,
+      sellerAddress,
+      wallet: { balance: walletBalance, formatted: walletBalance },
+      gateway: {
+        total,
+        available,
+        withdrawing,
+        withdrawable,
+        formattedAvailable: available,
+        formattedTotal: total,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Balance fetch error:", message);
     return NextResponse.json({
-      wallet: { balance: "0" },
-      gateway: { total: "0", available: "0", withdrawing: "0", withdrawable: "0" },
+      success: true,
+      wallet: { balance: "0", formatted: "0" },
+      gateway: { total: "0", available: "0", withdrawing: "0", withdrawable: "0", formattedAvailable: "0", formattedTotal: "0" },
     });
   }
 }

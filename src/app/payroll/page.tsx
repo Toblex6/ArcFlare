@@ -34,16 +34,48 @@ interface Recipient {
 
 export default function PayrollPage() {
   const _router = useRouter();
-  React.useEffect(() => {
-    fetch('/api/merchant/me').then((r) => {
-      if (r.status === 401) _router.replace('/merchant/login');
-    }).catch(() => _router.replace('/merchant/login'));
-  }, []);
 
   const [activeTab, setActiveTab] = useState<'run' | 'lookup'>('run');
 
-  const [payerSCA, setPayerSCA] = useState('0x7a8214dad7630a7a39054e0121acdbc7a65821c9');
-  const [payerWalletId, setPayerWalletId] = useState('58ab0223-cad0-5128-896e-a88d6f217b43');
+  // Payer fields are display-only: POST /api/payroll/run resolves the real
+  // payer from the authenticated session (body values are ignored).
+  const [payerSCA, setPayerSCA] = useState('');
+  const [payerWalletId, setPayerWalletId] = useState('');
+  const [walletBalance, setWalletBalance] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    // Auth gate + payer prefill + live balance. The old hardcoded 0x7a8214…
+    // prefill was the shared PLATFORM payer wallet — every run against it
+    // failed caller-control.
+    fetch('/api/merchant/me')
+      .then(async (r) => {
+        if (r.status === 401) {
+          _router.replace('/merchant/login');
+          return null;
+        }
+        return r.json().catch(() => null);
+      })
+      .then((data) => {
+        const addr = data?.merchant?.walletAddress;
+        if (addr) setPayerSCA(addr);
+      })
+      .catch(() => _router.replace('/merchant/login'));
+  }, []);
+
+  React.useEffect(() => {
+    if (!payerSCA) return;
+    let cancelled = false;
+    fetch(`/api/merchant/wallet/balance?address=${payerSCA}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d?.success) setWalletBalance(d.balance);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [payerSCA]);
+
   const [recipients, setRecipients] = useState<Recipient[]>([
     { recipientSCA: '', amount: '', label: '' },
   ]);
@@ -55,6 +87,23 @@ export default function PayrollPage() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<any>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const [recentBatches, setRecentBatches] = useState<any[]>([]);
+
+  // Load the merchant's recent payroll batches for the lookup tab (newest
+  // first) — batch discovery, so a missed ref is no longer lost.
+  const fetchRecentBatches = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/payroll/run?list=1&limit=10');
+      const data = await res.json();
+      if (data.success) setRecentBatches(data.batches || []);
+    } catch {
+      // non-fatal — the tab still works with manual lookup
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (activeTab === 'lookup') fetchRecentBatches();
+  }, [activeTab, fetchRecentBatches]);
 
   const addRecipient = () =>
     setRecipients([...recipients, { recipientSCA: '', amount: '', label: '' }]);
@@ -340,6 +389,30 @@ export default function PayrollPage() {
                 <p style={{ color: '#10b981', fontWeight: 700, fontSize: 14, margin: '0 0 4px' }}>
                   {runResult.status}
                 </p>
+                {runResult.batchRef && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      background: '#251c12',
+                      border: '1px solid #3d2e1a',
+                      borderRadius: 8,
+                      padding: '8px 12px',
+                      margin: '8px 0 12px',
+                      flexWrap: 'wrap' as const,
+                    }}
+                  >
+                    <span style={{ color: '#8a7560', fontSize: 11 }}>Batch Reference (keep this to look it up later):</span>
+                    <code style={{ color: '#c8975a', fontFamily: 'monospace', fontSize: 12 }}>{runResult.batchRef}</code>
+                    <button
+                      onClick={() => navigator.clipboard?.writeText(runResult.batchRef)}
+                      style={{ background: 'transparent', border: '1px solid #3d2e1a', borderRadius: 6, color: '#c8975a', fontSize: 10, cursor: 'pointer', padding: '3px 8px' }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                )}
                 <p style={{ color: '#f0ece6', fontSize: 12, margin: '0 0 14px' }}>
                   {runResult.message}
                 </p>
@@ -373,38 +446,95 @@ export default function PayrollPage() {
         )}
 
         {activeTab === 'lookup' && (
-          <div style={S.card}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 16px' }}>
-              Look Up Payroll Batch
-            </h3>
-            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-              <input
-                style={{ ...S.input, flex: 1 }}
-                value={lookupRef}
-                onChange={(e) => setLookupRef(e.target.value)}
-                placeholder="payroll_xxx"
-              />
-              <button style={S.btn(lookupLoading)} disabled={lookupLoading} onClick={lookupBatch}>
-                {lookupLoading ? 'Loading...' : 'Look Up'}
-              </button>
+          <>
+            <div style={S.card}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: '0 0 16px' }}>
+                Look Up Payroll Batch
+              </h3>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+                <input
+                  style={{ ...S.input, flex: 1 }}
+                  value={lookupRef}
+                  onChange={(e) => setLookupRef(e.target.value)}
+                  placeholder="payroll_xxx"
+                />
+                <button style={S.btn(lookupLoading)} disabled={lookupLoading} onClick={lookupBatch}>
+                  {lookupLoading ? 'Loading...' : 'Look Up'}
+                </button>
+              </div>
+              {lookupError && <p style={{ color: '#f87171', fontSize: 12 }}>❌ {lookupError}</p>}
+              {lookupResult && (
+                <pre
+                  style={{
+                    color: '#f0ece6',
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    whiteSpace: 'pre-wrap' as const,
+                    background: '#251c12',
+                    borderRadius: 10,
+                    padding: 16,
+                  }}
+                >
+                  {JSON.stringify(lookupResult, null, 2)}
+                </pre>
+              )}
             </div>
-            {lookupError && <p style={{ color: '#f87171', fontSize: 12 }}>❌ {lookupError}</p>}
-            {lookupResult && (
-              <pre
-                style={{
-                  color: '#f0ece6',
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  whiteSpace: 'pre-wrap' as const,
-                  background: '#251c12',
-                  borderRadius: 10,
-                  padding: 16,
-                }}
-              >
-                {JSON.stringify(lookupResult, null, 2)}
-              </pre>
-            )}
-          </div>
+
+            {/* Recent batches — the run response is the only place batchRef
+                used to appear; miss it and the ref was unrecoverable. */}
+            <div style={S.card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: '#f0ece6', margin: 0 }}>Recent Batches</h3>
+                <button
+                  onClick={() => fetchRecentBatches()}
+                  style={{ background: 'transparent', border: '1px solid #3d2e1a', borderRadius: 8, color: '#c8975a', fontSize: 11, cursor: 'pointer', padding: '5px 12px' }}
+                >
+                  ↻ Refresh
+                </button>
+              </div>
+              {recentBatches.length === 0 ? (
+                <p style={{ color: '#6b5a45', fontSize: 12, margin: 0 }}>
+                  No payroll batches yet — run one from the Run Payroll tab.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
+                  {recentBatches.map((b: any) => (
+                    <button
+                      key={b.batchRef}
+                      onClick={() => {
+                        setLookupRef(b.batchRef);
+                        lookupBatch();
+                      }}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.4fr 1fr 1fr auto',
+                        gap: 10,
+                        alignItems: 'center',
+                        textAlign: 'left' as const,
+                        background: '#251c12',
+                        border: '1px solid #3d2e1a',
+                        borderRadius: 10,
+                        padding: '10px 14px',
+                        cursor: 'pointer',
+                        width: '100%',
+                      }}
+                    >
+                      <code style={{ color: '#c8975a', fontFamily: 'monospace', fontSize: 11 }}>{b.batchRef}</code>
+                      <span style={{ color: b.status === 'COMPLETED' ? '#10b981' : b.status === 'FAILED' ? '#f87171' : '#c8975a', fontSize: 11 }}>
+                        {b.status}
+                      </span>
+                      <span style={{ color: '#f0ece6', fontSize: 11, fontFamily: 'monospace' }}>
+                        {b.totalAmount} USDC · {b.recipientCount} rcpt
+                      </span>
+                      <span style={{ color: '#6b5a45', fontSize: 10 }}>
+                        {new Date(b.createdAt).toLocaleString()}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </main>
     </div>

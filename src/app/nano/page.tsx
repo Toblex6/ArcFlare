@@ -17,20 +17,8 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   return API_KEY ? { ...extra, "x-api-key": API_KEY } : extra;
 }
 
-const NAV = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Homepage", href: "/" },
-  { label: "Transactions", href: "/transactions" },
-  { label: "Checkout", href: "/checkout" },
-  { label: "Escrow", href: "/escrow" },
-  { label: "Agents", href: "/agents" },
-  { label: "Agent Wallets", href: "/agent-wallets" },
-  { label: "Jobs", href: "/jobs" },
-  { label: "Nanopayments", href: "/nano", active: true },
-  { label: "Payroll", href: "/payroll" },
-  { label: "Scheduled", href: "/scheduled" },
-  { label: "Support", href: "/support" },
-];
+// NOTE: this page renders the shared DashboardSidebar component — the old
+// inline NAV array (with dead /checkout and /support links) was removed.
 
 // ── Types ──────────────────────────────────────────────────────────────
 interface BalanceData {
@@ -60,6 +48,9 @@ interface PayResult {
   message?: string;
   error?: string;
   details?: any;
+  // Pre-charge refusal fields (agent listings / suspended listings)
+  charged?: boolean;
+  hireEndpoint?: string;
 }
 
 // ── Style Helpers ─────────────────────────────────────────────────────
@@ -271,6 +262,7 @@ export default function NanoPaymentsPage() {
 
   // ── x402 State ──────────────────────────────────────────────────────
   const [x402Balances, setX402Balances] = useState<BalanceData | null>(null);
+  const [buyerWallet, setBuyerWallet] = useState<{ address: string; gatewayBalance: string; walletBalance: string } | null>(null);
   const [x402Payments, setX402Payments] = useState<PaymentLog[]>([]);
   const [x402Loading, setX402Loading] = useState(true);
 
@@ -339,7 +331,15 @@ export default function NanoPaymentsPage() {
       if (!data.success) throw new Error(data.error);
       setSettleResult(data);
     } catch (e: any) {
-      setSettleError(e.message);
+      // Settlement polls Circle for up to ~100s per pair — proxies/browsers
+      // can drop the connection mid-flight. That does NOT mean the settle
+      // failed server-side; the resume path is idempotent, so tell the user
+      // to re-click instead of showing a raw NetworkError.
+      const msg =
+        e?.name === "TypeError" || /network/i.test(e?.message || "")
+          ? "The connection dropped while waiting for the onchain settlement (it can take ~1–2 minutes). The settle is idempotent — click Settle again to check/resume; you will not be double-charged."
+          : e.message;
+      setSettleError(msg);
     } finally {
       setSettling(false);
     }
@@ -368,12 +368,31 @@ export default function NanoPaymentsPage() {
     setX402Loading(true);
     setError(null);
     try {
-      // 1. Fetch balances – required
+      // 1. Fetch seller gateway + on-chain balances – required
       const balanceRes = await fetch("/api/x402/seller/balance", {
         headers: authHeaders(),
       });
       const balanceData = await balanceRes.json();
-      if (balanceData.success) setX402Balances(balanceData);
+      // Route previously omitted `success` entirely — page showed 0.00
+      // even with a funded gateway. Accept either shape defensively.
+      if (balanceData.success !== false && balanceData.gateway) setX402Balances(balanceData);
+
+      // 1b. Fetch THIS merchant's buyer x402 wallet (EOA + its own gateway
+      // balance) — the old "Wallet Balance (Buyer)" card actually displayed
+      // the platform seller's raw wallet, mislabeled.
+      try {
+        const meRes = await fetch("/api/x402/eoa-wallet/me", { headers: authHeaders() });
+        const meData = await meRes.json();
+        if (meData.success) {
+          setBuyerWallet({
+            address: meData.address,
+            gatewayBalance: meData.gatewayBalance,
+            walletBalance: meData.walletBalance,
+          });
+        }
+      } catch {
+        // optional — leave previous state
+      }
 
       // 2. Fetch payment history – optional, fallback on error
       try {
@@ -547,9 +566,33 @@ export default function NanoPaymentsPage() {
               {balError && <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 10 }}>❌ {balError}</p>}
               {balResult && (
                 <div style={{ marginTop: 14, background: "var(--surface-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
-                  <pre style={{ color: "var(--text)", fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap" as const, margin: 0 }}>
-                    {JSON.stringify(balResult, null, 2)}
-                  </pre>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>Unsettled for this pair</span>
+                    <span style={{ color: balResult.total > 0 ? "var(--warning)" : "var(--success)", fontWeight: 700, fontFamily: "monospace", fontSize: 15 }}>
+                      {Number(balResult.total).toFixed(6)} USDC
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>Charges: <strong style={{ color: "var(--text)" }}>{balResult.count}</strong></span>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+                      Threshold (1 USDC):{" "}
+                      <strong style={{ color: balResult.shouldSettle ? "var(--success)" : "var(--text)" }}>
+                        {balResult.shouldSettle ? "ready to settle" : "not yet reached"}
+                      </strong>
+                    </span>
+                  </div>
+                  {(balResult.payments || []).length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
+                      {balResult.payments.map((p: any) => (
+                        <div key={p.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 10px", background: "var(--surface)", borderRadius: 8 }}>
+                          <span style={{ color: "var(--text)", fontSize: 11 }}>{p.description || "micro-charge"}</span>
+                          <span style={{ color: "var(--text-secondary)", fontSize: 11, fontFamily: "monospace" }}>
+                            {Number(p.amount).toFixed(6)} USDC
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -583,9 +626,31 @@ export default function NanoPaymentsPage() {
               )}
               {autoSettleResult && (
                 <div style={{ marginTop: 14, background: "var(--surface-secondary)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
-                  <pre style={{ color: "var(--text)", fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap" as const, margin: 0 }}>
-                    {JSON.stringify(autoSettleResult, null, 2)}
-                  </pre>
+                  {autoSettleResult.success ? (
+                    <>
+                      <p style={{ color: "var(--success)", fontWeight: 700, fontSize: 13, margin: "0 0 8px" }}>
+                        ✅ Auto-settle complete — {(autoSettleResult.settledPairs ?? autoSettleResult.results)?.length ?? 0} pair(s) processed
+                      </p>
+                      {(autoSettleResult.settledPairs ?? autoSettleResult.results)?.length > 0 ? (
+                        <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
+                          {(autoSettleResult.settledPairs ?? autoSettleResult.results).map((r: any, i: number) => (
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 10px", background: "var(--surface)", borderRadius: 8 }}>
+                              <span style={{ color: "var(--text-secondary)", fontSize: 11, fontFamily: "monospace" }}>
+                                {String(r.agentSCA || r.pair || "").slice(0, 12)}… → {Number(r.amount ?? r.total ?? 0).toFixed(6)} USDC
+                              </span>
+                              <span style={{ color: r.txHash ? "var(--success)" : "var(--text-secondary)", fontSize: 11 }}>
+                                {r.txHash ? `tx ${String(r.txHash).slice(0, 12)}…` : r.status || "ok"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={{ color: "var(--text-secondary)", fontSize: 11, margin: 0 }}>Nothing above threshold — nothing to settle.</p>
+                      )}
+                    </>
+                  ) : (
+                    <p style={{ color: "var(--danger)", fontSize: 12, margin: 0 }}>❌ {autoSettleResult.error || "Auto-settle failed."}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -602,20 +667,27 @@ export default function NanoPaymentsPage() {
             {/* ── BALANCE CARDS ── */}
             <div style={styles.balanceGrid}>
               <div style={styles.balanceCard}>
-                <p style={styles.balanceLabel}>Gateway Balance (Seller)</p>
+                <p style={styles.balanceLabel}>Gateway Balance (Platform Seller)</p>
                 <p style={styles.balanceValue}>
                   {x402Balances?.gateway?.formattedAvailable || "0.00"}{" "}
                   <span style={styles.balanceUnit}>USDC</span>
                 </p>
-                <p style={styles.balanceSub}>Total: {x402Balances?.gateway?.formattedTotal || "0.00"} USDC</p>
+                <p style={styles.balanceSub}>
+                  Total: {x402Balances?.gateway?.formattedTotal || "0.00"} USDC · Seller wallet:{" "}
+                  {x402Balances?.wallet?.formatted || "0.00"} USDC
+                </p>
               </div>
               <div style={styles.balanceCard}>
-                <p style={styles.balanceLabel}>Wallet Balance (Buyer)</p>
+                <p style={styles.balanceLabel}>Your x402 Buyer Wallet</p>
                 <p style={styles.balanceValue}>
-                  {x402Balances?.wallet?.formatted || "0.00"}{" "}
+                  {buyerWallet?.gatewayBalance || "0.00"}{" "}
                   <span style={styles.balanceUnit}>USDC</span>
                 </p>
-                <p style={styles.balanceSub}>Fund via faucet.circle.com</p>
+                <p style={styles.balanceSub}>
+                  {buyerWallet
+                    ? `Gateway available · EOA wallet: ${buyerWallet.walletBalance} USDC`
+                    : "Resolved from your login when you load this tab"}
+                </p>
               </div>
             </div>
 
@@ -687,20 +759,47 @@ export default function NanoPaymentsPage() {
                         </p>
                       )}
                       <div style={{ marginTop: 8, background: "var(--surface-secondary)", borderRadius: 8, padding: 10 }}>
-                        <p style={{ color: "var(--text-secondary)", fontSize: 10, margin: "0 0 4px" }}>Resource Data:</p>
-                        <pre style={{ color: "var(--text)", fontSize: 11, margin: 0, whiteSpace: "pre-wrap" as const }}>
-                          {JSON.stringify(payResult.resourceData, null, 2)}
-                        </pre>
+                        {payResult.resourceData && typeof payResult.resourceData === "object" && "paymentStatus" in payResult.resourceData ? (
+                          // Marketplace-style envelope — render fields, not JSON.
+                          <>
+                            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 6 }}>
+                              <span style={{ color: payResult.resourceData.upstreamOk ? "var(--success)" : "var(--danger)", fontSize: 11, fontWeight: 700 }}>
+                                {payResult.resourceData.upstreamOk ? "✓ Upstream delivered" : "⚠️ Upstream failed"}
+                                {payResult.resourceData.upstreamStatus ? ` (HTTP ${payResult.resourceData.upstreamStatus})` : ""}
+                              </span>
+                            </div>
+                            {payResult.resourceData.error && (
+                              <p style={{ color: "var(--warning)", fontSize: 11, margin: "0 0 6px" }}>{payResult.resourceData.error}</p>
+                            )}
+                          </>
+                        ) : null}
+                        <details>
+                          <summary style={{ color: "var(--text-secondary)", fontSize: 10, cursor: "pointer" }}>Raw resource data</summary>
+                          <pre style={{ color: "var(--text)", fontSize: 11, margin: "6px 0 0", whiteSpace: "pre-wrap" as const }}>
+                            {JSON.stringify(payResult.resourceData, null, 2)}
+                          </pre>
+                        </details>
                       </div>
                     </>
                   ) : (
                     <>
                       <p style={{ fontWeight: 700, margin: "0 0 6px" }}>❌ Payment failed</p>
                       <p style={{ margin: 0 }}>{payResult.error || payResult.message || "Unknown error"}</p>
+                      {payResult.charged === false && (
+                        <p style={{ color: "var(--success)", fontSize: 11, marginTop: 4 }}>You were NOT charged.</p>
+                      )}
+                      {payResult.hireEndpoint && (
+                        <p style={{ color: "var(--text-secondary)", fontSize: 11, marginTop: 4 }}>
+                          Hire this agent instead: <code>{payResult.hireEndpoint}</code>
+                        </p>
+                      )}
                       {payResult.details && (
-                        <pre style={{ fontSize: 11, marginTop: 6, color: "var(--text)", background: "var(--surface-secondary)", padding: 8, borderRadius: 6 }}>
-                          {JSON.stringify(payResult.details, null, 2)}
-                        </pre>
+                        <details style={{ marginTop: 6 }}>
+                          <summary style={{ color: "var(--text-secondary)", fontSize: 10, cursor: "pointer" }}>Details</summary>
+                          <pre style={{ fontSize: 11, marginTop: 6, color: "var(--text)", background: "var(--surface-secondary)", padding: 8, borderRadius: 6 }}>
+                            {JSON.stringify(payResult.details, null, 2)}
+                          </pre>
+                        </details>
                       )}
                     </>
                   )}

@@ -116,6 +116,36 @@ async function handleRequest(req: NextRequest, slug: string): Promise<NextRespon
         );
     }
 
+    // ── PRE-CHARGE SAFETY CHECK ────────────────────────────────────────────
+    // withGateway settles the buyer's USDC BEFORE the proxy handler runs,
+    // so a legacy listing whose targetUrl now fails the SSRF guard used to
+    // charge the buyer and then fail delivery ("paid but upstream failed").
+    // Check up-front instead: refuse BEFORE charging, and auto-suspend the
+    // listing so it disappears from the public feed until the provider
+    // fixes the URL. (The in-handler re-check below stays as defense in
+    // depth against DB-poisoned rows racing a publish.)
+    const preCharge = await assertSafeTargetUrl(listing.targetUrl);
+    if (!preCharge.ok) {
+        await (prisma as any).apiListing.update({
+            where: { id: listing.id },
+            data: { status: 'SUSPENDED' },
+        });
+        console.warn(
+            `[marketplace pay] Auto-suspended listing "${slug}" (${listing.id}): targetUrl failed safety check — ${preCharge.reason}`
+        );
+        return NextResponse.json(
+            {
+                success: false,
+                charged: false,
+                suspended: true,
+                error:
+                    `This listing is unavailable: its endpoint URL failed a safety check (${preCharge.reason}). ` +
+                    `You were NOT charged — no payment was attempted.`,
+            },
+            { status: 422 }
+        );
+    }
+
     const proxyHandler = await buildProxyHandler(listing.targetUrl);
 
     const protectedHandler = withGateway(

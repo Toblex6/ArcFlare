@@ -130,3 +130,68 @@ export async function verifyCallerControlsAddress(
 
   return null;
 }
+
+/**
+ * Enumerates EVERY address the authenticated caller controls — the
+ * set-valued counterpart to verifyCallerControlsAddress above.
+ *
+ * Needed by list-style endpoints (e.g. GET /api/payments/scheduled): a
+ * per-row control check against one claimed address can't answer "show me
+ * all my schedules," and probing each row's payer through the single-
+ * address verifier is N+1 queries. Same trust boundaries, same actor
+ * branches — just collected up-front instead of tested per claim.
+ */
+export async function getCallerControlledAddresses(
+  req: NextRequest
+): Promise<Set<string>> {
+  const addresses = new Set<string>();
+  const add = (a?: string | null) => {
+    if (a) addresses.add(a.toLowerCase());
+  };
+
+  // Merchant: own wallet, buyer EOA, owned agents' SCAs, agents' payment EOAs.
+  const merchant = await resolveMerchant(req).catch(() => null);
+  if (merchant) {
+    const record = await (prisma as any).merchant.findUnique({
+      where: { id: merchant.id },
+      select: { walletAddress: true },
+    });
+    add(record?.walletAddress);
+
+    const buyerWallet = await (prisma as any).x402EoaWallet.findUnique({
+      where: { merchantId: merchant.id },
+      select: { address: true },
+    });
+    add(buyerWallet?.address);
+
+    const ownedAgents = await (prisma as any).agentRegistry.findMany({
+      where: { merchantId: merchant.id },
+      select: { id: true, scaAddress: true },
+    });
+    for (const agent of ownedAgents) add(agent.scaAddress);
+
+    if (ownedAgents.length > 0) {
+      const paymentEoas = await (prisma as any).x402EoaWallet.findMany({
+        where: { agentRegistryId: { in: ownedAgents.map((a: any) => a.id) } },
+        select: { address: true },
+      });
+      for (const eoa of paymentEoas) add(eoa.address);
+    }
+  }
+
+  // Consumer session (JWT carries the wallet address).
+  const consumerWalletAddress = await resolveConsumerSession(req).catch(() => null);
+  add(consumerWalletAddress);
+
+  // Internal service key acts as exactly ONE agent: the platform's own.
+  const apiKey = req.headers.get("x-api-key");
+  if (apiKey) {
+    const keyRecord = await (prisma as any).apiKey.findUnique({ where: { key: apiKey } });
+    if (keyRecord && keyRecord.active) {
+      const platformAgent = (process.env.AGENT_OWNER_WALLET_ADDRESS || "").toLowerCase();
+      if (platformAgent) add(platformAgent);
+    }
+  }
+
+  return addresses;
+}

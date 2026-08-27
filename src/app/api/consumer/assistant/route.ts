@@ -14,7 +14,7 @@ import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { internalUrl } from '@/src/lib/internalUrl';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 
 interface ParsedAction {
   action: 'send' | 'request' | 'save' | 'balance' | 'unclear';

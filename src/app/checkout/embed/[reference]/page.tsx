@@ -45,15 +45,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import CheckoutWidget, { PaymentLogData, CheckoutEvent } from '@/src/components/CheckoutWidget';
+import CheckoutWidget, { CheckoutEvent } from '@/src/components/CheckoutWidget';
 import { CheckoutLoading } from '@/src/components/checkout/CheckoutLoading';
 import { CheckoutExpired } from '@/src/components/checkout/CheckoutExpired';
 import { CheckoutError } from '@/src/components/checkout/CheckoutError';
 import { CheckoutAlreadyPaid } from '@/src/components/checkout/CheckoutAlreadyPaid';
-
-type EnrichedPayment = PaymentLogData & {
-  expiresAt?: string | null;
-};
+import { usePaymentVerify, EnrichedPayment } from '@/src/components/checkout/usePaymentVerify';
 
 // Message contract sent to the parent window via postMessage. Keep this
 // list of event types stable — a merchant integrating the embed will
@@ -79,11 +76,16 @@ export default function EmbedCheckoutPage() {
   const params = useParams<{ reference: string }>();
   const reference = params?.reference;
 
-  const [payment, setPayment] = useState<EnrichedPayment | null>(null);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Bootstrap resolve lives here (not in the widget) — same deadlock guard
+  // as the hosted checkout page. Widget events still update `payment`
+  // through handleEvent below.
+  const { payment, setPayment } = usePaymentVerify(reference);
+
 
   // Post a message to the parent frame. No-op if not actually embedded
   // (window === window.parent), so this page also degrades gracefully if

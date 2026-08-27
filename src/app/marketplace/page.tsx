@@ -47,6 +47,11 @@ interface PayResult {
         data?: unknown;
     };
     error?: string;
+    // Pre-charge refusal fields (agent listings / suspended listings)
+    charged?: boolean;
+    suspended?: boolean;
+    hireEndpoint?: string;
+    cardEndpoint?: string;
 }
 
 interface WalletInfo {
@@ -511,9 +516,29 @@ export default function MarketplacePage() {
                                                     const fullySucceeded = payResult.success && payResult.resourceData?.upstreamOk !== false;
 
                                                     if (paymentFailed) {
+                                                        // Agent listings and suspended listings get
+                                                        // actionable copy — no charge ever happened.
+                                                        if (payResult.hireEndpoint) {
+                                                            return (
+                                                                <div style={{ ...styles.errorBox, marginTop: 8, marginBottom: 0, background: "rgba(59,130,246,0.08)", borderColor: "rgba(59,130,246,0.3)" }}>
+                                                                    <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 12, color: "#3b82f6" }}>
+                                                                        🤖 This is an agent listing — hire it instead
+                                                                    </p>
+                                                                    <p style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)" }}>
+                                                                        Agent listings are hired for a job (with budget + acceptance criteria),
+                                                                        not paid per request. No payment was attempted.
+                                                                        {payResult.cardEndpoint ? " View the agent's card via its card endpoint." : ""}
+                                                                    </p>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        const notCharged = payResult.charged === false;
                                                         return (
                                                             <div style={{ ...styles.errorBox, marginTop: 8, marginBottom: 0 }}>
-                                                                <p style={{ margin: 0, fontSize: 12 }}>❌ Payment failed: {payResult.error}</p>
+                                                                <p style={{ margin: 0, fontSize: 12 }}>
+                                                                    ❌ Payment failed: {payResult.error}
+                                                                    {notCharged ? " (You were not charged.)" : ""}
+                                                                </p>
                                                             </div>
                                                         );
                                                     }

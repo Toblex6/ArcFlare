@@ -129,7 +129,9 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const fetchLedgerStatus = useCallback(async () => {
         if (!reference) return;
         try {
-            const res = await fetch(`/api/payments/verify/${reference}`);
+            // Hard timeout so a hung request can never leave this widget (or a
+            // page waiting on its events) stuck in a loading state forever.
+            const res = await fetch(`/api/payments/verify/${reference}`, { signal: AbortSignal.timeout(15000) });
             const result = await res.json();
             if (result.status === true && result.data) {
                 setPayment(result.data);

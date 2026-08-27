@@ -81,6 +81,51 @@ async function x402PayHandler(req: NextRequest) {
       console.warn("[x402 pay] Could not check balance:", balErr.message);
     }
 
+    // Pre-flight probe: some protected resources reject payment outright
+    // with a JSON error body BEFORE issuing a 402 challenge (agent
+    // listings → "use the hire endpoint"; auto-suspended listings → safety
+    // refusal). GatewayClient.pay() discards response bodies on failure and
+    // surfaces them as bare "Request failed with status N" errors, so the
+    // actionable hints never reached buyers. A plain unauthenticated GET
+    // costs nothing: healthy listings just answer with their 402 challenge.
+    try {
+      const probe = await fetch(resolvedResourceUrl, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (probe.status === 400 || probe.status === 422) {
+        const probeData = await probe.json().catch(() => null);
+        if (probeData?.hireEndpoint) {
+          return NextResponse.json(
+            {
+              success: false,
+              charged: false,
+              error:
+                "This is an AGENT listing — it is hired, not paid per request. Hire it via the hire endpoint instead.",
+              ...probeData,
+            },
+            { status: 400 }
+          );
+        }
+        if (probeData?.suspended || probeData?.charged === false) {
+          return NextResponse.json(
+            { success: false, charged: false, error: probeData.error },
+            { status: probe.status }
+          );
+        }
+        if (probeData?.error) {
+          return NextResponse.json(
+            { success: false, charged: false, error: probeData.error },
+            { status: probe.status }
+          );
+        }
+      }
+    } catch {
+      // Probe failed (network blip) — fall through to the real paid flow,
+      // which has its own error handling.
+    }
+
     const response = await client.pay(resolvedResourceUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

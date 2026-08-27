@@ -21,8 +21,12 @@ export async function GET() {
         const successRate =
             payments.length > 0 ? Math.round((successfulPayments.length / payments.length) * 100) : 0;
 
+        // "Locked" = funds held in escrow that haven't been released or
+        // refunded: ACTIVE (awaiting completion) AND DISPUTED (frozen
+        // pending admin resolution). The old ACTIVE-only count understated
+        // locked funds — /api/escrow/list already counted both.
         const totalLocked = escrows
-            .filter((e: any) => e.status === 'ACTIVE')
+            .filter((e: any) => e.status === 'ACTIVE' || e.status === 'DISPUTED')
             .reduce((sum: number, e: any) => sum + e.amount, 0);
         const totalReleased = escrows
             .filter((e: any) => e.status === 'RELEASED')

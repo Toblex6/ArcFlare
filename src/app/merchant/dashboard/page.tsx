@@ -271,7 +271,14 @@ export default function MerchantDashboard() {
   }, [checkingAuth, merchant]);
 
   const successCount = payments.filter((p) => p.status === "SUCCESS").length;
-  const failedCount = payments.filter((p) => p.status !== "SUCCESS").length;
+  // Only terminal failure states count as "Failed" — the old `!== "SUCCESS"`
+  // bucket labelled in-flight payments (PENDING, PROCESSING_ONCHAIN, …) as
+  // failures. Pending gets its own stat.
+  const TERMINAL_FAILURES = new Set(["FAILED", "SETTLEMENT_ERROR", "ATTESTATION_FAILED", "EXPIRED"]);
+  const failedCount = payments.filter((p) => TERMINAL_FAILURES.has(p.status)).length;
+  const pendingCount = payments.filter(
+    (p) => !TERMINAL_FAILURES.has(p.status) && p.status !== "SUCCESS"
+  ).length;
   const avgTxValue = payments.length > 0 ? metrics.totalVolume / payments.length : 0;
 
   if (checkingAuth || loading) {
@@ -541,9 +548,10 @@ export default function MerchantDashboard() {
               </ResponsiveContainer>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4,1fr)", gap: 10, marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--surface-secondary)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(5,1fr)", gap: 10, marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--surface-secondary)" }}>
               {[
                 { label: "Successful", value: successCount, color: "var(--primary)", bg: "#ecfeff", border: "#a5f3fc", icon: "✓" },
+                { label: "Pending", value: pendingCount, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "◔" },
                 { label: "Failed", value: failedCount, color: "var(--danger)", bg: "#fef2f2", border: "#fecaca", icon: "✗" },
                 { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", icon: "◎" },
                 { label: "Avg Txn Value", value: `$${avgTxValue.toFixed(2)}`, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "↗" },

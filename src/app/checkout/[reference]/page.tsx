@@ -42,11 +42,12 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import { arcTestnet } from '@/src/lib/wagmi';
-import CheckoutWidget, { PaymentLogData, CheckoutEvent } from '@/src/components/CheckoutWidget';
+import CheckoutWidget, { CheckoutEvent } from '@/src/components/CheckoutWidget';
 import Invoice, { InvoiceData } from '@/src/components/Invoice';
 import { CheckoutLoading } from '@/src/components/checkout/CheckoutLoading';
 import { CheckoutExpired } from '@/src/components/checkout/CheckoutExpired';
 import { CheckoutError } from '@/src/components/checkout/CheckoutError';
+import { usePaymentVerify, EnrichedPayment } from '@/src/components/checkout/usePaymentVerify';
 
 type Phase = 'awaiting' | 'wallet_connected' | 'confirming' | 'settled';
 
@@ -60,12 +61,6 @@ const STEPS: { key: Phase; label: string; description: string }[] = [
 ];
 
 type StepStatus = 'complete' | 'active' | 'upcoming' | 'error';
-
-type EnrichedPayment = PaymentLogData & {
-  issuedAt?: string | null;
-  settledAt?: string | null;
-  expiresAt?: string | null;
-};
 
 function isPaymentExpired(payment: EnrichedPayment | null): boolean {
   if (!payment) return false;
@@ -81,11 +76,11 @@ export default function CheckoutPage() {
   const params = useParams<{ reference: string }>();
   const reference = params?.reference;
 
-  const [payment, setPayment] = useState<EnrichedPayment | null>(null);
   const [phase, setPhase] = useState<Phase>('awaiting');
-  const [hasError, setHasError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [referrer, setReferrer] = useState<string | null>(null);
+  // Bootstrap resolve lives here (not in the widget) — the widget only
+  // mounts once `payment` exists, so page state can never depend on it.
+  const { payment, setPayment, hasError, setHasError, errorMessage, setErrorMessage } = usePaymentVerify(reference);
 
   useEffect(() => {
     if (typeof document !== 'undefined' && document.referrer) {

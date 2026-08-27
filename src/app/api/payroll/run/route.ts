@@ -288,6 +288,7 @@ async function runPayrollHandler(request: NextRequest) {
 export const POST = runPayrollHandler;
 
 // ── GET /api/payroll/run?batchRef=xxx — check a batch's status ───────────────
+// ── GET /api/payroll/run?list=1     — list the merchant's recent batches ─────
 async function getPayrollBatchHandler(request: NextRequest) {
   try {
     const merchant = await resolveMerchant(request);
@@ -298,11 +299,28 @@ async function getPayrollBatchHandler(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const batchRef = searchParams.get('batchRef');
 
+    // List mode: no batchRef → the merchant's most recent batches (newest
+    // first). Previously GET hard-required batchRef, so there was no way to
+    // discover a batch's reference after closing the run response — lookup
+    // was write-down-the-ref-or-lose-it.
     if (!batchRef) {
-      return NextResponse.json(
-        { success: false, error: 'batchRef query param required.' },
-        { status: 400 }
-      );
+      const limit = Math.min(parseInt(searchParams.get('limit') || '10', 10) || 10, 50);
+      const batches = await (prisma as any).payrollBatch.findMany({
+        where: { merchantId: merchant.id },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        select: {
+          batchRef: true,
+          status: true,
+          totalAmount: true,
+          currency: true,
+          recipientCount: true,
+          successCount: true,
+          failedCount: true,
+          createdAt: true,
+        },
+      });
+      return NextResponse.json({ success: true, count: batches.length, batches });
     }
 
     // H8: tenant-scoped — a merchant may only read its OWN batches (the

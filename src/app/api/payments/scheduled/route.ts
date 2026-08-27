@@ -6,7 +6,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
-import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
 
 // The platform agent's signing wallet — same explicit resolution as settle
 // Path B. Never used as a blanket fallback for arbitrary payers: it is only
@@ -169,23 +169,40 @@ async function listScheduledHandler(request: Request) {
     // ── SECURITY: scope the listing to schedules the caller controls.
     // Without this, any authenticated caller (API key, cookie, consumer
     // session) can read everyone's recurring payment schedules.
-    const controlled = await verifyCallerControlsAddress(request as any, payerSCA || '0x0');
-    const controlledSet = controlled
-      ? new Set([controlled.walletAddress.toLowerCase()])
-      : new Set<string>();
+    //
+    // BUG FIX (was "my schedule disappeared"): the old implementation ran
+    // verifyCallerControlsAddress against `payerSCA || '0x0'` — a single
+    // probe that nobody controls when no ?payerSCA= param is passed — so
+    // controlledSet was empty for every plain GET and the list was ALWAYS
+    // empty. Now the caller's full controlled-address set is enumerated
+    // up-front and rows are matched against it.
+    const controlled = await getCallerControlledAddresses(request as any);
+
+    if (controlled.size === 0) {
+      // Authenticated, but controls no wallet that could ever be a payer.
+      return NextResponse.json({ success: true, count: 0, scheduledPayments: [] });
+    }
+
+    if (payerSCA && !controlled.has(payerSCA.toLowerCase())) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control this payer wallet.' },
+        { status: 403 }
+      );
+    }
 
     const schedules = await (prisma as any).scheduledPayment.findMany({
       where: {
         ...(status ? { status } : {}),
-        ...(payerSCA && !controlled ? { payerSCA: '___none___' } : {}),
+        ...(payerSCA
+          ? { payerSCA: { equals: payerSCA, mode: 'insensitive' } }
+          : {}),
       },
       orderBy: { nextRunAt: 'asc' },
     });
 
     const filtered = schedules.filter((s: any) => {
       if (!s.payerSCA) return false;
-      if (payerSCA) return s.payerSCA.toLowerCase() === payerSCA.toLowerCase();
-      return controlledSet.has(s.payerSCA.toLowerCase());
+      return payerSCA || controlled.has(s.payerSCA.toLowerCase());
     });
 
     return NextResponse.json({

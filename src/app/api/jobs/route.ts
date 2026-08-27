@@ -16,7 +16,7 @@ import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
-import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits } from 'viem';
+import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
 
 // ── ERC-8183 contract on Arc Testnet ─────────────────────────────────────────
 const AGENTIC_COMMERCE_CONTRACT = '0x0747EEf0706327138c69792bF28Cd525089e4583';
@@ -152,11 +152,77 @@ async function waitForTx(
       return data.transaction.txHash;
     }
     if (data?.transaction?.state === 'FAILED') {
-      throw new Error('Transaction failed onchain.');
+      // Surface Circle's actual revert reason — "Transaction failed
+      // onchain." alone gave callers no way to tell insufficient-balance
+      // from wrong-state from bad-actor reverts.
+      const reason =
+        data.transaction.errorReason ||
+        (data.transaction.errorDetails ? JSON.stringify(data.transaction.errorDetails) : '') ||
+        'no revert reason reported';
+      throw new Error(`Transaction failed onchain: ${reason}`);
     }
   }
   throw new Error('Transaction timed out.');
 }
+
+// ── On-chain preflight helpers ────────────────────────────────────────────────
+// Catch the common revert causes BEFORE creating a Circle transaction.
+// Every failure below used to cost real gas + ~100s of polling and came
+// back as the generic "Transaction failed onchain." string.
+
+class PreflightError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const ADDR_RE = /^0x[a-fA-F0-9]{40}$/;
+
+function usdc(n: bigint): string {
+  return formatUnits(n, 6);
+}
+
+async function requireJob(jobId: string | number): Promise<any> {
+  try {
+    return (await publicClient.readContract({
+      address: AGENTIC_COMMERCE_CONTRACT,
+      abi: AGENTIC_ABI,
+      functionName: 'getJob',
+      args: [BigInt(jobId)],
+    })) as any;
+  } catch (e: any) {
+    const notFound = /revert|execution/i.test(e?.message || '');
+    throw new PreflightError(
+      notFound ? 404 : 502,
+      notFound
+        ? `Job #${jobId} does not exist on the ERC-8183 contract (${AGENTIC_COMMERCE_CONTRACT}) — check the jobId.`
+        : `Could not read job #${jobId} state from Arc Testnet RPC: ${e.message}`
+    );
+  }
+}
+
+async function readUsdcBalance(owner: string): Promise<bigint> {
+  return (await publicClient.readContract({
+    address: USDC_ARC as `0x${string}`,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: [owner as `0x${string}`],
+  })) as bigint;
+}
+
+async function readUsdcAllowance(owner: string, spender: string): Promise<bigint> {
+  return (await publicClient.readContract({
+    address: USDC_ARC as `0x${string}`,
+    abi: erc20Abi,
+    functionName: 'allowance',
+    args: [owner as `0x${string}`, spender as `0x${string}`],
+  })) as bigint;
+}
+
+// (withPreflight helper removed — the outer jobsHandler catch converts
+// PreflightError into a clean JSON response with its own status code.)
 
 async function extractJobId(txHash: string): Promise<string> {
   const receipt = await publicClient.getTransactionReceipt({
@@ -230,6 +296,19 @@ async function jobsHandler(request: Request) {
         );
       }
 
+      if (!ADDR_RE.test(clientSCA) || !ADDR_RE.test(providerSCA)) {
+        return NextResponse.json(
+          { success: false, error: 'clientSCA and providerSCA must be valid 0x addresses.' },
+          { status: 400 }
+        );
+      }
+      if (evaluatorSCA && !ADDR_RE.test(evaluatorSCA)) {
+        return NextResponse.json(
+          { success: false, error: 'evaluatorSCA must be a valid 0x address.' },
+          { status: 400 }
+        );
+      }
+
       // The job's client wallet pays the escrow — the caller must control it.
       if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
         return NextResponse.json(
@@ -260,6 +339,21 @@ async function jobsHandler(request: Request) {
       const txHash = await waitForTx(circleClient, tx.data.id);
       const jobId = await extractJobId(txHash);
 
+      // Soft warning (non-blocking): the client will need this much USDC at
+      // fund time — flag a shortfall now instead of failing three steps later.
+      let balanceWarning: string | null = null;
+      try {
+        const clientBalance = await readUsdcBalance(clientSCA);
+        const neededWei = BigInt(Math.round(parseFloat(amountUSDC) * 1_000_000));
+        if (clientBalance < neededWei) {
+          balanceWarning =
+            `Note: client wallet ${clientSCA} currently holds ${usdc(clientBalance)} USDC but the job budget is ${amountUSDC}. ` +
+            `Top up before Fund Escrow or funding will fail.`;
+        }
+      } catch {
+        // RPC hiccup — never block creation on a read-only check.
+      }
+
       // Save to Postgres
       await prisma.job
         .create({
@@ -284,6 +378,7 @@ async function jobsHandler(request: Request) {
         deadlineHours,
         txHash,
         explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        ...(balanceWarning ? { warning: balanceWarning } : {}),
         nextStep: `POST /api/jobs { action:'setBudget', jobId:'${jobId}', providerSCA:'${providerSCA}', amountUSDC:'${amountUSDC}' }`,
         message: `Job #${jobId} created on Arc Testnet — status: Open`,
       });
@@ -306,6 +401,28 @@ async function jobsHandler(request: Request) {
           { success: false, error: 'You do not control the providerSCA wallet.' },
           { status: 403 }
         );
+      }
+
+      // ── PREFLIGHT: catch revert causes before spending gas.
+      const jobForBudget = await requireJob(jobId);
+      const onChainProvider = (jobForBudget.provider || '').toLowerCase();
+      if (onChainProvider !== providerSCA.toLowerCase()) {
+        throw new PreflightError(
+          409,
+          `providerSCA ${providerSCA} does not match this job's on-chain provider (${onChainProvider}). ` +
+            `Budget can only be set from the provider wallet named when the job was created — ` +
+            `if you are self-testing, use that same wallet here.`
+        );
+      }
+      if (Number(jobForBudget.status) !== 0) {
+        throw new PreflightError(
+          409,
+          `Job #${jobId} is ${JOB_STATUS_NAMES[Number(jobForBudget.status)] || 'Unknown'}, not Open — ` +
+            `budget can only be set while the job is Open.`
+        );
+      }
+      if (Date.now() > Number(jobForBudget.expiredAt) * 1000) {
+        throw new PreflightError(400, `Job #${jobId} has expired — no further actions are possible.`);
       }
 
       const amountWei = BigInt(Math.round(parseFloat(amountUSDC) * 1_000_000));
@@ -356,6 +473,28 @@ async function jobsHandler(request: Request) {
 
       const amountWei = BigInt(Math.round(parseFloat(amountUSDC) * 1_000_000));
 
+      // ── PREFLIGHT: skip the tx entirely when the allowance already covers
+      // the amount (approve is repeatable by ERC-20 design — it just
+      // overwrites — but repeating it burns gas for nothing and confused
+      // users into thinking it was a state transition).
+      let existingAllowance = 0n;
+      try {
+        existingAllowance = await readUsdcAllowance(clientSCA, AGENTIC_COMMERCE_CONTRACT);
+      } catch { /* RPC hiccup — proceed with the approve */ }
+      if (existingAllowance >= amountWei) {
+        return NextResponse.json({
+          success: true,
+          action: 'approve',
+          jobId,
+          amountUSDC,
+          clientSCA,
+          alreadyApproved: true,
+          currentAllowance: usdc(existingAllowance),
+          message: `Allowance already covers this budget (${usdc(existingAllowance)} USDC approved) — no new approval transaction needed. Continue to Fund Escrow.`,
+          nextStep: `POST /api/jobs { action:'fund', jobId:'${jobId}', clientSCA:'${clientSCA}' }`,
+        });
+      }
+
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: 'ARC-TESTNET' as any,
@@ -400,6 +539,61 @@ async function jobsHandler(request: Request) {
         );
       }
 
+      // ── PREFLIGHT: the escrow's fund() pulls the on-chain budget via
+      // transferFrom, so every failure below used to revert on-chain after
+      // the fact. Diagnose it up-front instead.
+      const jobToFund = await requireJob(jobId);
+      const statusName = JOB_STATUS_NAMES[Number(jobToFund.status)] || 'Unknown';
+      if ((jobToFund.client || '').toLowerCase() !== clientSCA.toLowerCase()) {
+        throw new PreflightError(
+          409,
+          `clientSCA ${clientSCA} does not match this job's on-chain client (${jobToFund.client}). ` +
+            `Funding must come from the wallet that created the job.`
+        );
+      }
+      const budget = BigInt(jobToFund.budget);
+      if (budget === 0n) {
+        throw new PreflightError(
+          409,
+          `Budget for job #${jobId} is 0 — Set Budget never succeeded (its tx likely failed). ` +
+            `Re-run Set Budget from the PROVIDER wallet first; funding cannot proceed without an on-chain budget.`
+        );
+      }
+      if (Number(jobToFund.status) === 1) {
+        throw new PreflightError(409, `Job #${jobId} is already Funded.`);
+      }
+      if (Number(jobToFund.status) !== 0) {
+        throw new PreflightError(409, `Job #${jobId} is ${statusName} — only Open jobs can be funded.`);
+      }
+      if (Date.now() > Number(jobToFund.expiredAt) * 1000) {
+        throw new PreflightError(400, `Job #${jobId} has expired — no further actions are possible.`);
+      }
+
+      let clientBalance = 0n;
+      try {
+        clientBalance = await readUsdcBalance(clientSCA);
+      } catch (e: any) {
+        throw new PreflightError(502, `Could not read USDC balance from Arc Testnet RPC: ${e.message}`);
+      }
+      if (clientBalance < budget) {
+        throw new PreflightError(
+          400,
+          `Insufficient USDC in payer wallet ${clientSCA}: has ${usdc(clientBalance)}, needs ${usdc(budget)} for this job's budget. Top up at faucet.circle.com and retry.`
+        );
+      }
+      let allowance = 0n;
+      try {
+        allowance = await readUsdcAllowance(clientSCA, AGENTIC_COMMERCE_CONTRACT);
+      } catch (e: any) {
+        throw new PreflightError(502, `Could not read USDC allowance from Arc Testnet RPC: ${e.message}`);
+      }
+      if (allowance < budget) {
+        throw new PreflightError(
+          400,
+          `USDC allowance too low: ${usdc(allowance)} approved to the escrow contract, needs ${usdc(budget)}. Re-run Approve USDC with at least the full budget amount.`
+        );
+      }
+
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: 'ARC-TESTNET' as any,
@@ -441,6 +635,24 @@ async function jobsHandler(request: Request) {
           { success: false, error: 'You do not control the providerSCA wallet.' },
           { status: 403 }
         );
+      }
+
+      // ── PREFLIGHT
+      const jobToSubmit = await requireJob(jobId);
+      if ((jobToSubmit.provider || '').toLowerCase() !== providerSCA.toLowerCase()) {
+        throw new PreflightError(
+          409,
+          `providerSCA ${providerSCA} does not match this job's on-chain provider (${jobToSubmit.provider}).`
+        );
+      }
+      if (Number(jobToSubmit.status) === 0) {
+        throw new PreflightError(409, `Job #${jobId} is still Open — it must be funded before work can be submitted.`);
+      }
+      if (Number(jobToSubmit.status) !== 1) {
+        throw new PreflightError(409, `Job #${jobId} is ${JOB_STATUS_NAMES[Number(jobToSubmit.status)]} — only Funded jobs can be submitted against.`);
+      }
+      if (Date.now() > Number(jobToSubmit.expiredAt) * 1000) {
+        throw new PreflightError(400, `Job #${jobId} has expired — no further actions are possible.`);
       }
 
       const deliverableHash = keccak256(toHex(deliverable)) as `0x${string}`;
@@ -489,6 +701,27 @@ async function jobsHandler(request: Request) {
           { success: false, error: 'You do not control the clientSCA wallet.' },
           { status: 403 }
         );
+      }
+
+      // ── PREFLIGHT
+      const jobToComplete = await requireJob(jobId);
+      if ((jobToComplete.evaluator || '').toLowerCase() !== clientSCA.toLowerCase()) {
+        throw new PreflightError(
+          409,
+          `This job's evaluator is ${jobToComplete.evaluator} — completion (release) must be signed by the evaluator wallet, not ${clientSCA}.`
+        );
+      }
+      if (Number(jobToComplete.status) === 3) {
+        throw new PreflightError(409, `Job #${jobId} is already Completed.`);
+      }
+      if (Number(jobToComplete.status) !== 2) {
+        throw new PreflightError(
+          409,
+          `Job #${jobId} is ${JOB_STATUS_NAMES[Number(jobToComplete.status)]} — only Submitted jobs can be completed. The provider must submit first.`
+        );
+      }
+      if (Date.now() > Number(jobToComplete.expiredAt) * 1000) {
+        throw new PreflightError(400, `Job #${jobId} has expired — no further actions are possible.`);
       }
 
       const reasonHash = keccak256(toHex('deliverable-approved')) as `0x${string}`;
@@ -542,6 +775,10 @@ async function jobsHandler(request: Request) {
       { status: 400 }
     );
   } catch (error: any) {
+    if (error instanceof PreflightError) {
+      // Preflight failures are clean, expected rejections — not server errors.
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+    }
     console.error('❌ Jobs route error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

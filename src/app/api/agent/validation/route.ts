@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
@@ -283,7 +283,11 @@ async function validationHandler(request: NextRequest) {
   }
 }
 
-export const POST = withApiKey(validationHandler);
+// Session-capable wrapper: a logged-in merchant (or consumer) passes the
+// outer gate; verifyCallerControlsAddress inside still decides WHO may
+// request/respond. The strict withApiKey gate made the /agents dashboard
+// validation tab unusable without a raw service key.
+export const POST = withApiKeyOrAnySession(validationHandler);
 
 // ─── GET /api/agent/validation?requestHash=0x... ──────────────────────────────
 // Reads validation status directly from ValidationRegistry onchain
@@ -335,4 +339,4 @@ async function getValidationHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(getValidationHandler);
+export const GET = withApiKeyOrAnySession(getValidationHandler);

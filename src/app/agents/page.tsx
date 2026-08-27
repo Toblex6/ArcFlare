@@ -95,10 +95,11 @@ export default function AgentsPage() {
   const [valResult, setValResult] = useState<ValidationResult | null>(null);
   const [valError, setValError] = useState<string | null>(null);
 
-  // Load agents
+  // Load agents — the full registry list for this merchant. The old load
+  // path (/api/agent/status?name=Agent) silently hid any agent whose name
+  // didn't contain "Agent".
   useEffect(() => {
-    fetch('/api/agent/status?name=Agent', {
-    })
+    fetch('/api/agent/list')
       .then((r) => r.json())
       .then((d) => {
         if (d.success) setAgents(d.agents || []);
@@ -122,15 +123,26 @@ export default function AgentsPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
+      // Success is locked in BEFORE the list refresh — the refresh used to
+      // run inside the same try block, so a failure there (the list route
+      // 404ing, pre-fix) showed a JSON.parse error banner next to the
+      // success one.
       setDeployResult(data);
-      // Refresh agent list
+    } catch (e: any) {
+      setDeployError(e.message);
+      setDeploying(false);
+      return;
+    }
+    setDeploying(false);
+    // List refresh is best-effort and can't taint the deploy result. The
+    // /api/agent/list route now exists — this previously hit a 404 HTML page
+    // and crashed JSON.parse.
+    try {
       const listRes = await fetch('/api/agent/list');
       const d2 = await listRes.json();
       if (d2.success) setAgents(d2.agents || []);
-    } catch (e: any) {
-      setDeployError(e.message);
-    } finally {
-      setDeploying(false);
+    } catch {
+      // Non-fatal: the deployed agent still shows in the success panel.
     }
   };
 

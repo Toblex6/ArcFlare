@@ -11,7 +11,7 @@ import { tryJwtSecret } from "@/src/lib/auth/secrets";
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 
 async function getMerchantFromCookie(req: NextRequest) {
     const token = req.cookies.get("merchant_token")?.value;
@@ -235,8 +235,20 @@ IMPORTANT:
             });
 
             if (!res.ok) {
-                console.error(`[assistant] Groq error ${res.status}:`, await res.text());
-                return NextResponse.json({ success: true, response: "I ran into a problem — please try again.", toolsUsed, results });
+                // Honest failure: the old path returned HTTP 200 with a
+                // chatty "I ran into a problem" success body, which made
+                // upstream outages (e.g. a dead Groq model) invisible.
+                const detail = await res.text().catch(() => "");
+                console.error(`[assistant] Groq error ${res.status}:`, detail);
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: `Assistant backend error (${res.status}). Check GROQ_MODEL / GROQ_API_KEY configuration and try again.`,
+                        toolsUsed,
+                        results,
+                    },
+                    { status: 502 }
+                );
             }
 
             const data = await res.json();

@@ -7,7 +7,7 @@
 
 import type { AIProvider, ChatMessage, ProviderCapabilities } from './types';
 
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 
 export class GroqProvider implements AIProvider {
   id = `groq:${GROQ_MODEL}`;

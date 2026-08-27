@@ -41,14 +41,28 @@ interface JobResult {
   explorerUrl?: string;
   nextStep?: string;
   message?: string;
+  warning?: string | null;
 }
 
 export default function JobsPage() {
   const _router = useRouter();
   React.useEffect(() => {
-    fetch('/api/merchant/me').then((r) => {
-      if (r.status === 401) _router.replace('/merchant/login');
-    }).catch(() => _router.replace('/merchant/login'));
+    // Auth gate + prefill the client (payer) wallet from the merchant's own
+    // profile. The old hardcoded 0x7a8214… prefill was the shared PLATFORM
+    // payer wallet — every create/fund attempt against it failed caller-control.
+    fetch('/api/merchant/me')
+      .then(async (r) => {
+        if (r.status === 401) {
+          _router.replace('/merchant/login');
+          return null;
+        }
+        return r.json().catch(() => null);
+      })
+      .then((data) => {
+        const addr = data?.merchant?.walletAddress;
+        if (addr) setClientSCA(addr);
+      })
+      .catch(() => _router.replace('/merchant/login'));
   }, []);
 
   const [activeTab, setActiveTab] = useState<'board' | 'create' | 'manage'>('board');
@@ -60,8 +74,25 @@ export default function JobsPage() {
   const [stepError, setStepError] = useState<string | null>(null);
   const [stepLoading, setStepLoading] = useState(false);
 
-  // Create fields
-  const [clientSCA, setClientSCA] = useState('0x7a8214dad7630a7a39054e0121acdbc7a65821c9');
+  // Create fields — clientSCA is prefilled from the merchant profile above
+  const [clientSCA, setClientSCA] = useState('');
+  const [walletBalance, setWalletBalance] = useState<string | null>(null);
+
+  // Live USDC balance of the payer wallet so "transaction failed onchain"
+  // surprises become visible before they happen.
+  React.useEffect(() => {
+    if (!clientSCA) return;
+    let cancelled = false;
+    fetch(`/api/merchant/wallet/balance?address=${clientSCA}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d?.success) setWalletBalance(d.balance);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [clientSCA]);
   const [providerSCA, setProviderSCA] = useState('');
   const [amountUSDC, setAmountUSDC] = useState('1.0');
   const [description, setDescription] = useState('');
@@ -519,6 +550,13 @@ export default function JobsPage() {
                               value={clientSCA}
                               onChange={(e) => setClientSCA(e.target.value)}
                             />
+                            <span style={{ fontSize: 11, color: walletBalance === null ? 'var(--text-secondary)' : parseFloat(walletBalance) > 0 ? '#0d7c5f' : '#dc2626' }}>
+                              {clientSCA
+                                ? walletBalance !== null
+                                  ? `Payer wallet USDC balance: ${walletBalance}`
+                                  : ''
+                                : 'Prefilled from your merchant wallet'}
+                            </span>
                           </div>
                           <div>
                             <span style={S.label}>Provider SCA</span>
@@ -640,6 +678,20 @@ export default function JobsPage() {
                         <p style={{ color: 'var(--danger)', fontSize: 12, margin: '8px 0' }}>
                           ❌ {stepError}
                         </p>
+                      )}
+
+                      {stepResult?.warning && (
+                        <div
+                          style={{
+                            background: 'rgba(245,158,11,0.08)',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                            borderRadius: 10,
+                            padding: '8px 12px',
+                            marginTop: 8,
+                          }}
+                        >
+                          <span style={{ color: '#f59e0b', fontSize: 12 }}>⚠️ {stepResult.warning}</span>
+                        </div>
                       )}
 
                       <button

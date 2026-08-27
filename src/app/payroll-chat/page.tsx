@@ -17,6 +17,8 @@ interface Contractor {
   address: string;
   amount: number;
   frequency: Frequency;
+  /** Exact interval in days — set for "every N weeks/months" phrasings. */
+  intervalDays?: number;
 }
 
 interface ChatMessage {
@@ -31,6 +33,7 @@ export default function PayrollChatPage() {
   const [input, setInput] = useState("");
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [schedule, setSchedule] = useState<Frequency | null>(null);
+  const [scheduleIntervalDays, setScheduleIntervalDays] = useState<number | null>(null);
   const [vaultAddress, setVaultAddress] = useState("");
   const [vaultWalletId, setVaultWalletId] = useState("");
   const [receipts, setReceipts] = useState<any[]>([]);
@@ -64,8 +67,11 @@ export default function PayrollChatPage() {
     try {
       switch (intent.type) {
         case "add_contractor": {
-          setContractors((prev) => [...prev, { name: intent.name, address: intent.address, amount: intent.amount, frequency: intent.frequency }]);
-          addMessage("assistant", `Got it. Added ${intent.name} (${intent.address.slice(0, 10)}...) at ${intent.amount} USDC, paid ${intent.frequency}. They'll be included in your next payroll run.`);
+          setContractors((prev) => [...prev, { name: intent.name, address: intent.address, amount: intent.amount, frequency: intent.frequency, intervalDays: intent.intervalDays }]);
+          const cadence = intent.intervalDays && intent.intervalDays !== FREQUENCY_TO_DAYS[intent.frequency]
+            ? `every ${intent.intervalDays} days`
+            : intent.frequency;
+          addMessage("assistant", `Got it. Added ${intent.name} (${intent.address.slice(0, 10)}...) at ${intent.amount} USDC, paid ${cadence}. They'll be included in your next payroll run.`);
           break;
         }
 
@@ -97,7 +103,11 @@ export default function PayrollChatPage() {
 
         case "set_schedule": {
           setSchedule(intent.frequency);
-          addMessage("assistant", `Payroll schedule set to run ${intent.frequency}. I'll create a recurring schedule for each contractor when you run payroll.`);
+          setScheduleIntervalDays(intent.intervalDays ?? null);
+          const cadence = intent.intervalDays && intent.intervalDays !== FREQUENCY_TO_DAYS[intent.frequency]
+            ? `every ${intent.intervalDays} days`
+            : intent.frequency;
+          addMessage("assistant", `Payroll schedule set to run ${cadence}. I'll create a recurring schedule for each contractor when you run payroll.`);
           break;
         }
 
@@ -144,11 +154,10 @@ export default function PayrollChatPage() {
                   headers: { "Content-Type": "application/json", "x-api-key": ARCFLARE_API_KEY },
                   body: JSON.stringify({
                     payerSCA: vaultAddress,
-                    payerWalletId: vaultWalletId,
                     receiverSCA: c.address,
                     amount: c.amount,
-                    intervalDays: FREQUENCY_TO_DAYS[schedule],
-                    description: `${c.name} — ${schedule} payroll`,
+                    intervalDays: c.intervalDays ?? scheduleIntervalDays ?? FREQUENCY_TO_DAYS[schedule],
+                    description: `${c.name} — ${c.intervalDays ? `every ${c.intervalDays} days` : schedule} payroll`,
                     startImmediately: false,
                   }),
                 });

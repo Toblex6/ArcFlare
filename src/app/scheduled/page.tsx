@@ -36,16 +36,43 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function ScheduledPaymentsPage() {
   const _router = useRouter();
-  React.useEffect(() => {
-    fetch('/api/merchant/me').then((r) => {
-      if (r.status === 401) _router.replace('/merchant/login');
-    }).catch(() => _router.replace('/merchant/login'));
-  }, []);
 
   const [activeTab, setActiveTab] = useState<'create' | 'list'>('list');
 
-  // Create form
-  const [payerSCA, setPayerSCA] = useState('0x7a8214dad7630a7a39054e0121acdbc7a65821c9');
+  // Create form — payer prefilled from the merchant's own wallet (the old
+  // hardcoded 0x7a8214… platform-wallet prefill always failed caller-control).
+  const [payerSCA, setPayerSCA] = useState('');
+  const [walletBalance, setWalletBalance] = useState<string | null>(null);
+  React.useEffect(() => {
+    fetch('/api/merchant/me')
+      .then(async (r) => {
+        if (r.status === 401) {
+          _router.replace('/merchant/login');
+          return null;
+        }
+        return r.json().catch(() => null);
+      })
+      .then((data) => {
+        const addr = data?.merchant?.walletAddress;
+        if (addr) setPayerSCA(addr);
+      })
+      .catch(() => _router.replace('/merchant/login'));
+  }, []);
+
+  React.useEffect(() => {
+    if (!payerSCA) return;
+    let cancelled = false;
+    fetch(`/api/merchant/wallet/balance?address=${payerSCA}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d?.success) setWalletBalance(d.balance);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [payerSCA]);
+
   const [receiverSCA, setReceiverSCA] = useState('');
   const [amount, setAmount] = useState('');
   const [intervalDays, setIntervalDays] = useState('7');
@@ -223,6 +250,11 @@ export default function ScheduledPaymentsPage() {
                   value={payerSCA}
                   onChange={(e) => setPayerSCA(e.target.value)}
                 />
+                {payerSCA && (
+                  <span style={{ fontSize: 11, color: walletBalance === null ? '#6b5a45' : parseFloat(walletBalance) > 0 ? '#10b981' : '#f87171' }}>
+                    {walletBalance !== null ? `Payer wallet USDC balance: ${walletBalance}` : ''}
+                  </span>
+                )}
               </div>
               <div>
                 <span style={S.label}>Receiver SCA</span>
