@@ -18,38 +18,38 @@
  * consistent choice, not a shortcut specific to Telegram users.
  */
 
+import { randomUUID } from 'crypto';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { prisma } from '@/lib/prisma'; // adjust to your actual client path
 import { getRelayerSigner } from '@/lib/wallet/jobEscrowClient'; // existing relayer, reused for gas sponsorship — same signer used across batches 1-6
 
-const CIRCLE_API_KEY = process.env.CIRCLE_API_KEY ?? '';
-const CIRCLE_ENTITY_SECRET = process.env.CIRCLE_ENTITY_SECRET ?? '';
-const CIRCLE_WALLET_SET_ID = process.env.CIRCLE_WALLET_SET_ID ?? '';
-
-// Blockchain identifier string for Circle's Developer-Controlled Wallets
-// API. CONFIRMED against live call sites: 'ARC-TESTNET' is the exact
-// string used by src/lib/circle/client.ts (createWallets /
-// createContractExecutionTransaction), the settlement engine Path B
-// (src/app/api/payments/settle/route.ts), and the jobs routes. Overridable
-// via env for safety, but the default matches production.
-const ARC_TESTNET_BLOCKCHAIN = process.env.CIRCLE_ARC_BLOCKCHAIN_ID ?? 'ARC-TESTNET';
-
-const GAS_SPONSORSHIP_AMOUNT_WEI = process.env.GAS_SPONSORSHIP_AMOUNT_WEI ?? '10000000000000000'; // 0.01 native token, 18 decimals assumed — verify against Arc Testnet's actual gas token decimals
-
 let cachedClient: ReturnType<typeof initiateDeveloperControlledWalletsClient> | null = null;
+let cachedCreds: { apiKey: string; entitySecret: string } | null = null;
+
+function getProvisioningConfig() {
+  return {
+    apiKey: process.env.CIRCLE_API_KEY ?? '',
+    entitySecret: process.env.CIRCLE_ENTITY_SECRET ?? '',
+    walletSetId: process.env.CIRCLE_WALLET_SET_ID ?? '',
+    blockchain: process.env.CIRCLE_ARC_BLOCKCHAIN_ID ?? 'ARC-TESTNET',
+    gasWei: process.env.GAS_SPONSORSHIP_AMOUNT_WEI ?? '10000000000000000',
+  };
+}
 
 function getCircleClient() {
-  if (!CIRCLE_API_KEY || !CIRCLE_ENTITY_SECRET) {
+  const { apiKey, entitySecret } = getProvisioningConfig();
+  if (!apiKey || !entitySecret) {
     throw new Error(
       'Circle Developer-Controlled Wallets is not configured — set CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET. ' +
       'These should already exist in your production env since the platform already uses this client for settlement.'
     );
   }
-  if (!cachedClient) {
+  if (!cachedClient || !cachedCreds || cachedCreds.apiKey !== apiKey || cachedCreds.entitySecret !== entitySecret) {
     cachedClient = initiateDeveloperControlledWalletsClient({
-      apiKey: CIRCLE_API_KEY,
-      entitySecret: CIRCLE_ENTITY_SECRET,
+      apiKey,
+      entitySecret,
     });
+    cachedCreds = { apiKey, entitySecret };
   }
   return cachedClient;
 }
@@ -70,7 +70,8 @@ export async function provisionWalletForTelegramUser(
   telegramUserId: string,
   displayName: string
 ): Promise<ProvisionedWallet> {
-  if (!CIRCLE_WALLET_SET_ID) {
+  const { walletSetId, blockchain } = getProvisioningConfig();
+  if (!walletSetId) {
     throw new Error(
       'CIRCLE_WALLET_SET_ID is not configured. Create a wallet set once via the Circle console/API ' +
       '(separate from any existing merchant-facing wallet set, to keep Telegram consumer wallets logically ' +
@@ -89,22 +90,39 @@ export async function provisionWalletForTelegramUser(
 
   const client = getCircleClient();
 
-  // FLAGGING: exact method name/shape (createWallets, blockchains array
-  // format, response.data.wallets path) is based on Circle's documented
-  // Developer-Controlled Wallets SDK pattern, not verified line-by-line
-  // against your specific installed SDK version. Since this platform
-  // already has a working call site for wallet creation/resolution
-  // (wherever DEFAULT_PAYER_SCA or similar was originally provisioned),
-  // that call site is the authoritative reference — if this doesn't match
-  // it, trust the existing code over this file and adjust here.
-  const response = await client.createWallets({
-    idempotencyKey: `telegram-${telegramUserId}`,
-    walletSetId: CIRCLE_WALLET_SET_ID,
-    blockchains: [ARC_TESTNET_BLOCKCHAIN as any],
-    count: 1,
-    accountType: 'SCA', // matches the live wallet creation pattern (src/lib/circle/client.ts)
-    metadata: [{ name: displayName, refId: telegramUserId }],
-  });
+  // Aligned with src/lib/circle/client.ts:createWallets — uses ARC-TESTNET,
+  // count 1, SCA. idempotencyKey must be UUID v4 (Circle validates format;
+  // the previous `telegram-${telegramUserId}` caused 400 API parameter invalid).
+  // metadata shape is WalletMetadata[] { name, refId } per SDK — kept, but
+  // removed if Circle ever rejects it (minimal diff vs working call site).
+  let response: Awaited<ReturnType<typeof client.createWallets>>;
+  try {
+    response = await client.createWallets({
+      idempotencyKey: randomUUID(),
+      walletSetId,
+      blockchains: [blockchain as any],
+      count: 1,
+      accountType: 'SCA', // matches the live wallet creation pattern (src/lib/circle/client.ts)
+      metadata: [{ name: displayName, refId: telegramUserId }],
+    });
+  } catch (e: any) {
+    const circleMessage =
+      e?.response?.data?.message ??
+      e?.response?.data?.errors?.[0]?.message ??
+      e?.data?.message ??
+      e?.message ??
+      String(e);
+    const safeMeta = {
+      url: e?.url,
+      method: e?.method,
+      status: e?.status,
+      code: e?.code,
+      circleMessage,
+    };
+    console.error('[circleWalletProvisioning] Circle createWallets failed', JSON.stringify(safeMeta));
+    // Re-throw with Circle's message exposed (no secrets) so webhook logs are actionable
+    throw new Error(`Circle wallet creation failed: ${circleMessage} (status ${e?.status ?? 'unknown'}, code ${e?.code ?? 'unknown'})`);
+  }
 
   const wallet = response?.data?.wallets?.[0];
   if (!wallet?.id || !wallet?.address) {
@@ -146,10 +164,11 @@ export async function provisionWalletForTelegramUser(
 }
 
 async function sponsorGas(walletAddress: string): Promise<string> {
+  const { gasWei } = getProvisioningConfig();
   const relayerSigner = getRelayerSigner();
   const tx = await relayerSigner.sendTransaction({
     to: walletAddress,
-    value: BigInt(GAS_SPONSORSHIP_AMOUNT_WEI),
+    value: BigInt(gasWei),
   });
   const receipt = await tx.wait();
   return receipt!.hash;

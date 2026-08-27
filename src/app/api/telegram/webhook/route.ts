@@ -172,7 +172,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         reply = { text: `Unknown command. Type /help to see what's available.` };
     }
   } catch (err) {
-    console.error(`[telegram/webhook] handler error for command ${parsed.command}:`, err);
+    const anyErr = err as any;
+    const circleMessage =
+      anyErr?.response?.data?.message ??
+      anyErr?.response?.data?.errors?.[0]?.message ??
+      anyErr?.data?.message ??
+      anyErr?.message ??
+      String(err);
+    const safeMeta: Record<string, unknown> = {
+      command: parsed.command,
+      message: circleMessage,
+      url: anyErr?.url,
+      method: anyErr?.method,
+      status: anyErr?.status,
+      code: anyErr?.code,
+    };
+    // Remove undefined keys to keep logs compact; never include secrets (no apiKey/entitySecret/botToken)
+    Object.keys(safeMeta).forEach((k) => safeMeta[k] === undefined && delete safeMeta[k]);
+    console.error(`[telegram/webhook] handler error for command ${parsed.command}:`, JSON.stringify(safeMeta), anyErr?.stack ? String(anyErr.stack).split('\n').slice(0, 3).join(' | ') : '');
     reply = { text: `Something went wrong processing that. Please try again.` };
   }
 
