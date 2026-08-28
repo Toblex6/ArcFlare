@@ -45,6 +45,16 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
   const actor = await verifyCallerControlsAddress(req, hirer.scaAddress ?? hirerWallet.address);
   if (!actor) return NextResponse.json({ error: "You do not control the hiring agent." }, { status: 403 });
 
+  // Trust check FIRST (cheapest, no side effects) — if policy has minTrustScore, enforce before money checks
+  const hirerPolicy: any = await (prisma as any).agentTreasuryPolicy.findUnique({ where: { agentRegistryId: hirerId } }).catch(() => null);
+  if (hirerPolicy?.minTrustScore !== null && hirerPolicy?.minTrustScore !== undefined) {
+    const { computeTrustScore } = await import("@/lib/trust/trustScore");
+    const providerTrust = await computeTrustScore(providerId);
+    if (providerTrust.score < Number(hirerPolicy.minTrustScore)) {
+      return NextResponse.json({ error: `Trust requirement not met: provider trust ${providerTrust.score} < required ${hirerPolicy.minTrustScore}`, code: "TRUST_REQUIREMENT_NOT_MET", providerTrust, required: hirerPolicy.minTrustScore }, { status: 403 });
+    }
+  }
+
   // Treasury policy check (fail-closed)
   const policyCheck = await evaluatePolicyForSpend({ agentRegistryId: hirerId, amount: budgetBigInt, kind: "subcontractor" });
   if (!policyCheck.allowed) {

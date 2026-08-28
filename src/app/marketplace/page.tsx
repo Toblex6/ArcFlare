@@ -201,7 +201,7 @@ const badgeStyle = (status?: string): React.CSSProperties => {
 };
 
 export default function MarketplacePage() {
-    const [tab, setTab] = useState<"discover" | "publish" | "mine">("discover");
+    const [tab, setTab] = useState<"discover" | "publish" | "mine" | "agents">("discover");
 
     // ── Discover state ──
     const [listings, setListings] = useState<Listing[]>([]);
@@ -233,6 +233,14 @@ export default function MarketplacePage() {
     const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
     const [analyticsBySlug, setAnalyticsBySlug] = useState<Record<string, Analytics>>({});
     const [analyticsOpenSlug, setAnalyticsOpenSlug] = useState<string | null>(null);
+
+    // ── Agent economy state (Build 4) ──
+    const [agents, setAgents] = useState<any[]>([]);
+    const [agentsLoading, setAgentsLoading] = useState(false);
+    const [agentsError, setAgentsError] = useState<string | null>(null);
+    const [agentSort, setAgentSort] = useState("trust");
+    const [agentSearch, setAgentSearch] = useState("");
+    const [agentDetail, setAgentDetail] = useState<any | null>(null);
 
     // ── Fetch discovery listings ──
     const fetchListings = useCallback(async () => {
@@ -292,6 +300,21 @@ export default function MarketplacePage() {
     useEffect(() => {
         fetchWallet();
     }, [fetchWallet]);
+
+    const fetchAgents = useCallback(async () => {
+        setAgentsLoading(true); setAgentsError(null);
+        try {
+            const params = new URLSearchParams();
+            if (agentSearch) params.set("search", agentSearch);
+            params.set("sortBy", agentSort);
+            params.set("limit", "20");
+            const res = await fetch(`/api/agents/discover?${params.toString()}`);
+            const data = await res.json();
+            if (!data.success && !Array.isArray(data.agents)) throw new Error(data.error || "failed");
+            setAgents(data.agents || []);
+        } catch (e: any) { setAgentsError(e.message); } finally { setAgentsLoading(false); }
+    }, [agentSearch, agentSort]);
+    useEffect(() => { if (tab === "agents") fetchAgents(); }, [tab, fetchAgents]);
 
     const allCategories = Array.from(new Set(listings.flatMap((l) => l.categories)));
 
@@ -405,6 +428,9 @@ export default function MarketplacePage() {
                 <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
                     <button style={tabStyle(tab === "discover")} onClick={() => setTab("discover")}>
                         🔍 Discover
+                    </button>
+                    <button style={tabStyle(tab === "agents")} onClick={() => setTab("agents")}>
+                        🤖 Agents
                     </button>
                     <button style={tabStyle(tab === "publish")} onClick={() => setTab("publish")}>
                         📤 Publish an API
@@ -571,6 +597,58 @@ export default function MarketplacePage() {
                                         </div>
                                     );
                                 })}
+                            </div>
+                        )}
+                    </>
+                )}
+
+                {tab === "agents" && (
+                    <>
+                        {agentsError && <div style={styles.errorBox}>❌ {agentsError}</div>}
+                        <div style={styles.card}>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, alignItems: "center" }}>
+                                <input style={{ ...styles.input, flex: 1, marginBottom: 0 }} placeholder="Search agents by name..." value={agentSearch} onChange={(e) => setAgentSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && fetchAgents()} />
+                                <select value={agentSort} onChange={(e) => setAgentSort(e.target.value)} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface-secondary)", color: "var(--text)" }}>
+                                    <option value="trust">Trust ↓</option>
+                                    <option value="reputation">Reputation ↓</option>
+                                    <option value="createdAt">Newest</option>
+                                    <option value="price">Price</option>
+                                </select>
+                                <button style={btnStyle(false)} onClick={fetchAgents}>Search</button>
+                            </div>
+                        </div>
+                        {agentsLoading ? <p style={{ color: "var(--text-secondary)" }}>Loading agents...</p> : agents.length === 0 ? <div style={styles.card}><p style={{ color: "var(--text-secondary)", margin: 0 }}>No agents yet.</p></div> : (
+                            <div style={styles.grid}>
+                                {agents.map((a: any) => (
+                                    <div key={a.id} style={styles.listingCard}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{a.name}</h3>
+                                            {a.trust && <span style={{ ...badgeStyle("PUBLISHED"), background: a.trust.score >= 70 ? "rgba(16,185,129,0.12)" : a.trust.score >= 40 ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)", color: a.trust.score >= 70 ? "var(--success)" : a.trust.score >= 40 ? "var(--warning)" : "var(--danger)" }}>Trust {a.trust.score} · conf {a.trust.confidence}</span>}
+                                        </div>
+                                        {a.description && <p style={{ color: "var(--text-secondary)", fontSize: 11, margin: 0 }}>{String(a.description).slice(0, 120)}</p>}
+                                        {a.skills && Array.isArray(a.skills) && a.skills.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>{a.skills.slice(0, 4).map((s: any, i: number) => <span key={i} style={styles.tag}>{typeof s === "string" ? s : s.name || JSON.stringify(s).slice(0, 20)}</span>)}</div>}
+                                        <div style={{ fontSize: 11, color: "var(--text-secondary)", display: "flex", flexDirection: "column" as const, gap: 2 }}>
+                                            {a.trackRecord && <span>{a.trackRecord.completedJobs} completed · {a.trackRecord.validatedJobs} validated · {a.trackRecord.validationPassRate !== null ? `${Math.round(a.trackRecord.validationPassRate * 100)}% pass` : "no validated"} · {(Number(a.trackRecord.validatedVolume)/1e6).toFixed(2)} USDC vol</span>}
+                                            {!a.trackRecord && <span>Reputation {a.reputation}</span>}
+                                            <span style={{ fontFamily: "monospace", fontSize: 10 }}>{a.scaAddress?.slice(0, 10)}...</span>
+                                        </div>
+                                        <div style={{ display: "flex", gap: 8 }}>
+                                            <button style={{ ...btnStyle(false), flex: 1, padding: "8px 12px" }} onClick={async () => {
+                                                try { const r = await fetch(a.cardUrl); const j = await r.json(); setAgentDetail(j.agentCard || j); } catch {}
+                                            }}>View Card</button>
+                                            <a href={a.trackRecordUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle(false), flex: 1, padding: "8px 12px", textAlign: "center" as const, textDecoration: "none" as const, display: "block" as const }}>Track Record</a>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {agentDetail && (
+                            <div style={{ ...styles.card, marginTop: 16 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <h3 style={{ margin: 0, fontSize: 14 }}>Agent Card — {agentDetail.name || agentDetail.agentId}</h3>
+                                    <button style={btnStyle(false)} onClick={() => setAgentDetail(null)}>Close</button>
+                                </div>
+                                <pre style={{ fontSize: 11, background: "var(--surface-secondary)", padding: 12, borderRadius: 10, overflow: "auto" as const, maxHeight: 400 }}>{JSON.stringify(agentDetail, null, 2)}</pre>
                             </div>
                         )}
                     </>

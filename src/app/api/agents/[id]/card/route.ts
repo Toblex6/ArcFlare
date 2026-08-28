@@ -36,6 +36,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!agent) return NextResponse.json({ error: `agent ${agentId} not found` }, { status: 404 });
   if (agent.status !== "ACTIVE_AGENT_PROVISIONED") return NextResponse.json({ error: "Agent not available for discovery" }, { status: 404 });
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE || req.nextUrl.origin;
-  const card = buildAgentCard(agent, baseUrl);
+  const card: any = buildAgentCard(agent, baseUrl);
+  // Build 4: attach public trust/trackRecord (best-effort, never blocks card)
+  try {
+    const { getTrackRecord } = await import("@/lib/trust/trackRecord");
+    const tr = await getTrackRecord(agentId);
+    card.trust = { score: tr.trust.score, confidence: tr.trust.confidence, methodologyVersion: tr.trust.methodologyVersion, breakdown: tr.trust.breakdown };
+    card.trackRecord = { completedJobs: tr.stats.completedJobs, validatedJobs: tr.stats.validatedJobs, validationPassRate: tr.stats.validationPassRate, validatedVolume: tr.stats.validatedVolume, validatedVolumeUSDC: tr.stats.validatedVolumeUSDC, reputationCount: tr.stats.reputationCount, totalJobs: tr.stats.totalJobs, failedJobs: tr.stats.failedJobs, uniqueValidators: tr.stats.uniqueValidators, lastActivityAt: tr.stats.lastActivityAt };
+    card.reputationSummary = { onChain: tr.reputation, dbReputation: tr.dbReputation };
+    card.evidenceReferences = tr.evidenceReferences;
+    card.trackRecordUrl = `/api/agents/${agentId}/track-record`;
+  } catch {}
   return NextResponse.json({ success: true, agentCard: card });
 }

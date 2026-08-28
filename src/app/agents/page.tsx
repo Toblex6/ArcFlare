@@ -64,13 +64,17 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Agent | null>(null);
-  const [activeTab, setActiveTab] = useState<'registry' | 'reputation' | 'validation' | 'deploy' | 'economics'>(
+  const [activeTab, setActiveTab] = useState<'registry' | 'reputation' | 'validation' | 'deploy' | 'economics' | 'trust'>(
     'registry'
   );
   const [ecoAgentId, setEcoAgentId] = useState('');
   const [ecoData, setEcoData] = useState<any>(null);
   const [ecoLoading, setEcoLoading] = useState(false);
   const [ecoError, setEcoError] = useState<string|null>(null);
+  const [trustId, setTrustId] = useState('');
+  const [trustData, setTrustData] = useState<any>(null);
+  const [trustLoading, setTrustLoading] = useState(false);
+  const [trustError, setTrustError] = useState<string|null>(null);
 
   // Deploy state
   const [deploying, setDeploying] = useState(false);
@@ -340,7 +344,7 @@ export default function AgentsPage() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' as const }}>
-          {(['registry', 'reputation', 'validation', 'deploy', 'economics'] as const).map((t) => (
+          {(['registry', 'reputation', 'validation', 'deploy', 'economics', 'trust'] as const).map((t) => (
             <button key={t} style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>
               {t === 'registry'
                 ? '🤖 Agent Registry'
@@ -350,7 +354,9 @@ export default function AgentsPage() {
                     ? '✅ Validation'
                     : t === 'economics'
                       ? '💰 Economics'
-                      : '⚡ Deploy Agent'}
+                      : t === 'trust'
+                        ? '🏆 Trust'
+                        : '⚡ Deploy Agent'}
             </button>
           ))}
         </div>
@@ -864,6 +870,60 @@ export default function AgentsPage() {
                   ))}
                   {(!ecoData.recent||ecoData.recent.length===0) && <p style={{ fontSize:12, color:'var(--text-secondary)' }}>No ledger entries yet.</p>}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'trust' && (
+          <div style={S.card}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Verifiable Track Record</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 16px' }}>Every trust number has an underlying source (jobs, validation, ledger, reputation). Score 0..100 · confidence 0..100 · methodology 1.0</p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <input style={{ ...S.input, marginBottom: 0, flex: 1 }} value={trustId} onChange={e=>setTrustId(e.target.value)} placeholder="Agent registry id (e.g. 1)" />
+              <button style={S.btn} disabled={trustLoading} onClick={async()=>{
+                setTrustLoading(true); setTrustError(null);
+                try{ const r=await fetch(`/api/agents/${trustId}/track-record`); const d=await r.json(); if(!r.ok) throw new Error(d.error||'failed'); setTrustData(d.trackRecord); }catch(e:any){ setTrustError(e.message);} finally{ setTrustLoading(false); }
+              }}>{trustLoading?'Loading...':'Load'}</button>
+            </div>
+            {trustError && <p style={{ color:'var(--danger)', fontSize:12 }}>❌ {trustError}</p>}
+            {trustData && (
+              <div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:10, marginBottom:12 }}>
+                  {[
+                    ['Trust', String(trustData.trust.score)],
+                    ['Confidence', String(trustData.trust.confidence)],
+                    ['Completed', String(trustData.stats.completedJobs)],
+                    ['Validated', String(trustData.stats.validatedJobs)],
+                    ['Pass Rate', trustData.stats.validationPassRate!==null?`${Math.round(trustData.stats.validationPassRate*100)}%`:'—'],
+                    ['Validated Volume', trustData.stats.validatedVolumeUSDC+' USDC'],
+                    ['Unique Validators', String(trustData.stats.uniqueValidators)],
+                    ['Method', trustData.trust.methodologyVersion],
+                  ].map(([k,v]: any)=>(
+                    <div key={k} style={{ background:'var(--surface-secondary)', borderRadius:8, padding:10 }}>
+                      <span style={S.label}>{k}</span>
+                      <p style={{ margin:0, fontSize:13, fontWeight:700 }}>{v}</p>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background:'var(--surface-secondary)', borderRadius:8, padding:10, marginBottom:12 }}>
+                  <span style={S.label}>Breakdown (job/validation/reputation/payment/economic)</span>
+                  <pre style={{ fontSize:11, margin:'6px 0 0', whiteSpace:'pre-wrap' }}>{JSON.stringify(trustData.trust.breakdown,null,2)}</pre>
+                </div>
+                <span style={S.label}>Recent verified work</span>
+                <div style={{ display:'flex', flexDirection:'column' as const, gap:6, marginTop:6 }}>
+                  {(trustData.recentOutcomes||[]).map((o:any)=>(
+                    <div key={o.jobId} style={{ background:'var(--surface-secondary)', borderRadius:8, padding:8, fontSize:11, fontFamily:'monospace' }}>
+                      Job {o.jobId} · {o.status} · {(Number(o.budget)/1e6).toFixed(2)} USDC {o.validation?`· validation ${o.validation.status}`:''} {o.txHash?'· '+o.txHash.slice(0,14)+'…':''}
+                    </div>
+                  ))}
+                  {(!trustData.recentOutcomes||trustData.recentOutcomes.length===0) && <p style={{ fontSize:12, color:'var(--text-secondary)' }}>No verified work yet — fresh agent (score 50, low confidence is expected).</p>}
+                </div>
+                <div style={{ background:'var(--surface-secondary)', borderRadius:8, padding:10, marginTop:12 }}>
+                  <span style={S.label}>Evidence References</span>
+                  <pre style={{ fontSize:11, margin:'6px 0 0', whiteSpace:'pre-wrap', wordBreak:'break-all' as const }}>{JSON.stringify(trustData.evidenceReferences,null,2)}</pre>
+                </div>
+                <p style={{ fontSize:11, color:'var(--text-secondary)', marginTop:8 }}>Reputation registry: {trustData.reputation.registryAddress} · readOk={String(trustData.reputation.readOk)} · onChainScore={String(trustData.reputation.reputationScore)}</p>
               </div>
             )}
           </div>

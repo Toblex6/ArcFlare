@@ -125,6 +125,26 @@ async function completeJobHandler(req: NextRequest) {
       }
     } catch {}
 
+    // Build 4: auto-reputation from validated completion (awaited, deduped, no fire-and-forget)
+    // Only for validated jobs that passed; self-feedback/hiring excluded inside the helper.
+    try {
+      const { maybeAutoReputationForValidatedJob } = await import("@/lib/trust/autoReputation");
+      const { resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { getJobValidationPolicy } = await import("@/lib/jobs/jobValidationPolicy");
+      let jv: any = null;
+      try { jv = await getJobValidationPolicy(BigInt(jobId)); } catch {}
+      if (jv && jv.required) {
+        const providerAgentId = await resolveAgentIdBySca(job.providerSCA).catch(() => null);
+        let providerTokenId: string | null = null;
+        if (providerAgentId) {
+          try { const ag: any = await (prisma as any).agentRegistry.findUnique({ where: { id: providerAgentId }, select: { tokenId: true } }); providerTokenId = String(ag?.tokenId ?? ""); } catch {}
+          if (!providerTokenId) providerTokenId = null;
+        }
+        const rep = await maybeAutoReputationForValidatedJob({ jobId: BigInt(jobId), providerAgentId, providerTokenId, jobValidationId: jv.id, txHash });
+        console.log(`[autoReputation] job ${jobId} ->`, rep);
+      }
+    } catch (e: any) { console.error("[autoReputation] failed:", e?.message); }
+
     return NextResponse.json({ success: true, jobId, status: 'COMPLETED', txHash });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

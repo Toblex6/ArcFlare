@@ -130,26 +130,28 @@ async function scoreApplication(app: any, job: any): Promise<ScoredApplicant> {
 }
 
 /**
- * Real reputation source: AgentRegistry.reputation (Int, 0-100, default 50),
- * matched by scaAddress. This is the authoritative Postgres reputation
- * signal in this repo — see agent/reputation route (on-chain ERC-8004
- * recording + estimatedScore derived from paymentLog). If the applicant has
- * no registry row (first-time worker), returns a neutral mid-range score
- * rather than 0 — a 0 would permanently disadvantage every new worker,
- * which defeats the point of a fair marketplace.
+ * Derived trust source: computeTrustScore(agentId) when available (job/validation/ledger evidence),
+ * fallback to AgentRegistry.reputation (0..100, default 50) if trust unavailable or agent has no registry row.
+ * Broken dependency fixed: previously returned 20 (half of 40 max) for unscored — now uses trust where available.
  */
 async function getReputationScore(applicantAddress: string): Promise<number> {
   try {
     const agent = await prisma.agentRegistry.findFirst({
       where: { scaAddress: { equals: applicantAddress, mode: "insensitive" } },
     });
-    if (!agent) return 20; // neutral default (half of the 40-point max) for unscored/new applicants
-
+    if (!agent) return 20; // neutral default for first-time worker (no registry row)
+    // Prefer derived trust (validated evidence-aware) over raw DB reputation
+    try {
+      const { computeTrustScore } = await import("@/lib/trust/trustScore");
+      const trust = await computeTrustScore(agent.id);
+      // Trust score 0..100 -> 0..40 points (same scale as reputationScore slot)
+      return Math.round((Math.max(0, Math.min(100, trust.score)) / 100) * 40);
+    } catch {}
     const reputation = typeof agent.reputation === "number" ? agent.reputation : 50;
     const normalized = Math.max(0, Math.min(100, reputation)) / 100;
     return Math.round(normalized * 40);
   } catch {
-    return 20; // never let a reputation lookup break the whole ranked list
+    return 20; // never let a reputation/trust lookup break the whole ranked list
   }
 }
 

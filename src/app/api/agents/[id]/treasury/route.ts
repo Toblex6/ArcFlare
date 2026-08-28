@@ -42,6 +42,15 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
     throw new Error(`invalid amount ${v}`);
   }
   try {
+    let minTrustScore: number | null | undefined = undefined;
+    if (body.minTrustScore !== undefined) {
+      if (body.minTrustScore === null || body.minTrustScore === "") minTrustScore = null;
+      else {
+        const v = Number(body.minTrustScore);
+        if (!Number.isInteger(v) || v < 0 || v > 100) return NextResponse.json({ error: "minTrustScore must be integer 0..100 or null" }, { status: 400 });
+        minTrustScore = v;
+      }
+    }
     const policy = await upsertPolicy(agentId, {
       reserveMinimum: body.reserveMinimum !== undefined ? toUnits(body.reserveMinimum) : undefined,
       maxSpendPerJob: body.maxSpendPerJob !== undefined ? toUnits(body.maxSpendPerJob) : undefined,
@@ -49,6 +58,7 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
       maxSubcontractorSpendPerDay: body.maxSubcontractorSpendPerDay !== undefined ? toUnits(body.maxSubcontractorSpendPerDay) : undefined,
       autoPaySubcontractors: body.autoPaySubcontractors,
       reinvestPercent: body.reinvestPercent,
+      minTrustScore,
     });
     return NextResponse.json({ success: true, policy });
   } catch (e: any) {

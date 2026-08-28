@@ -20,6 +20,19 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
       body.metadataUri || 'ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei';
     const agentName = body.agentName || 'FlareHQ Autonomous Agent';
     const ownerNode = body.ownerNode || '0xAgenticNodeOperatorDefaultAddress';
+    // Gap A fix: populate skills/pricing/description from existing supported input
+    // Accepts body.skills (string[] or {name,description}[]), body.pricing ({pricePerRequest|pricePerJob}), body.description
+    let skillsInput: any = body.skills ?? body.capabilities ?? null;
+    let pricingInput: any = body.pricing ?? null;
+    let descriptionInput: string | null = typeof body.description === 'string' ? body.description : null;
+    // Normalize skills to array of strings/objects
+    if (skillsInput && !Array.isArray(skillsInput)) skillsInput = [skillsInput];
+    if (pricingInput && typeof pricingInput === 'string') {
+      try { pricingInput = JSON.parse(pricingInput); } catch { pricingInput = { pricePerRequest: pricingInput }; }
+    }
+    // Infer pricePerRequest if not provided but pricePerJob exists elsewhere
+    if (body.pricePerRequest && !pricingInput) pricingInput = { pricePerRequest: body.pricePerRequest };
+    if (body.pricePerJob && !pricingInput) pricingInput = { pricePerJob: body.pricePerJob };
 
     // 1. Initialize Circle Client
     if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
@@ -132,6 +145,9 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
         metadataURI: metadataUri,
         status: 'ACTIVE_AGENT_PROVISIONED',
         merchantId: merchant.id,
+        ...(descriptionInput ? { description: descriptionInput } : {}),
+        ...(skillsInput ? { skills: skillsInput } : {}),
+        ...(pricingInput ? { pricing: pricingInput } : {}),
       },
     });
 

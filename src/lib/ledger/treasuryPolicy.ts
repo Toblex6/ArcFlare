@@ -12,6 +12,7 @@ export interface PolicyInput {
   maxSubcontractorSpendPerDay?: string;
   autoPaySubcontractors?: boolean;
   reinvestPercent?: number;
+  minTrustScore?: number | null; // 0..100, null clears
 }
 
 export async function getOrCreatePolicy(agentRegistryId: number): Promise<any> {
@@ -47,6 +48,14 @@ export async function upsertPolicy(agentRegistryId: number, input: PolicyInput):
     const v = Number(input.reinvestPercent);
     if (!Number.isInteger(v) || v < 0 || v > 100) throw new Error("reinvestPercent must be integer 0..100");
     data.reinvestPercent = v;
+  }
+  if (input.minTrustScore !== undefined) {
+    if (input.minTrustScore === null) data.minTrustScore = null;
+    else {
+      const v = Number(input.minTrustScore);
+      if (!Number.isInteger(v) || v < 0 || v > 100) throw new Error("minTrustScore must be integer 0..100 or null");
+      data.minTrustScore = v;
+    }
   }
   return (prisma as any).agentTreasuryPolicy.upsert({
     where: { agentRegistryId },

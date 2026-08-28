@@ -216,6 +216,43 @@ const AGENT_TOOLS = [
       required: ["type", "reference"],
     },
   },
+  {
+    name: "discover_agents",
+    description: "Discover available agents by skill, filter by minimum trust, and inspect pricing. Returns candidate AgentCards/track records.",
+    input_schema: {
+      type: "object",
+      properties: {
+        skill: { type: "string", description: "Skill/capability to search" },
+        minTrust: { type: "number", description: "Minimum trust score 0..100" },
+        sortBy: { type: "string", enum: ["trust", "reputation", "price", "createdAt"] },
+        limit: { type: "number" },
+        search: { type: "string" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_agent_trust",
+    description: "Get derived trust score and verifiable track record for an agent (same as GET /api/agents/[id]/track-record).",
+    input_schema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string", description: "AgentRegistry numeric id" },
+      },
+      required: ["agentId"],
+    },
+  },
+  {
+    name: "check_treasury",
+    description: "Check available treasury, locked funds, and spend-policy constraints for an agent (read-only, no money movement).",
+    input_schema: {
+      type: "object",
+      properties: {
+        agentId: { type: "string", description: "AgentRegistry numeric id" },
+      },
+      required: ["agentId"],
+    },
+  },
 ];
 
 // Groq's API is OpenAI-compatible: tools are wrapped as
@@ -504,6 +541,39 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
         }
       }
       return { error: "Unknown status type" };
+    }
+
+    // ── 12. Discover Agents (read-only, no identity override) ───────────────────
+    case "discover_agents": {
+      const q = new URLSearchParams();
+      if (input.skill) q.set("skill", String(input.skill));
+      if (input.minTrust !== undefined) q.set("minTrust", String(input.minTrust));
+      if (input.sortBy) q.set("sortBy", String(input.sortBy));
+      if (input.limit) q.set("limit", String(input.limit));
+      if (input.search) q.set("search", String(input.search));
+      const res = await fetch(`${baseUrl}/api/agents/discover?${q.toString()}`, { headers });
+      const data = await res.json().catch(() => ({}));
+      return data;
+    }
+    // ── 13. Get Agent Trust / Track Record ──────────────────────────────────────
+    case "get_agent_trust": {
+      const aid = String(input.agentId).trim();
+      if (!/^\d+$/.test(aid)) return { error: "agentId must be numeric" };
+      const res = await fetch(`${baseUrl}/api/agents/${aid}/track-record`, { headers });
+      const data = await res.json().catch(() => ({}));
+      return data;
+    }
+    // ── 14. Check Treasury (read-only, authorized view) ─────────────────────────
+    case "check_treasury": {
+      const aid = String(input.agentId).trim();
+      if (!/^\d+$/.test(aid)) return { error: "agentId must be numeric" };
+      // Treasury GET is auth-gated (verifyCallerControlsAddress). Brain calls use INTERNAL key which resolves to platform agent.
+      // For brain use, we return whatever the API returns — unauthorized callers get 403 safely.
+      const res = await fetch(`${baseUrl}/api/agents/${aid}/treasury`, { headers });
+      const data = await res.json().catch(() => ({}));
+      // Strip nothing — treasury endpoint already returns public-safe subset (no Circle creds). Add explicit fail note if 403.
+      if (!res.ok) return { error: data.error || `treasury check failed ${res.status}`, status: res.status };
+      return data;
     }
 
     default:

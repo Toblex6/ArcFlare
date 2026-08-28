@@ -19,8 +19,9 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status");                  // agent status filter
     const category = searchParams.get("category");              // category/skill category
     const search = searchParams.get("search");                  // free-text search (name/description)
-    const sortBy = searchParams.get("sortBy") || "reputation";  // sort: reputation | price | createdAt
+    const sortBy = searchParams.get("sortBy") || "reputation";  // sort: reputation | price | createdAt | trust
     const sortOrder = searchParams.get("sortOrder") || "desc";  // asc | desc
+    const minTrust = searchParams.get("minTrust") ? Number(searchParams.get("minTrust")) : null;
     const limit = Math.min(Number(searchParams.get("limit") || "20"), 100);
     const offset = Number(searchParams.get("offset") || "0");
 
@@ -52,14 +53,14 @@ export async function GET(request: NextRequest) {
       ];
     }
 
-    // Sorting
+    // Sorting — trust requires in-memory post-process (computed via trustScore); DB order is fallback
     let orderBy: any = { reputation: "desc" };
     if (sortBy === "price") {
-      // Price sorting requires JSON extraction — use raw query or sort in memory
-      // For now, sort by reputation as primary, then we'll post-process
       orderBy = { reputation: sortOrder };
     } else if (sortBy === "createdAt") {
       orderBy = { createdAt: sortOrder };
+    } else if (sortBy === "trust") {
+      orderBy = { reputation: sortOrder }; // placeholder — real sort after trust enrichment
     } else {
       orderBy = { reputation: sortOrder };
     }
@@ -126,7 +127,29 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Post-process sorting (reputation already DB-sorted, price needs in-memory)
+    // Enrich filtered with trust scores (computed lazily — only for the filtered set, bounded by fetchTake)
+    // For sortBy=trust we need trust before paging; for minTrust filter we need it before paging too.
+    let trustMap = new Map<number, any>();
+    const needsTrust = sortBy === "trust" || minTrust !== null || true; // always enrich (cheap for small window, required for response)
+    if (needsTrust && filtered.length > 0) {
+      try {
+        const { computeTrustScore } = await import("@/lib/trust/trustScore");
+        const results = await Promise.all(filtered.map(async (a: any) => {
+          try { const t = await computeTrustScore(a.id); return { id: a.id, t }; } catch { return { id: a.id, t: { score: 50, confidence: 10, methodologyVersion: "1.0" } as any }; }
+        }));
+        for (const r of results) trustMap.set(r.id, r.t);
+      } catch {}
+    }
+
+    // Apply minTrust filter (post trust compute, before sort/page)
+    if (minTrust !== null && !Number.isNaN(minTrust)) {
+      filtered = filtered.filter((a: any) => {
+        const t = trustMap.get(a.id);
+        return t ? t.score >= minTrust : false;
+      });
+    }
+
+    // Post-process sorting
     if (sortBy === "price") {
       filtered.sort((a: any, b: any) => {
         const priceA = a.pricing?.pricePerRequest
@@ -143,9 +166,15 @@ export async function GET(request: NextRequest) {
         const db = new Date(b.createdAt).getTime();
         return sortOrder === "asc" ? da - db : db - da;
       });
+    } else if (sortBy === "trust") {
+      filtered.sort((a: any, b: any) => {
+        const ta = trustMap.get(a.id)?.score ?? 50;
+        const tb = trustMap.get(b.id)?.score ?? 50;
+        return sortOrder === "asc" ? ta - tb : tb - ta;
+      });
     }
     // reputation already sorted DB-side, but re-sort in-memory if we filtered
-    else if (skill || category || maxPricePerRequest || minPricePerRequest) {
+    else if (skill || category || maxPricePerRequest || minPricePerRequest || minTrust !== null) {
       filtered.sort((a: any, b: any) => (sortOrder === "asc" ? a.reputation - b.reputation : b.reputation - a.reputation));
     }
 
@@ -153,21 +182,27 @@ export async function GET(request: NextRequest) {
     const hasMore = filtered.length > offset + limit;
     let results = paged;
 
-    // Enrich with AgentCard URLs and minimal reputation info
-    const enriched = results.map((agent: any) => ({
-      id: agent.id,
-      tokenId: agent.tokenId,
-      name: agent.name,
-      description: agent.description,
-      skills: agent.skills ?? [],
-      pricing: agent.pricing ?? {},
-      reputation: agent.reputation ?? 50,
-      status: agent.status,
-      lastActiveAt: agent.lastActiveAt,
-      createdAt: agent.createdAt,
-      cardUrl: `/api/agents/${agent.id}/card`,
-      hireUrl: `/api/agents/${agent.id}/hire`,
-    }));
+    // Enrich with AgentCard URLs and trust info (public-safe)
+    const enriched = results.map((agent: any) => {
+      const t = trustMap.get(agent.id) || null;
+      return {
+        id: agent.id,
+        tokenId: agent.tokenId,
+        name: agent.name,
+        description: agent.description,
+        skills: agent.skills ?? [],
+        pricing: agent.pricing ?? {},
+        reputation: agent.reputation ?? 50,
+        trust: t ? { score: t.score, confidence: t.confidence, methodologyVersion: t.methodologyVersion } : null,
+        trackRecord: t ? { completedJobs: t.signals.completedJobs, validatedJobs: t.signals.validatedJobs, validationPassRate: t.signals.validationPassRate, validatedVolume: t.signals.validatedVolume } : null,
+        status: agent.status,
+        lastActiveAt: agent.lastActiveAt,
+        createdAt: agent.createdAt,
+        cardUrl: `/api/agents/${agent.id}/card`,
+        hireUrl: `/api/agents/${agent.id}/hire`,
+        trackRecordUrl: `/api/agents/${agent.id}/track-record`,
+      };
+    });
 
     return NextResponse.json({
       success: true,
@@ -180,6 +215,7 @@ export async function GET(request: NextRequest) {
       filters: {
         skill,
         minReputation,
+        minTrust,
         maxPricePerRequest,
         minPricePerRequest,
         status,
