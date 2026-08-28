@@ -27,6 +27,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const actor = await verifyCallerControlsAddress(innerReq, clientAddress);
     if (!actor) return NextResponse.json({ error: "You do not control the payer wallet" }, { status: 403 });
     const providerAddress = agent.scaAddress;
+    // Self-hire guard: client === provider is rejected outright (mirrors self-validation guard below).
+    // Rationale: hiring yourself via escrow is a no-op (funds round-trip minus gas/fees) and would
+    // inflate trust if counted. We fail closed at the API boundary rather than silently discounting
+    // later — see trustScore.ts selfHireJobIds exclusion. If a legitimate self-test is needed, use
+    // a distinct test wallet or bypass via direct DB seeding.
+    if (String(clientAddress).toLowerCase() === String(providerAddress).toLowerCase()) {
+      return NextResponse.json({ error: "self-hire not allowed: client and provider cannot be the same address" }, { status: 400 });
+    }
     const evaluator = evaluatorAddress || clientAddress;
     const budgetBigInt = BigInt(Math.round(Number(budget) * 1_000_000));
     if (budgetBigInt <= 0n) return NextResponse.json({ error: "budget must be > 0" }, { status: 400 });

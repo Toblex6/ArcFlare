@@ -308,6 +308,10 @@ async function jobsHandler(request: Request) {
           { status: 400 }
         );
       }
+      // Self-hire guard: same policy as POST /api/agents/[id]/hire — rejected outright, not silently discounted (see trustScore.ts)
+      if (String(clientSCA).toLowerCase() === String(providerSCA).toLowerCase()) {
+        return NextResponse.json({ success: false, error: 'self-hire not allowed: clientSCA and providerSCA cannot be the same address' }, { status: 400 });
+      }
 
       // The job's client wallet pays the escrow — the caller must control it.
       if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {

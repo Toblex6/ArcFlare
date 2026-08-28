@@ -58,27 +58,30 @@ export async function computeTrustScore(agentRegistryId: number): Promise<TrustR
   if (jobIds.length > 0) {
     validations = await (prisma as any).erc8183JobValidation.findMany({ where: { jobId: { in: jobIds } } }).catch(() => []);
   }
-  const completedJobs = jobsAsProvider.filter((j) => j.status === "COMPLETED").length;
-  const failedJobs = jobsAsProvider.filter((j) => j.status === "REJECTED" || j.status === "FAILED").length;
-  const totalJobs = jobsAsProvider.length;
+  // Self-hire exclusion: jobs where clientSCA === providerSCA must not earn trust
+  // (same selfHireJobIds set used for revenue/payment — apply to job/validation performance too)
+  const selfHireJobIds = new Set<string>();
+  for (const j of jobsAsProvider) {
+    if (String(j.clientSCA).toLowerCase() === sca) selfHireJobIds.add(String(j.jobId));
+  }
+  const eligibleJobs = jobsAsProvider.filter((j) => !selfHireJobIds.has(String(j.jobId)));
+  const eligibleValidations = validations.filter((v) => !selfHireJobIds.has(String(v.jobId)));
+  const completedJobs = eligibleJobs.filter((j) => j.status === "COMPLETED").length;
+  const failedJobs = eligibleJobs.filter((j) => j.status === "REJECTED" || j.status === "FAILED").length;
+  const totalJobs = eligibleJobs.length;
 
-  // Validation stats: only count validated jobs (where validation required)
-  const validatedJobs = validations.length;
-  const passedCount = validations.filter((v) => v.status === "PASSED").length;
-  const failedValidation = validations.filter((v) => v.status === "FAILED").length;
+  // Validation stats: only count validated jobs (where validation required) — self-hires excluded
+  const validatedJobs = eligibleValidations.length;
+  const passedCount = eligibleValidations.filter((v) => v.status === "PASSED").length;
+  const failedValidation = eligibleValidations.filter((v) => v.status === "FAILED").length;
   const validationPassRate = validatedJobs > 0 ? passedCount / validatedJobs : null;
-  const uniqueValidators = new Set(validations.map((v) => String(v.validatorSCA || "").toLowerCase()).filter(Boolean)).size;
+  const uniqueValidators = new Set(eligibleValidations.map((v) => String(v.validatorSCA || "").toLowerCase()).filter(Boolean)).size;
 
   // Ledger: provider revenue evidence (anti self-transfer) — count only REVENUE/JOB_ESCROW_RELEASE where counterparty != self
   let ledger: any[] = [];
   try { ledger = await (prisma as any).agentLedgerEntry.findMany({ where: { agentRegistryId } }).catch(() => []); } catch {}
   // Self-hiring / self-transfer exclusion: entries where counterpartyAgentId === agentRegistryId or job client==provider are not positive evidence
   const revenueEntries = ledger.filter((e) => e.type === "REVENUE" && e.direction === "CREDIT");
-  // Exclude self-hires: job where clientSCA == providerSCA (sca match)
-  let selfHireJobIds = new Set<string>();
-  for (const j of jobsAsProvider) {
-    if (String(j.clientSCA).toLowerCase() === sca) selfHireJobIds.add(String(j.jobId));
-  }
   const eligibleRevenue = revenueEntries.filter((e) => !selfHireJobIds.has(String(e.jobId ?? "")));
   // Tiny transaction spam guard: cap count weight, and volume dominates not count
   const validatedVolumeBigint = eligibleRevenue.reduce((acc: bigint, e: any) => acc + BigInt(e.amount || "0"), 0n);
@@ -96,10 +99,10 @@ export async function computeTrustScore(agentRegistryId: number): Promise<TrustR
   // Reputation component normalizes AgentRegistry.reputation (0..100) but discounts if single-validator.
   const dbReputation = typeof agent.reputation === "number" ? agent.reputation : 50;
 
-  // Recency: days since last completed job or ledger entry
+  // Recency: days since last completion — self-hires excluded (same filter as job/validation performance)
   let recentActivityDays: number | null = null;
-  if (jobsAsProvider.length > 0) {
-    const latest = jobsAsProvider.reduce((m: Date, j: any) => j.updatedAt > m ? j.updatedAt : m, jobsAsProvider[0].updatedAt || jobsAsProvider[0].createdAt);
+  if (eligibleJobs.length > 0) {
+    const latest = eligibleJobs.reduce((m: Date, j: any) => j.updatedAt > m ? j.updatedAt : m, eligibleJobs[0].updatedAt || eligibleJobs[0].createdAt);
     recentActivityDays = Math.floor((Date.now() - new Date(latest).getTime()) / (86400000));
   } else if (ledger.length > 0) {
     const latest = ledger.reduce((m: Date, e: any) => new Date(e.createdAt) > m ? new Date(e.createdAt) : m, new Date(ledger[0].createdAt));

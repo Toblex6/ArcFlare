@@ -100,6 +100,13 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "hirer has no Circle wallet — set one or provide hirerCircleWalletId" }, { status: 400 });
   }
 
+  // Self-hire guard: same policy as POST /api/agents/[id]/hire — hiring yourself is rejected
+  // outright rather than silently excluded from trust (see trustScore.ts). Prevents no-op escrow
+  // jobs that would otherwise waste gas and could be used to probe trust boundaries.
+  if (String(clientAddress).toLowerCase() === String(provider.scaAddress).toLowerCase()) {
+    return NextResponse.json({ error: "self-hire not allowed: hirer and provider cannot be the same address" }, { status: 400 });
+  }
+
   // Validation optional
   let validationPolicy: any = null;
   if (validation && validation.required) {
