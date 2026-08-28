@@ -87,6 +87,25 @@ async function refundHandler(request: Request, merchant: AuthedMerchant) {
             data: { status: 'REFUNDED', releaseTxHash: txHash },
         });
 
+        // Build 5 ledger: REFUND for depositor if agent
+        try {
+          const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+          const agentId = await resolveAgentIdBySca(escrow.depositorSCA).catch(() => null);
+          if (agentId) {
+            try {
+              const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
+              await recordLedgerEntry({
+                agentRegistryId: agentId,
+                type: "REFUND",
+                amount: amt,
+                direction: "CREDIT",
+                txHash,
+                description: `escrow refund ${reference}`,
+              });
+            } catch (e: any) { console.error("[ledger] refund failed:", e.message); }
+          }
+        } catch {}
+
         if (escrow.merchantId) {
             try {
                 const { notify } = await import('@/lib/notifications');

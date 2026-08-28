@@ -65,6 +65,8 @@ model AgentRegistry {
   wallets        CircleWallet[]
   ledgerEntries  AgentLedgerEntry[]
   treasuryPolicy AgentTreasuryPolicy?
+  providerPolicy AgentProviderPolicy?
+  procurements   ProcurementPosting[]
 }
 
 model ApiListing {
@@ -602,4 +604,62 @@ model AgentTreasuryPolicy {
   updatedAt                    DateTime @updatedAt
 
   @@map("agent_treasury_policies")
+}
+
+model AgentProviderPolicy {
+  id                  Int      @id @default(autoincrement())
+  agentRegistryId     Int      @unique
+  agent               AgentRegistry @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
+  minBudget           String   @default("0") // 6-dec units bigint string
+  maxConcurrentJobs   Int      @default(5)
+  minClientTrustScore Int?     // null = no minimum
+  allowedSkills       Json?    // string[] or null = any skill
+  allowedCategories   Json?    // string[] or null = any category
+  autoAccept          Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("agent_provider_policies")
+}
+
+model ProcurementPosting {
+  id                   String   @id @default(cuid())
+  clientAgentId        Int
+  clientAgent          AgentRegistry @relation(fields: [clientAgentId], references: [id], onDelete: Cascade)
+  clientSCA            String
+  title                String?
+  description          String
+  requirements         Json?    // string[] requirements
+  budgetMax            String   // 6-dec bigint string
+  budgetMin            String?  // optional 6-dec
+  skill                String?
+  category             String?
+  status               String   @default("OPEN") // OPEN | SELECTED | HIRED | CLOSED | CANCELLED
+  selectedProviderId   Int?
+  selectedProviderSCA  String?
+  resultingJobId       BigInt?
+  merchantId           String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  applications         ProcurementApplication[]
+
+  @@index([clientAgentId])
+  @@index([status])
+  @@map("procurement_postings")
+}
+
+model ProcurementApplication {
+  id                String   @id @default(cuid())
+  procurementId     String
+  procurement       ProcurementPosting @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  applicantAgentId  Int?
+  applicantAddress  String
+  pitch             String
+  proposedAmount    String?  // 6-dec bigint string
+  portfolioLinks    String[] @default([])
+  createdAt         DateTime @default(now())
+
+  @@unique([procurementId, applicantAddress])
+  @@index([procurementId])
+  @@map("procurement_applications")
 }

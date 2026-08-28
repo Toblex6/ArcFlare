@@ -244,6 +244,44 @@ async function runPayrollHandler(request: NextRequest) {
       },
     });
 
+    // Build 5 ledger: PAYROLL_SPEND for each successful recipient (awaited, idempotent)
+    // Only if payer maps to an AgentRegistry (agent treasury payroll). Merchant payroll without agent mapping is not ledger-tracked.
+    try {
+      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const payerAgentId = await resolveAgentIdBySca(payerSCA).catch(() => null);
+      if (payerAgentId) {
+        for (const r of results) {
+          if (r.status !== "SUCCESS" || !r.txHash) continue;
+          const amt = BigInt(Math.round(parseFloat(String(r.amount)) * 1_000_000));
+          const recipientAgentId = await resolveAgentIdBySca(r.recipientSCA).catch(() => null);
+          try {
+            await recordLedgerEntry({
+              agentRegistryId: payerAgentId,
+              type: "PAYROLL_SPEND",
+              amount: amt,
+              direction: "DEBIT",
+              counterpartyAgentId: recipientAgentId ?? null,
+              txHash: r.txHash,
+              description: r.label ? `payroll: ${r.label}` : `payroll to ${r.recipientSCA}`,
+            });
+          } catch (e: any) { console.error("[ledger] payroll spend failed:", e.message); }
+          if (recipientAgentId) {
+            try {
+              await recordLedgerEntry({
+                agentRegistryId: recipientAgentId,
+                type: "REVENUE",
+                amount: amt,
+                direction: "CREDIT",
+                counterpartyAgentId: payerAgentId,
+                txHash: r.txHash,
+                description: `payroll revenue from ${payerSCA}`,
+              });
+            } catch {}
+          }
+        }
+      }
+    } catch (e: any) { console.error("[ledger] payroll instrumentation error:", e.message); }
+
     if (webhookUrl && finalStatus !== 'AWAITING_SIGNATURES') {
       fetch(webhookUrl, {
         method: 'POST',

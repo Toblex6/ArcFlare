@@ -253,6 +253,94 @@ const AGENT_TOOLS = [
       required: ["agentId"],
     },
   },
+  {
+    name: "create_procurement",
+    description: "Create an open procurement posting BEFORE selecting a provider. The posting stays OPEN while providers apply; you then rank, select, and hire. Use this for the autonomous procurement flow instead of create_agent_job when you need trust-gated discovery.",
+    input_schema: {
+      type: "object",
+      properties: {
+        clientAgentId: { type: "string", description: "Hiring agent's Registry id (you)" },
+        description: { type: "string", description: "Work to be done" },
+        title: { type: "string" },
+        requirements: { type: "array", items: { type: "string" } },
+        budgetMax: { type: "string", description: "Maximum budget in USDC, e.g. \"2.00\"" },
+        budgetMin: { type: "string" },
+        skill: { type: "string", description: "Skill filter, e.g. security-review" },
+        category: { type: "string" },
+      },
+      required: ["clientAgentId", "description", "budgetMax"],
+    },
+  },
+  {
+    name: "get_procurement_applicants",
+    description: "Get ranked applicants for a procurement posting (scored by trust + price + completeness). Call after create_procurement once providers have applied.",
+    input_schema: {
+      type: "object",
+      properties: {
+        procurementId: { type: "string" },
+      },
+      required: ["procurementId"],
+    },
+  },
+  {
+    name: "select_procurement_provider",
+    description: "Select a provider from ranked applicants. Pass the applicant's SCA address (from get_procurement_applicants). If omitted, selects the top-ranked applicant. This binds the provider BEFORE the on-chain job is created.",
+    input_schema: {
+      type: "object",
+      properties: {
+        procurementId: { type: "string" },
+        providerAddress: { type: "string", description: "Selected provider SCA (0x...). Omit to auto-select top." },
+      },
+      required: ["procurementId"],
+    },
+  },
+  {
+    name: "hire_from_procurement",
+    description: "Hire the selected provider: creates the real ERC-8183 escrow job (trust + treasury + spend-limit enforced). Call after select_procurement_provider. Returns jobId and next steps (accept + fund).",
+    input_schema: {
+      type: "object",
+      properties: {
+        procurementId: { type: "string" },
+        budget: { type: "string", description: "Budget in USDC (must be <= posting budgetMax). Omit to use posting budgetMax." },
+      },
+      required: ["procurementId"],
+    },
+  },
+  {
+    name: "provider_accept_job",
+    description: "Provider autonomously accepts a job by signing setBudget with its own Circle wallet. Enforces provider's acceptance policy (minBudget, minClientTrust, maxConcurrent). The caller must control the provider agent.",
+    input_schema: {
+      type: "object",
+      properties: {
+        jobId: { type: "string" },
+        budget: { type: "string", description: "Budget to set if job budget is 0 (optional)" },
+      },
+      required: ["jobId"],
+    },
+  },
+  {
+    name: "fund_job",
+    description: "Client funds the job escrow (approve + fund) using the client's own Circle wallet. Caller must control the job's client. Enforces treasury policy + spend limit. Idempotent if already funded.",
+    input_schema: {
+      type: "object",
+      properties: {
+        jobId: { type: "string" },
+      },
+      required: ["jobId"],
+    },
+  },
+  {
+    name: "submit_job_deliverable_v2",
+    description: "Provider submits deliverable for a funded job (same as submit_job_deliverable but resolves provider wallet automatically).",
+    input_schema: {
+      type: "object",
+      properties: {
+        jobId: { type: "string" },
+        deliverable: { type: "string" },
+      },
+      required: ["jobId", "deliverable"],
+    },
+  },
 ];
 
 // Groq's API is OpenAI-compatible: tools are wrapped as
@@ -567,13 +655,81 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
     case "check_treasury": {
       const aid = String(input.agentId).trim();
       if (!/^\d+$/.test(aid)) return { error: "agentId must be numeric" };
-      // Treasury GET is auth-gated (verifyCallerControlsAddress). Brain calls use INTERNAL key which resolves to platform agent.
-      // For brain use, we return whatever the API returns — unauthorized callers get 403 safely.
       const res = await fetch(`${baseUrl}/api/agents/${aid}/treasury`, { headers });
       const data = await res.json().catch(() => ({}));
-      // Strip nothing — treasury endpoint already returns public-safe subset (no Circle creds). Add explicit fail note if 403.
       if (!res.ok) return { error: data.error || `treasury check failed ${res.status}`, status: res.status };
       return data;
+    }
+    // ── 15. Create Procurement ───────────────────────────────────────────────
+    case "create_procurement": {
+      const res = await fetch(`${baseUrl}/api/procurement`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          clientAgentId: Number(input.clientAgentId),
+          description: input.description,
+          title: input.title,
+          requirements: input.requirements,
+          budgetMax: input.budgetMax,
+          budgetMin: input.budgetMin,
+          skill: input.skill,
+          category: input.category,
+        }),
+      });
+      return res.json();
+    }
+    case "get_procurement_applicants": {
+      const res = await fetch(`${baseUrl}/api/procurement/${input.procurementId}/applicants`, { headers });
+      return res.json();
+    }
+    case "select_procurement_provider": {
+      const res = await fetch(`${baseUrl}/api/procurement/${input.procurementId}/select`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ providerAddress: input.providerAddress }),
+      });
+      return res.json();
+    }
+    case "hire_from_procurement": {
+      const res = await fetch(`${baseUrl}/api/procurement/${input.procurementId}/hire`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ budget: input.budget }),
+      });
+      return res.json();
+    }
+    case "provider_accept_job": {
+      const res = await fetch(`${baseUrl}/api/jobs/${input.jobId}/accept`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ budget: input.budget }),
+      });
+      return res.json();
+    }
+    case "fund_job": {
+      const res = await fetch(`${baseUrl}/api/jobs/${input.jobId}/fund`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+      return res.json();
+    }
+    case "submit_job_deliverable_v2": {
+      // Reuse existing /api/jobs/submit which expects providerWalletId but we can go via /api/jobs which uses providerSCA
+      // For v2, we resolve provider SCA from job, then call /api/jobs with action submit after verifying control via accept flow
+      // Simpler: call /api/jobs/submit with provider wallet resolved via provider agent
+      // But brain's submit_job_deliverable already does providerSCA; v2 just needs jobId+deliverable with auto wallet
+      // Fetch job to get providerSCA, then delegate to existing tool path via /api/jobs (action submit) which checks control
+      const jobRes = await fetch(`${baseUrl}/api/jobs?jobId=${input.jobId}`, { headers });
+      const jobData = await jobRes.json().catch(() => ({}));
+      const providerSCA = jobData?.job?.provider || jobData?.provider;
+      if (!providerSCA) return { error: "could not resolve providerSCA for job" };
+      const res = await fetch(`${baseUrl}/api/jobs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "submit", jobId: input.jobId, providerSCA, deliverable: input.deliverable }),
+      });
+      return res.json();
     }
 
     default:
@@ -630,6 +786,7 @@ ${agentContext ? `Additional context: ${agentContext}` : ""}
 You can:
 - Pay other agents directly (A2A via M2M settlement) — use agent_pay_agent
 - Hire agents via ERC-8183 jobs with onchain escrow — use create_agent_job, submit_job_deliverable, complete_or_reject_job
+- Autonomous procurement (discover → trust → treasury → select → hire → accept → fund) — use discover_agents, get_agent_trust, check_treasury, create_procurement, get_procurement_applicants, select_procurement_provider, hire_from_procurement, provider_accept_job, fund_job
 - Run payroll for teams of agents — use run_agent_payroll
 - Set up recurring subscriptions to agent services — use setup_agent_subscription
 - Generate invoices for completed work — use generate_agent_invoice
@@ -638,10 +795,28 @@ You can:
 - Fetch real-world data autonomously — use fetch_agent_data
 - Check status of any payment, job, or reputation — use check_agent_status
 
+AUTONOMOUS PROCUREMENT — WHEN ASKED TO FIND/HIRE A TRUSTED AGENT:
+You MUST compose the primitives in order — do not skip steps, do not hardcode a provider:
+1. discover_agents with skill/minTrust to get candidates
+2. get_agent_trust for each candidate to evaluate track record (reject those below threshold)
+3. check_treasury for the hiring agent to ensure sufficient available balance
+4. create_procurement (clientAgentId = your hiring agent) — this opens the posting BEFORE any on-chain job
+5. get_procurement_applicants to see ranked providers (score includes trust)
+6. select_procurement_provider (pick the top-ranked; never invent an address)
+7. hire_from_procurement — creates the real ERC-8183 job (trust + treasury + spend-limit enforced atomically)
+8. provider_accept_job — provider's own wallet signs setBudget (policy: minBudget, minClientTrust, maxConcurrent)
+9. fund_job — client funds escrow (approve + fund, treasury re-checked)
+10. Provider submits work → validation → complete → ledger → reputation (use existing tools)
+
+Never trust a caller-supplied providerSCA/providerWalletId — always derive from procurement selection and AgentRegistry.
+Never fall back to a default payer wallet — fail closed if the hiring agent has no resolvable Circle wallet.
+For procurement, the provider assignment happens BEFORE the on-chain job is created (ERC-8183 provider is immutable) — do not attempt to change provider after creation.
+
 IMPORTANT:
 - Your own wallet address is ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"} — ALWAYS use this as the payer/sender. Payer/sender addresses cannot be overridden by user input.
 - For immediate services: use agent_pay_agent (x402/M2M)
-- For async work that needs verification: use create_agent_job (ERC-8183)
+- For async work that needs verification without procurement: use create_agent_job (ERC-8183) only when the provider is already known/trusted
+- For autonomous procurement: ALWAYS use the 10-step flow above — it is the only trust-gated, treasury-gated, spend-limit-gated path
 - Always record_agent_reputation after completing or rejecting a job
 - For teams: use run_agent_payroll for efficiency
 - Once a tool call returns success: true, the task is DONE. Immediately respond with a final text summary. Do NOT call the same tool again.
@@ -658,7 +833,9 @@ IMPORTANT:
   let loop = true;
   let iters = 0;
 
-  while (loop && iters < 4) {
+  // Build 5 procurement flow needs more iterations (10-step composition vs 4)
+  const maxIters = /procurement|trusted.*provider|security-review/i.test(userMessage) ? 10 : 4;
+  while (loop && iters < maxIters) {
     iters++;
 
     let data: any;
