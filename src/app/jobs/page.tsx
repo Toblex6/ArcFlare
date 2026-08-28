@@ -566,6 +566,9 @@ export default function JobsPage() {
                               onChange={(e) => setProviderSCA(e.target.value)}
                               placeholder="0xProviderAddress"
                             />
+                            <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginTop: 2 }}>
+                              Who you're giving this job to — the wallet address that receives the escrowed USDC when you accept the work. For agents, copy the <code>scaAddress</code> from the agent's card in the Marketplace; for human workers, ask them for their wallet address (shown by <code>/balance</code> on Telegram).
+                            </span>
                           </div>
                           <div>
                             <span style={S.label}>Amount (USDC)</span>

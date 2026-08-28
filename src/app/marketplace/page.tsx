@@ -158,6 +158,79 @@ const styles = {
         borderRadius: 20,
         padding: "3px 10px",
     } as React.CSSProperties,
+    // Agent Card modal — centered popup, mobile friendly
+    modalBackdrop: {
+        position: "fixed" as const,
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+        padding: 16,
+    } as React.CSSProperties,
+    modalCard: {
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 16,
+        width: "100%",
+        maxWidth: 460,
+        maxHeight: "80vh",
+        display: "flex",
+        flexDirection: "column" as const,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.3)",
+    } as React.CSSProperties,
+    modalHeader: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "14px 16px",
+        borderBottom: "1px solid var(--border)",
+        flexShrink: 0,
+    } as React.CSSProperties,
+    modalBody: {
+        padding: 16,
+        overflowY: "auto" as const,
+        fontSize: 12,
+        display: "flex",
+        flexDirection: "column" as const,
+        gap: 10,
+    } as React.CSSProperties,
+    modalRow: {
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        alignItems: "baseline" as const,
+    } as React.CSSProperties,
+    modalLabel: {
+        fontSize: 10,
+        color: "var(--text-secondary)",
+        textTransform: "uppercase" as const,
+        letterSpacing: 1,
+        flexShrink: 0,
+    } as React.CSSProperties,
+    modalValue: {
+        margin: 0,
+        textAlign: "right" as const,
+        wordBreak: "break-all" as const,
+    } as React.CSSProperties,
+    modalClose: {
+        background: "transparent",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        width: 30,
+        height: 30,
+        fontSize: 15,
+        lineHeight: 1,
+        cursor: "pointer",
+        color: "var(--text-secondary)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        padding: 0,
+    } as React.CSSProperties,
+    mono: { fontFamily: "monospace", fontSize: 11 } as React.CSSProperties,
 };
 
 const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -241,6 +314,13 @@ export default function MarketplacePage() {
     const [agentSort, setAgentSort] = useState("trust");
     const [agentSearch, setAgentSearch] = useState("");
     const [agentDetail, setAgentDetail] = useState<any | null>(null);
+    const [agentDetailLoading, setAgentDetailLoading] = useState(false);
+    useEffect(() => {
+        if (!agentDetail) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAgentDetail(null); };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [agentDetail]);
 
     // ── Fetch discovery listings ──
     const fetchListings = useCallback(async () => {
@@ -633,24 +713,77 @@ export default function MarketplacePage() {
                                             <span style={{ fontFamily: "monospace", fontSize: 10 }}>{a.scaAddress?.slice(0, 10)}...</span>
                                         </div>
                                         <div style={{ display: "flex", gap: 8 }}>
-                                            <button style={{ ...btnStyle(false), flex: 1, padding: "8px 12px" }} onClick={async () => {
-                                                try { const r = await fetch(a.cardUrl); const j = await r.json(); setAgentDetail(j.agentCard || j); } catch {}
-                                            }}>View Card</button>
+                                            <button style={{ ...btnStyle(false), flex: 1, padding: "8px 12px" }} disabled={agentDetailLoading} onClick={async () => {
+                                                setAgentDetailLoading(true);
+                                                try { const r = await fetch(a.cardUrl); const j = await r.json(); setAgentDetail(j.agentCard || j); } catch {} finally { setAgentDetailLoading(false); }
+                                            }}>{agentDetailLoading ? "…" : "View Card"}</button>
                                             <a href={a.trackRecordUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle(false), flex: 1, padding: "8px 12px", textAlign: "center" as const, textDecoration: "none" as const, display: "block" as const }}>Track Record</a>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
-                        {agentDetail && (
-                            <div style={{ ...styles.card, marginTop: 16 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <h3 style={{ margin: 0, fontSize: 14 }}>Agent Card — {agentDetail.name || agentDetail.agentId}</h3>
-                                    <button style={btnStyle(false)} onClick={() => setAgentDetail(null)}>Close</button>
+                        {agentDetail && (() => {
+                            const d = agentDetail;
+                            const trust = d.trust || {};
+                            const tr = d.trackRecord || {};
+                            const row = (label: string, value: React.ReactNode) => (
+                                <div key={label} style={styles.modalRow}>
+                                    <span style={styles.modalLabel}>{label}</span>
+                                    <span style={styles.modalValue}>{value}</span>
                                 </div>
-                                <pre style={{ fontSize: 11, background: "var(--surface-secondary)", padding: 12, borderRadius: 10, overflow: "auto" as const, maxHeight: 400 }}>{JSON.stringify(agentDetail, null, 2)}</pre>
-                            </div>
-                        )}
+                            );
+                            return (
+                                <div style={styles.modalBackdrop} onClick={() => setAgentDetail(null)}>
+                                    <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+                                        <div style={styles.modalHeader}>
+                                            <h3 style={{ margin: 0, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                                                {d.name || `Agent ${d.agentId}`}
+                                            </h3>
+                                            <button style={styles.modalClose} aria-label="Close agent card" onClick={() => setAgentDetail(null)}>✕</button>
+                                        </div>
+                                        <div style={styles.modalBody}>
+                                            {d.description && <p style={{ margin: 0, color: "var(--text-secondary)" }}>{String(d.description).slice(0, 200)}</p>}
+                                            {d.status && <span style={badgeStyle("PUBLISHED")}>{String(d.status)}</span>}
+                                            {trust.score !== undefined && (
+                                                <div style={{ ...styles.modalRow, background: "var(--surface-secondary)", borderRadius: 10, padding: 10 }}>
+                                                    <span style={styles.modalLabel}>Trust</span>
+                                                    <span style={{ margin: 0, fontWeight: 700 }}>{trust.score}/100 <span style={{ fontWeight: 400, color: "var(--text-secondary)", fontSize: 11 }}>(conf {trust.confidence})</span></span>
+                                                </div>
+                                            )}
+                                            {Array.isArray(trust.breakdown) === false && trust.breakdown && Object.keys(trust.breakdown).length > 0 && (
+                                                <div>
+                                                    {Object.entries(trust.breakdown).map(([k, v]) => (
+                                                        <div key={k} style={{ ...styles.modalRow, fontSize: 11, color: "var(--text-secondary)" }}>
+                                                            <span>{k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}</span>
+                                                            <span>{String(v)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {(tr.completedJobs !== undefined) && (
+                                                <div>
+                                                    {row("Track record", `${tr.completedJobs ?? 0} completed · ${tr.validatedJobs ?? 0} validated${tr.validationPassRate !== null && tr.validationPassRate !== undefined ? ` · ${Math.round(tr.validationPassRate * 100)}% pass` : ""}`)}
+                                                    {row("Volume", `${Number(tr.validatedVolumeUSDC ?? 0).toFixed(2)} USDC · ${tr.totalJobs ?? 0} total · ${tr.failedJobs ?? 0} failed`)}
+                                                </div>
+                                            )}
+                                            {d.wallet?.scaAddress && row("Wallet (SCA)", <span style={styles.mono}>{String(d.wallet.scaAddress)}</span>)}
+                                            {d.identity?.registryAddress && row("Registry", <span style={styles.mono}>{String(d.identity.registryAddress)}</span>)}
+                                            {d.identity?.tokenId && row("Token ID", d.identity.tokenId)}
+                                            {d.supportedChains && row("Chains", d.supportedChains.join(", "))}
+                                            {d.supportedTokens && row("Tokens", d.supportedTokens.join(", "))}
+                                            {d.hiring?.hireEndpoint && row("Hire", <span style={styles.mono}>{String(d.hiring.hireEndpoint)}</span>)}
+                                            {d.endpoints?.card && row("Card", <span style={styles.mono}>{String(d.endpoints.card)}</span>)}
+                                            {d.validation?.registryAddress && row("Validation", <span style={styles.mono}>{String(d.validation.registryAddress)}</span>)}
+                                            <details style={{ marginTop: 4 }}>
+                                                <summary style={{ cursor: "pointer", fontSize: 11, color: "var(--text-secondary)" }}>Raw JSON</summary>
+                                                <pre style={{ fontSize: 10, background: "var(--surface-secondary)", padding: 10, borderRadius: 8, overflow: "auto" as const, maxHeight: 200 }}>{JSON.stringify(d, null, 2)}</pre>
+                                            </details>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </>
                 )}
 
