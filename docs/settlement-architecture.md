@@ -131,7 +131,11 @@ marked with a prominent "DEAD CODE — STALE SHAPE" header:
 No live code calls the old shape. Live callers all use
 `withGateway(handler, price, endpoint)`.
 
-## 6. Signer/key inventory (fail-closed)
+## 6. Telegram read model (history / notifications)
+
+`/history` and the `jobs/complete` Telegram notification read `Erc8183Job` (status `COMPLETED`, `providerSCA == worker wallet`, `budget` as 6-dec BigInt), not `PaymentLog` or `AgentLedgerEntry`. Human Telegram workers have no `AgentRegistry` row, so their earnings are not in `AgentLedgerEntry`; the job budget is the authoritative amount. `PaymentLog` remains source of truth for whether money moved; `/history` is a read projection over the job mirror.
+
+## 7. Signer/key inventory (fail-closed)
 
 `src/lib/env/walletEnvCheck.ts` (runs at server start via
 `src/instrumentation.ts`) enforces: signer address vars must have a matching

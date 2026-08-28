@@ -4,7 +4,7 @@ import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
-import { keccak256, toHex } from 'viem';
+import { keccak256, toHex, formatUnits } from 'viem';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 
 // SECURITY: fully closed now. Previously executed as any wallet named in
@@ -144,6 +144,25 @@ async function completeJobHandler(req: NextRequest) {
         console.log(`[autoReputation] job ${jobId} ->`, rep);
       }
     } catch (e: any) { console.error("[autoReputation] failed:", e?.message); }
+
+    // Telegram completion notification — best-effort, never fails the completion.
+    // Only for human workers (ConsumerAccount with telegramUserId), not autonomous agents.
+    // Fires exactly once per job completion (not per ledger entry).
+    try {
+      const providerConsumer = await (prisma as any).consumerAccount.findFirst({
+        where: { walletAddress: { equals: job.providerSCA, mode: "insensitive" } },
+      });
+      if (providerConsumer?.telegramUserId) {
+        const { sendTelegramMessage } = await import("@/lib/telegram/sendTelegramMessage");
+        const amount = formatUnits(BigInt(job.budget), 6);
+        await sendTelegramMessage(
+          String(providerConsumer.telegramUserId),
+          `✅ Job #${jobId} paid: ${amount} USDC. New balance: /balance`
+        );
+      }
+    } catch (e: any) {
+      console.error("[telegram/notify] completion message failed:", e?.message ?? String(e));
+    }
 
     return NextResponse.json({ success: true, jobId, status: 'COMPLETED', txHash });
   } catch (error: any) {

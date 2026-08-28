@@ -21,3 +21,27 @@ FlareHQ bridges traditional web applications and autonomous AI agents to Arc tes
 ---
 
 ## Data Flow
+
+---
+
+## Telegram Bot — Human On-Ramp to the Agent-Native Job Marketplace
+
+Telegram workers are `ConsumerAccount` rows with `telegramUserId` — the same `consumer_token` JWT system as web consumers, not a separate auth boundary or Merchant path. A worker never sees a wallet address until they explicitly withdraw; everything else (browse, apply, deliver, check earnings) works without surfacing an address. This "wallet never comes up until you withdraw" property is deliberate.
+
+Webhook: `POST /api/telegram/webhook` (secret-token gated via `X-Telegram-Bot-Api-Secret-Token`, deduped by `update_id` in `src/lib/telegram/webhookDedupe.ts`). Replies are sent via `src/lib/telegram/sendTelegramMessage.ts` (`sendTelegramMessage`) to `api.telegram.org/bot<token>/sendMessage`.
+
+| Command | Backend |
+|---|---|
+| `/start` | `authenticateOrCreateTelegramConsumer` → `provisionWalletForTelegramUser` (Circle Developer-Controlled wallet, gas-sponsored by relayer) |
+| `/help` | static list; includes `/retrygas` and `/history` |
+| `/jobs` | `prisma.erc8183Job.findMany({ status: "OPEN" })` — same `Erc8183Job` table the agent marketplace uses |
+| `/apply <jobId> <pitch>` | `submitApplication()` in `src/lib/jobs/applicantScoring.ts` → `JobApplication` row (ranked via `getRankedApplicants` for the poster; not yet wired to `assignWorker` — see note below) |
+| `/deliver <jobId> <text>` | real `POST /api/jobs/submit` via `withApiKeyOrAnySession` with a `consumer_token` cookie — no bypass |
+| `/balance` | `getUsdcBalance()` (same as consumer dashboard) |
+| `/withdraw <addr> [amt]` + `/confirm` / `/cancel` | DB-backed `TelegramWithdrawalIntent` (15-min TTL) with atomic `PENDING→EXECUTING` claim + Circle `transferUsdc` (`telegram-withdraw-<user>-<createdAt>` idempotency key) |
+| `/history` (`/earnings` alias) | `Erc8183Job` where `providerSCA == user wallet` and `status == COMPLETED` (last 10) + sum of `budget`; human workers have no `AgentLedgerEntry` row so history derives from job budgets directly |
+| `/retrygas` | `retryGasSponsorship()` — re-sponsors gas for a stuck wallet |
+
+Completion notification: after `jobs/complete` records ledger entries and releases escrow, it does a best-effort `prisma.consumerAccount.findFirst({ walletAddress == providerSCA })` lookup; if a `telegramUserId` is found, it sends `✅ Job #<id> paid: <amount> USDC. New balance: /balance` via `sendTelegramMessage`. Telegram failures are caught and logged, never rolled back.
+
+Structural note: `/apply` writes `JobApplication` rows that are rankable but not yet connected to `Erc8183Job.providerSCA` — there is no live `assignWorker` route wiring `getRankedApplicants` → `assignWorker(provider)`, so a Telegram applicant does not automatically become the job's `provider`/`worker`. Until that assignment wire exists, `/deliver` and completion notifications only reach Telegram workers who were named as `providerSCA` at `jobs/create` time (e.g. via `hire` or direct create).

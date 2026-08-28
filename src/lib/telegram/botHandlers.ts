@@ -336,7 +336,9 @@ export async function handleHelp(): Promise<BotReply> {
       `/balance — check your balance\n` +
       `/withdraw <address> [amount] — withdraw funds to your own wallet\n` +
       `/confirm — execute a pending withdrawal\n` +
-      `/cancel — cancel a pending withdrawal`,
+      `/cancel — cancel a pending withdrawal\n` +
+      `/history — recent completed jobs and lifetime earnings\n` +
+      `/retrygas — retry a stuck gas sponsorship`,
   };
 }
 
@@ -346,5 +348,37 @@ export async function handleGasRetry(telegramUserId: string): Promise<BotReply> 
     return { text: `Gas sponsorship retried successfully.` };
   } catch (err) {
     return { text: `Couldn't retry gas sponsorship: ${(err as Error).message}` };
+  }
+}
+
+export async function handleHistory(telegramUserId: string): Promise<BotReply> {
+  const session = await getTelegramConsumerSession(telegramUserId);
+  if (!session) {
+    return { text: `You need to /start first.` };
+  }
+  try {
+    const jobs = await prisma.erc8183Job.findMany({
+      where: { providerSCA: { equals: session.walletAddress, mode: "insensitive" as any }, status: "COMPLETED" },
+      take: 10,
+      orderBy: { updatedAt: "desc" },
+    } as any);
+    if (jobs.length === 0) {
+      return { text: `No completed jobs yet. Apply with /apply and deliver with /deliver to get started.` };
+    }
+    let total = 0n;
+    for (const j of jobs as any[]) {
+      try { total += BigInt(j.budget); } catch {}
+    }
+    const lines = (jobs as any[]).map((j) => {
+      const amt = formatUnits(BigInt(j.budget), 6);
+      const desc = (j.description || "").slice(0, 40);
+      return `• Job #${j.jobId.toString()} — ${amt} USDC — ${desc}`;
+    });
+    const totalStr = formatUnits(total, 6);
+    return {
+      text: `Recent completions (${jobs.length}):\n${lines.join("\n")}\n\nLifetime earnings (recent 10): ${totalStr} USDC`,
+    };
+  } catch (err) {
+    return { text: `Couldn't fetch history: ${(err as Error).message}` };
   }
 }

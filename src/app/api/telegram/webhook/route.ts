@@ -28,6 +28,7 @@ import {
   handleCancelWithdraw,
   handleHelp,
   handleGasRetry,
+  handleHistory,
   type BotReply,
 } from '@/lib/telegram/botHandlers';
 import { trackUpdate } from '@/lib/telegram/webhookDedupe';
@@ -167,6 +168,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         break;
       case '/retrygas':
         reply = await handleGasRetry(telegramUserId);
+        break;
+      case '/history':
+      case '/earnings':
+        reply = await handleHistory(telegramUserId);
         break;
       default:
         reply = { text: `Unknown command. Type /help to see what's available.` };
