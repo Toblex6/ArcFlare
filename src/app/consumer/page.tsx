@@ -19,12 +19,12 @@ interface ActionResult {
 }
 
 const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
-  { id: "home", label: "Home", icon: "○" },
-  { id: "send", label: "Send", icon: "→" },
-  { id: "save", label: "Save", icon: "◷" },
-  { id: "request", label: "Request", icon: "←" },
-  { id: "crosschain", label: "Bridge to Arc", icon: "↕" },
-  { id: "payroll-chat", label: "Payroll Chat", icon: "💬" },
+  { id: "home", label: "Home", icon: "🏠" },
+  { id: "send", label: "Send", icon: "💸" },
+  { id: "save", label: "Save", icon: "🐷" },
+  { id: "request", label: "Request", icon: "📥" },
+  { id: "crosschain", label: "Bridge", icon: "🌉" },
+  { id: "payroll-chat", label: "Payroll", icon: "💬" },
 ];
 
 interface ChainOption {
@@ -39,6 +39,7 @@ export default function ConsumerApp() {
   const [view, setView] = useState<View>("home");
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
+  const [walletType, setWalletType] = useState<string | null>(null);
   const [justCreatedWallet, setJustCreatedWallet] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
@@ -71,6 +72,12 @@ export default function ConsumerApp() {
   const [crossResult, setCrossResult] = useState<ActionResult | null>(null);
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [chainBalance, setChainBalance] = useState<string | null>(null);
+  const [chainBalanceLoading, setChainBalanceLoading] = useState(false);
+  const [chainBalanceError, setChainBalanceError] = useState<string | null>(null);
+  const [chainBalanceTick, setChainBalanceTick] = useState(0);
+  const [bridgeNeedsFlareWallet, setBridgeNeedsFlareWallet] = useState(false);
+  const [creatingFlareWallet, setCreatingFlareWallet] = useState(false);
   const [activity, setActivity] = useState<any[]>([]);
 
   const refreshBalance = () => {
@@ -96,6 +103,45 @@ export default function ConsumerApp() {
       .catch(console.error);
   }, [walletAddress]);
 
+  // ── Refresh the home balance whenever the user comes back to Home ──
+  useEffect(() => {
+    if (view === "home" && walletAddress) refreshBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, walletAddress]);
+
+  // ── Source-chain balance for the bridge view (per selected chain) ──
+  useEffect(() => {
+    if (view !== "crosschain" || !fromChain || !walletAddress) return;
+    let cancelled = false;
+    setChainBalanceLoading(true);
+    setChainBalanceError(null);
+    fetch(`/api/cctp/transfer/balance?fromChain=${encodeURIComponent(fromChain)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.success) setChainBalance(data.balance);
+        else if (data.code === "EXTERNAL_WALLET") {
+          setBridgeNeedsFlareWallet(true);
+          setChainBalance(null);
+          setChainBalanceError(null);
+        } else {
+          setChainBalance(null);
+          setChainBalanceError(data.error || "Could not load balance for this chain.");
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setChainBalance(null);
+        setChainBalanceError("Could not load balance for this chain.");
+      })
+      .finally(() => {
+        if (!cancelled) setChainBalanceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, fromChain, walletAddress, chainBalanceTick]);
+
   // ── Check for existing session ──
   useEffect(() => {
     fetch("/api/consumer/session")
@@ -103,6 +149,7 @@ export default function ConsumerApp() {
       .then((data) => {
         if (data.success && data.account?.walletAddress) {
           setWalletAddress(data.account.walletAddress);
+          setWalletType(data.account.walletType ?? null);
           setView("home");
         } else {
           setView("onboarding");
@@ -164,6 +211,7 @@ export default function ConsumerApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
       setWalletAddress(data.account.walletAddress);
+      setWalletType(data.account.walletType ?? null);
       setView("home");
     } catch (e: any) {
       const message =
@@ -186,6 +234,7 @@ export default function ConsumerApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not create a wallet right now.");
       setWalletAddress(data.account.walletAddress);
+      setWalletType(data.account.walletType ?? "CIRCLE");
       setJustCreatedWallet(true);
       setView("home");
     } catch (e: any) {
@@ -195,11 +244,40 @@ export default function ConsumerApp() {
     }
   };
 
+  // ── Bridge upgrade flow: give an external-wallet user a FlareHQ wallet ──
+  // POST {} provisions a brand-new Circle-managed wallet and reissues the
+  // session against it. The user's connected wallet still works for sending/
+  // requesting; the FlareHQ wallet is what the bridge can actually move
+  // funds from (Circle signs on it).
+  const createFlareHQWallet = async () => {
+    setCreatingFlareWallet(true);
+    setCrossResult(null);
+    try {
+      const res = await fetch("/api/consumer/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not create a FlareHQ wallet right now.");
+      setWalletAddress(data.account.walletAddress);
+      setWalletType(data.account.walletType ?? "CIRCLE");
+      setBridgeNeedsFlareWallet(false);
+      setJustCreatedWallet(true);
+    } catch (e: any) {
+      setCrossResult({ success: false, error: e.message });
+    } finally {
+      setCreatingFlareWallet(false);
+    }
+  };
+
   const disconnectWallet = async () => {
     try {
       await fetch("/api/consumer/session", { method: "DELETE" });
     } catch { }
     setWalletAddress("");
+    setWalletType(null);
+    setBridgeNeedsFlareWallet(false);
     setView("onboarding");
   };
 
@@ -307,7 +385,10 @@ export default function ConsumerApp() {
         }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Transfer failed.");
+      if (!data.success) {
+        if (data.code === "EXTERNAL_WALLET") setBridgeNeedsFlareWallet(true);
+        throw new Error(data.error || "Transfer failed.");
+      }
 
       // The whole bridge (burn -> attestation -> mint) runs in the
       // background from here — poll instead of waiting on one open
@@ -331,6 +412,7 @@ export default function ConsumerApp() {
             message: `Bridged ${crossAmount} USDC from ${fromChain} to Arc!`,
             explorerUrl: statusData.destinationExplorerUrl,
           });
+          setChainBalanceTick((t) => t + 1);
           return;
         }
         if (statusData.state === "error") {
@@ -531,27 +613,27 @@ export default function ConsumerApp() {
 
             <section style={styles.actionsGrid} className="flow-actions-grid">
               <button style={styles.actionCard} onClick={() => goTo("send")}>
-                <span style={styles.actionIcon}>→</span>
+                <span style={styles.actionIconBadge}><span style={styles.actionIcon}>💸</span></span>
                 <span style={styles.actionLabel}>Send money</span>
                 <span style={styles.actionSub}>Pay anyone instantly</span>
               </button>
               <button style={styles.actionCard} onClick={() => goTo("save")}>
-                <span style={styles.actionIcon}>◷</span>
+                <span style={styles.actionIconBadge}><span style={styles.actionIcon}>🐷</span></span>
                 <span style={styles.actionLabel}>Save automatically</span>
                 <span style={styles.actionSub}>Set money aside on a schedule</span>
               </button>
               <button style={styles.actionCard} onClick={() => goTo("request")}>
-                <span style={styles.actionIcon}>←</span>
+                <span style={styles.actionIconBadge}><span style={styles.actionIcon}>📥</span></span>
                 <span style={styles.actionLabel}>Request payment</span>
                 <span style={styles.actionSub}>Get a link to share</span>
               </button>
               <button style={styles.actionCard} onClick={() => goTo("crosschain")}>
-                <span style={styles.actionIcon}>↕</span>
+                <span style={styles.actionIconBadge}><span style={styles.actionIcon}>🌉</span></span>
                 <span style={styles.actionLabel}>Bridge to Arc</span>
                 <span style={styles.actionSub}>Move USDC into Arc</span>
               </button>
               <button style={styles.actionCard} onClick={() => goTo("payroll-chat")}>
-                <span style={styles.actionIcon}>💬</span>
+                <span style={styles.actionIconBadge}><span style={styles.actionIcon}>💬</span></span>
                 <span style={styles.actionLabel}>Payroll Chat</span>
                 <span style={styles.actionSub}>Manage payroll with natural language</span>
               </button>
@@ -686,21 +768,72 @@ export default function ConsumerApp() {
               <span style={styles.flowDot} />
             </div>
 
+            {(walletType === "EXTERNAL" || bridgeNeedsFlareWallet) && !crossResult ? (
+              <div style={styles.flareWalletCard}>
+                <p style={styles.flareWalletIcon}>👛</p>
+                <p style={styles.flareWalletTitle}>Bridging needs a FlareHQ wallet</p>
+                <p style={styles.flareWalletText}>
+                  You connected your own wallet — great for holding funds, but FlareHQ
+                  can't sign bridge transactions from it. Create a free FlareHQ-managed
+                  wallet and you can bridge USDC from any supported chain in one tap.
+                  Your connected wallet keeps working everywhere else.
+                </p>
+                <button
+                  style={styles.submitButton}
+                  disabled={creatingFlareWallet}
+                  onClick={createFlareHQWallet}
+                >
+                  {creatingFlareWallet ? "Creating your wallet..." : "Create a FlareHQ wallet"}
+                </button>
+              </div>
+            ) : (
+              <>
             {!crossResult && (
               <div style={styles.form}>
                 <div style={styles.field}>
                   <label style={styles.label}>Source Chain</label>
-                  <select
-                    value={fromChain}
-                    onChange={(e) => setFromChain(e.target.value)}
-                    style={styles.input}
-                  >
-                    {chains.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label} {c.testnet ? "(testnet)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <div style={styles.selectWrap}>
+                    <select
+                      value={fromChain}
+                      onChange={(e) => {
+                        setCrossAmount("");
+                        setFromChain(e.target.value);
+                      }}
+                      style={styles.select}
+                      aria-label="Select the chain to bridge from"
+                    >
+                      {chains.length === 0 && <option value="">Loading chains…</option>}
+                      {chains.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label} {c.testnet ? "(testnet)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <span style={styles.selectChevron} aria-hidden="true">▾</span>
+                  </div>
+                  <div style={styles.chainBalanceRow}>
+                    {chainBalanceLoading ? (
+                      <span style={styles.chainBalanceText}>Checking balance…</span>
+                    ) : chainBalanceError ? (
+                      <>
+                        <span style={styles.chainBalanceErrorText}>{chainBalanceError}</span>
+                        <button style={styles.chainBalanceRetry} onClick={() => setChainBalanceTick((t) => t + 1)}>Retry</button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={styles.chainBalanceText}>
+                          Available: <strong>{chainBalance !== null ? `${parseFloat(chainBalance).toFixed(2)} USDC` : "—"}</strong>
+                        </span>
+                        <button
+                          style={styles.maxButton}
+                          disabled={!chainBalance || parseFloat(chainBalance) <= 0}
+                          onClick={() => setCrossAmount(String(parseFloat(chainBalance!)))}
+                        >
+                          Max
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div style={styles.field}>
                   <label style={styles.label}>Destination Chain</label>
@@ -729,10 +862,22 @@ export default function ConsumerApp() {
                 </div>
                 <button
                   style={styles.submitButton}
-                  disabled={crossLoading || !crossAmount || !fromChain}
+                  disabled={
+                    crossLoading ||
+                    !crossAmount ||
+                    !fromChain ||
+                    chains.length === 0 ||
+                    (chainBalance !== null && parseFloat(crossAmount) > parseFloat(chainBalance))
+                  }
                   onClick={handleCrossChain}
                 >
-                  {crossLoading ? "Processing..." : "Bridge to Arc"}
+                  {crossLoading
+                    ? "Processing..."
+                    : chains.length === 0
+                      ? "Loading chains..."
+                      : chainBalance !== null && parseFloat(crossAmount || "0") > parseFloat(chainBalance)
+                        ? "Amount exceeds available balance"
+                        : "Bridge to Arc"}
                 </button>
               </div>
             )}
@@ -749,6 +894,8 @@ export default function ConsumerApp() {
                 <button style={styles.doneButton} onClick={() => goTo("home")}>Done</button>
               </div>
             )}
+              </>
+            )}
           </section>
         )}
       </div>
@@ -761,7 +908,7 @@ export default function ConsumerApp() {
             style={view === item.id ? styles.navItemActive : styles.navItem}
             onClick={() => goTo(item.id)}
           >
-            <span style={styles.navIcon}>{item.icon}</span>
+            <span style={view === item.id ? styles.navItemActiveIcon : styles.navIcon}>{item.icon}</span>
             <span style={styles.navLabel}>{item.label}</span>
           </button>
         ))}
@@ -933,7 +1080,18 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     transition: "all 0.15s",
   },
-  actionIcon: { fontSize: "clamp(18px, 2vw, 20px)", color: "#E8714A", marginBottom: 6, fontFamily: "'Fraunces', serif" },
+  actionIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    background: "rgba(232, 113, 74, 0.14)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+    flexShrink: 0,
+  },
+  actionIcon: { fontSize: "clamp(20px, 2.2vw, 24px)", lineHeight: 1 },
   actionLabel: { fontSize: "clamp(16px, 1.8vw, 18px)", fontWeight: 600 },
   actionSub: { fontSize: "clamp(12px, 1.2vw, 14px)", color: "var(--flow-text-faint)" },
   footnote: { textAlign: "center", fontSize: "clamp(10px, 1vw, 12px)", color: "var(--flow-text-faint)", margin: "8px 0" },
@@ -978,6 +1136,79 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#FFFFFF",
     fontSize: "clamp(12px, 1.2vw, 14px)",
     fontWeight: 600,
+    cursor: "pointer",
+  },
+  flareWalletCard: {
+    textAlign: "center" as const,
+    background: "var(--flow-surface)",
+    border: "1px solid var(--flow-border)",
+    borderRadius: 18,
+    padding: "28px 22px",
+  },
+  flareWalletIcon: { fontSize: 40, margin: "0 0 10px", lineHeight: 1 },
+  flareWalletTitle: {
+    fontFamily: "'Fraunces', serif",
+    fontSize: "clamp(18px, 2vw, 21px)",
+    fontWeight: 600,
+    margin: "0 0 10px",
+  },
+  flareWalletText: {
+    fontSize: "clamp(13px, 1.2vw, 15px)",
+    lineHeight: 1.55,
+    color: "var(--flow-text-muted)",
+    margin: "0 0 18px",
+  },
+  selectWrap: { position: "relative", width: "100%" },
+  select: {
+    padding: "12px 40px 12px 14px",
+    borderRadius: 12,
+    border: "1px solid var(--flow-border)",
+    background: "var(--flow-surface)",
+    fontSize: "clamp(14px, 1.5vw, 16px)",
+    color: "var(--flow-text)",
+    outline: "none",
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+    width: "100%",
+    appearance: "none" as const,
+    WebkitAppearance: "none" as const,
+    cursor: "pointer",
+  },
+  selectChevron: {
+    position: "absolute",
+    right: 14,
+    top: "50%",
+    transform: "translateY(-50%)",
+    fontSize: 14,
+    color: "var(--flow-text-muted)",
+    pointerEvents: "none" as const,
+  },
+  chainBalanceRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 4,
+  },
+  chainBalanceText: { fontSize: "clamp(12px, 1.1vw, 13px)", color: "var(--flow-text-muted)" },
+  chainBalanceErrorText: { fontSize: "clamp(12px, 1.1vw, 13px)", color: "#C0563A" },
+  chainBalanceRetry: {
+    background: "none",
+    border: "none",
+    color: "#E8714A",
+    fontSize: "clamp(12px, 1.1vw, 13px)",
+    fontWeight: 600,
+    cursor: "pointer",
+    padding: 0,
+  },
+  maxButton: {
+    background: "var(--flow-surface-2)",
+    border: "1px solid var(--flow-border)",
+    borderRadius: 8,
+    fontSize: "clamp(11px, 1vw, 12px)",
+    fontWeight: 700,
+    color: "var(--flow-text)",
+    padding: "4px 10px",
     cursor: "pointer",
   },
   submitButton: {
@@ -1124,6 +1355,19 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--flow-text)",
     padding: "4px 8px",
   },
-  navIcon: { fontSize: "clamp(14px, 1.5vw, 16px)", fontFamily: "'Fraunces', serif" },
+  navIcon: {
+    fontSize: "clamp(18px, 1.8vw, 21px)",
+    lineHeight: 1.2,
+    padding: "2px 10px",
+    borderRadius: 12,
+    background: "transparent",
+  },
+  navItemActiveIcon: {
+    fontSize: "clamp(18px, 1.8vw, 21px)",
+    lineHeight: 1.2,
+    padding: "2px 10px",
+    borderRadius: 12,
+    background: "rgba(92, 122, 92, 0.16)",
+  },
   navLabel: { fontSize: "clamp(9px, 0.8vw, 11px)", fontWeight: 600 },
 };

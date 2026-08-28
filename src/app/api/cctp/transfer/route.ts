@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
+          code: 'EXTERNAL_WALLET',
           error: "Bridging currently requires a FlareHQ-created wallet — external (bring-your-own) wallets can't be bridged from automatically.",
         },
         { status: 400 }

@@ -42,15 +42,21 @@ function buildChallengeMessage(domain: string, address: string, nonce: string): 
   ].join('\n');
 }
 
-async function issueSession(account: { id: string; walletAddress: string }) {
+async function issueSession(account: { id: string; walletAddress: string; walletType?: string | null }) {
   const token = await issueConsumerSessionToken(account.id, account.walletAddress);
 
-  const response = NextResponse.json({
+  const res = NextResponse.json({
     success: true,
-    account: { id: account.id, walletAddress: account.walletAddress },
+    account: {
+      id: account.id,
+      walletAddress: account.walletAddress,
+      // EXTERNAL (bring-your-own) vs CIRCLE (FlareHQ-managed) — the UI uses
+      // this to gate features that need a FlareHQ wallet (e.g. bridging).
+      walletType: account.walletType ?? null,
+    },
   });
 
-  response.cookies.set('consumer_token', token, {
+  res.cookies.set('consumer_token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
@@ -58,7 +64,7 @@ async function issueSession(account: { id: string; walletAddress: string }) {
     path: '/',
   });
 
-  return response;
+  return res;
 }
 
 // GET /api/consumer/session
@@ -108,11 +114,15 @@ export async function GET(req: NextRequest) {
     }
 
     const { payload } = await jwtVerify(token, JWT_SECRET);
+    const acct = await prisma.consumerAccount.findUnique({
+      where: { id: payload.consumerId as string },
+    });
     return NextResponse.json({
       success: true,
       account: {
         id: payload.consumerId as string,
         walletAddress: payload.walletAddress as string,
+        walletType: acct?.walletType ?? null,
       },
     });
   } catch {
