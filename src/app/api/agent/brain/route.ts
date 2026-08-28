@@ -28,7 +28,7 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "https://flarehq.xyz";
 const INTERNAL_API_KEY = process.env.INTERNAL_SETTLEMENT_API_KEY!;
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
 // ERC-8004 registries
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
@@ -850,7 +850,7 @@ IMPORTANT:
         },
         body: JSON.stringify({
           model: GROQ_MODEL,
-          max_tokens: 512,
+          max_tokens: 2048,
           temperature: 0.1,
           messages,
           tools: GROQ_TOOLS,

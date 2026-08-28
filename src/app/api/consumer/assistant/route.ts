@@ -14,7 +14,7 @@ import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { internalUrl } from '@/src/lib/internalUrl';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 
 interface ParsedAction {
   action: 'send' | 'request' | 'save' | 'balance' | 'unclear';
@@ -62,7 +62,7 @@ Rules:
     },
     body: JSON.stringify({
       model: GROQ_MODEL,
-      max_tokens: 400,
+      max_tokens: 2048,
       temperature: 0.1,
       response_format: { type: 'json_object' },
       messages: [

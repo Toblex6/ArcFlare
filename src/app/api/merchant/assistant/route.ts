@@ -11,7 +11,7 @@ import { tryJwtSecret } from "@/src/lib/auth/secrets";
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
 async function getMerchantFromCookie(req: NextRequest) {
     const token = req.cookies.get("merchant_token")?.value;
@@ -226,7 +226,7 @@ IMPORTANT:
                 headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
                 body: JSON.stringify({
                     model: GROQ_MODEL,
-                    max_tokens: 512,
+                    max_tokens: 2048,
                     temperature: 0.1,
                     messages,
                     tools: GROQ_TOOLS,
