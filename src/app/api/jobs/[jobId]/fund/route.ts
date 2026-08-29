@@ -2,6 +2,11 @@
 // Resolves client wallet from AgentRegistry.circleWalletId — never trusts caller-supplied walletId.
 // Verifies caller controls job.clientSCA, treasury policy, spend limit, then approve+fund.
 // Idempotent: if job status already FUNDED, replays.
+//
+// Spend-limit (Build 5 repair): the check and the authoritative on-chain
+// record (checkAndRecordSpend) are applied to the ACTUAL payer — the Circle
+// SCA that signs approve/fund — not to some unrelated x402 EOA. Enforcement
+// runs BEFORE any on-chain funding is attempted and never swallows errors.
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -10,7 +15,7 @@ import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAd
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
 import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT } from "@/lib/contracts/erc8183";
 import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
-import { checkSpendAllowed } from "@/lib/agents/spendLimitEnforcer";
+import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimitEnforcer";
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await ctx.params;
@@ -47,22 +52,37 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
     return NextResponse.json({ error: "client Circle wallet does not match job clientSCA" }, { status: 403 });
   }
 
+  // The actual payer for the approve/fund transactions IS clientWalletAddress
+  // (the Circle SCA derived above). All spend-limit enforcement binds to it.
+  const payer = clientWalletAddress;
+
   // Policy checks — re-evaluate at fund time (treasury may have changed since hire)
   const policyCheck = await evaluatePolicyForSpend({ agentRegistryId: clientAgent.id, amount: BigInt(job.budget), kind: "subcontractor" });
   if (!policyCheck.allowed) return NextResponse.json({ error: `Treasury policy blocked: ${policyCheck.reason}` }, { status: 403 });
 
+  // ── Spend-limit enforcement on the ACTUAL payer ──────────────────────────────
+  // 1. Pre-flight view: a clean, fast 403 if the cap would be exceeded — no
+  //    funding attempted at all.
+  const spendCheck = await checkSpendAllowed({ agentAddress: payer, amount: BigInt(job.budget) });
+  if (!spendCheck.allowed) return NextResponse.json({ error: `Spend limit blocked: ${spendCheck.reason}` }, { status: 403 });
+
+  // 2. Authoritative on-chain record (relayer-signed checkAndRecordSpend)
+  //    BEFORE any funding transaction. This is the hard enforcement write and
+  //    the source of "spend counter actually records the spend". It reverts if
+  //    a concurrent spend pushed the payer over cap. Errors are NOT swallowed:
+  //    a failure here means no funds move and the request fails closed.
   try {
-    const w = await prisma.x402EoaWallet.findUnique({ where: { agentRegistryId: clientAgent.id } }).catch(() => null);
-    const checkAddr = w?.address ?? clientWalletAddress;
-    const spendCheck = await checkSpendAllowed({ agentAddress: checkAddr, amount: BigInt(job.budget) });
-    if (!spendCheck.allowed) return NextResponse.json({ error: `Spend limit blocked: ${spendCheck.reason}` }, { status: 403 });
-  } catch {}
+    const spendTx = await getSpendLimitContract().checkAndRecordSpend(payer, BigInt(job.budget));
+    await spendTx.wait();
+  } catch (spendLimitError: any) {
+    return NextResponse.json({ error: `Spend limit enforcement failed: ${spendLimitError?.message ?? spendLimitError}` }, { status: 500 });
+  }
 
   // Approve USDC (idempotent approve — contract overwrites) then fund
   let approveTx: string;
   try {
     approveTx = await createContractTransaction(
-      clientWalletAddress,
+      payer,
       USDC_CONTRACT,
       'approve(address,uint256)',
       [AGENTIC_COMMERCE_CONTRACT, job.budget.toString()],
@@ -75,7 +95,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   let fundTx: string;
   try {
     fundTx = await createContractTransaction(
-      clientWalletAddress,
+      payer,
       AGENTIC_COMMERCE_CONTRACT,
       'fund(uint256,bytes)',
       [jobId, '0x'],
@@ -90,28 +110,27 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
     data: { status: "FUNDED", txHashes: { push: [approveTx, fundTx] } },
   });
 
-  // Ledger: escrow lock for client if agent — awaited
+  // Ledger: escrow lock for client if agent — awaited (non-fatal on failure)
   try {
     const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
     const clientAgentId = await resolveAgentIdBySca(job.clientSCA).catch(() => null);
     if (clientAgentId) {
-      try {
-        await recordLedgerEntry({
-          agentRegistryId: clientAgentId,
-          type: "JOB_ESCROW_LOCK",
-          amount: BigInt(job.budget),
-          direction: "DEBIT",
-          jobId: jobIdBig,
-          txHash: fundTx,
-          description: `escrow lock for job ${jobId}`,
-        });
-      } catch (e: any) { console.error("[ledger] fund lock failed:", e.message); }
+      await recordLedgerEntry({
+        agentRegistryId: clientAgentId,
+        type: "JOB_ESCROW_LOCK",
+        amount: BigInt(job.budget),
+        direction: "DEBIT",
+        jobId: jobIdBig,
+        txHash: fundTx,
+        description: `escrow lock for job ${jobId}`,
+      });
     }
-  } catch {}
+  } catch (e: any) { console.error("[ledger] fund lock failed:", e.message); }
 
-  return NextResponse.json({ success: true, jobId, status: "FUNDED", approveTx, fundTx });
+  return NextResponse.json({ success: true, jobId, status: "FUNDED", approveTx, fundTx, payer });
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {
-  return withApiKeyOrAnySession(handler as any)(req);
+  // Forward the route context into the wrapped handler (see accept route).
+  return withApiKeyOrAnySession((inner: NextRequest) => handler(inner, ctx))(req);
 }

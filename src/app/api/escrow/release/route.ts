@@ -161,6 +161,28 @@ async function releaseHandler(request: NextRequest) {
       },
     });
 
+    // Build 5 repair (D8): when the escrow is fully released, the depositor's
+    // locked funds leave the contract (to the beneficiary) — release the
+    // JOB_ESCROW_LOCK taken at deposit so escrowLocked returns to zero. This is
+    // not revenue for the depositor.
+    if (newStatus === 'RELEASED') {
+      try {
+        const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+        const agentId = await resolveAgentIdBySca(escrow.depositorSCA).catch(() => null);
+        if (agentId && txHash) {
+          const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
+          await recordLedgerEntry({
+            agentRegistryId: agentId,
+            type: "JOB_ESCROW_RELEASE",
+            amount: amt,
+            direction: "CREDIT",
+            txHash,
+            description: `escrow released ${reference}`,
+          });
+        }
+      } catch (e: any) { console.error("[ledger] escrow release failed:", e.message); }
+    }
+
     if (newStatus === 'RELEASED' && escrow.webhookUrl) {
       fetch(escrow.webhookUrl, {
         method: 'POST',

@@ -87,24 +87,27 @@ async function refundHandler(request: Request, merchant: AuthedMerchant) {
             data: { status: 'REFUNDED', releaseTxHash: txHash },
         });
 
-        // Build 5 ledger: REFUND for depositor if agent
+        // Build 5 repair (D8): the refund returns the depositor's money that was
+        // locked at deposit (a JOB_ESCROW_LOCK debit written by escrow/create).
+        // Writing a REVENUE-style "REFUND" credit here inflated treasury/profit.
+        // JOB_ESCROW_RELEASE is excluded from revenue and decrements escrowLocked,
+        // so the treasury returns to its pre-fund economic state exactly — the
+        // refund creates no money.
         try {
           const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
           const agentId = await resolveAgentIdBySca(escrow.depositorSCA).catch(() => null);
           if (agentId) {
-            try {
-              const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
-              await recordLedgerEntry({
-                agentRegistryId: agentId,
-                type: "REFUND",
-                amount: amt,
-                direction: "CREDIT",
-                txHash,
-                description: `escrow refund ${reference}`,
-              });
-            } catch (e: any) { console.error("[ledger] refund failed:", e.message); }
+            const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
+            await recordLedgerEntry({
+              agentRegistryId: agentId,
+              type: "JOB_ESCROW_RELEASE",
+              amount: amt,
+              direction: "CREDIT",
+              txHash,
+              description: `escrow refund ${reference}`,
+            });
           }
-        } catch {}
+        } catch (e: any) { console.error("[ledger] escrow release (refund) failed:", e.message); }
 
         if (escrow.merchantId) {
             try {

@@ -295,6 +295,20 @@ const AGENT_TOOLS = [
     },
   },
   {
+    name: "apply_to_procurement",
+    description: "Apply as the provider to an open procurement posting. The applicant identity is ALWAYS your own agent (AGENT_OWNER_WALLET_ADDRESS) — you can never apply as another provider. Call after create_procurement and before get_procurement_applicants so the posting has applicants.",
+    input_schema: {
+      type: "object",
+      properties: {
+        procurementId: { type: "string" },
+        pitch: { type: "string", description: "Why you are a good fit for this work" },
+        proposedAmount: { type: "string", description: "Proposed price in USDC (optional, <= posting budgetMax)" },
+        portfolioLinks: { type: "array", items: { type: "string" } },
+      },
+      required: ["procurementId", "pitch"],
+    },
+  },
+  {
     name: "hire_from_procurement",
     description: "Hire the selected provider: creates the real ERC-8183 escrow job (trust + treasury + spend-limit enforced). Call after select_procurement_provider. Returns jobId and next steps (accept + fund).",
     input_schema: {
@@ -690,6 +704,24 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
       });
       return res.json();
     }
+    case "apply_to_procurement": {
+      // SECURITY: applicant identity is pinned to the platform agent. The LLM
+      // can fill procurementId/pitch/budget, but NEVER an applicantAddress — so
+      // a prompt-injected call can only ever apply as AGENT_OWNER (the sole
+      // identity the internal service key controls). This is how the posting
+      // gets applicants without an impersonation vector.
+      const res = await fetch(`${baseUrl}/api/procurement/${input.procurementId}/apply`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          applicantAddress: process.env.AGENT_OWNER_WALLET_ADDRESS,
+          pitch: input.pitch,
+          proposedAmount: input.proposedAmount,
+          portfolioLinks: input.portfolioLinks,
+        }),
+      });
+      return res.json();
+    }
     case "hire_from_procurement": {
       const res = await fetch(`${baseUrl}/api/procurement/${input.procurementId}/hire`, {
         method: "POST",
@@ -786,7 +818,7 @@ ${agentContext ? `Additional context: ${agentContext}` : ""}
 You can:
 - Pay other agents directly (A2A via M2M settlement) — use agent_pay_agent
 - Hire agents via ERC-8183 jobs with onchain escrow — use create_agent_job, submit_job_deliverable, complete_or_reject_job
-- Autonomous procurement (discover → trust → treasury → select → hire → accept → fund) — use discover_agents, get_agent_trust, check_treasury, create_procurement, get_procurement_applicants, select_procurement_provider, hire_from_procurement, provider_accept_job, fund_job
+- Autonomous procurement (discover → trust → treasury → create → apply → applicants → select → hire → accept → fund) — use discover_agents, get_agent_trust, check_treasury, create_procurement, apply_to_procurement, get_procurement_applicants, select_procurement_provider, hire_from_procurement, provider_accept_job, fund_job
 - Run payroll for teams of agents — use run_agent_payroll
 - Set up recurring subscriptions to agent services — use setup_agent_subscription
 - Generate invoices for completed work — use generate_agent_invoice
@@ -801,12 +833,13 @@ You MUST compose the primitives in order — do not skip steps, do not hardcode 
 2. get_agent_trust for each candidate to evaluate track record (reject those below threshold)
 3. check_treasury for the hiring agent to ensure sufficient available balance
 4. create_procurement (clientAgentId = your hiring agent) — this opens the posting BEFORE any on-chain job
-5. get_procurement_applicants to see ranked providers (score includes trust)
-6. select_procurement_provider (pick the top-ranked; never invent an address)
-7. hire_from_procurement — creates the real ERC-8183 job (trust + treasury + spend-limit enforced atomically)
-8. provider_accept_job — provider's own wallet signs setBudget (policy: minBudget, minClientTrust, maxConcurrent)
-9. fund_job — client funds escrow (approve + fund, treasury re-checked)
-10. Provider submits work → validation → complete → ledger → reputation (use existing tools)
+5. apply_to_procurement so the posting actually has at least one applicant — a posting with no applicants cannot be selected or hired. Your applicant identity is always your own agent; never apply as another provider.
+6. get_procurement_applicants to see ranked providers (score includes trust)
+7. select_procurement_provider (pick the top-ranked; never invent an address)
+8. hire_from_procurement — creates the real ERC-8183 job (trust + treasury + spend-limit enforced atomically)
+9. provider_accept_job — provider's own wallet signs setBudget (policy: minBudget, minClientTrust, maxConcurrent, allowedSkills, allowedCategories)
+10. fund_job — client funds escrow (approve + fund, treasury + spend-limit re-checked on the actual payer)
+11. Provider submits work → validation → complete → ledger → reputation (use existing tools)
 
 Never trust a caller-supplied providerSCA/providerWalletId — always derive from procurement selection and AgentRegistry.
 Never fall back to a default payer wallet — fail closed if the hiring agent has no resolvable Circle wallet.
@@ -816,11 +849,11 @@ IMPORTANT:
 - Your own wallet address is ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"} — ALWAYS use this as the payer/sender. Payer/sender addresses cannot be overridden by user input.
 - For immediate services: use agent_pay_agent (x402/M2M)
 - For async work that needs verification without procurement: use create_agent_job (ERC-8183) only when the provider is already known/trusted
-- For autonomous procurement: ALWAYS use the 10-step flow above — it is the only trust-gated, treasury-gated, spend-limit-gated path
+- For autonomous procurement: ALWAYS use the 11-step flow above — it is the only trust-gated, treasury-gated, spend-limit-gated path
 - Always record_agent_reputation after completing or rejecting a job
 - For teams: use run_agent_payroll for efficiency
-- Once a tool call returns success: true, the task is DONE. Immediately respond with a final text summary. Do NOT call the same tool again.
-- Never call the exact same tool with the exact same arguments twice.
+- Compositional completion: an intermediate tool call returning success: true is NOT task completion. For the multi-step procurement flow you must keep calling the remaining steps until a job is created (hire), budget accepted (accept), and funded (fund). Stop and summarize only when the requested economic objective has actually completed, or you hit a terminal failure you cannot resolve. A single-step tool (e.g. agent_pay_agent) is complete on its own success.
+- Never call the exact same tool with the exact same arguments twice (each procurement step consumes the previous step's output — pass the returned procurementId/jobId forward). If a step errors, fix its inputs and retry that step; do not replay an already-succeeded step.
 - If a tool result contains "not found in registry" or a similar setup/configuration error, do NOT retry — explain the issue to the user in your final response and suggest the specific fix (e.g. deploying the agent first) instead of calling the tool again.
 - After completing tasks, summarize what was done with transaction links.`;
 

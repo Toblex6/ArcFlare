@@ -1,5 +1,11 @@
 // POST /api/procurement/[id]/select — select a provider from applicants (poster-only)
 // Body: { providerAddress } — must be one of the applicants; if omitted, selects top-ranked
+//
+// Atomicity (Build 5 repair): the OPEN→SELECTED transition is a conditional
+// updateMany matched on `status` still OPEN, so concurrent selects cannot both
+// win (the loser gets count0 and a 409). Trust is fail-closed: a trust
+// computation error REJECTS the selection instead of proceeding.
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
@@ -10,14 +16,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const posting = await (prisma as any).procurementPosting.findUnique({ where: { id } });
   if (!posting) return NextResponse.json({ error: "posting not found" }, { status: 404 });
+  if (posting.status === "SELECTED") {
+    return NextResponse.json({ error: "posting already selected", status: "SELECTED", selectedProviderSCA: posting.selectedProviderSCA }, { status: 409 });
+  }
   if (posting.status !== "OPEN") return NextResponse.json({ error: `posting is ${posting.status}, not OPEN` }, { status: 400 });
 
   const actorCheck = await verifyCallerControlsAddress(req, posting.clientSCA);
-  let merchantOwning = false;
   if (!actorCheck) {
     const merchant = await resolveMerchant(req).catch(() => null);
-    if (merchant && posting.merchantId === merchant.id) merchantOwning = true;
-    else return NextResponse.json({ error: "Only the posting owner can select a provider." }, { status: 403 });
+    const owns = merchant && posting.merchantId === merchant.id;
+    if (!owns) return NextResponse.json({ error: "Only the posting owner can select a provider." }, { status: 403 });
   }
 
   const body = await req.json().catch(() => ({}));
@@ -27,7 +35,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (ranked.length === 0) return NextResponse.json({ error: "no applicants to select from" }, { status: 400 });
 
   if (!providerAddress) {
-    // auto-select top
     providerAddress = ranked[0].applicantAddress.toLowerCase();
   } else {
     if (!/^0x[a-fA-F0-9]{40}$/.test(providerAddress)) return NextResponse.json({ error: "invalid providerAddress" }, { status: 400 });
@@ -35,12 +42,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!isApplicant) return NextResponse.json({ error: "providerAddress is not an applicant for this posting" }, { status: 400 });
   }
 
-  // Verify not self-hire at selection time (clientSCA == provider)
   if (providerAddress.toLowerCase() === posting.clientSCA.toLowerCase()) {
     return NextResponse.json({ error: "self-hire not allowed: client and provider cannot be the same address" }, { status: 400 });
   }
 
-  // Optional trust gate: if client has treasury policy minTrustScore, enforce now (early fail before on-chain)
+  // Optional trust gate (client treasury policy minTrustScore) — FAIL-CLOSED.
   try {
     const clientAgent = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: posting.clientSCA, mode: "insensitive" } }, select: { id: true } });
     if (clientAgent) {
@@ -53,15 +59,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (t.score < policy.minTrustScore) {
             return NextResponse.json({ error: `Trust requirement not met: provider trust ${t.score} < required ${policy.minTrustScore}`, code: "TRUST_REQUIREMENT_NOT_MET", providerTrust: t, required: policy.minTrustScore }, { status: 403 });
           }
-        } else {
-          // no registry row — neutral trust 50? use 20 reputation default? For safety, if provider has no registry, trust is 50 (neutral 10 confidence per trustScore)
-          // But we treat unknown as 50 per trustScore no-history; if required >50, reject.
-          if (50 < policy.minTrustScore) return NextResponse.json({ error: `provider has no trust history (neutral 50) < required ${policy.minTrustScore}` }, { status: 403 });
+        } else if (50 < policy.minTrustScore) {
+          return NextResponse.json({ error: `provider has no trust history (neutral 50) < required ${policy.minTrustScore}` }, { status: 403 });
         }
       }
     }
   } catch (e: any) {
-    // if trust compute fails, fail closed? For now allow selection to proceed if compute fails — hire will re-check.
+    return NextResponse.json({ error: `Trust evaluation failed — selection rejected: ${e?.message ?? e}`, code: "TRUST_COMPUTATION_FAILED" }, { status: 503 });
   }
 
   // Resolve provider agent id
@@ -71,10 +75,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (pa) providerId = pa.id;
   } catch {}
 
-  const updated = await (prisma as any).procurementPosting.update({
-    where: { id },
+  // ── Atomic conditional claim: OPEN → SELECTED ────────────────────────────────
+  const updated = await (prisma as any).procurementPosting.updateMany({
+    where: { id, status: "OPEN" },
     data: { status: "SELECTED", selectedProviderId: providerId, selectedProviderSCA: providerAddress },
   });
+  if (updated.count !== 1) {
+    const fresh = await (prisma as any).procurementPosting.findUnique({ where: { id } });
+    return NextResponse.json({ error: "concurrent selection won", status: fresh?.status, selectedProviderSCA: fresh?.selectedProviderSCA ?? null }, { status: 409 });
+  }
 
-  return NextResponse.json({ success: true, posting: updated, selectedProvider: { address: providerAddress, agentId: providerId } });
+  const finalPosting = await (prisma as any).procurementPosting.findUnique({ where: { id } });
+  return NextResponse.json({ success: true, posting: finalPosting, selectedProvider: { address: providerAddress, agentId: providerId } });
 }

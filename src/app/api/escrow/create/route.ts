@@ -177,7 +177,26 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       },
     });
 
-    // ── Step 4: Fire webhook ─────────────────────────────────────────────────
+    // ── Step 4: Ledger — deposit locks the depositor's funds (Build 5 repair D8).
+    // This is the match of the refund's JOB_ESCROW_RELEASE: the amount leaves the
+    // treasury (as escrowLocked) now, and a refund returns exactly that — never
+    // counted as revenue.
+    try {
+      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const agentId = await resolveAgentIdBySca(depositorSCA).catch(() => null);
+      if (agentId) {
+        await recordLedgerEntry({
+          agentRegistryId: agentId,
+          type: "JOB_ESCROW_LOCK",
+          amount: amountWei,
+          direction: "DEBIT",
+          txHash,
+          description: `escrow deposit ${reference}`,
+        });
+      }
+    } catch (e: any) { console.error("[ledger] escrow lock failed:", e.message); }
+
+    // ── Step 5: Fire webhook ─────────────────────────────────────────────────
     if (webhookUrl) {
       fetch(webhookUrl, {
         method: 'POST',

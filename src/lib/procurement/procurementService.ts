@@ -106,23 +106,35 @@ export async function evaluateProviderAcceptance(params: {
   clientSCA: string;
   skill?: string | null;
   category?: string | null;
+  excludeJobId?: bigint | null;
 }): Promise<{ allowed: boolean; reason: string }> {
   const policy: any = await (prisma as any).agentProviderPolicy.findUnique({ where: { agentRegistryId: params.providerAgentId } }).catch(() => null);
   if (!policy) return { allowed: true, reason: "no policy — default accept" };
   if (!policy.autoAccept) return { allowed: false, reason: "provider autoAccept is false — manual acceptance required" };
   const minBudget = BigInt(policy.minBudget ?? "0");
   if (params.jobBudget < minBudget) return { allowed: false, reason: `budget ${params.jobBudget} < provider minBudget ${minBudget}` };
-  // max concurrent
+  // max concurrent — fail closed: if we cannot count active jobs, reject.
   try {
     const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: params.providerAgentId }, select: { scaAddress: true } });
     if (agent?.scaAddress) {
       const activeCount = await (prisma as any).erc8183Job.count({
-        where: { providerSCA: { equals: agent.scaAddress, mode: "insensitive" }, status: { in: ["OPEN", "FUNDED", "SUBMITTED"] } },
-      }).catch(() => 0);
+        where: {
+          providerSCA: { equals: agent.scaAddress, mode: "insensitive" },
+          status: { in: ["OPEN", "FUNDED", "SUBMITTED"] },
+          // The job being accepted (this one) must not count against the
+          // provider's own cap — it is OPEN precisely because it's awaiting
+          // this very acceptance.
+          NOT: params.excludeJobId ? { jobId: params.excludeJobId } : undefined,
+        },
+      });
       if (activeCount >= policy.maxConcurrentJobs) return { allowed: false, reason: `provider at maxConcurrentJobs ${policy.maxConcurrentJobs} (active ${activeCount})` };
+    } else {
+      return { allowed: false, reason: "provider agent has no SCA — cannot verify maxConcurrentJobs" };
     }
-  } catch {}
-  if (policy.minClientTrustScore !== null && policy.minClientTrustScore !== undefined) {
+  } catch (e: any) {
+    return { allowed: false, reason: `maxConcurrentJobs check failed: ${e.message}` };
+  }
+  if (policy.minClientTrustScore !== null && policy.minClientTrustScore !== undefined && Number.isFinite(policy.minClientTrustScore)) {
     // resolve client agent id by SCA
     try {
       const clientAgent = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: params.clientSCA, mode: "insensitive" } }, select: { id: true } });
