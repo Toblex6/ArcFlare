@@ -212,7 +212,7 @@ export default function CheckoutPage() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={40} height={40} style={{ borderRadius: 10, objectFit: 'contain' }} />
+          <Image src="/arcflare-logo.png" alt="FlareHQ" width={40} height={40} style={{ borderRadius: 10, objectFit: 'contain' }} />
           <div>
             <p style={{ color: '#f0ece6', fontSize: 'clamp(14px, 2vw, 17px)', fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>FLAREHQ</p>
             <p style={{ color: '#6b5a45', fontSize: 'clamp(10px, 1vw, 11px)', margin: 0 }}>Stablecoin Payment Infrastructure</p>

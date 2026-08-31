@@ -49,7 +49,7 @@ export default function MerchantLogin() {
       <div style={{ width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <Image
-            src="/arcflare-logo.png.png"
+            src="/arcflare-logo.png"
             alt="FlareHQ"
             width={52}
             height={52}

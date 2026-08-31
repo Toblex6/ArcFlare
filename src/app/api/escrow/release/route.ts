@@ -17,6 +17,7 @@ import { prisma } from '@/lib/prisma';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { queueExternalSignatureRequest } from '@/lib/wallet/signatureQueue';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -104,8 +105,28 @@ async function releaseHandler(request: NextRequest) {
     // ── Execute confirmDelivery(bytes32) ────────────────────────────────────
     let txHash: string;
     if (actor.type === 'merchant') {
-      // Full WalletProvider abstraction — supports Circle and external wallets.
       const walletProvider = await resolveWalletProvider(actor.id);
+      if (walletProvider.kind !== "CIRCLE") {
+        const req = await queueExternalSignatureRequest({
+          merchantId: actor.id,
+          action: "escrow.release",
+          actionRefId: reference,
+          payload: {
+            reference,
+            contractEscrowId: escrow.contractEscrowId,
+            contractAddress: ESCROW_CONTRACT,
+            callerSCA,
+            amount: escrow.amount,
+            beneficiarySCA: escrow.beneficiarySCA,
+          },
+        });
+        return NextResponse.json({
+          success: true,
+          pendingSignature: true,
+          requestId: req.id,
+          message: 'Your wallet needs to approve this confirmation — check /api/merchant/wallet/sign-requests.',
+        });
+      }
       const result = await walletProvider.executeContract({
         contractAddress: ESCROW_CONTRACT,
         abiFunctionSignature: 'confirmDelivery(bytes32)',

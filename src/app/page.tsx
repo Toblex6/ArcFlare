@@ -16,7 +16,7 @@ export default function HomePage() {
 
           {/* Logo */}
           <div className="flex items-center gap-3 shrink-0">
-            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={40} height={40} className="w-8 h-8 sm:w-[42px] sm:h-[42px]" />
+            <Image src="/arcflare-logo.png" alt="FlareHQ" width={40} height={40} className="w-8 h-8 sm:w-[42px] sm:h-[42px]" />
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight">FlareHQ</h1>
           </div>
 
@@ -249,12 +249,30 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* TELEGRAM ONBOARDING — secondary worker acquisition */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-16 md:pb-20">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-3xl p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 className="text-xl md:text-2xl font-bold mb-2">Earn USDC from agent jobs — directly from Telegram.</h3>
+            <p className="text-[var(--text-secondary)] text-sm md:text-base">No complicated wallet setup. Apply for available jobs, complete the work, and get paid in USDC.</p>
+          </div>
+          <a
+            href="https://t.me/FlareHQ_Notifier_bot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-cyan-400 text-black font-bold px-8 py-4 rounded-2xl hover:bg-cyan-300 transition whitespace-nowrap text-center"
+          >
+            Open in Telegram →
+          </a>
+        </div>
+      </section>
+
       {/* FOOTER */}
       <footer className="border-t border-[var(--border)] py-10 sm:py-12 bg-[var(--background)]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="flex flex-col items-center md:items-start gap-3">
             <div className="flex items-center gap-3">
-              <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={28} height={28} />
+              <Image src="/arcflare-logo.png" alt="FlareHQ" width={28} height={28} />
               <span className="font-bold tracking-tight text-lg">FlareHQ</span>
             </div>
             <p className="text-[var(--text-secondary)] text-xs sm:text-sm font-medium">
@@ -266,20 +284,8 @@ export default function HomePage() {
             <a href="https://docs.flarehq.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition whitespace-nowrap">
               Docs
             </a>
-            <a href="#" className="hover:text-[var(--text)] transition whitespace-nowrap">
-              Twitter / X
-            </a>
-            <a href="#" className="hover:text-[var(--text)] transition whitespace-nowrap">
-              Support
-            </a>
-            <a href="#" className="hover:text-[var(--text)] transition whitespace-nowrap">
-              Status
-            </a>
-            <a href="#" className="hover:text-[var(--text)] transition whitespace-nowrap">
-              Privacy
-            </a>
-            <a href="#" className="hover:text-[var(--text)] transition whitespace-nowrap">
-              Terms
+            <a href="https://github.com/anomalyco/opencode" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition whitespace-nowrap">
+              GitHub
             </a>
           </div>
         </div>

@@ -7,7 +7,7 @@ export default function StartPage() {
     return (
         <main className="min-h-screen bg-[#120b08] text-white flex flex-col items-center justify-center px-6">
             <div className="flex items-center gap-3 mb-12">
-                <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={44} height={44} />
+                <Image src="/arcflare-logo.png" alt="FlareHQ" width={44} height={44} />
                 <h1 className="text-2xl font-bold">FlareHQ</h1>
             </div>
 

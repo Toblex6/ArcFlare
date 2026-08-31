@@ -106,7 +106,7 @@ export default function PublicStatsPage() {
       <header style={S.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Image
-            src="/arcflare-logo.png.png"
+            src="/arcflare-logo.png"
             alt="FlareHQ"
             width={36}
             height={36}
@@ -269,8 +269,8 @@ export default function PublicStatsPage() {
                   address: '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F',
                 },
                 {
-                  name: 'ArcFlareStream.sol (not yet deployed)',
-                  address: '0xc9BbeDFb142b6306c34838a39521c894F3dbc872',
+                  name: 'ArcFlareStream.sol',
+                  address: '0xd8ca3Bbc212F36666145fAa487D45742eA04A52B',
                 },
               ].map((c) => (
                 <div

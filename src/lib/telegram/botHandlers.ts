@@ -68,9 +68,16 @@ export async function handleStart(telegramUserId: string, displayName: string): 
 }
 
 /**
- * /apply <jobId> <pitch text> — wraps the existing applicant scoring
- * submission from batch 6 (submitApplication). Does not reimplement
- * scoring/ranking — reuses it directly.
+ * /apply <targetId> <pitch> — participates in procurement flow when the
+ * target is a ProcurementPosting, otherwise falls back to legacy
+ * JobApplication (explicit distinction — no hidden third model).
+ *
+ * Identity: applicantAddress is derived authoritatively from the Telegram
+ * consumer session (session.walletAddress), never from caller-supplied
+ * address. Telegram workers are ConsumerAccounts (not AgentRegistry agents)
+ * — procurement allows applicantAgentId = null so no fake AgentCard is
+ * created. If a Telegram worker lacks AgentRegistry identity, the apply
+ * still succeeds as a procurement applicant with address-only identity.
  */
 export async function handleApply(
   telegramUserId: string,
@@ -81,13 +88,53 @@ export async function handleApply(
   if (!session) {
     return { text: `You need to /start first before applying to jobs.` };
   }
+  if (!pitchText || !pitchText.trim()) {
+    return { text: `Please provide a pitch after the job id, e.g. /apply ${jobId} I can deliver in 2 days.` };
+  }
+  const applicantAddress = session.walletAddress;
 
+  // 1) Procurement path — reuse Build 5 primitives directly (no new model)
+  // ProcurementPosting.id is a cuid (non-numeric), Erc8183Job.jobId is numeric bigint string
+  try {
+    const procurement = await (prisma as any).procurementPosting.findUnique({ where: { id: jobId } });
+    if (procurement) {
+      if (procurement.status !== "OPEN") {
+        return { text: `That posting is ${procurement.status}, not open for applications.` };
+      }
+      // Derive applicantAgentId if wallet maps to an AgentRegistry (optional, not required)
+      let applicantAgentId: number | null = null;
+      try {
+        const ag = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: applicantAddress, mode: "insensitive" } }, select: { id: true } });
+        if (ag) applicantAgentId = ag.id;
+      } catch {}
+      try {
+        await (prisma as any).procurementApplication.create({
+          data: {
+            procurementId: jobId,
+            applicantAgentId,
+            applicantAddress: applicantAddress.toLowerCase(),
+            pitch: String(pitchText),
+            proposedAmount: null,
+            portfolioLinks: [],
+          },
+        });
+        return { text: `Application submitted for procurement ${jobId}. You'll be notified if you're selected.` };
+      } catch (e: any) {
+        if (e?.code === "P2002" || String(e.message).includes("already applied") || String(e.message).includes("Unique constraint")) {
+          return { text: `You've already applied to this job.` };
+        }
+        return { text: `Couldn't submit your application: ${e.message}` };
+      }
+    }
+  } catch {}
+
+  // 2) Legacy path — Erc8183Job + JobApplication (kept for existing jobs that still use it)
+  // Only if targetId is a numeric jobId
   const { submitApplication } = await import('@/lib/jobs/applicantScoring');
-
   try {
     await submitApplication({
       jobId,
-      applicantAddress: session.walletAddress,
+      applicantAddress,
       pitch: pitchText,
     });
     return { text: `Application submitted for job ${jobId}. You'll be notified if you're selected.` };
@@ -96,17 +143,37 @@ export async function handleApply(
     if (message.includes('already applied')) {
       return { text: `You've already applied to this job.` };
     }
+    if (message.includes('not found')) {
+      return { text: `Job or posting ${jobId} not found. Use /jobs to see open work.` };
+    }
     return { text: `Couldn't submit your application: ${message}` };
   }
 }
 
 /**
- * /jobs — lists open jobs. The real jobs model is Erc8183Job (DB status
- * values are uppercase: 'OPEN', 'FUNDED', 'SUBMITTED', 'COMPLETED' —
- * see src/app/api/jobs/create/route.ts), not the assumed "JobListing".
- * Budget is BigInt in micro-USDC, formatted like the rest of the code.
+ * /jobs — lists open procurement postings (primary) plus legacy OPEN
+ * Erc8183Jobs for backwards compatibility. Explicitly labels each line.
  */
 export async function handleListJobs(): Promise<BotReply> {
+  // Primary: procurement postings (Build 5) — these are the jobs that
+  // actually support assignment/selection.
+  const postings = await (prisma as any).procurementPosting.findMany({
+    where: { status: 'OPEN' },
+    take: 10,
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (postings.length > 0) {
+    const lines = postings.map((p: any) => {
+      const budget = (() => { try { return formatUnits(BigInt(p.budgetMax), 6); } catch { return "?"; } })();
+      const title = p.title || p.description?.slice(0, 50) || "Untitled";
+      return `• *${title}* — ${budget} USDC (procurement)\n  /apply ${p.id} <your pitch>`;
+    });
+    // Also show legacy count hint if any
+    return { text: `Open procurement postings:\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
+  }
+
+  // Fallback: legacy Erc8183Job OPEN jobs (old system) — kept for jobs that still use it
   const jobs = await prisma.erc8183Job.findMany({
     where: { status: 'OPEN' },
     take: 10,
@@ -118,7 +185,7 @@ export async function handleListJobs(): Promise<BotReply> {
   }
 
   const lines = jobs.map((j) => `• *${j.description}* — ${formatUnits(j.budget, 6)} USDC\n  /apply ${j.jobId.toString()} <your pitch>`);
-  return { text: `Open jobs:\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
+  return { text: `Open jobs (legacy):\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
 }
 
 /**

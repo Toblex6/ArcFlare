@@ -1,16 +1,15 @@
 // src/app/api/merchant/wallet/sign-requests/[id]/route.ts
 //
-// Accepts the signature a connected wallet produced for a pending request.
-// This closes the generic half of the loop (verify + record). It does NOT
-// yet resume whatever feature queued the request (broadcasting the tx,
-// flipping an Escrow to RELEASED, etc.) — that resume logic is specific to
-// each of the 19 call sites and is follow-up work, not built here. Marking
-// this honestly rather than pretending the loop is fully closed.
+// Verifies signature and RESUMES the underlying action. Idempotent and
+// fail-closed: PENDING->SIGNED (atomic) -> EXECUTING -> COMPLETED/FAILED.
+// Signature is bound to server-created payload; modified payload cannot
+// redirect the action because resume re-validates against DB state.
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyMessage } from "viem";
 import { prisma } from "@/lib/prisma";
 import { resolveMerchant } from "@/lib/middleware/withMerchantAuth";
+import { resumeSignatureRequest } from "@/lib/wallet/signatureResume";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const merchant = await resolveMerchant(req);
@@ -24,9 +23,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ success: false, error: "signature is required." }, { status: 400 });
   }
 
-  const request = await (prisma as any).walletSignatureRequest.findUnique({ where: { id } });
+  let request = await (prisma as any).walletSignatureRequest.findUnique({ where: { id } });
   if (!request || request.merchantId !== merchant.id) {
     return NextResponse.json({ success: false, error: "Signature request not found." }, { status: 404 });
+  }
+
+  // Idempotent replay: already completed
+  if (request.status === "COMPLETED") {
+    return NextResponse.json({ success: true, request, resumed: true, txHash: request.signedTx, note: "Already completed — idempotent replay." });
+  }
+  if (request.status === "FAILED") {
+    return NextResponse.json({ success: false, error: "Previous resume failed — retry the original action.", request }, { status: 500 });
+  }
+  if (request.status === "EXECUTING") {
+    return NextResponse.json({ success: true, request, note: "Resume already in progress." });
   }
   if (request.status !== "PENDING") {
     return NextResponse.json({ success: false, error: `Request is already ${request.status}.` }, { status: 409 });
@@ -47,14 +57,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ success: false, error: "Signature does not match this wallet." }, { status: 401 });
   }
 
-  const updated = await (prisma as any).walletSignatureRequest.update({
-    where: { id },
+  // Atomic PENDING->SIGNED claim
+  const claimed = await (prisma as any).walletSignatureRequest.updateMany({
+    where: { id, status: "PENDING" },
     data: { status: "SIGNED", signedTx: signedTx || null },
   });
+  if (claimed.count === 0) {
+    request = await (prisma as any).walletSignatureRequest.findUnique({ where: { id } });
+    if (request?.status === "COMPLETED") return NextResponse.json({ success: true, request, resumed: true, txHash: request.signedTx });
+    return NextResponse.json({ success: false, error: `Request is already ${request?.status}.` }, { status: 409 });
+  }
+  request = await (prisma as any).walletSignatureRequest.findUnique({ where: { id } });
 
-  return NextResponse.json({
-    success: true,
-    request: updated,
-    note: `Signature recorded for ${updated.action}. Resuming the original action (${updated.actionRefId}) is feature-specific and not yet wired for every call site.`,
-  });
+  // Resume underlying action — fail-closed, never mark COMPLETED until success
+  const result = await resumeSignatureRequest(request);
+
+  const updated = await (prisma as any).walletSignatureRequest.findUnique({ where: { id } });
+
+  if (result.status === "COMPLETED") {
+    return NextResponse.json({
+      success: true,
+      request: updated,
+      txHash: result.txHash,
+      message: `Action ${updated.action} completed.`,
+    });
+  }
+  if (result.status === "EXECUTING") {
+    return NextResponse.json({ success: true, request: updated, note: "Resume in progress." });
+  }
+  // FAILED
+  console.error(`[sign-requests/${id}] resume failed:`, result.error);
+  return NextResponse.json({ success: false, error: "Underlying action failed — not marked completed.", details: result.error, request: updated }, { status: 500 });
 }

@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { queueExternalSignatureRequest } from '@/lib/wallet/signatureQueue';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http } from 'viem';
 
@@ -162,6 +163,25 @@ async function withdrawHandler(request: NextRequest) {
     let txHash: string;
     if (actor.type === 'merchant') {
       const walletProvider = await resolveWalletProvider(actor.id);
+      if (walletProvider.kind !== "CIRCLE") {
+        const req = await queueExternalSignatureRequest({
+          merchantId: actor.id,
+          action: "stream.withdraw",
+          actionRefId: reference,
+          payload: {
+            reference,
+            contractStreamId,
+            contractAddress: STREAM_CONTRACT,
+            receiverSCA,
+          },
+        });
+        return NextResponse.json({
+          success: true,
+          pendingSignature: true,
+          requestId: req.id,
+          message: 'Your wallet needs to approve this withdrawal — check /api/merchant/wallet/sign-requests.',
+        });
+      }
       const result = await walletProvider.executeContract({
         contractAddress: STREAM_CONTRACT,
         abiFunctionSignature: 'withdraw(bytes32)',

@@ -118,9 +118,13 @@ export default function PendingSignaturesPanel() {
               Expires {new Date(req.expiresAt).toLocaleTimeString()}
             </span>
           </div>
-          <p style={{ margin: 0, fontSize: 'clamp(10px, 0.9vw, 12px)', color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
-            {JSON.stringify(req.payload)}
-          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'clamp(10px, 0.9vw, 12px)', color: 'var(--text-secondary)' }}>
+            {(req.payload as any)?.reference && <span>Ref: {(req.payload as any).reference.slice(0, 16)}...</span>}
+            {(req.payload as any)?.amount && <span>Amount: {(req.payload as any).amount} USDC</span>}
+            {(req.payload as any)?.recipientSCA && <span>To: {(req.payload as any).recipientSCA.slice(0, 10)}... <button onClick={() => navigator.clipboard?.writeText((req.payload as any).recipientSCA)} style={{ fontSize: 10, marginLeft: 6 }}>Copy</button></span>}
+            {(req.payload as any)?.contractAddress && <span>Contract: {(req.payload as any).contractAddress.slice(0, 10)}...</span>}
+            <details><summary style={{ cursor: 'pointer', fontSize: 10 }}>Details</summary><pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 10 }}>{JSON.stringify(req.payload, null, 2)}</pre></details>
+          </div>
           <button
             onClick={() => handleSign(req)}
             disabled={signingId === req.id}

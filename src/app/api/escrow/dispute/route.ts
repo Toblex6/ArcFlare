@@ -12,6 +12,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { queueExternalSignatureRequest } from '@/lib/wallet/signatureQueue';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -97,6 +98,26 @@ async function disputeHandler(request: NextRequest) {
     let txHash: string;
     if (actor.type === 'merchant') {
       const walletProvider = await resolveWalletProvider(actor.id);
+      if (walletProvider.kind !== "CIRCLE") {
+        const req = await queueExternalSignatureRequest({
+          merchantId: actor.id,
+          action: "escrow.dispute",
+          actionRefId: reference,
+          payload: {
+            reference,
+            contractEscrowId: escrow.contractEscrowId,
+            contractAddress: ESCROW_CONTRACT,
+            callerSCA,
+            reason: disputeReason,
+          },
+        });
+        return NextResponse.json({
+          success: true,
+          pendingSignature: true,
+          requestId: req.id,
+          message: 'Your wallet needs to approve this dispute — check /api/merchant/wallet/sign-requests.',
+        });
+      }
       const result = await walletProvider.executeContract({
         contractAddress: ESCROW_CONTRACT,
         abiFunctionSignature: 'dispute(bytes32,string)',

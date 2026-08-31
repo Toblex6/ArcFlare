@@ -478,7 +478,7 @@ export default function ConsumerApp() {
         <div style={styles.onboardingWrap}>
           <div style={styles.headerLeft}>
             <Image
-              src="/arcflare-logo.png.png"
+              src="/arcflare-logo.png"
               alt="ArcFlare"
               width={40}
               height={40}
@@ -511,7 +511,7 @@ export default function ConsumerApp() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <Image
-            src="/arcflare-logo.png.png"
+            src="/arcflare-logo.png"
             alt="ArcFlare"
             width={32}
             height={32}

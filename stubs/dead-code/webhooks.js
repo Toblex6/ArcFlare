@@ -37,7 +37,7 @@ webhookRouter.post('/api/v1/webhooks/nanopayments', async (req, res) => {
       `Successfully settled ${settledAmount} USDC across ${paymentCount} micro-payments.`
     );
 
-    // TODO: Write a database query to update your merchant balance ledger
+    // NOTE (dead-code artifact — not executed): historical ledger update stub
     // await db.merchants.incrementBalance(merchantAddress, settledAmount);
   }
 

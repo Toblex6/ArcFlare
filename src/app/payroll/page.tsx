@@ -11,20 +11,7 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 
 
-const NAV = [
-  { label: 'Dashboard', href: '/merchant/dashboard' },
-  { label: 'Homepage', href: '/' },
-  { label: 'Transactions', href: '/transactions' },
-  { label: 'Checkout', href: '/merchant/dashboard#checkout' },
-  { label: 'Escrow', href: '/escrow' },
-  { label: 'Agents', href: '/agents' },
-  { label: 'Agent Wallets', href: '/agent-wallets' },
-  { label: 'Jobs', href: '/jobs' },
-  { label: 'Nanopayments', href: '/nano' },
-  { label: 'Payroll', href: '/payroll', active: true },
-  { label: 'Scheduled', href: '/scheduled' },
-  { label: 'Support', href: '/support' },
-];
+
 
 interface Recipient {
   recipientSCA: string;
@@ -464,19 +451,23 @@ export default function PayrollPage() {
               </div>
               {lookupError && <p style={{ color: '#f87171', fontSize: 12 }}>❌ {lookupError}</p>}
               {lookupResult && (
-                <pre
-                  style={{
-                    color: '#f0ece6',
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    whiteSpace: 'pre-wrap' as const,
-                    background: '#251c12',
-                    borderRadius: 10,
-                    padding: 16,
-                  }}
-                >
-                  {JSON.stringify(lookupResult, null, 2)}
-                </pre>
+                <div style={{ background: '#251c12', borderRadius: 10, padding: 16, border: '1px solid #2d2015' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                    <div><span style={{ color: '#6b5a45', fontSize: 10 }}>Reference</span><p style={{ color: '#c8975a', fontFamily: 'monospace', fontSize: 12, margin: 0 }}>{lookupResult.batchRef}</p></div>
+                    <div><span style={{ color: '#6b5a45', fontSize: 10 }}>Status</span><p style={{ color: lookupResult.status === 'COMPLETED' ? '#10b981' : '#c8975a', fontSize: 12, margin: 0 }}>{lookupResult.status}</p></div>
+                    <div><span style={{ color: '#6b5a45', fontSize: 10 }}>Total</span><p style={{ color: '#f0ece6', fontSize: 12, margin: 0 }}>{lookupResult.totalAmount} USDC</p></div>
+                    <div><span style={{ color: '#6b5a45', fontSize: 10 }}>Recipients</span><p style={{ color: '#f0ece6', fontSize: 12, margin: 0 }}>{lookupResult.successCount ?? 0} / {lookupResult.recipientCount} succeeded</p></div>
+                  </div>
+                  {Array.isArray(lookupResult.results) && lookupResult.results.map((r: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #2d2015', fontSize: 11 }}>
+                      <span style={{ fontFamily: 'monospace', color: '#f0ece6' }}>{r.recipientSCA?.slice(0, 10)}...{r.recipientSCA?.slice(-4)} — {r.amount} USDC</span>
+                      <span style={{ color: r.status === 'SUCCESS' ? '#10b981' : r.status === 'PENDING_SIGNATURE' ? '#c8975a' : '#f87171' }}>{r.status}</span>
+                      {r.txHash && <a href={`https://testnet.arcscan.app/tx/${r.txHash}`} target="_blank" rel="noopener noreferrer" style={{ color: '#c8975a' }}>View ↗</a>}
+                      {r.requestId && !r.txHash && <span style={{ color: '#6b5a45' }}>Req {String(r.requestId).slice(0, 8)}</span>}
+                    </div>
+                  ))}
+                  <details style={{ marginTop: 12 }}><summary style={{ color: '#6b5a45', fontSize: 11, cursor: 'pointer' }}>Developer JSON</summary><pre style={{ color: '#f0ece6', fontSize: 10, fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: 8 }}>{JSON.stringify(lookupResult, null, 2)}</pre></details>
+                </div>
               )}
             </div>
 

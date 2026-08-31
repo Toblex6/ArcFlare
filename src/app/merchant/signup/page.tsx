@@ -152,7 +152,7 @@ export default function MerchantSignup() {
       <main style={shellStyle}>
         <div style={{ width: '100%', maxWidth: 520 }}>
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+            <Image src="/arcflare-logo.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
             <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Account Verified</h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Your API key is shown below. Save it now — it won't appear again.</p>
           </div>
@@ -213,7 +213,7 @@ export default function MerchantSignup() {
       <main style={shellStyle}>
         <div style={{ width: '100%', maxWidth: 420 }}>
           <div style={{ textAlign: 'center', marginBottom: 36 }}>
-            <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+            <Image src="/arcflare-logo.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
             <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Check your email</h1>
             <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>We sent a 6-digit code to {form.email}</p>
           </div>
@@ -261,7 +261,7 @@ export default function MerchantSignup() {
     <main style={shellStyle}>
       <div style={{ width: '100%', maxWidth: 460 }}>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <Image src="/arcflare-logo.png.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
+          <Image src="/arcflare-logo.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
           <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Create Merchant Account</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>Start accepting USDC payments on Arc in minutes.</p>
         </div>

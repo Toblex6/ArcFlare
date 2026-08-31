@@ -100,7 +100,7 @@ export default function ForgotPassword() {
       <div style={{ width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 'clamp(24px, 4vw, 36px)' }}>
           <Image
-            src="/arcflare-logo.png.png"
+            src="/arcflare-logo.png"
             alt="FlareHQ"
             width={52}
             height={52}

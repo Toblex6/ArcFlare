@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
+import { queueExternalSignatureRequest } from '@/lib/wallet/signatureQueue';
 
 interface PayrollRecipient {
   recipientSCA: string;
@@ -179,11 +180,36 @@ async function runPayrollHandler(request: NextRequest) {
 
     const results: any[] = [];
     let pendingSignatureCount = 0;
+    const isExternal = walletProvider.kind !== "CIRCLE";
 
     // ── Pay each recipient sequentially ─────────────────────────────────────
     // Sequential (not parallel) to avoid wallet nonce collisions, same as before.
     for (const recipient of recipients as PayrollRecipient[]) {
       const amountStr = String(recipient.amount);
+      if (isExternal) {
+        const req = await queueExternalSignatureRequest({
+          merchantId: merchant.id,
+          action: "payroll.transfer",
+          actionRefId: `${batchRef}:${recipient.recipientSCA}`,
+          payload: {
+            batchRef,
+            recipientSCA: recipient.recipientSCA,
+            amount: amountStr,
+            label: recipient.label || null,
+            payerSCA,
+          },
+        });
+        pendingSignatureCount++;
+        results.push({
+          recipientSCA: recipient.recipientSCA,
+          amount: recipient.amount,
+          label: recipient.label || null,
+          status: 'PENDING_SIGNATURE',
+          requestId: req.id,
+        });
+        console.log(`⏳ Queued signature request for ${recipient.recipientSCA}: ${req.id}`);
+        continue;
+      }
       const outcome = await walletProvider.transferUSDC(
         recipient.recipientSCA,
         amountStr,

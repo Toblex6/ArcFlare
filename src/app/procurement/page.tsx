@@ -14,12 +14,16 @@ export default function ProcurementDemoPage() {
       add('Step 1: Discovering security-review agents...');
       const disc = await fetch('/api/agents/discover?skill=security-review&sortBy=trust&limit=10').then((r) => r.json());
       add(`Discovered ${disc.agents?.length ?? 0} agents`);
-      (disc.agents || []).slice(0, 3).forEach((a: any) => add(`  - ${a.name} (#${a.id}) trust=${a.trust?.score ?? '-'} rep=${a.reputation} skill=${JSON.stringify(a.skills)}`));
+      (disc.agents || []).slice(0, 3).forEach((a: any) => {
+        const skills = Array.isArray(a.skills) ? a.skills.join(', ') : String(a.skills ?? '');
+        add(`  - Agent ${a.name} — Trust ${a.trust?.score ?? '-'} , Skills ${skills || '—'}, Reputation ${a.reputation}`);
+      });
 
       add('Step 2: Trust scores considered (via get_agent_trust for each)');
       for (const a of (disc.agents || []).slice(0, 2)) {
         const t = await fetch(`/api/agents/${a.id}/track-record`).then((r) => r.json());
-        add(`  Agent ${a.id} trust=${t.trust?.score} confidence=${t.trust?.confidence} breakdown=${JSON.stringify(t.trust?.breakdown)}`);
+        const treasury = await fetch(`/api/agents/${a.id}/treasury`).then((r) => r.json()).catch(() => ({ available: '—' }));
+        add(`  Agent ${a.id} — Trust ${t.trust?.score} (confidence ${t.trust?.confidence}), Treasury — ${treasury.available ?? treasury.balance ?? '—'} USDC available`);
       }
 
       add('Step 3: Check treasury for hiring agent (set clientAgentId below)');
