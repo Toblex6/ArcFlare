@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useSignMessage } from "wagmi";
 import type { Address } from "viem";
+import { friendlyWalletError } from "@/lib/wallet/walletErrors";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain";
 
@@ -284,9 +285,11 @@ export default function ConsumerApp() {
       setWalletType(data.account.walletType ?? null);
       setView("home");
     } catch (e: any) {
-      const message =
-        e?.shortMessage || (e?.message?.includes("User rejected") ? "Signature was cancelled." : e?.message);
-      setOnboardingError(message || "Could not connect that wallet.");
+      const lower = String(e?.shortMessage ?? e?.message ?? '').toLowerCase();
+      const message = lower.includes('user rejected') || lower.includes('user denied')
+        ? 'Signature was cancelled. No changes were made.'
+        : friendlyWalletError(e);
+      setOnboardingError(message);
     } finally {
       setCreatingWallet(false);
     }
@@ -308,7 +311,7 @@ export default function ConsumerApp() {
       setJustCreatedWallet(true);
       setView("home");
     } catch (e: any) {
-      setOnboardingError(e.message);
+      setOnboardingError(friendlyWalletError(e));
     } finally {
       setCreatingWallet(false);
     }
@@ -335,7 +338,7 @@ export default function ConsumerApp() {
       setBridgeNeedsFlareWallet(false);
       setJustCreatedWallet(true);
     } catch (e: any) {
-      setCrossResult({ success: false, error: e.message });
+      setCrossResult({ success: false, error: friendlyWalletError(e) });
     } finally {
       setCreatingFlareWallet(false);
     }

@@ -1,5 +1,6 @@
 // src/lib/errors/errorMapper.ts
-// Small reusable mapper: raw Circle/API errors -> friendly codes, logs full detail server-side.
+// Shared error mappers: server/API + wallet. Wallet mapping re-exports from
+// the wallet-specific module so imports stay single-sourced.
 
 export type FriendlyCode = "INSUFFICIENT_FUNDS" | "VALIDATION_REQUIRED" | "UNAUTHORIZED" | "UNKNOWN";
 
@@ -12,3 +13,7 @@ export function mapApiError(e: any): { code: FriendlyCode; message: string } {
   if (/UNAUTHORIZED|not control|403/i.test(raw)) return { code: "UNAUTHORIZED", message: "You don't have permission for this action." };
   return { code: "UNKNOWN", message: "Something went wrong. Please try again." };
 }
+
+// Re-export wallet mapper so callers can import from a single error entrypoint
+export { mapWalletError, friendlyWalletError, isUserRejection } from '@/lib/wallet/walletErrors';
+export type { WalletErrorKind } from '@/lib/wallet/walletErrors';

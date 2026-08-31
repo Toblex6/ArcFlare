@@ -31,6 +31,9 @@ import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, us
 import { parseUnits } from 'viem';
 import { USDC_CONTRACT, USDC_DECIMALS, erc20TransferAbi } from '@/src/lib/wallet/erc20';
 import { arcTestnet } from '@/src/lib/wagmi';
+import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
+import { friendlyWalletError } from '@/lib/wallet/walletErrors';
+import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
 
 export interface PaymentLogData {
     reference: string;
@@ -83,16 +86,10 @@ const CCTP_SOURCE_DOMAINS = [
     { domain: 7, label: 'Polygon' },
 ];
 
-// Translates wagmi's raw connect() errors into copy a real payer can act
-// on. Only touches the specific "no provider in this browser" case — any
-// other error (user rejected the request, wrong network, etc.) still shows
-// through with its own message, unchanged from before.
-function friendlyConnectError(err: { message?: string; name?: string } | null | undefined): string {
-    const msg = err?.message || '';
-    if (msg.toLowerCase().includes('provider not found')) {
-        return 'No wallet extension detected in this browser. Try WalletConnect to pay from your phone, or scan the QR code above.';
-    }
-    return msg || 'Could not connect. Make sure you have a wallet app installed.';
+const CONNECT_TIMEOUT_MS = 45000;
+
+function friendlyConnectError(err: unknown): string {
+    return friendlyWalletError(err);
 }
 
 interface CheckoutWidgetProps {
@@ -119,12 +116,14 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const [cctpError, setCctpError] = useState<string | null>(null);
 
     const { address, isConnected } = useAccount();
-    const { connectors, connect, error: connectError, isPending: isConnecting, reset: resetConnect } = useConnect();
+    const { connectors, connect, connectAsync, error: connectError, isPending: isConnecting, reset: resetConnect } = useConnect();
     const { disconnect } = useDisconnect();
     const { writeContractAsync } = useWriteContract();
     const chainId = useChainId();
     const { switchChainAsync } = useSwitchChain();
     const [networkMismatch, setNetworkMismatch] = useState(false);
+    const [showTechnical, setShowTechnical] = useState(false);
+    const [connecting, setConnecting] = useState(false);
 
     const fetchLedgerStatus = useCallback(async () => {
         if (!reference) return;
@@ -145,10 +144,10 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                     fetchAgentWallet(senderEmail);
                 }
             } else {
-                setError(result.message || 'Failed to resolve reference ledger entry.');
+                setError(result.message || 'We couldn\'t find this payment. Please check the link and try again.');
             }
         } catch {
-            setError('Operational server error while syncing transactions.');
+            setError('We couldn\'t load this payment. Check your connection and try again.');
         } finally {
             setLoading(false);
         }
@@ -207,18 +206,17 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         try {
             setSettleError(null);
             setNetworkMismatch(false);
+            setShowTechnical(false);
             setIsTxPending(true);
             onEvent?.({ type: 'payment_pending' });
 
             if (chainId !== arcTestnet.id) {
-                try {
-                    await switchChainAsync({ chainId: arcTestnet.id });
-                } catch {
+                const net = await ensureArcNetwork({ chainId, switchChainAsync });
+                if (!net.ok) {
                     setIsTxPending(false);
                     setNetworkMismatch(true);
-                    const msg = 'Your wallet could not switch networks automatically. Please add Arc Testnet manually — details below — then try again.';
-                    setSettleError(msg);
-                    onEvent?.({ type: 'payment_error', error: msg });
+                    setSettleError(net.message);
+                    onEvent?.({ type: 'payment_error', error: net.message });
                     return;
                 }
             }
@@ -248,9 +246,15 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         } catch (err: any) {
             setIsTxPending(false);
             setIsVerifying(false);
-            const msg = err.shortMessage || err.message || 'Payment failed. Please try again.';
-            setSettleError(msg);
-            onEvent?.({ type: 'payment_error', error: msg });
+            const msg = friendlyWalletError(err);
+            // Map common tx rejections to the same friendly copy without leaking viem internals
+            const lower = String((err as any)?.shortMessage ?? (err as any)?.message ?? '').toLowerCase();
+            const friendly = lower.includes('user rejected') || lower.includes('user denied')
+                ? 'Payment cancelled. No funds were moved.'
+                : lower.includes('insufficient') ? 'Insufficient funds for this transaction.'
+                : msg;
+            setSettleError(friendly);
+            onEvent?.({ type: 'payment_error', error: friendly });
         }
     };
 
@@ -290,8 +294,8 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     if (error || !payment) {
         return (
             <div style={{ background: '#1a1410', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 24, padding: 24, textAlign: 'center' }}>
-                <p style={{ color: '#f87171', fontWeight: 700, marginBottom: 8, fontSize: 16 }}>Ledger Disconnect</p>
-                <p style={{ color: '#6b5a45', fontSize: 12 }}>{error || 'The reference could not be found.'}</p>
+                <p style={{ color: '#f87171', fontWeight: 700, marginBottom: 8, fontSize: 16 }}>Payment unavailable</p>
+                <p style={{ color: '#6b5a45', fontSize: 12 }}>{error || 'We couldn\'t find this payment. Please check the link and try again.'}</p>
             </div>
         );
     }
@@ -380,75 +384,72 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                     {!isConnected ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {(() => {
-                                // If a browser wallet extension is already injected (MetaMask,
-                                // Rabby, etc), the injected() connector and the walletConnect()
-                                // connector both end up offering to connect to the SAME wallet —
-                                // and injected() often literally names itself "MetaMask" too, so
-                                // both buttons can read identically. Clicking the WalletConnect
-                                // one then routes through WC's relay servers to bridge back to an
-                                // extension that's already sitting right there in the same
-                                // browser — this is the "stuck on Continue in MetaMask, then
-                                // resets" failure. Fix: when an injected provider exists, connect
-                                // to IT directly as the single primary option, and only offer
-                                // WalletConnect as an explicitly-labeled secondary path (for
-                                // scanning with a phone) — never two same-named buttons.
-                                const hasInjectedProvider = typeof window !== 'undefined' && !!(window as any).ethereum;
-                                const injectedConnector = connectors.find((c) => c.type === 'injected');
+                                const hasProvider = typeof window !== 'undefined' && !!(window as any).ethereum;
+                                const isMobile = typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                                const showInjected = !(isMobile && !hasProvider);
+                                const injectedConnectors = connectors.filter((c) => c.type === 'injected');
                                 const walletConnectConnector = connectors.find((c) => c.type === 'walletConnect');
-                                const otherConnectors = connectors.filter(
-                                    (c) => c.type !== 'injected' && c.type !== 'walletConnect'
-                                );
+                                const otherConnectors = connectors.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
 
-                                const attemptConnect = (c: (typeof connectors)[number]) => {
-                                    // Clear any stuck pending/error state from a previously
-                                    // aborted attempt before starting a new one — without this,
-                                    // wagmi can leave isPending/error set from the last reset
-                                    // WalletConnect session, making the button look dead on retry.
+                                const attemptConnect = async (c: (typeof connectors)[number]) => {
                                     resetConnect();
-                                    connect({ connector: c });
+                                    if (connectAsync) {
+                                        try {
+                                            setConnecting(true);
+                                            await withTimeout(connectAsync({ connector: c }), CONNECT_TIMEOUT_MS, 'Wallet connection timed out');
+                                        } catch (err: any) {
+                                            // friendly error handled via connectError + catch
+                                        } finally { setConnecting(false); }
+                                    } else {
+                                        connect({ connector: c });
+                                    }
                                 };
+
+                                const isBusy = connecting || isConnecting;
 
                                 return (
                                     <>
-                                        {hasInjectedProvider && injectedConnector && (
-                                            <button
-                                                key={injectedConnector.uid}
-                                                onClick={() => attemptConnect(injectedConnector)}
-                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: 'pointer', background: '#251c12', color: '#f0ece6' }}
-                                            >
-                                                {isConnecting ? 'Connecting...' : `Connect ${injectedConnector.name}`}
-                                            </button>
-                                        )}
+                                        {showInjected &&
+                                            injectedConnectors.map((c) => (
+                                                <button
+                                                    key={c.uid}
+                                                    onClick={() => attemptConnect(c)}
+                                                    disabled={isBusy}
+                                                    style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
+                                                >
+                                                    {isBusy ? 'Connecting...' : `Connect ${friendlyConnectorLabel(c)}`}
+                                                </button>
+                                            ))}
                                         {walletConnectConnector && (
                                             <button
                                                 key={walletConnectConnector.uid}
                                                 onClick={() => attemptConnect(walletConnectConnector)}
-                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: 'pointer', background: '#251c12', color: '#f0ece6' }}
+                                                disabled={isBusy}
+                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
                                             >
-                                                {isConnecting ? 'Connecting...' : hasInjectedProvider ? 'Scan QR with Mobile Wallet' : 'Connect Wallet'}
-                                            </button>
-                                        )}
-                                        {!hasInjectedProvider && injectedConnector && (
-                                            // No extension detected at all (e.g. mobile browser with
-                                            // no wallet app injecting a provider) — still offer it,
-                                            // clearly labeled, rather than hiding it silently.
-                                            <button
-                                                key={injectedConnector.uid}
-                                                onClick={() => attemptConnect(injectedConnector)}
-                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: 'pointer', background: '#251c12', color: '#f0ece6' }}
-                                            >
-                                                {isConnecting ? 'Connecting...' : `Connect ${injectedConnector.name}`}
+                                                {isBusy ? 'Connecting...' : showInjected ? 'Connect with WalletConnect' : 'Connect Wallet'}
                                             </button>
                                         )}
                                         {otherConnectors.map((c) => (
                                             <button
                                                 key={c.uid}
                                                 onClick={() => attemptConnect(c)}
-                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: 'pointer', background: '#251c12', color: '#f0ece6' }}
+                                                disabled={isBusy}
+                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
                                             >
-                                                {isConnecting ? 'Connecting...' : `Connect ${c.name}`}
+                                                {isBusy ? 'Connecting...' : `Connect ${friendlyConnectorLabel(c)}`}
                                             </button>
                                         ))}
+                                        {isMobile && !hasProvider && walletConnectConnector && (
+                                            <p style={{ color: '#6b5a45', fontSize: 11, margin: '4px 0 0', lineHeight: 1.4 }}>
+                                                On mobile, open this page in your wallet app, or copy the link and open it there.
+                                            </p>
+                                        )}
+                                        {isMobile && !hasProvider && !walletConnectConnector && (
+                                            <p style={{ color: '#6b5a45', fontSize: 11, margin: '4px 0 0' }}>
+                                                WalletConnect isn&apos;t configured. On mobile, open this page inside your wallet app&apos;s browser.
+                                            </p>
+                                        )}
                                     </>
                                 );
                             })()}
@@ -553,21 +554,34 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
             {networkMismatch && (
                 <div style={{ marginTop: 12, background: '#1a1410', border: '1px solid #2d2015', borderRadius: 12, padding: 14 }}>
-                    <p style={{ color: '#c8975a', fontSize: 12, fontWeight: 700, margin: '0 0 8px' }}>Add this network manually in your wallet:</p>
-                    {[
-                        ['Network Name', 'Arc Testnet'],
-                        ['Chain ID', String(arcTestnet.id)],
-                        ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
-                        ['Currency Symbol', 'ARC'],
-                        ['Block Explorer', arcTestnet.blockExplorers.default.url],
-                    ].map(([label, value]) => (
-                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: '#a89684', padding: '4px 0', borderBottom: '1px solid #2d2015' }}>
-                            <span>{label}</span>
-                            <span style={{ color: '#f0ece6', fontFamily: 'monospace', cursor: 'pointer', wordBreak: 'break-all', textAlign: 'right' }} onClick={() => navigator.clipboard.writeText(value)} title="Tap to copy">
-                                {value}
-                            </span>
+                    <p style={{ color: '#f0ece6', fontSize: 12, fontWeight: 600, margin: '0 0 6px', lineHeight: 1.5 }}>
+                        FlareHQ uses <strong>Arc Testnet</strong> for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet
+                        and select/add <strong>Arc Testnet</strong>, then return here and try again.
+                    </p>
+                    <button
+                        onClick={() => setShowTechnical((v) => !v)}
+                        style={{ background: 'none', border: 'none', color: '#c8975a', cursor: 'pointer', fontSize: 11, padding: 0, textDecoration: 'underline' }}
+                    >
+                        {showTechnical ? 'Hide technical details' : 'Show technical details'}
+                    </button>
+                    {showTechnical && (
+                        <div style={{ marginTop: 10 }}>
+                            {[
+                                ['Network Name', 'Arc Testnet'],
+                                ['Chain ID', String(arcTestnet.id)],
+                                ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
+                                ['Currency Symbol', 'ARC'],
+                                ['Block Explorer', arcTestnet.blockExplorers.default.url],
+                            ].map(([label, value]) => (
+                                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: '#a89684', padding: '4px 0', borderBottom: '1px solid #2d2015' }}>
+                                    <span>{label}</span>
+                                    <span style={{ color: '#f0ece6', fontFamily: 'monospace', cursor: 'pointer', wordBreak: 'break-all', textAlign: 'right' }} onClick={() => navigator.clipboard.writeText(value)} title="Tap to copy">
+                                        {value}
+                                    </span>
+                                </div>
+                            ))}
                         </div>
-                    ))}
+                    )}
                 </div>
             )}
 

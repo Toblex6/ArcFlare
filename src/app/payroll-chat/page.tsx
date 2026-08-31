@@ -19,6 +19,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { parsePayrollCommand, EXAMPLE_COMMANDS, FREQUENCY_TO_DAYS, Frequency, ParsedIntent } from "@/lib/payrollChatParser";
+import { friendlyWalletError } from "@/lib/wallet/walletErrors";
 
 interface Contractor {
   name: string;
@@ -409,7 +410,7 @@ export default function PayrollChatPage() {
         }
       }
     } catch (e: any) {
-      addMessage("assistant", `Something went wrong: ${e.message}`);
+      addMessage("assistant", friendlyWalletError(e));
     } finally {
       setSending(false);
     }

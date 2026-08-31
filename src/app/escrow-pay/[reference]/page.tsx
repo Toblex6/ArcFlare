@@ -26,6 +26,9 @@ import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, us
 import { parseUnits, keccak256, toBytes } from 'viem';
 import { USDC_CONTRACT, USDC_DECIMALS } from '@/lib/wallet/erc20';
 import { arcTestnet } from '@/lib/wagmi';
+import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
+import { friendlyWalletError } from '@/lib/wallet/walletErrors';
+import { friendlyConnectorLabel } from '@/lib/wallet/walletLabels';
 
 // Minimal ABIs — approve from the ERC-20 surface Checkout uses, createEscrow
 // with the exact signature escrow/create/route.ts sends via Circle.
@@ -85,11 +88,12 @@ export default function EscrowPayPage() {
   const [explorerUrl, setExplorerUrl] = useState<string | null>(null);
 
   const { address, isConnected } = useAccount();
-  const { connectors, connect, isPending: isConnecting } = useConnect();
+  const { connectors, connect, connectAsync, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const { writeContractAsync } = useWriteContract();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!reference) return;
@@ -109,7 +113,12 @@ export default function EscrowPayPage() {
     try {
       if (chainId !== arcTestnet.id) {
         setStatusText('Switching your wallet to Arc Testnet…');
-        await switchChainAsync({ chainId: arcTestnet.id });
+        const net = await ensureArcNetwork({ chainId, switchChainAsync });
+        if (!net.ok) {
+          setStep('error');
+          setStatusText(net.message);
+          return;
+        }
       }
 
       const amountWei = parseUnits(details.amount.toString(), USDC_DECIMALS);
@@ -150,7 +159,7 @@ export default function EscrowPayPage() {
       setStep('done');
     } catch (err: any) {
       setStep('error');
-      setStatusText(err?.shortMessage || err?.message || 'Payment failed. Please try again.');
+      setStatusText(friendlyWalletError(err));
     }
   }, [details, address, chainId, reference, writeContractAsync, switchChainAsync]);
 
@@ -211,16 +220,54 @@ export default function EscrowPayPage() {
         ) : !isConnected ? (
           <div>
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 10px' }}>
-              Connect your own wallet (MetaMask, WalletConnect…) to fund this escrow. You keep custody the whole time — FlareHQ never holds your keys.
+              Connect your own wallet to fund this escrow. You keep custody the whole time — FlareHQ never holds your keys.
+              {typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) && !(window as any).ethereum
+                ? ' On mobile, open this page in your wallet app or use WalletConnect.'
+                : ''}
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {connectors.map((c) => (
-                <button key={c.uid} onClick={() => connect({ connector: c })} disabled={isConnecting}
-                  style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #E5DDC9', background: '#fff', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
-                  {c.name}
-                </button>
-              ))}
+              {(() => {
+                const isMobile = typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                const hasProvider = typeof window !== 'undefined' && !!(window as any).ethereum;
+                const showInjected = !(isMobile && !hasProvider);
+                const injected = connectors.filter((c) => c.type === 'injected');
+                const wc = connectors.find((c) => c.type === 'walletConnect');
+                const others = connectors.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
+                const doConnect = async (c: (typeof connectors)[number]) => {
+                  setConnectError(null);
+                  try { await (connectAsync ? connectAsync({ connector: c }) : connect({ connector: c })); }
+                  catch (e: any) { setConnectError(friendlyWalletError(e)); }
+                };
+                return (
+                  <>
+                    {showInjected && injected.map((c) => (
+                      <button key={c.uid} onClick={() => doConnect(c)} disabled={isConnecting}
+                        style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #E5DDC9', background: '#fff', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
+                        {friendlyConnectorLabel(c)}
+                      </button>
+                    ))}
+                    {wc && (
+                      <button key={wc.uid} onClick={() => doConnect(wc)} disabled={isConnecting}
+                        style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #E5DDC9', background: '#fff', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
+                        WalletConnect
+                      </button>
+                    )}
+                    {others.map((c) => (
+                      <button key={c.uid} onClick={() => doConnect(c)} disabled={isConnecting}
+                        style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #E5DDC9', background: '#fff', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
+                        {friendlyConnectorLabel(c)}
+                      </button>
+                    ))}
+                    {isMobile && !hasProvider && (
+                      <p style={{ fontSize: 11, color: '#8A8275', margin: '4px 0 0' }}>
+                        On mobile, open this page in your wallet app, or use WalletConnect. If the button says “Open” and it’s greyed out, copy the link instead.
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
+            {connectError && <p style={{ fontSize: 12, color: '#C0563A', margin: '8px 0 0' }}>⚠️ {connectError}</p>}
           </div>
         ) : (
           <div>
