@@ -11,20 +11,48 @@
 // SECURITY (non-negotiable, same model as the agent brain):
 //  - The LLM's tool-calls NEVER supply a payer/vault wallet address or
 //    wallet ID. run_payroll's intent carries NO wallet fields; the client
-//    executes it against /api/payroll/run using payerSCA/payerWalletId from
-//    the user's own session state (the vault fields they typed into the
-//    page) — /api/payroll/run's existing resolveMerchant authorization is
-//    untouched. This route does not execute payroll at all.
+//    executes it with the caller's own credential (merchant cookie ->
+//    /api/payroll/run, whose server-side wallet resolution is untouched;
+//    consumer cookie -> Flow's initialize+settle send path, which debits
+//    the session wallet only). This route does not execute payroll at all.
+//  - The vault address used for balance lookups comes from the page state
+//    or, for consumers, defaults to their session wallet — never from the
+//    LLM.
 //  - A contractor's payout address comes from the user's own chat text
 //    ("add flare 0xAbc… as a contractor") — that's the existing behavior
 //    and is validated server-side here before being surfaced as an intent.
 //  - check_balance is executed server-side via getUsdcBalance() — the SAME
-//    helper the Telegram /balance command uses (botHandlers.handleBalance) —
-//    against vaultAddress supplied by the page state, never by the LLM.
+//    helper the Telegram /balance command uses (botHandlers.handleBalance).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
+import { resolveConsumerSession } from '@/lib/middleware/withConsumerAuth';
 import { getUsdcBalance } from '@/lib/wallet/usdcBalance';
+
+// The payroll chat is reachable from BOTH sides of the product:
+//   - merchants (dashboard cookie or x-api-key) — full payroll
+//   - consumers (Flow session cookie) — their own wallet as the "vault"
+// resolveCaller never falls through silently: a caller that presented no
+// valid credential gets null and the route 401s.
+async function resolveCaller(req: NextRequest): Promise<
+  | { type: 'merchant'; walletAddress?: string }
+  | { type: 'consumer'; walletAddress: string }
+  | null
+> {
+  const merchant = await resolveMerchant(req);
+  if (merchant) {
+    // API-key calls don't carry the merchant's wallet address; the page
+    // supplies the vault it typed. Cookie callers get their wallet below
+    // via the page's /api/merchant/me lookup — this branch only answers
+    // "is this a legitimate merchant".
+    return { type: 'merchant' };
+  }
+  const consumerWallet = await resolveConsumerSession(req);
+  if (consumerWallet) {
+    return { type: 'consumer', walletAddress: consumerWallet };
+  }
+  return null;
+}
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
@@ -153,13 +181,14 @@ function sanitizeAddArgs(args: ContractorInput): { ok: true; intent: any } | { o
 }
 
 // GET — real vault balance for the chat UI (both the LLM path and the regex
-// fallback path render it). Same lookup as Telegram /balance.
+// fallback path render it). Same lookup as Telegram /balance. Consumers may
+// omit ?vaultAddress — their session wallet IS the vault.
 export async function GET(req: NextRequest) {
-  const merchant = await resolveMerchant(req);
-  if (!merchant) {
+  const caller = await resolveCaller(req);
+  if (!caller) {
     return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
   }
-  const vaultAddress = req.nextUrl.searchParams.get('vaultAddress') || '';
+  const vaultAddress = req.nextUrl.searchParams.get('vaultAddress') || (caller.type === 'consumer' ? caller.walletAddress : '');
   if (!SCA_RE.test(vaultAddress)) {
     return NextResponse.json({ success: false, error: 'vaultAddress query param (0x…) is required.' }, { status: 400 });
   }
@@ -236,8 +265,8 @@ async function executeTool(
 // On Groq outage/misconfiguration this returns 5xx and the client falls back
 // to the regex parser instead of showing an error.
 export async function POST(req: NextRequest) {
-  const merchant = await resolveMerchant(req);
-  if (!merchant) {
+  const caller = await resolveCaller(req);
+  if (!caller) {
     return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
   }
   if (!GROQ_API_KEY) {
@@ -251,7 +280,11 @@ export async function POST(req: NextRequest) {
   }
   const contractors: any[] = Array.isArray(body.contractors) ? body.contractors : [];
   const schedule: string | null = body.schedule || null;
-  const vaultAddress: string = (body.vaultAddress || '').toString();
+  // The vault the caller is paying from. A consumer's session wallet is the
+  // trusted default; a merchant must name their own vault (the page sends
+  // the wallet address from their /api/merchant/me profile).
+  const vaultAddress: string =
+    (body.vaultAddress || '').toString() || (caller.type === 'consumer' ? caller.walletAddress : '');
 
   const contextNote =
     `Current payroll state:\n` +

@@ -16,10 +16,24 @@ interface ChatMessage {
   pendingAction?: any;
 }
 
-const URL_REGEX = /(https?:\/\/[^\s]+)/;
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+// Non-global twin for .test() — the /g regex above is stateful across test()
+// calls (lastIndex persists), which could make later links in a message
+// un-clickable. Split with URL_REGEX, test with IS_URL.
+const IS_URL = /^https?:\/\//;
 function extractLink(text: string): string | null {
   const match = text.match(URL_REGEX);
-  return match ? match[1] : null;
+  return match ? match[0] as any : null;
+}
+function renderTextWithCopyableLinks(text: string, onCopy: (url: string) => void) {
+  const parts = text.split(URL_REGEX);
+  return parts.map((part, idx) =>
+    IS_URL.test(part) ? (
+      <span key={idx} onClick={() => onCopy(part)} title="Click to copy link" style={{ color: '#c8975a', textDecoration: 'underline', cursor: 'pointer', wordBreak: 'break-all' }}>{part}</span>
+    ) : (
+      <span key={idx}>{part}</span>
+    )
+  );
 }
 
 // List of widely supported languages for speech
@@ -269,18 +283,18 @@ export default function FlareHQAssistantPage() {
           return (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
               <div
-                style={{
-                  maxWidth: '80%',
-                  background: m.role === 'user' ? '#c8975a' : '#1a1410',
-                  color: m.role === 'user' ? '#0e0b08' : '#f0ece6',
-                  border: m.role === 'assistant' ? '1px solid #2d2015' : 'none',
-                  borderRadius: 14,
-                  padding: '10px 14px',
-                  fontSize: 14,
-                  lineHeight: 1.5,
+                onClick={() => {
+                  if (link) {
+                    navigator.clipboard.writeText(link).catch(() => {});
+                    setCopiedLinkIndex(i);
+                    setTimeout(() => setCopiedLinkIndex((cur) => (cur === i ? null : cur)), 1500);
+                  }
                 }}
+                title={link ? 'Click to copy link' : undefined}
+                style={{ cursor: link ? 'pointer' as const : undefined, maxWidth: '80%', background: m.role === 'user' ? '#c8975a' : '#1a1410', color: m.role === 'user' ? '#0e0b08' : '#f0ece6', border: m.role === 'assistant' ? '1px solid #2d2015' : 'none', borderRadius: 14, padding: '10px 14px', fontSize: 14, lineHeight: 1.5, wordBreak: 'break-word' }}
               >
-                {m.text}
+                {m.role === 'assistant' ? renderTextWithCopyableLinks(m.text, (url) => { navigator.clipboard.writeText(url).catch(()=>{}); setCopiedLinkIndex(i); setTimeout(()=> setCopiedLinkIndex(c=> c===i?null:c),1500); }) : m.text}
+                {link && <span style={{ display: 'block', marginTop: 6, fontSize: 11, color: copiedLinkIndex === i ? '#0d7c5f' : '#6b5a45' }}>{copiedLinkIndex === i ? '✓ Copied' : 'Click link to copy'}</span>}
               </div>
 
               {link && (

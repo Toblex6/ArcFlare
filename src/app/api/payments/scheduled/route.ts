@@ -267,3 +267,121 @@ async function cancelScheduledHandler(request: Request) {
 }
 
 export const DELETE = withApiKeyOrAnySession(cancelScheduledHandler);
+
+// ── PATCH /api/payments/scheduled — edit a scheduled payment ─────────────────
+// Body: { reference, amount?, intervalDays?, description?, maxRuns? }
+// Only the controller of the payer wallet may edit, and only ACTIVE rows
+// (a cancelled/completed plan is immutable history — create a new one).
+// When intervalDays changes, nextRunAt is recomputed from now so the new
+// cadence applies going forward.
+async function editScheduledHandler(request: Request) {
+  try {
+    const { reference, amount, intervalDays, description, maxRuns } = await request.json();
+
+    if (!reference) {
+      return NextResponse.json(
+        { success: false, error: 'reference is required.' },
+        { status: 400 }
+      );
+    }
+
+    if (
+      amount === undefined &&
+      intervalDays === undefined &&
+      description === undefined &&
+      maxRuns === undefined
+    ) {
+      return NextResponse.json(
+        { success: false, error: 'Nothing to update — provide amount, intervalDays, description or maxRuns.' },
+        { status: 400 }
+      );
+    }
+
+    const existing = await (prisma as any).scheduledPayment.findUnique({
+      where: { reference },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { success: false, error: 'Scheduled payment not found.' },
+        { status: 404 }
+      );
+    }
+
+    // ── SECURITY: only the controller of the payer wallet may edit it.
+    const controlsPayer = await verifyCallerControlsAddress(request as any, existing.payerSCA);
+    if (!controlsPayer) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'You do not control the payer wallet of this scheduled payment.',
+        },
+        { status: 403 }
+      );
+    }
+
+    if (existing.status !== 'ACTIVE') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Only ACTIVE plans can be edited — this one is ${existing.status}. Create a new one instead.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate the fields actually being changed.
+    const data: Record<string, unknown> = {};
+    if (amount !== undefined) {
+      const amt = typeof amount === 'number' ? amount : parseFloat(amount);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        return NextResponse.json({ success: false, error: 'amount must be a positive number.' }, { status: 400 });
+      }
+      data.amount = amt;
+    }
+    if (intervalDays !== undefined) {
+      const days = typeof intervalDays === 'number' ? intervalDays : parseInt(intervalDays);
+      if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+        return NextResponse.json({ success: false, error: 'intervalDays must be between 1 and 3650.' }, { status: 400 });
+      }
+      data.intervalDays = days;
+      // New cadence applies from now — the old nextRunAt may be days away
+      // under the old interval.
+      data.nextRunAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    }
+    if (description !== undefined) {
+      if (typeof description !== 'string' || description.length > 500) {
+        return NextResponse.json({ success: false, error: 'description must be a string of at most 500 characters.' }, { status: 400 });
+      }
+      data.description = description || null;
+    }
+    if (maxRuns !== undefined) {
+      if (maxRuns === null) {
+        data.maxRuns = null;
+      } else {
+        const runs = typeof maxRuns === 'number' ? maxRuns : parseInt(maxRuns);
+        if (!Number.isFinite(runs) || runs < existing.runCount) {
+          return NextResponse.json(
+            { success: false, error: `maxRuns must be at least the ${existing.runCount} runs already executed (or null for infinite).` },
+            { status: 400 }
+          );
+        }
+        data.maxRuns = runs;
+      }
+    }
+
+    const updated = await (prisma as any).scheduledPayment.update({
+      where: { reference },
+      data,
+    });
+
+    return NextResponse.json({
+      success: true,
+      scheduledPayment: updated,
+      message: `Scheduled payment ${reference} updated.`,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+export const PATCH = withApiKeyOrAnySession(editScheduledHandler);

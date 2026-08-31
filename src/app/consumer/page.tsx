@@ -1,7 +1,7 @@
 // src/app/consumer/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useSignMessage } from "wagmi";
@@ -31,6 +31,22 @@ interface ChainOption {
   id: string;
   label: string;
   testnet: boolean;
+}
+
+// A saving plan = a scheduled self-transfer (payer == receiver). Rows the
+// caller controls that pay OTHER people (e.g. payroll schedules) are not
+// "savings" and are filtered out of the Save view.
+interface SavingsPlan {
+  reference: string;
+  payerSCA: string;
+  receiverSCA: string;
+  amount: number;
+  intervalDays: number;
+  nextRunAt: string;
+  runCount: number;
+  maxRuns?: number | null;
+  description?: string | null;
+  status: string;
 }
 
 // Shape returned by /api/consumer/activity. explorerUrl is present only when
@@ -91,6 +107,47 @@ export default function ConsumerApp() {
   const [bridgeNeedsFlareWallet, setBridgeNeedsFlareWallet] = useState(false);
   const [creatingFlareWallet, setCreatingFlareWallet] = useState(false);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+
+  // ── Savings plans (scheduled self-transfers) ──
+  const [savingsPlans, setSavingsPlans] = useState<SavingsPlan[]>([]);
+  const [savingsLoading, setSavingsLoading] = useState(false);
+  const [savingsBusyRef, setSavingsBusyRef] = useState<string | null>(null);
+  const [editingRef, setEditingRef] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState("");
+  const [editFrequency, setEditFrequency] = useState("7");
+
+  // ── Deep links (/consumer?view=save etc.) — captured once at mount so the
+  // payroll page's bottom nav can land on a specific view ──
+  const initialViewRef = useRef<View | null>(null);
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("view");
+    const valid: View[] = ["home", "send", "save", "request", "crosschain"];
+    if (requested && valid.includes(requested as View)) {
+      initialViewRef.current = requested as View;
+    }
+  }, []);
+
+  const refreshSavings = () => {
+    if (!walletAddress) return;
+    setSavingsLoading(true);
+    fetch("/api/payments/scheduled?status=ACTIVE")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          const selfPay = (data.scheduledPayments || []).filter(
+            (s: SavingsPlan) => (s.receiverSCA || "").toLowerCase() === (s.payerSCA || "").toLowerCase()
+          );
+          setSavingsPlans(selfPay);
+        }
+      })
+      .catch(console.error)
+      .finally(() => setSavingsLoading(false));
+  };
+
+  useEffect(() => {
+    if (view === "save" && walletAddress) refreshSavings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, walletAddress]);
 
 
   const refreshBalance = () => {
@@ -163,7 +220,7 @@ export default function ConsumerApp() {
         if (data.success && data.account?.walletAddress) {
           setWalletAddress(data.account.walletAddress);
           setWalletType(data.account.walletType ?? null);
-          setView("home");
+          setView(initialViewRef.current ?? "home");
         } else {
           setView("onboarding");
         }
@@ -352,10 +409,61 @@ export default function ConsumerApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not set up savings.");
       setResult({ success: true, message: `Saving ${amount} USDC every ${frequency} day(s).`, reference: data.scheduledPayment?.reference });
+      refreshSavings();
     } catch (e: any) {
       setResult({ success: false, error: e.message });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Savings plan management (edit / cancel via /api/payments/scheduled) ──
+  const startEditSavings = (plan: SavingsPlan) => {
+    setEditingRef(plan.reference);
+    setEditAmount(String(plan.amount));
+    setEditFrequency(String(plan.intervalDays));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingRef) return;
+    setSavingsBusyRef(editingRef);
+    try {
+      const res = await fetch(`/api/payments/scheduled`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reference: editingRef,
+          amount: parseFloat(editAmount),
+          intervalDays: parseInt(editFrequency),
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not update this plan.");
+      setEditingRef(null);
+      refreshSavings();
+    } catch (e: any) {
+      setResult({ success: false, error: e.message });
+    } finally {
+      setSavingsBusyRef(null);
+    }
+  };
+
+  const handleCancelSavings = async (reference: string) => {
+    setSavingsBusyRef(reference);
+    try {
+      const res = await fetch(`/api/payments/scheduled`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reference }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not cancel this plan.");
+      if (editingRef === reference) setEditingRef(null);
+      refreshSavings();
+    } catch (e: any) {
+      setResult({ success: false, error: e.message });
+    } finally {
+      setSavingsBusyRef(null);
     }
   };
 
@@ -699,6 +807,97 @@ export default function ConsumerApp() {
 
             <p style={styles.footnote}>Built on Arc · Settled in USDC · Every transfer is real and onchain</p>
           </>
+        )}
+
+        {/* ── Your savings plans (Save view) ── */}
+        {view === "save" && walletAddress && (
+          <section style={{ marginBottom: 24 }}>
+            <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "var(--flow-text-muted)" }}>
+              Your savings plans
+            </p>
+            {savingsLoading && savingsPlans.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: "var(--flow-text-faint)" }}>Loading your plans...</p>
+            ) : savingsPlans.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: "var(--flow-text-faint)" }}>
+                No active saving plans yet — set one up below and it will appear here.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {savingsPlans.map((plan) => (
+                  <div key={plan.reference} style={{ background: "var(--flow-surface-2)", borderRadius: 12, padding: "12px 14px" }}>
+                    {editingRef !== plan.reference ? (
+                      <>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                          <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+                            ${plan.amount.toFixed(2)} <span style={{ fontWeight: 500, color: "var(--flow-text-muted)" }}>every {plan.intervalDays} day(s)</span>
+                          </p>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#3F7A57", background: "rgba(63,122,87,0.12)", padding: "3px 8px", borderRadius: 8 }}>
+                            ACTIVE
+                          </span>
+                        </div>
+                        <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--flow-text-faint)" }}>
+                          Next run {new Date(plan.nextRunAt).toLocaleString()} · {plan.runCount} run(s) so far
+                        </p>
+                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <button
+                            style={{ flex: 1, padding: "8px 0", borderRadius: 10, border: "1px solid var(--flow-border)", background: "var(--flow-surface)", color: "var(--flow-text)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                            onClick={() => startEditSavings(plan)}
+                            disabled={savingsBusyRef === plan.reference}
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button
+                            style={{ flex: 1, padding: "8px 0", borderRadius: 10, border: "1px solid #F0D5C9", background: "var(--flow-surface)", color: "#C0563A", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                            onClick={() => handleCancelSavings(plan.reference)}
+                            disabled={savingsBusyRef === plan.reference}
+                          >
+                            {savingsBusyRef === plan.reference ? "Cancelling..." : "✕ Cancel plan"}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 600 }}>Edit this plan</p>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          <div style={styles.field}>
+                            <label style={styles.label}>Amount (USDC)</label>
+                            <input style={styles.input} type="number" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="0.00" />
+                          </div>
+                          <div style={styles.field}>
+                            <label style={styles.label}>How often? (days)</label>
+                            <div style={styles.freqRow}>
+                              {[{ label: "Daily", val: "1" }, { label: "Weekly", val: "7" }, { label: "Monthly", val: "30" }].map((f) => (
+                                <button key={f.val} style={editFrequency === f.val ? styles.freqPillActive : styles.freqPill} onClick={() => setEditFrequency(f.val)}>
+                                  {f.label}
+                                </button>
+                              ))}
+                            </div>
+                            <input style={{ ...styles.input, marginTop: 6 }} type="number" min="1" value={editFrequency} onChange={(e) => setEditFrequency(e.target.value)} placeholder="Custom interval in days" />
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "none", background: "#1C1B19", color: "#FBF8F3", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                              onClick={handleSaveEdit}
+                              disabled={savingsBusyRef === plan.reference || !editAmount || parseInt(editFrequency) <= 0}
+                            >
+                              {savingsBusyRef === plan.reference ? "Saving..." : "Save changes"}
+                            </button>
+                            <button
+                              style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "1px solid var(--flow-border)", background: "var(--flow-surface)", color: "var(--flow-text)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                              onClick={() => setEditingRef(null)}
+                              disabled={savingsBusyRef === plan.reference}
+                            >
+                              Discard
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         )}
 
         {/* ── Send / Save / Request ── */}

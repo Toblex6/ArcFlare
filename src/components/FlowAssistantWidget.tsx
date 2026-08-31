@@ -27,6 +27,24 @@ const COLORS = {
     bubbleBg: '#EDE6D8',
 };
 
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+// NOTE: URL_REGEX keeps the g flag for .split(), but .test() on a /g regex
+// is STATEFUL (lastIndex carries over between calls) — later links in a
+// multi-link message could silently stop being clickable. Always test with
+// this non-global regex instead.
+const IS_URL = /^https?:\/\//;
+
+function renderTextWithCopyableLinks(text: string, onCopy: (url: string) => void) {
+    const parts = text.split(URL_REGEX);
+    return parts.map((part, idx) =>
+        IS_URL.test(part) ? (
+            <span key={idx} onClick={() => onCopy(part)} title="Click to copy link" style={{ color: '#0d7c5f', textDecoration: 'underline', cursor: 'pointer', wordBreak: 'break-all' }}>{part}</span>
+        ) : (
+            <span key={idx}>{part}</span>
+        )
+    );
+}
+
 export default function FlowAssistantWidget() {
     const [open, setOpen] = useState(false);
     const [hasSession, setHasSession] = useState(false);
@@ -40,6 +58,7 @@ export default function FlowAssistantWidget() {
     const [sending, setSending] = useState(false);
     const [listening, setListening] = useState(false);
     const [speechSupported, setSpeechSupported] = useState(false);
+    const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
     const recognitionRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -126,6 +145,12 @@ export default function FlowAssistantWidget() {
 
     const handleCancel = () => addMessage({ role: 'assistant', text: 'Okay, cancelled. Anything else?' });
 
+    const handleCopyLink = (url: string, idx: number) => {
+        navigator.clipboard.writeText(url).catch(() => {});
+        setCopiedIdx(idx);
+        setTimeout(() => setCopiedIdx((cur) => (cur === idx ? null : cur)), 1500);
+    };
+
     if (!hasSession) return null; // no wallet connected yet, nothing to act on
 
     return (
@@ -194,9 +219,13 @@ export default function FlowAssistantWidget() {
                                         padding: '9px 12px',
                                         fontSize: 13,
                                         lineHeight: 1.5,
+                                        wordBreak: 'break-word',
                                     }}
                                 >
-                                    {m.text}
+                                    {m.role === 'assistant' ? renderTextWithCopyableLinks(m.text, (url) => handleCopyLink(url, i)) : m.text}
+                                    {m.role === 'assistant' && /(https?:\/\/[^\s]+)/.test(m.text) && (
+                                        <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: copiedIdx === i ? '#0d7c5f' : COLORS.mutedLight }}>{copiedIdx === i ? '✓ Copied' : 'Click link to copy'}</span>
+                                    )}
                                 </div>
                                 {m.pendingAction && (
                                     <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
