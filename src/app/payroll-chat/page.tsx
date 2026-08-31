@@ -7,7 +7,7 @@
 // /api/payments/scheduled routes — no new backend primitives.
 
 import React, { useState, useRef, useEffect } from "react";
-import { parsePayrollCommand, EXAMPLE_COMMANDS, FREQUENCY_TO_DAYS, Frequency } from "@/lib/payrollChatParser";
+import { parsePayrollCommand, EXAMPLE_COMMANDS, FREQUENCY_TO_DAYS, Frequency, ParsedIntent } from "@/lib/payrollChatParser";
 
 const ARCFLARE_BASE = process.env.NEXT_PUBLIC_ARCFLARE_API_BASE || "https://flarehq.xyz";
 const ARCFLARE_API_KEY = process.env.NEXT_PUBLIC_ARCFLARE_API_KEY || "";
@@ -62,7 +62,38 @@ export default function PayrollChatPage() {
       return;
     }
 
-    const intent = parsePayrollCommand(userText);
+    // ── Primary path: LLM-backed intent parsing (api/merchant/payroll-assistant).
+    // Falls back to the local regex parser on any LLM failure/timeout so the
+    // currently-working exact-phrase commands keep functioning during outages.
+    let intent: ParsedIntent | null = null;
+    let llmReply: string | null = null;
+    try {
+      const res = await fetch("/api/merchant/payroll-assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": ARCFLARE_API_KEY },
+        body: JSON.stringify({ message: userText, contractors, schedule, vaultAddress }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          llmReply = data.reply ?? null;
+          intent = data.intent ?? null;
+        }
+      }
+    } catch {
+      // LLM unavailable — fall through to the regex parser.
+    }
+
+    if (llmReply && !intent) {
+      // Pure conversational reply (e.g. "hi") — no state change to apply.
+      addMessage("assistant", llmReply);
+      setSending(false);
+      return;
+    }
+    if (!intent) {
+      intent = parsePayrollCommand(userText);
+    }
 
     try {
       switch (intent.type) {
@@ -71,7 +102,7 @@ export default function PayrollChatPage() {
           const cadence = intent.intervalDays && intent.intervalDays !== FREQUENCY_TO_DAYS[intent.frequency]
             ? `every ${intent.intervalDays} days`
             : intent.frequency;
-          addMessage("assistant", `Got it. Added ${intent.name} (${intent.address.slice(0, 10)}...) at ${intent.amount} USDC, paid ${cadence}. They'll be included in your next payroll run.`);
+          if (!llmReply) addMessage("assistant", `Got it. Added ${intent.name} (${intent.address.slice(0, 10)}...) at ${intent.amount} USDC, paid ${cadence}. They'll be included in your next payroll run.`);
           break;
         }
 
@@ -93,11 +124,33 @@ export default function PayrollChatPage() {
 
         case "check_balance": {
           if (!vaultAddress) {
-            addMessage("assistant", "I don't have your vault wallet address yet. Set it in the field below first.");
+            addMessage("assistant", "I don't have your vault wallet address yet. Set it in the field above first.");
             break;
           }
-          // Balance check is a stub for hackathon – replace with real Circle balance call if needed
-          addMessage("assistant", `💡 Balance check isn't live yet – I'll show it when it's ready. (Stub for ${vaultAddress.slice(0, 10)}...)`);
+          // Real balance — same on-chain lookup the Telegram /balance command
+          // uses (getUsdcBalance), served by the payroll-assistant route.
+          try {
+            const res = await fetch(`/api/merchant/payroll-assistant?vaultAddress=${encodeURIComponent(vaultAddress)}`, {
+              headers: { "x-api-key": ARCFLARE_API_KEY },
+              signal: AbortSignal.timeout(15000),
+            });
+            const data = await res.json();
+            if (data.success) {
+              addMessage("assistant", `💰 Your vault balance: $${Number(data.balance).toFixed(2)} USDC`);
+            } else {
+              addMessage("assistant", `Couldn't fetch your balance right now: ${data.error}`);
+            }
+          } catch {
+            addMessage("assistant", "Couldn't fetch your balance right now. Try again shortly.");
+          }
+          break;
+        }
+
+        case "remove_contractor": {
+          setContractors((prev) => prev.filter((c) => c.name.toLowerCase() !== intent.name.toLowerCase()));
+          if (!llmReply) {
+            addMessage("assistant", `Removed ${intent.name} from your contractor list (if they were on it).`);
+          }
           break;
         }
 

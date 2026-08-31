@@ -4,6 +4,7 @@ export type Frequency = "daily" | "weekly" | "monthly";
 
 export type ParsedIntent =
   | { type: "add_contractor"; name: string; address: string; amount: number; frequency: Frequency; intervalDays: number }
+  | { type: "remove_contractor"; name: string }
   | { type: "list_contractors" }
   | { type: "clear_contractors" }
   | { type: "check_balance" }

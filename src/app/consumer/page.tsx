@@ -33,6 +33,18 @@ interface ChainOption {
   testnet: boolean;
 }
 
+// Shape returned by /api/consumer/activity. explorerUrl is present only when
+// the row has a real arcTxHash (null while a transfer is still pending).
+interface ActivityItem {
+  reference: string;
+  direction: "in" | "out";
+  counterparty?: string;
+  amount: number;
+  status: string;
+  timestamp: string;
+  explorerUrl?: string | null;
+}
+
 export default function ConsumerApp() {
   const router = useRouter();
   const { signMessageAsync } = useSignMessage();
@@ -78,7 +90,8 @@ export default function ConsumerApp() {
   const [chainBalanceTick, setChainBalanceTick] = useState(0);
   const [bridgeNeedsFlareWallet, setBridgeNeedsFlareWallet] = useState(false);
   const [creatingFlareWallet, setCreatingFlareWallet] = useState(false);
-  const [activity, setActivity] = useState<any[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+
 
   const refreshBalance = () => {
     if (!walletAddress) return;
@@ -665,6 +678,15 @@ export default function ConsumerApp() {
                         <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>
                           {new Date(a.timestamp).toLocaleString()} · {a.status}
                         </p>
+                        {a.explorerUrl ? (
+                          <a href={a.explorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>
+                            View on ArcScan
+                          </a>
+                        ) : (
+                          <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>
+                            {a.status !== "SUCCESS" ? "Pending — no transaction yet" : null}
+                          </p>
+                        )}
                       </div>
                       <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: a.direction === "out" ? "#C0563A" : "#3F7A57" }}>
                         {a.direction === "out" ? "-" : "+"}${a.amount.toFixed(2)}
