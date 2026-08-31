@@ -69,7 +69,8 @@ const PAYROLL_TOOLS = [
     type: 'function',
     function: {
       name: 'add_contractor',
-      description: "Add a contractor to the payroll list. Use when the user names a person and a wallet address, e.g. 'add flare 0xAbc… as a contractor at 2 USDC monthly'.",
+      description:
+        "Add a contractor to the payroll list. Use whenever the user names a person AND a wallet address AND an amount — in ANY phrasing: 'add flare 0xAbc… as a contractor at 2 USDC monthly', 'add deji 0xAbc… 1 usdc every 2 days', 'pay maria 0xAbc… 5 usdc weekly', or even a bare 'deji 0xAbc… 1 usdc every 2 days' continuing an earlier add. Also use it to COMPLETE a pending add when the user has already given some details in earlier turns and now supplies the missing ones (e.g. they gave name+address before and now say '1 usdc every 2 days').",
       parameters: {
         type: 'object',
         properties: {
@@ -77,7 +78,7 @@ const PAYROLL_TOOLS = [
           address: { type: 'string', description: "Contractor's payout wallet address (0x…)" },
           amount: { type: 'number', description: 'USDC amount per payment' },
           frequency: { type: 'string', enum: ['daily', 'weekly', 'monthly'] },
-          intervalDays: { type: 'number', description: 'Exact interval in days for custom cadences like "every 4 weeks" (would be 28)' },
+          intervalDays: { type: 'number', description: 'Exact interval in days for custom cadences like "every 4 weeks" (would be 28). Minimum is 1 — sub-day cadences are not supported.' },
         },
         required: ['name', 'address', 'amount'],
       },
@@ -155,8 +156,13 @@ const PAYROLL_TOOLS = [
 const SYSTEM_PROMPT = `You are FlareHQ's payroll assistant, a friendly chat interface for managing contractor payroll.
 
 Rules:
-- Map the user's message to the closest tool. If they're just chatting (greetings like "hi", "what can you do", thanks, small talk), do NOT call a tool — reply conversationally and briefly mention what you can do: add/remove/list/clear contractors, check the vault balance, set the payroll schedule, run payroll, and show receipts.
-- When adding a contractor, extract name, wallet address (0x…), amount, and cadence from the user's OWN words. If a required piece is missing, ask for it instead of calling the tool.
+- Map the user's message to the closest tool. If they're just chatting (greetings like "hi", "what can you do", thanks, small talk, general questions), reply conversationally — no tool call — and briefly mention what you can do: add/remove/list/clear contractors, check the vault balance, set the payroll schedule, run payroll, and show receipts.
+- This is a MULTI-TURN conversation. Earlier turns may contain pieces of a pending action. When the user supplies a missing detail (a name, address, amount, or cadence) after you asked for it, combine it with what they ALREADY said and call add_contractor with the complete set — do not ask again for details they already gave.
+- When adding a contractor, extract name, wallet address (0x…), amount, and cadence from the user's OWN words — across turns if needed. Only ask for what is genuinely still missing. Any phrasing counts: 'add deji 0xAbc… 1 usdc every 2 days' is a complete add.
+- Cadences are measured in DAYS. 'every 2 days' → intervalDays 2; 'every 3 weeks' → intervalDays 21; 'monthly' → monthly. Sub-day cadences (hours, minutes, seconds) are NOT supported — the shortest is daily. If the user asks for sub-day, tell them the shortest supported cadence is daily and offer that (ask before adding).
+- When describing a cadence in your reply, name what the user actually said: 'every 2 days', 'every 3 weeks', 'monthly'. Never relabel a custom interval as one of the plain buckets.
+- A cadence answer alone ('every 2 days', 'daily') after a pending add completes THAT add — it is not a schedule change. Only call set_schedule when the user is explicitly setting the overall payroll schedule (e.g. 'set payroll to run weekly').
+- If the user asks HOW to do something, answer in plain natural language with a one-line example phrase (e.g. 'add deji 0xAbc… 1 usdc every 2 days'). NEVER show JSON, code blocks, field lists, or internal schemas.
 - Never invent, guess, or alter wallet addresses, amounts, or the paying wallet. The paying wallet is configured by the user outside this chat and is out of your control entirely.
 - When you call a tool, its result comes back to you — summarize the outcome in one or two short sentences.`;
 
@@ -291,8 +297,19 @@ export async function POST(req: NextRequest) {
     `- Contractors (${contractors.length}): ${contractors.map((c) => `${c.name} at ${c.amount} USDC ${c.frequency || ''}`).join('; ') || 'none'}\n` +
     `- Schedule: ${schedule || 'not set'}\n`;
 
+  // Conversation history (the client sends its last messages) so multi-turn
+  // flows work: a user who gave name+address earlier and answers 'every 2
+  // days' now is completing that add, not starting from scratch. Bounded and
+  // shape-checked — anything malformed is dropped, never trusted.
+  const rawHistory: any[] = Array.isArray(body.history) ? body.history : [];
+  const history = rawHistory
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.text.trim())
+    .slice(-12)
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.text.slice(0, 2000) }));
+
   const messages: any[] = [
     { role: 'system', content: SYSTEM_PROMPT + '\n\n' + contextNote },
+    ...history,
     { role: 'user', content: message },
   ];
 

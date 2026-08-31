@@ -251,14 +251,22 @@ export default function PayrollChatPage() {
 
     // Primary path: LLM-backed intent parsing (merchant OR consumer auth).
     // Falls back to the local regex parser on any LLM failure so the
-    // exact-phrase commands keep working during outages.
+    // exact-phrase commands keep working during outages. Recent chat history
+    // travels along so multi-turn flows (partial add, then the missing
+    // cadence) complete instead of restarting.
     let intent: ParsedIntent | null = null;
     let llmReply: string | null = null;
     try {
       const res = await fetch("/api/merchant/payroll-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText, contractors, schedule, vaultAddress }),
+        body: JSON.stringify({
+          message: userText,
+          contractors,
+          schedule,
+          vaultAddress,
+          history: messages.slice(-12).map((m) => ({ role: m.role, text: m.text })),
+        }),
         signal: AbortSignal.timeout(20000),
       });
       if (res.ok) {
