@@ -14,6 +14,7 @@ interface NavItem {
     label: string;
     href: string;
     disabled?: boolean;
+    external?: boolean;
 }
 
 interface NavSection {
@@ -28,6 +29,12 @@ const SECTIONS: NavSection[] = [
             { label: 'Dashboard', href: '/merchant/dashboard' },
             { label: 'Analytics', href: '/analytics' },
             { label: 'Homepage', href: '/' },
+        ],
+    },
+    {
+        group: 'FAUCET',
+        items: [
+            { label: 'Get Test Tokens', href: 'https://faucet.circle.com/', external: true },
         ],
     },
     {
@@ -64,6 +71,7 @@ const ICONS: Record<string, JSX.Element> = {
     Jobs: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>,
     'AI Assistant': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
     'Agent Wallets': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="7" cy="15" r="1.5" /></svg>,
+    'Get Test Tokens': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /></svg>,
 };
 
 export default function DashboardSidebar({ active }: { active: string }) {
@@ -173,6 +181,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
                                     <a
                                         key={item.label}
                                         href={item.href}
+                                        {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                                         style={{
                                             display: 'flex', alignItems: 'center', gap: 10,
                                             padding: '9px 12px', borderRadius: 9,
