@@ -131,8 +131,9 @@ export async function handleApply(
     if (procurementId) {
       const procurement = await (prisma as any).procurementPosting.findUnique({ where: { id: procurementId } });
       if (procurement) {
+        const humanId = `job${procurement.seq}`;
         if (procurement.status !== "OPEN") {
-          return { text: `That posting is ${procurement.status}, not open for applications.` };
+          return { text: `That posting (${humanId}) is ${procurement.status}, not open for applications.` };
         }
         // Derive applicantAgentId if wallet maps to an AgentRegistry (optional, not required)
         let applicantAgentId: number | null = null;
@@ -151,7 +152,8 @@ export async function handleApply(
               portfolioLinks: [],
             },
           });
-          return { text: `Application submitted for procurement ${procurementId}. You'll be notified if you're selected.` };
+          const humanId = `job${procurement.seq}`;
+          return { text: `Application submitted for job ${humanId}. You'll be notified if you're selected.` };
         } catch (e: any) {
           if (e?.code === "P2002" || String(e.message).includes("already applied") || String(e.message).includes("Unique constraint")) {
             return { text: `You've already applied to this job.` };
@@ -172,7 +174,7 @@ export async function handleApply(
       return {
         text:
           `Job #${jobId} is a direct-hire job — its provider was assigned when it was created, so it can't be applied for.\n` +
-          `Watch /jobs for open procurement postings (marked "procurement") and apply to those.`,
+          `Watch /jobs for open jobs and apply to those.`,
       };
     }
   }
@@ -180,8 +182,8 @@ export async function handleApply(
 }
 
 /**
- * /jobs — lists open procurement postings (the only jobs that accept
- * applications). Legacy direct-hire Erc8183Jobs are intentionally NOT listed:
+ * /jobs — lists open postings (the only jobs that accept applications).
+ * Legacy direct-hire Erc8183Jobs are intentionally NOT listed:
  * their provider was fixed at createJob time, so applying is impossible —
  * listing them would invite dead-end /apply calls.
  */
@@ -200,9 +202,9 @@ export async function handleListJobs(): Promise<BotReply> {
     const budget = (() => { try { return formatUnits(BigInt(p.budgetMax), 6); } catch { return "?"; } })();
     const title = p.title || p.description?.slice(0, 50) || "Untitled";
     const humanId = `job${p.seq}`;
-    return `• *${title}* — ${budget} USDC (procurement)\n  /apply ${humanId} "<your pitch>"`;
+    return `• *${title}* — ${budget} USDC\n  /apply ${humanId} "<your pitch>"`;
   });
-  return { text: `Open procurement postings:\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
+  return { text: `Open jobs:\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
 }
 
 /**

@@ -135,6 +135,11 @@ export default function JobsPage() {
   const [applicantsLoading, setApplicantsLoading] = useState(false);
   const [selecting, setSelecting] = useState<string | null>(null); // postingId being selected/hired
 
+  // Agent treasury funding (hire gate needs the agent's ledger treasury)
+  const [agentTreasury, setAgentTreasury] = useState<any>(null);
+  const [treasuryLoading, setTreasuryLoading] = useState(false);
+  const [funding, setFunding] = useState(false);
+
   const callJobsAPI = async (body: any) => {
     const res = await fetch('/api/jobs', {
       method: 'POST',
@@ -216,6 +221,14 @@ export default function JobsPage() {
     }
   };
 
+  // Normalize a USDC input to a 6-dec string so the API never interprets a
+  // bare integer ("2") as micro-units. "2" -> "2.000000" (2 USDC).
+  const toUsdcSixDec = (v: string): string => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    return n.toFixed(6);
+  };
+
   const createPosting = async () => {
     setPostLoading(true);
     setPostError(null);
@@ -231,7 +244,7 @@ export default function JobsPage() {
           clientAgentId: Number(postAgentId),
           description: postDescription,
           title: postTitle || undefined,
-          budgetMax: postBudgetMax,
+          budgetMax: toUsdcSixDec(postBudgetMax),
           skill: postSkill || undefined,
         }),
       });
@@ -324,6 +337,54 @@ export default function JobsPage() {
       setPostError(e.message);
     } finally {
       setSelecting(null);
+    }
+  };
+
+  const loadTreasury = async (agentId: string) => {
+    if (!agentId) {
+      setAgentTreasury(null);
+      return;
+    }
+    setTreasuryLoading(true);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/treasury`);
+      const data = await res.json();
+      if (!res.ok || !data.treasury) throw new Error(data.error || 'failed to load treasury');
+      setAgentTreasury(data.treasury);
+    } catch (e: any) {
+      setAgentTreasury(null);
+    } finally {
+      setTreasuryLoading(false);
+    }
+  };
+
+  const fundTreasury = async () => {
+    if (!postAgentId) return;
+    const amount = window.prompt('Fund the agent treasury with how much USDC? (e.g. 5)', '5');
+    if (!amount) return;
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n <= 0) {
+      setPostError('Enter a positive USDC amount.');
+      return;
+    }
+    setFunding(true);
+    setPostError(null);
+    try {
+      const res = await fetch(`/api/agents/${postAgentId}/treasury/credit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountUSDC: n.toFixed(6) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Fund failed (${res.status})`);
+      setPostResult({
+        message: `Treasury funded: ${data.receivedUsdc} USDC received by the agent (tx ${(data.txHash || '').slice(0, 12)}…). You can now select & hire.`,
+      });
+      await loadTreasury(postAgentId);
+    } catch (e: any) {
+      setPostError(e.message);
+    } finally {
+      setFunding(false);
     }
   };
 
@@ -1049,7 +1110,10 @@ export default function JobsPage() {
                   <select
                     style={{ ...S.input, marginBottom: 0, fontFamily: 'monospace' }}
                     value={postAgentId}
-                    onChange={(e) => setPostAgentId(e.target.value)}
+                    onChange={(e) => {
+                      setPostAgentId(e.target.value);
+                      loadTreasury(e.target.value);
+                    }}
                   >
                     <option value="">Select your agent...</option>
                     {postAgents.map((a) => (
@@ -1063,16 +1127,51 @@ export default function JobsPage() {
                       No active agents found. Deploy an agent first (Agents / Marketplace).
                     </span>
                   )}
+                  {postAgentId && (
+                    <div style={{ marginTop: 8, fontSize: 11 }}>
+                      {treasuryLoading ? (
+                        <span style={{ color: 'var(--text-secondary)' }}>Loading treasury...</span>
+                      ) : agentTreasury ? (
+                        <span style={{ color: 'var(--text-secondary)', display: 'block' }}>
+                          Agent treasury available:{' '}
+                          <strong style={{ color: Number(agentTreasury.availableBalance) > 0 ? '#0d7c5f' : '#dc2626' }}>
+                            {(Number(agentTreasury.availableBalance) / 1e6).toFixed(4)} USDC
+                          </strong>{' '}
+                          {postBudgetMax && Number(postBudgetMax) > 0 && Number(agentTreasury.availableBalance) / 1e6 < Number(postBudgetMax) && (
+                            <span style={{ color: '#f59e0b', display: 'block', marginTop: 2 }}>
+                              Below the budget — hire will be blocked until you fund it.{' '}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-secondary)' }}>Treasury unavailable.</span>
+                      )}
+                      <button
+                        style={{ ...S.btnSm(false), marginTop: 6, color: 'var(--primary)', fontWeight: 700 }}
+                        disabled={funding}
+                        onClick={fundTreasury}
+                      >
+                        {funding ? 'Funding...' : 'Fund agent treasury (USDC)'}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <span style={S.label}>Max Budget (USDC)</span>
                   <input
                     style={S.input}
                     type="number"
+                    min="0"
+                    step="0.01"
                     value={postBudgetMax}
                     onChange={(e) => setPostBudgetMax(e.target.value)}
                     placeholder="5.00"
                   />
+                  <span style={{ fontSize: 11, color: postBudgetMax && Number(postBudgetMax) > 0 ? '#0d7c5f' : 'var(--text-secondary)', display: 'block', marginTop: 2 }}>
+                    {postBudgetMax && Number(postBudgetMax) > 0
+                      ? `Will be posted as ${Number(postBudgetMax).toFixed(2)} USDC`
+                      : 'Enter an amount in USDC'}
+                  </span>
                 </div>
                 <div>
                   <span style={S.label}>Title (optional)</span>

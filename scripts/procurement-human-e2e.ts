@@ -26,7 +26,6 @@ import { prisma } from '@/lib/prisma';
 import { provisionWalletForTelegramUser } from '@/lib/wallet/circleWalletProvisioning';
 import { ensureAgentDefaultSpendLimit } from '@/lib/agents/spendLimitEnforcer';
 import { getCircleClient } from '@/lib/circle/client';
-import { recordLedgerEntry } from '@/lib/ledger/ledgerService';
 
 const arcTestnet = defineChain({
   id: 5042002,
@@ -154,30 +153,29 @@ async function main() {
       console.log('  (neutralized client minTrustScore for this run — will restore)');
     }
 
-    // Spend limit bootstrap (idempotent) + USDC preflight for the client wallet
+    // Spend-limit bootstrap (idempotent) — the fund route's checkAndRecordSpend
+    // needs the agent wallet to have an owned limit slot.
     try { await ensureAgentDefaultSpendLimit(clientWalletAddress); } catch (e: any) { console.log('  ⚠️ ensureAgentDefaultSpendLimit:', e?.message ?? e); }
-    const clientBal = await balanceOf(clientWalletAddress).catch(() => 0);
-    if (clientBal < 0.05) {
-      await topUpNative(clientWalletAddress, '0.5');
-    }
-    const clientBal2 = await balanceOf(clientWalletAddress).catch(() => 0);
-    ok(`client agent wallet funded (>= 0.05 USDC), has ${clientBal2.toFixed(4)}`, clientBal2 >= 0.05, `balance ${clientBal2}`);
 
-    // Treasury ledger credit for the client agent (mirrors the on-chain top-up;
-    // hire/fund check the agent's ledger treasury, not just the wallet). Uses a
-    // deterministic source dedupe so re-runs don't double-credit.
-    const ledgerDedupeKey = "e2e-human-topup:human-e2e:" + clientAgent.id + ":REVENUE";
-    await prisma.agentLedgerEntry.deleteMany({ where: { dedupeKey: ledgerDedupeKey } }).catch(() => {});
-    await recordLedgerEntry({
-      agentRegistryId: clientAgent.id,
-      type: "REVENUE",
-      amount: 500000n,
-      token: "USDC",
-      direction: "CREDIT",
-      sourceType: "e2e-human-topup",
-      sourceId: "human-e2e",
-      description: "E2E treasury top-up (procurement human e2e)",
-    }).catch((e: any) => console.log('  ⚠️ ledger top-up failed:', e?.message ?? e));
+    // ── Fund the client agent's treasury via the REAL credit endpoint ────────
+    // (merchant Circle wallet -> agent Circle wallet -> ADJUSTMENT ledger credit).
+    // This proves the exact user flow that previously failed with
+    // "Treasury policy blocked: insufficient available balance 0" — and also
+    // funds the agent wallet so the later on-chain fund() has real USDC.
+    if (!merchant.walletAddress) throw new Error('merchant has no wallet address');
+    const merchantBal = await balanceOf(merchant.walletAddress).catch(() => 0);
+    if (merchantBal < 0.6) {
+      await topUpNative(merchant.walletAddress, '1.0');
+    }
+    const credit = await fetchWithRpcRetry(`/api/agents/${clientAgent.id}/treasury/credit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', cookie: merchantCookie },
+      body: JSON.stringify({ amountUSDC: '0.5' }),
+    });
+    ok('treasury credit ok (real USDC merchant->agent)', credit.res.status === 200 && credit.data.success, `${credit.res.status} ${credit.data.error || ''}`);
+    const availAfterCredit = Number(credit.data?.treasury?.availableBalance ?? 0) / 1e6;
+    ok(`client agent treasury funded (available ${availAfterCredit.toFixed(4)} USDC)`, availAfterCredit >= 0.05, `available ${availAfterCredit}`);
+    const agentBalAfterCredit = await balanceOf(clientWalletAddress).catch(() => 0);
+    ok(`client agent wallet received real USDC (${agentBalAfterCredit.toFixed(4)})`, agentBalAfterCredit >= 0.05, `balance ${agentBalAfterCredit}`);
 
     // ── Human worker: real Circle wallet, NO AgentRegistry row ───────────────
     await prisma.consumerAccount.deleteMany({ where: { telegramUserId: WORKER_TG } }).catch(() => {});
@@ -289,7 +287,7 @@ async function main() {
     }
     if (clientAgent?.id) {
       await prisma.agentLedgerEntry.deleteMany({
-        where: { dedupeKey: "e2e-human-topup:human-e2e:" + clientAgent.id + ":REVENUE" },
+        where: { agentRegistryId: clientAgent.id, description: { contains: 'treasury fund top-up' } },
       }).catch(() => {});
     }
     if (worker?.walletAddress) {

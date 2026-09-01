@@ -92,6 +92,7 @@ async function main() {
   ok("/jobs includes the procurement posting (by job<N>)", list.text.includes(`job${posting.seq}`), list.text);
   ok("/jobs does NOT list legacy direct-hire job", !list.text.includes(legacyJobId.toString()), list.text);
   ok("/jobs shows semantic job<N> id", list.text.includes(`job${posting.seq}`), `listing ${list.text}`);
+  ok("/jobs listing has no '(procurement)' jargon", !list.text.includes("(procurement)"), `listing ${list.text}`);
 
   // 5. /apply job<N> — semantic id + quoted pitch (quotes stripped)
   const humanId = `job${posting.seq}`;
@@ -102,6 +103,7 @@ async function main() {
   });
   const quoted = await handleApply(TG_APPLIER, humanId, '"I can deliver this in 2 days"');
   ok("/apply job<N> with quoted pitch → success", quoted.text.includes("Application submitted"), quoted.text);
+  ok("/apply reply uses job<N>, not the cuid", quoted.text.includes(`job${posting.seq}`) && !quoted.text.includes(posting.id), `reply ${quoted.text}`);
   const appRow = await (prisma as any).procurementApplication.findFirst({ where: { procurementId: posting.id } });
   ok("applied via job<N> id (row exists)", !!appRow, "no application row");
   ok("quotes stripped from stored pitch", appRow?.pitch === "I can deliver this in 2 days", `pitch ${JSON.stringify(appRow?.pitch)}`);
@@ -162,6 +164,19 @@ async function main() {
   const adminJobsPagePath = path.join(process.cwd(), "src/app/admin/jobs/page.tsx");
   const adminJobsPageSrc = fs.readFileSync(adminJobsPagePath, "utf8");
   ok("admin jobs page has remove buttons", adminJobsPageSrc.includes("Remove") && adminJobsPageSrc.includes("/api/admin/jobs"), "no remove UI");
+
+  // 7. Static proofs — treasury credit endpoint (this task)
+  const creditPath = path.join(process.cwd(), "src/app/api/agents/[id]/treasury/credit/route.ts");
+  const creditSrc = fs.readFileSync(creditPath, "utf8");
+  ok("treasury credit requires merchant auth", creditSrc.includes("resolveMerchant"), "no merchant gate");
+  ok("treasury credit requires control of the agent", creditSrc.includes("verifyCallerControlsAddress"), "no agent control gate");
+  ok("treasury credit derives source wallet server-side (never body)", creditSrc.includes("merchantRecord.circleWalletId") && !/body\.(walletId|walletAddress|destinationAddress)/.test(creditSrc), "body-trusted wallet");
+  ok("treasury credit destination must resolve to agent scaAddress", creditSrc.includes("destAddress.toLowerCase() !== agent.scaAddress.toLowerCase()"), "no scaAddress match");
+  ok("treasury credit records ADJUSTMENT (not REVENUE)", creditSrc.includes("type: 'ADJUSTMENT'"), "wrong ledger type");
+  ok("treasury credit measures received delta", creditSrc.includes("receivedWei = delta"), "no delta measurement");
+  ok("treasury credit records ledger deduped by txHash", creditSrc.includes("txHash: arcTxHash"), "no txHash dedupe");
+  ok("jobs page has fund-treasury wiring", fs.readFileSync(path.join(process.cwd(), "src/app/jobs/page.tsx"), "utf8").includes("treasury/credit"), "no UI wiring");
+  ok("jobs page normalizes budget to 6-dec", fs.readFileSync(path.join(process.cwd(), "src/app/jobs/page.tsx"), "utf8").includes("toUsdcSixDec"), "no units fix");
 
   console.log(`\nPASS: ${passed}  FAIL: ${failed}`);
   for (const f of failures) console.log(`  ❌ ${f}`);
