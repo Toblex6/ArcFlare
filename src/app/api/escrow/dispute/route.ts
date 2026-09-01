@@ -12,10 +12,11 @@ import { NextResponse, NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
-import { queueExternalSignatureRequest } from '@/lib/wallet/signatureQueue';
+import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
+import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -99,23 +100,37 @@ async function disputeHandler(request: NextRequest) {
     if (actor.type === 'merchant') {
       const walletProvider = await resolveWalletProvider(actor.id);
       if (walletProvider.kind !== "CIRCLE") {
-        const req = await queueExternalSignatureRequest({
+        // External wallet: queue a TRANSACTION request. The merchant's wallet
+        // broadcasts dispute(contractEscrowId, reason) directly; the server
+        // verifies the receipt + EscrowDisputed event before marking anything.
+        const req = await queueTransactionRequest({
           merchantId: actor.id,
-          action: "escrow.dispute",
+          action: TX_ACTIONS.escrowDispute,
           actionRefId: reference,
           payload: {
+            kind: "transaction",
             reference,
             contractEscrowId: escrow.contractEscrowId,
             contractAddress: ESCROW_CONTRACT,
             callerSCA,
             reason: disputeReason,
+            transaction: {
+              description: `Raise dispute on escrow ${reference}`,
+              chainId: ARC_TESTNET_CHAIN_ID,
+              to: ESCROW_CONTRACT,
+              from: callerSCA,
+              abiFunctionSignature: 'dispute(bytes32,string)',
+              args: [escrow.contractEscrowId, disputeReason],
+              value: '0',
+            },
           },
         });
         return NextResponse.json({
           success: true,
           pendingSignature: true,
           requestId: req.id,
-          message: 'Your wallet needs to approve this dispute — check /api/merchant/wallet/sign-requests.',
+          transaction: req.payload?.transaction ?? null,
+          message: 'Your wallet needs to broadcast the dispute transaction — approve it in your wallet, then the server verifies the on-chain receipt.',
         });
       }
       const result = await walletProvider.executeContract({

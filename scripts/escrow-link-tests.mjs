@@ -39,9 +39,13 @@ ok(!page.includes('developer-controlled-wallets') && !page.includes('CIRCLE_API_
 ok(!/\/api\/escrow\/create/.test(page), 'funding page never calls the Circle-custodial escrow/create route');
 
 const fundRoute = readFileSync(join(here, '..', 'src', 'app', 'api', 'escrow', 'link', '[reference]', 'fund', 'route.ts'), 'utf8');
-ok(fundRoute.includes('getTransactionReceipt'), 'fund route verifies the tx receipt on-chain');
-ok(fundRoute.includes("receipt.from.toLowerCase() !== depositorSCA.toLowerCase()"), 'fund route requires the tx sender to be the depositor');
-ok(fundRoute.includes('contractAddress.toLowerCase()'), 'fund route requires the tx to target the escrow contract');
+ok(fundRoute.includes('getReceiptReliable') || fundRoute.includes('getTransactionReceipt'), 'fund route verifies the tx receipt on-chain (independent re-read of the chain)');
+ok(fundRoute.includes('receipt.from.toLowerCase() !== depositorSCA.toLowerCase()'), 'fund route requires the tx sender to be the depositor');
+ok(fundRoute.includes('receipt.to?.toLowerCase() !== ESCROW_CONTRACT.toLowerCase()'), 'fund route requires the tx to target the escrow contract');
+ok(fundRoute.includes('keccak256(toBytes(reference))') && fundRoute.includes('created.escrowId.toLowerCase() !== onchainId.toLowerCase()'),
+  'fund route proves the tx created THIS request\u2019s escrow (onchainId = keccak256(reference), EscrowCreated event escrowId must match)');
+ok(fundRoute.includes("created.beneficiary") && fundRoute.includes("created.amount") && fundRoute.includes("created.depositor"),
+  'fund route verifies the created escrow\u2019s depositor/beneficiary/amount against the request');
 ok(!fundRoute.includes('initiateDeveloperControlledWalletsClient') && !fundRoute.includes('createContractExecutionTransaction') && !fundRoute.includes('transferUsdc'),
   'fund route never moves funds via Circle');
 

@@ -1,0 +1,65 @@
+═══════ External-wallet E2E ═══════
+BASE=http://localhost:3000 RPC=https://rpc.drpc.testnet.arc.io
+DEPOSITOR(payer)=0x46dfEDe57338ceaD8c83C569fD37CE3A25746b35 BENEFICIARY=0x0d9Dc1733FEA587Ce16E4CbBE449B8E01E677F44
+═══ Static proofs — no synthetic-hash success path ═══
+  ✓ function named externalTxHash (old fabricator) absent
+  ✓ sha256-based synthetic hash (non-chain data → 0x..64) absent
+  ✓ signature-only resume engine import absent
+  ✓ fake explorer URL built from a request id absent
+  ✓ signatureResume.ts (fake-hash engine) deleted
+  ✓ verification requires an authoritative receipt
+  ✓ stream stop/withdraw fail closed (ABI conflict)
+  ✓ fund route decodes EscrowCreated and binds escrowId to keccak256(reference)
+
+═══ Live route tests (server at http://localhost:3000) ═══
+
+Depositor USDC balance: 4.1882
+
+── 1. escrow-link funding (real external-wallet broadcast) ──
+  ✓ create escrow request R1 (0.5 USDC → beneficiary)
+    createEscrow tx: 0xd3206676ad46e73ee7d52005be8ff743cc63fa82766f11d36c823ec5f914135d
+  ✓ external wallet broadcasts approve + createEscrow (real tx)
+  ✓ fund route records R1 ACTIVE after verifying the real tx
+
+── 2. escrow-link attack (valid tx for another request must not fund) ──
+  ✓ create escrow request R2
+  ✓ fund R2 with a real (different) escrow transaction
+  ✓ submitting R2's txHash to an UNRELATED pending request MUST be rejected (escrowId mismatch)
+
+── 3. external-wallet escrow release (real confirmDelivery) ──
+  ✓ Merchant A (depositor) queues a release transaction request
+    confirm tx: 0x699ed54236108646a54520994a9a1c6c8e519a980e35993a3f939b528efea537
+  ✓ wallet broadcasts confirmDelivery → real txHash verified → depositor confirmed
+    release tx: 0xa838e6b03364704612e4ba285f602a9c46b7236aea56f422c78b665694517cdf
+  ✓ Merchant B (beneficiary) queues + broadcasts confirmDelivery → RELEASED
+
+── 7. replay: same request + same txHash cannot re-execute ──
+  ✓ resubmitting the same release request/txHash replays, never double-releases
+
+── 4. external-wallet escrow dispute (real dispute broadcast) ──
+  ✓ create + fund escrow request R3 for the dispute
+  ✓ Merchant A queues a dispute transaction request
+    dispute tx: 0x4d2261ee5123cc84076f2e2d3e0d2009dc5e9c08b8383cf8a1c4c6e7abf9421b
+  ✓ wallet broadcasts dispute → real txHash verified → DISPUTED
+
+── 8. fake hash never produces domain success ──
+  ✓ a fabricated txHash is rejected and escrow stays ACTIVE
+
+── 6. tampering: a broadcast that differs from the intent is rejected ──
+  ✓ payroll: broadcasting a DIFFERENT amount/destination is rejected
+
+── 5. external-wallet payroll (real USDC.transfer per recipient) ──
+  ✓ run a 2-recipient payroll batch (AWAITING_SIGNATURES)
+  ✓ broadcast recipient 1 transfer → verified SUCCESS
+  ✓ broadcast recipient 2 transfer → verified SUCCESS → batch COMPLETED
+  ✓ payroll replay: same recipient request + same txHash replays, no double-pay
+
+── 9. legacy signature-only requests are refused ──
+  ✓ a legacy personal-sign request row can never fabricate success
+
+── 10. stream stop/withdraw fail closed (ABI conflict) ──
+  ✓ POST /api/payments/stream/stop rejects with the config conflict
+  ✓ POST /api/payments/stream/withdraw rejects with the config conflict
+
+═══════ Results ═══════
+22 passed, 0 failed (96.6s)

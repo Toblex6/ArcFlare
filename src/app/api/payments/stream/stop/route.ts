@@ -1,277 +1,60 @@
 // src/app/api/payments/stream/stop/route.ts
 //
-// SECURITY FIX: previously had NO party-membership check (didn't verify
-// callerSCA matched stream.senderSCA) and no ownership verification — any
-// caller with a valid internal API key could stop any stream and trigger
-// its refund by naming any callerSCA. Both fixed below.
+// EXTERNAL-WALLET / STREAM-STOP STATUS: UNSUPPORTED — FAIL CLOSED.
+//
+// The configured stream contract (ARCFLARE_STREAM_CONTRACT_ADDRESS =
+// 0xd8ca3Bbc…A52B) is the deployed criterion-based ArcFlareStream.sol
+// (openStream/releaseTranche/closeStream, uint256 streamId — nanopayments,
+// deployed 2026-08-21). It does NOT implement `stopStream(bytes32)` /
+// `withdraw(bytes32)` / `createStream(...)`, which is the per-second
+// streaming interface this route previously claimed.
+//
+// Verified 2026-08-31 against the deployed bytecode: those selectors are
+// absent (eth_call reverts with "missing revert data"). Broadcasting a
+// `stopStream` call to the configured address would revert on-chain, and
+// fabricating a server-side "STOPPED" without a real transaction would be
+// the exact fake-success this codebase no longer permits.
+//
+// The per-second streaming model was replaced by the nanopayment stream
+// (see /api/jobs/nanopay/* and src/lib/contracts/streamContract.ts). This
+// route therefore refuses to fabricate anything and reports the conflict.
+//
+// Per the external-wallet repair spec (§9/§10): "real or explicitly rejected
+// if unsupported." This is an explicit rejection.
 
 import { NextResponse, NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
-import { resolveWalletProvider } from '@/lib/wallet/resolve';
-import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
-import { queueExternalSignatureRequest } from '@/lib/wallet/signatureQueue';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
-import { createPublicClient, http } from 'viem';
+import { ARCFLARE_STREAM_CONTRACT_ADDRESS } from '@/lib/wallet/flarehqContracts';
 
-const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
+const STREAM_CONTRACT =
+  process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
 
-const arcTestnet = {
-  id: 5042002,
-  name: 'Arc Testnet',
-  nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-  rpcUrls: {
-    default: { http: ['https://rpc.testnet.arc.network'] },
-    public: { http: ['https://rpc.testnet.arc.network'] },
-  },
-} as const;
-
-const publicClient = createPublicClient({
-  chain: arcTestnet,
-  transport: http('https://rpc.testnet.arc.network'),
-});
-
-// ── EXACT ABI matching your deployed ArcFlareStream.sol ──────────────────────
-// StreamCreated has 3 indexed params: streamId, sender, receiver
-const STREAM_CREATED_EVENT = {
-  type: 'event',
-  name: 'StreamCreated',
-  inputs: [
-    { name: 'streamId', type: 'bytes32', indexed: true },
-    { name: 'sender', type: 'address', indexed: true },
-    { name: 'receiver', type: 'address', indexed: true },
-    { name: 'ratePerSecond', type: 'uint256', indexed: false },
-    { name: 'totalDeposited', type: 'uint256', indexed: false },
-    { name: 'ref', type: 'string', indexed: false },
-  ],
-} as const;
-
-function getCircleClient() {
-  return initiateDeveloperControlledWalletsClient({
-    apiKey: process.env.CIRCLE_API_KEY!,
-    entitySecret: process.env.CIRCLE_ENTITY_SECRET!,
-  });
-}
-
-async function waitForCircleTx(
-  client: ReturnType<typeof getCircleClient>,
-  txId: string
-): Promise<string> {
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2500));
-    const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
-      return data.transaction.txHash;
-    }
-    if (data?.transaction?.state === 'FAILED') {
-      throw new Error('Stop stream transaction failed onchain.');
-    }
-  }
-  throw new Error('Stop stream transaction timed out.');
-}
-
-// ── Read streamId from tx receipt logs ───────────────────────────────────────
-// streamId is topics[1] since it's the first indexed param
-async function getStreamIdFromReceipt(txHash: string): Promise<`0x${string}`> {
-  console.log(`🔍 Fetching receipt for tx: ${txHash}`);
-
-  const receipt = await publicClient.getTransactionReceipt({
-    hash: txHash as `0x${string}`,
-  });
-
-  console.log(`📋 Receipt has ${receipt.logs.length} logs`);
-
-  // Log all topics for debugging
-  receipt.logs.forEach((log, i) => {
-    console.log(`Log ${i}: address=${log.address}, topics=${JSON.stringify(log.topics)}`);
-  });
-
-  // Find the log from our stream contract
-  const contractAddress = STREAM_CONTRACT.toLowerCase();
-
-  for (const log of receipt.logs) {
-    // Match log from stream contract
-    if (log.address.toLowerCase() !== contractAddress) continue;
-
-    // StreamCreated has 4 topics: eventSig + streamId + sender + receiver
-    if (log.topics.length !== 4) continue;
-
-    // topics[1] is the streamId (first indexed param)
-    const streamId = log.topics[1] as `0x${string}`;
-    console.log(`✅ Found streamId: ${streamId}`);
-    return streamId;
-  }
-
-  // Fallback: try any log with 4 topics (in case contract address check fails)
-  for (const log of receipt.logs) {
-    if (log.topics.length === 4) {
-      const streamId = log.topics[1] as `0x${string}`;
-      console.log(`⚠️ Fallback streamId from log: ${streamId}`);
-      return streamId;
-    }
-  }
-
-  throw new Error(
-    `Could not find StreamCreated event in tx ${txHash}. ` +
-      `Contract address in DB: ${STREAM_CONTRACT}. ` +
-      `Logs found: ${receipt.logs.length}. ` +
-      `Check that ARCFLARE_STREAM_CONTRACT_ADDRESS matches your deployed contract.`
-  );
-}
+const CONFLICT_MESSAGE = `The configured stream contract (${STREAM_CONTRACT || 'unset'}) is the criterion-based ArcFlareStream (nanopayments) contract, which has no stopStream(bytes32) function. The per-second streaming model this route implemented was replaced on 2026-08-21. Stopping a per-second stream cannot be executed on-chain against this configuration, so FlareHQ refuses to record a fabricated stop. Use the nanopayment stream flow (/api/jobs/nanopay/*) instead.`;
 
 async function stopStreamHandler(request: NextRequest) {
-  try {
-    const { reference, callerSCA } = await request.json();
+  const { reference, callerSCA } = await request.json().catch(() => ({}));
 
-    if (!reference || !callerSCA) {
-      return NextResponse.json(
-        { success: false, error: 'reference and callerSCA are required.' },
-        { status: 400 }
-      );
-    }
-
-    if (!STREAM_CONTRACT) {
-      return NextResponse.json(
-        { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment.' },
-        { status: 500 }
-      );
-    }
-
-    const stream = await prisma.stream.findUnique({ where: { reference } });
-    if (!stream) {
-      return NextResponse.json({ success: false, error: 'Stream not found.' }, { status: 404 });
-    }
-    if (stream.status !== 'ACTIVE') {
-      return NextResponse.json(
-        { success: false, error: `Stream is already ${stream.status}.` },
-        { status: 400 }
-      );
-    }
-    if (!stream.txHash) {
-      return NextResponse.json({ success: false, error: 'Stream has no txHash.' }, { status: 400 });
-    }
-
-    // ── Membership check — only the sender can stop a stream and trigger a
-    // refund. Was completely missing before. ────────────────────────────────
-    if (callerSCA.toLowerCase() !== stream.senderSCA.toLowerCase()) {
-      return NextResponse.json(
-        { success: false, error: 'Only the stream sender can stop this stream.' },
-        { status: 403 }
-      );
-    }
-
-    // ── Ownership check — proves the caller actually controls callerSCA ────
-    const actor = await verifyCallerControlsAddress(request, callerSCA);
-    if (!actor) {
-      return NextResponse.json(
-        { success: false, error: 'You do not control the wallet named in callerSCA.' },
-        { status: 403 }
-      );
-    }
-
-    // Get bytes32 streamId from original createStream tx
-    const contractStreamId = await getStreamIdFromReceipt(stream.txHash);
-
-    // Calculate earnings
-    const now = Date.now();
-    const elapsedSeconds = (now - new Date(stream.startedAt).getTime()) / 1000;
-    const earned = Math.min(stream.ratePerSecond * elapsedSeconds, stream.totalDeposited);
-    const refundAmount = Math.max(0, stream.totalDeposited - earned);
-
-    let stopTxHash: string;
-    if (actor.type === 'merchant') {
-      const walletProvider = await resolveWalletProvider(actor.id);
-      if (walletProvider.kind !== "CIRCLE") {
-        const req = await queueExternalSignatureRequest({
-          merchantId: actor.id,
-          action: "stream.stop",
-          actionRefId: reference,
-          payload: {
-            reference,
-            contractStreamId,
-            contractAddress: STREAM_CONTRACT,
-            callerSCA,
-          },
-        });
-        return NextResponse.json({
-          success: true,
-          pendingSignature: true,
-          requestId: req.id,
-          message: 'Your wallet needs to approve stopping this stream — check /api/merchant/wallet/sign-requests.',
-        });
-      }
-      const result = await walletProvider.executeContract({
-        contractAddress: STREAM_CONTRACT,
-        abiFunctionSignature: 'stopStream(bytes32)',
-        args: [contractStreamId],
-      });
-      if (result.status === 'failed') {
-        return NextResponse.json({ success: false, error: result.error }, { status: 500 });
-      }
-      if (result.status === 'pending_signature') {
-        return NextResponse.json({
-          success: true,
-          pendingSignature: true,
-          requestId: result.requestId,
-          message: 'Your wallet needs to approve stopping this stream — check /api/merchant/wallet/sign-requests.',
-        });
-      }
-      stopTxHash = result.txHash;
-    } else {
-      const circleClient = getCircleClient();
-      const stopTx = await circleClient.createContractExecutionTransaction({
-        walletAddress: callerSCA,
-        blockchain: 'ARC-TESTNET' as any,
-        contractAddress: STREAM_CONTRACT,
-        abiFunctionSignature: 'stopStream(bytes32)',
-        abiParameters: [contractStreamId],
-        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-      });
-      if (!stopTx.data?.id) {
-        throw new Error('Circle stop transaction returned no ID.');
-      }
-      stopTxHash = await waitForCircleTx(circleClient, stopTx.data.id);
-    }
-    console.log(`✅ Stream stopped. Tx: ${stopTxHash}`);
-
-    const updated = await prisma.stream.update({
-      where: { reference },
-      data: {
-        status: 'STOPPED',
-        totalStreamed: parseFloat(earned.toFixed(6)),
-        stoppedAt: new Date(),
-      },
-    });
-
-    if (stream.webhookUrl) {
-      fetch(stream.webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event: 'stream.stopped',
-          reference,
-          totalStreamed: parseFloat(earned.toFixed(6)),
-          refundedToSender: parseFloat(refundAmount.toFixed(6)),
-          txHash: stopTxHash,
-          stoppedAt: new Date().toISOString(),
-          explorerUrl: `https://testnet.arcscan.app/tx/${stopTxHash}`,
-        }),
-      }).catch(() => {});
-    }
-
-    return NextResponse.json({
-      success: true,
-      stream: updated,
-      txHash: stopTxHash,
-      explorerUrl: `https://testnet.arcscan.app/tx/${stopTxHash}`,
-      totalStreamed: parseFloat(earned.toFixed(6)),
-      refundedToSender: parseFloat(refundAmount.toFixed(6)),
-      message: `Stream stopped — ${earned.toFixed(6)} USDC streamed, ${refundAmount.toFixed(6)} USDC refunded to sender.`,
-    });
-  } catch (error: any) {
-    console.error('❌ Stop stream error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  if (!reference || !callerSCA) {
+    return NextResponse.json(
+      { success: false, error: 'reference and callerSCA are required.' },
+      { status: 400 }
+    );
   }
+
+  const stream = await prisma.stream.findUnique({ where: { reference } });
+  if (!stream) {
+    return NextResponse.json({ success: false, error: 'Stream not found.' }, { status: 404 });
+  }
+
+  return NextResponse.json(
+    {
+      success: false,
+      error: CONFLICT_MESSAGE,
+      code: 'STREAM_ABI_CONFIG_CONFLICT',
+    },
+    { status: 501 }
+  );
 }
 
 export const POST = withApiKey(stopStreamHandler);

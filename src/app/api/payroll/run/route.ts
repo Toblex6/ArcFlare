@@ -24,7 +24,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
-import { queueExternalSignatureRequest } from '@/lib/wallet/signatureQueue';
+import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
+import { ARCFLARE_USDC_CONTRACT, ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
+import { parseUnits } from 'viem';
 
 interface PayrollRecipient {
   recipientSCA: string;
@@ -187,16 +189,30 @@ async function runPayrollHandler(request: NextRequest) {
     for (const recipient of recipients as PayrollRecipient[]) {
       const amountStr = String(recipient.amount);
       if (isExternal) {
-        const req = await queueExternalSignatureRequest({
+        // External wallet: each recipient is a REAL USDC.transfer the wallet
+        // broadcasts. The batch stays AWAITING_SIGNATURES until each transfer
+        // is proven on-chain; nothing is marked SUCCESS before a receipt.
+        const amountWei = parseUnits(amountStr, 6).toString();
+        const req = await queueTransactionRequest({
           merchantId: merchant.id,
-          action: "payroll.transfer",
+          action: TX_ACTIONS.payrollTransfer,
           actionRefId: `${batchRef}:${recipient.recipientSCA}`,
           payload: {
+            kind: "transaction",
             batchRef,
             recipientSCA: recipient.recipientSCA,
             amount: amountStr,
             label: recipient.label || null,
             payerSCA,
+            transaction: {
+              description: `Payroll payment of ${amountStr} USDC to ${recipient.recipientSCA}`,
+              chainId: ARC_TESTNET_CHAIN_ID,
+              to: ARCFLARE_USDC_CONTRACT,
+              from: payerSCA,
+              abiFunctionSignature: 'transfer(address,uint256)',
+              args: [recipient.recipientSCA, amountWei],
+              value: '0',
+            },
           },
         });
         pendingSignatureCount++;
@@ -207,7 +223,7 @@ async function runPayrollHandler(request: NextRequest) {
           status: 'PENDING_SIGNATURE',
           requestId: req.id,
         });
-        console.log(`⏳ Queued signature request for ${recipient.recipientSCA}: ${req.id}`);
+        console.log(`⏳ Queued payroll transfer for ${recipient.recipientSCA}: ${req.id}`);
         continue;
       }
       const outcome = await walletProvider.transferUSDC(
