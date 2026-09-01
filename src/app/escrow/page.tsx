@@ -39,7 +39,7 @@ interface EscrowMetrics {
 }
 
 interface MerchantWallet {
-  walletType: 'CIRCLE' | 'EXTERNAL';
+  walletProvider: string; // 'CIRCLE' | 'METAMASK' | 'WALLETCONNECT' | 'COINBASE' — see /api/merchant/wallet
   walletAddress: string | null;
   circleWalletId?: string | null;
 }
@@ -367,23 +367,23 @@ export default function EscrowDashboard() {
             </p>
           </div>
           <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {wallet?.walletType !== 'CIRCLE' && (
+            {wallet?.walletProvider !== 'CIRCLE' && (
               <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '5px 10px' }}>
                 Creating escrows needs a Circle-managed wallet — set one up in Settings
               </span>
             )}
             <button
               onClick={() => setShowCreate((v) => !v)}
-              disabled={wallet?.walletType !== 'CIRCLE'}
+              disabled={wallet?.walletProvider !== 'CIRCLE'}
               style={{
                 padding: '9px 18px',
                 borderRadius: 10,
                 border: 'none',
-                background: wallet?.walletType !== 'CIRCLE' ? '#94a3b8' : '#0d7c5f',
+                background: wallet?.walletProvider !== 'CIRCLE' ? '#94a3b8' : '#0d7c5f',
                 color: '#fff',
                 fontSize: 13,
                 fontWeight: 700,
-                cursor: wallet?.walletType !== 'CIRCLE' ? 'not-allowed' : 'pointer',
+                cursor: wallet?.walletProvider !== 'CIRCLE' ? 'not-allowed' : 'pointer',
                 whiteSpace: 'nowrap',
               }}
             >

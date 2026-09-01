@@ -16,6 +16,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAccount, useChainId, useWriteContract } from 'wagmi';
+import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 
 interface TransactionIntent {
   description?: string;
@@ -138,11 +139,19 @@ export default function PendingSignaturesPanel() {
         body: JSON.stringify({ txHash }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || (data.details ? `Verification failed: ${data.details}` : 'Could not verify transaction.'));
+      if (!data.success) {
+        // Server verification details are developer diagnostics — log them,
+        // show the merchant a generic line (same pattern as the broadcast catch).
+        console.error('[PendingSignaturesPanel] verification rejected:', data.error, data.details || '');
+        throw new Error(data.error || 'Could not verify the transaction. The server will re-check it — try again.');
+      }
       setSuccessIds((prev) => new Set(prev).add(req.id));
       setRequests((prev) => prev.filter((r) => r.id !== req.id));
     } catch (err: any) {
-      setError(err?.shortMessage || err?.message || 'Could not broadcast/verify transaction.');
+      // Friendly, non-technical message for the merchant; full detail goes to
+      // the browser console only (wallet reverts can embed raw RPC payloads).
+      console.error('[PendingSignaturesPanel] broadcast/verify failed:', err);
+      setError(friendlyWalletError(err) || 'Could not broadcast or verify the transaction. Try again.');
     } finally {
       setBroadcastId(null);
     }

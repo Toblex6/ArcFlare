@@ -102,9 +102,18 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
 
     const amountFloat = parseFloat(amount);
     const amountWei = parseUnits(amountFloat.toFixed(6), 6);
-    const deadlineTimestamp = Math.floor(Date.now() / 1000) + deadlineHours * 3600;
+    const hoursFloat = parseFloat(deadlineHours);
+    // Match the escrow-link route's bounds — an uncapped deadline would let a
+    // merchant lock funds for decades with no expiry refund path.
+    if (isNaN(hoursFloat) || hoursFloat <= 0 || hoursFloat > 24 * 30) {
+      return NextResponse.json(
+        { success: false, error: 'deadlineHours must be a number between 0 and 720 (30 days).' },
+        { status: 400 }
+      );
+    }
+    const deadlineTimestamp = Math.floor(Date.now() / 1000) + hoursFloat * 3600;
     const reference = `escrow_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-    const deadlineDate = new Date(Date.now() + deadlineHours * 3600 * 1000);
+    const deadlineDate = new Date(Date.now() + hoursFloat * 3600 * 1000);
 
     // Derive the on-chain escrow id deterministically from `reference`, before
     // sending anything to Circle. `reference` is server-generated (not user

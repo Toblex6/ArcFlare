@@ -39,7 +39,7 @@ interface MerchantInfo {
   businessName: string;
   email: string;
   apiKeyHint: string;
-  walletType?: 'CIRCLE' | 'EXTERNAL';
+  walletProvider?: string; // 'CIRCLE' | 'METAMASK' | 'WALLETCONNECT' | 'COINBASE' — see /api/merchant/me
   walletAddress?: string | null;
 }
 
@@ -100,7 +100,7 @@ export default function MerchantDashboard() {
           businessName: data.merchant.businessName,
           email: data.merchant.email,
           apiKeyHint: data.merchant.apiKeyHint,
-          walletType: data.merchant.walletType,
+          walletProvider: data.merchant.walletProvider,
           walletAddress: data.merchant.walletAddress,
         });
       })
@@ -463,7 +463,7 @@ export default function MerchantDashboard() {
           )}
         </div>
 
-        {merchant.walletType === 'CIRCLE' && (
+        {merchant.walletProvider === 'CIRCLE' && (
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 4px 0" }}>Withdraw Funds</h3>
             <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 20px 0" }}>
