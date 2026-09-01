@@ -45,6 +45,8 @@ import {
   escrowEvents,
 } from '@/lib/wallet/flarehqContracts';
 import { getReceiptReliable, readContractReliable } from '@/lib/wallet/chainClient';
+import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
+import { notifyBeneficiary } from '@/lib/escrow/notifyBeneficiary';
 
 const ESCROW_CONTRACT =
   process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -230,6 +232,22 @@ export async function POST(
         txHash,
       },
     });
+
+    // ── Best-effort beneficiary notification once the escrow is ACTIVE. The
+    // link may have been created earlier (PENDING_FUNDING) — the beneficiary
+    // only matters once funds are locked, so notify at funding time. Idempotent
+    // via beneficiaryNotifiedAt; never fails the funding flow.
+    if (updated.beneficiaryNotifiedAt == null) {
+      const beneficiary = await resolveBeneficiary(escrow.beneficiarySCA).catch(() => null);
+      if (beneficiary) {
+        await notifyBeneficiary({
+          reference,
+          beneficiary,
+          amount: escrow.amount,
+          currency: escrow.currency,
+        }).catch((e: any) => console.error('[escrow/fund] notify failed:', e?.message));
+      }
+    }
 
     return NextResponse.json({
       success: true,

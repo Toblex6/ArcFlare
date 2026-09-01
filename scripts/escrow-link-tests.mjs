@@ -56,6 +56,57 @@ ok(linkRoute.includes("status: 'PENDING_FUNDING'"), 'escrow-link rows start PEND
 const checkout = readFileSync(join(here, '..', 'src', 'app', 'api', 'escrow', 'create', 'route.ts'), 'utf8');
 ok(checkout.includes("actor.type !== 'merchant'"), 'existing escrow/create merchant-depositor guard UNCHANGED');
 
+console.log('═══ Escrow — beneficiary end-to-end (Phase 1-4) static proofs ═══');
+
+// Phase 1: creation hardening
+ok(checkout.includes('isAddress(beneficiarySCA)'), 'escrow/create validates beneficiarySCA is a real 0x address');
+ok(checkout.includes('depositor and beneficiary must be different'), 'escrow/create blocks self-escrow (depositor == beneficiary)');
+ok(checkout.includes('resolveBeneficiary') && checkout.includes('beneficiaryKind: beneficiary.kind'),
+  'escrow/create classifies the beneficiary at creation and stores beneficiaryKind');
+ok(checkout.includes('beneficiaryConfirmUrl'), 'escrow/create returns the beneficiary confirm link');
+
+// Phase 2: Incoming list + notification
+const listRoute = readFileSync(join(here, '..', 'src', 'app', 'api', 'escrow', 'list', 'route.ts'), 'utf8');
+ok(listRoute.includes('role === \'beneficiary\''), 'escrow list supports ?role=beneficiary (incoming view)');
+ok(listRoute.includes('getCallerControlledAddresses'), 'incoming list uses getCallerControlledAddresses (same trust set as release)');
+const notifyLib = readFileSync(join(here, '..', 'src', 'lib', 'escrow', 'notifyBeneficiary.ts'), 'utf8');
+ok(notifyLib.includes('beneficiaryNotifiedAt'), 'beneficiary notification is idempotent via beneficiaryNotifiedAt');
+ok(notifyLib.includes('sendTelegramMessage'), 'consumer beneficiaries get a Telegram DM when a telegramUserId exists');
+
+// Phase 4: external-EOA confirm — verify route never trusts bare claims
+const confirmRoute = readFileSync(join(here, '..', 'src', 'app', 'api', 'escrow', '[reference]', 'beneficiary-confirm', 'route.ts'), 'utf8');
+ok(confirmRoute.includes('getTransactionReliable') && confirmRoute.includes('extractSelector'), 'beneficiary-confirm fetches the raw tx and extracts the calldata selector');
+ok(confirmRoute.includes('tx.from.toLowerCase() !== callerSCA.toLowerCase()'), 'beneficiary-confirm requires the tx sender to be the beneficiary');
+ok(confirmRoute.includes('tx.to') && confirmRoute.includes('ESCROW_CONTRACT.toLowerCase()'), 'beneficiary-confirm requires the tx to target the escrow contract');
+ok(confirmRoute.includes('escrowSelectors.confirmDelivery'), 'beneficiary-confirm requires the confirmDelivery function selector');
+ok(confirmRoute.includes('decodeAbiParameters') && confirmRoute.includes('DIFFERENT escrow id'), 'beneficiary-confirm decodes the bytes32 arg and matches it to THIS escrow id');
+ok(confirmRoute.includes('getReceiptReliable') && confirmRoute.includes('receipt.status !== \'success\''), 'beneficiary-confirm verifies the receipt is successful');
+ok(confirmRoute.includes('readContractReliable') && confirmRoute.includes('getEscrow'),
+  'beneficiary-confirm RE-READS authoritative getEscrow state and mirrors it (never receipt-success alone)');
+ok(confirmRoute.includes('if (!beneficiaryConfirmed)'), 'beneficiary-confirm fails closed if on-chain state shows no confirmation');
+ok(confirmRoute.includes("bothConfirmed ? 'RELEASED' : 'ACTIVE'"), 'beneficiary-confirm mirrors one-sided vs auto-released state from the contract');
+ok(!confirmRoute.includes('createContractExecutionTransaction') && !confirmRoute.includes('transferUsdc') && !confirmRoute.includes('initiateDeveloperControlledWalletsClient'),
+  'beneficiary-confirm never moves funds via Circle (verification-only)');
+
+// Phase 4: public confirm page
+const confirmPage = readFileSync(join(here, '..', 'src', 'app', 'escrow-confirm', '[reference]', 'page.tsx'), 'utf8');
+ok(confirmPage.includes("functionName: 'confirmDelivery'"), 'confirm page signs confirmDelivery from the beneficiary\u2019s own wallet');
+ok(confirmPage.includes('isBeneficiary') && confirmPage.includes('beneficiarySCA.toLowerCase() === address.toLowerCase()'),
+  'confirm page blocks non-beneficiary wallets');
+ok(confirmPage.includes('/beneficiary-confirm'), 'confirm page records via the public beneficiary-confirm route (server re-verifies on-chain)');
+ok(!confirmPage.includes('developer-controlled-wallets') && !confirmPage.includes('CIRCLE_API_KEY'), 'confirm page has NO Circle SDK / custodial path');
+
+// Phase 4: link route extension returns confirm state
+const linkDetail = readFileSync(join(here, '..', 'src', 'app', 'api', 'escrow', 'link', '[reference]', 'route.ts'), 'utf8');
+ok(linkDetail.includes('beneficiaryConfirmed') && linkDetail.includes('depositorConfirmed'), 'public link detail returns on-chain confirm flags');
+ok(linkDetail.includes('contractEscrowId') && linkDetail.includes('confirmUrl'), 'public link detail returns contractEscrowId + confirmUrl');
+
+// Phase 5 invariant applied to release too: never flip from body+receipt alone
+const releaseRoute = readFileSync(join(here, '..', 'src', 'app', 'api', 'escrow', 'release', 'route.ts'), 'utf8');
+ok(releaseRoute.includes('readContractReliable') && releaseRoute.includes('getEscrow'),
+  'escrow/release re-reads authoritative on-chain state after confirm (never body+receipt alone)');
+ok(releaseRoute.includes('Could not read the on-chain escrow state'), 'escrow/release fails closed when the state read is unavailable');
+
 console.log('\n═══ Escrow link — live API (server at ' + BASE + ') ═══');
 let serverUp = false;
 try {

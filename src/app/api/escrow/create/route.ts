@@ -8,7 +8,9 @@ import { prisma } from '@/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
-import { parseUnits, keccak256, toBytes } from 'viem';
+import { parseUnits, keccak256, toBytes, isAddress } from 'viem';
+import { resolveBeneficiary, beneficiaryConfirmUrl } from '@/lib/escrow/resolveBeneficiary';
+import { notifyBeneficiary } from '@/lib/escrow/notifyBeneficiary';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 const USDC_ARC = '0x3600000000000000000000000000000000000000';
@@ -62,6 +64,22 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
           error: 'depositorSCA, depositorWalletId, beneficiarySCA and amount are required.',
           hint: 'depositorWalletId is the Circle wallet UUID — get it from GET /api/agent/status',
         },
+        { status: 400 }
+      );
+    }
+
+    // ── Creation hardening: a beneficiary must be a real address, and it
+    // must not be the depositor themselves (self-escrow locks your own money
+    // for no reason and muddies the two-party confirmation model).
+    if (!isAddress(beneficiarySCA)) {
+      return NextResponse.json(
+        { success: false, error: 'beneficiarySCA must be a valid 0x address.' },
+        { status: 400 }
+      );
+    }
+    if (beneficiarySCA.toLowerCase() === String(depositorSCA).toLowerCase()) {
+      return NextResponse.json(
+        { success: false, error: 'depositor and beneficiary must be different addresses.' },
         { status: 400 }
       );
     }
@@ -168,6 +186,10 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
     console.log(`✅ Escrow created on Arc. TxHash: ${txHash}`);
 
     // ── Step 3: Save to Postgres ─────────────────────────────────────────────
+    // Classify the beneficiary BEFORE the row is written so the stored
+    // beneficiaryKind is available for notification + Incoming-list filtering
+    // without any re-resolution.
+    const beneficiary = await resolveBeneficiary(beneficiarySCA);
     const escrowRecord = await prisma.escrow.create({
       data: {
         reference,
@@ -183,8 +205,17 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
         txHash,
         webhookUrl: webhookUrl || null,
         merchantId: merchant.id,
+        beneficiaryKind: beneficiary.kind,
       },
     });
+
+    // ── Step 3b: best-effort beneficiary notification (never fails the flow).
+    await notifyBeneficiary({
+      reference,
+      beneficiary,
+      amount: amountFloat,
+      currency: 'USDC',
+    }).catch((e: any) => console.error('[escrow/create] notify failed:', e?.message));
 
     // ── Step 4: Ledger — deposit locks the depositor's funds (Build 5 repair D8).
     // This is the match of the refund's JOB_ESCROW_RELEASE: the amount leaves the
@@ -206,6 +237,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
     } catch (e: any) { console.error("[ledger] escrow lock failed:", e.message); }
 
     // ── Step 5: Fire webhook ─────────────────────────────────────────────────
+    const confirmUrl = beneficiaryConfirmUrl(reference);
     if (webhookUrl) {
       fetch(webhookUrl, {
         method: 'POST',
@@ -215,11 +247,13 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
           reference,
           depositorSCA,
           beneficiarySCA,
+          beneficiaryKind: beneficiary.kind,
           amount: amountFloat,
           currency: 'USDC',
           condition: condition || null,
           deadline: deadlineDate.toISOString(),
           txHash,
+          beneficiaryConfirmUrl: confirmUrl,
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
           createdAt: new Date().toISOString(),
         }),
@@ -232,6 +266,8 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       txHash,
       explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
       contractAddress: ESCROW_CONTRACT,
+      beneficiaryKind: beneficiary.kind,
+      beneficiaryConfirmUrl: confirmUrl,
       message: `${amount} USDC locked in FlareHQEscrow contract on Arc Testnet. Both parties must confirm to release.`,
       nextSteps: {
         release: `POST /api/escrow/release { reference: "${reference}", callerSCA: "depositorOrBeneficiarySCA" }`,

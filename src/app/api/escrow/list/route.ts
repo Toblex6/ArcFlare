@@ -12,6 +12,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
+import { getCallerControlledAddresses } from '@/src/lib/wallet/verifyCallerControlsAddress';
+import { beneficiaryConfirmUrl } from '@/src/lib/escrow/resolveBeneficiary';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +31,46 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const depositor = searchParams.get('depositor');
     const beneficiary = searchParams.get('beneficiary');
+    const role = searchParams.get('role'); // "beneficiary" → incoming escrows where caller controls beneficiarySCA
+
+    const now = new Date();
+
+    // ── Incoming view: escrows where the authenticated caller controls the
+    // BENEFICIARY address — regardless of which merchant owns the row. Uses
+    // the same control set as every other route (own wallet, buyer EOA, owned
+    // agents' SCAs + payment EOAs), so a beneficiary merchant/owner sees what
+    // they can actually act on via /api/escrow/release.
+    if (role === 'beneficiary') {
+      const controlled = await getCallerControlledAddresses(request);
+      if (controlled.size === 0) {
+        return NextResponse.json({ success: true, metrics: {}, escrows: [], role: 'beneficiary' });
+      }
+      const all = await (prisma as any).escrow.findMany({
+        orderBy: { createdAt: 'desc' },
+      });
+      const incoming = all.filter(
+        (e: any) => controlled.has(String(e.beneficiarySCA).toLowerCase())
+      );
+      const activeIncoming = incoming.filter((e: any) => e.status === 'ACTIVE');
+
+      return NextResponse.json({
+        success: true,
+        role: 'beneficiary',
+        metrics: {
+          total: incoming.length,
+          active: activeIncoming.length,
+        },
+        escrows: incoming.map((e: any) => ({
+          ...e,
+          isExpired: e.deadline ? new Date(e.deadline) < now : false,
+          timeRemaining: e.deadline
+            ? Math.max(0, Math.floor((new Date(e.deadline).getTime() - now.getTime()) / 1000))
+            : null,
+          explorerUrl: e.txHash ? `https://testnet.arcscan.app/tx/${e.txHash}` : null,
+          confirmUrl: beneficiaryConfirmUrl(e.reference),
+        })),
+      });
+    }
 
     const allEscrows = await (prisma as any).escrow.findMany({
       where: { merchantId: merchant.id },
@@ -41,8 +83,6 @@ export async function GET(request: NextRequest) {
       if (beneficiary && e.beneficiarySCA !== beneficiary) return false;
       return true;
     });
-
-    const now = new Date();
 
     const active = allEscrows.filter((e: any) => e.status === 'ACTIVE').length;
     const released = allEscrows.filter((e: any) => e.status === 'RELEASED').length;
@@ -78,6 +118,7 @@ export async function GET(request: NextRequest) {
           ? Math.max(0, Math.floor((new Date(e.deadline).getTime() - now.getTime()) / 1000))
           : null,
         explorerUrl: e.txHash ? `https://testnet.arcscan.app/tx/${e.txHash}` : null,
+        confirmUrl: beneficiaryConfirmUrl(e.reference),
       })),
     });
   } catch (error: any) {

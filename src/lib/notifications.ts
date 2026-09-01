@@ -25,6 +25,10 @@ export const NOTIFICATION_EVENTS = {
         label: 'Escrow funded',
         description: 'USDC was locked into a new escrow.',
     },
+    'escrow.incoming': {
+        label: 'Incoming escrow',
+        description: 'You (or one of your agents) are the beneficiary of a new escrow.',
+    },
     'escrow.released': {
         label: 'Escrow released',
         description: 'An escrow fully released funds to the beneficiary.',

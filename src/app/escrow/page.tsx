@@ -26,6 +26,7 @@ interface EscrowItem {
   explorerUrl: string | null;
   createdAt: string;
   disputedBy: string | null;
+  confirmUrl?: string | null;
 }
 
 interface EscrowMetrics {
@@ -95,6 +96,7 @@ export default function EscrowDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   const [wallet, setWallet] = useState<MerchantWallet | null>(null);
+  const [view, setView] = useState<'mine' | 'incoming'>('mine');
 
   // ── Create form state ──────────────────────────────────────────────────
   const [showCreate, setShowCreate] = useState(false);
@@ -122,7 +124,8 @@ export default function EscrowDashboard() {
 
   const fetchEscrows = async () => {
     try {
-      const url = filter === 'ALL' ? '/api/escrow/list' : `/api/escrow/list?status=${filter}`;
+      const base = view === 'incoming' ? '/api/escrow/list?role=beneficiary' : (filter === 'ALL' ? '/api/escrow/list' : `/api/escrow/list?status=${filter}`);
+      const url = view === 'incoming' ? '/api/escrow/list?role=beneficiary' : base;
       const res = await fetch(url);
       const json = await res.json();
       if (json.success) {
@@ -147,7 +150,7 @@ export default function EscrowDashboard() {
     fetchEscrows();
     const interval = setInterval(fetchEscrows, 10000);
     return () => clearInterval(interval);
-  }, [filter]);
+  }, [filter, view]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -190,14 +193,18 @@ export default function EscrowDashboard() {
   };
 
   const handleConfirmDelivery = async () => {
-    if (!selected || !wallet?.walletAddress) return;
+    if (!selected) return;
+    // Incoming view → the caller controls the beneficiary (own wallet or owned
+    // agent SCA); name it so the server's control check passes.
+    const callerSCA = view === 'incoming' ? selected.beneficiarySCA : wallet?.walletAddress;
+    if (!callerSCA) return;
     setActionLoading(true);
     setActionError(null);
     try {
       const res = await fetch('/api/escrow/release', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference: selected.reference, callerSCA: wallet.walletAddress }),
+        body: JSON.stringify({ reference: selected.reference, callerSCA }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -211,14 +218,16 @@ export default function EscrowDashboard() {
   };
 
   const handleDispute = async () => {
-    if (!selected || !wallet?.walletAddress) return;
+    if (!selected) return;
+    const callerSCA = view === 'incoming' ? selected.beneficiarySCA : wallet?.walletAddress;
+    if (!callerSCA) return;
     setActionLoading(true);
     setActionError(null);
     try {
       const res = await fetch('/api/escrow/dispute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference: selected.reference, callerSCA: wallet.walletAddress, reason: disputeReason || undefined }),
+        body: JSON.stringify({ reference: selected.reference, callerSCA, reason: disputeReason || undefined }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -276,14 +285,18 @@ export default function EscrowDashboard() {
 
 
   // Is the merchant's own wallet one of the two parties on the selected escrow?
+  // In the Incoming view the caller controls the beneficiary (own wallet OR an
+  // owned agent's SCA), so they're always a party there.
   const isParty =
-    !!wallet?.walletAddress &&
-    !!selected &&
-    (wallet.walletAddress.toLowerCase() === selected.depositorSCA.toLowerCase() ||
-      wallet.walletAddress.toLowerCase() === selected.beneficiarySCA.toLowerCase());
+    view === 'incoming' ||
+    (!!wallet?.walletAddress &&
+      !!selected &&
+      (wallet.walletAddress.toLowerCase() === selected.depositorSCA.toLowerCase() ||
+        wallet.walletAddress.toLowerCase() === selected.beneficiarySCA.toLowerCase()));
 
   const isDepositorSide = wallet?.walletAddress?.toLowerCase() === selected?.depositorSCA.toLowerCase();
-  const isBeneficiarySide = wallet?.walletAddress?.toLowerCase() === selected?.beneficiarySCA.toLowerCase();
+  const isBeneficiarySide =
+    view === 'incoming' || wallet?.walletAddress?.toLowerCase() === selected?.beneficiarySCA.toLowerCase();
   const alreadyConfirmedByMe =
     (isDepositorSide && selected?.depositorConfirmed) ||
     (isBeneficiarySide && selected?.beneficiaryConfirmed);
@@ -367,6 +380,28 @@ export default function EscrowDashboard() {
             </p>
           </div>
           <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', background: '#eef2f6', borderRadius: 10, padding: 3 }}>
+              <button
+                onClick={() => { setView('mine'); setSelected(null); setFilter('ALL'); }}
+                style={{
+                  padding: '6px 14px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', background: view === 'mine' ? '#fff' : 'transparent',
+                  color: view === 'mine' ? '#0d7c5f' : '#64748b', boxShadow: view === 'mine' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                My Escrows
+              </button>
+              <button
+                onClick={() => { setView('incoming'); setSelected(null); }}
+                style={{
+                  padding: '6px 14px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', background: view === 'incoming' ? '#fff' : 'transparent',
+                  color: view === 'incoming' ? '#0d7c5f' : '#64748b', boxShadow: view === 'incoming' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                📥 Incoming
+              </button>
+            </div>
             {wallet?.walletProvider !== 'CIRCLE' && (
               <span style={{ fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '5px 10px' }}>
                 Creating escrows needs a Circle-managed wallet — set one up in Settings
@@ -392,8 +427,20 @@ export default function EscrowDashboard() {
           </div>
         </div>
 
+        {/* Incoming banner */}
+        {view === 'incoming' && (
+          <div style={{ background: 'rgba(13,124,95,0.08)', border: '1px solid rgba(13,124,95,0.25)', borderRadius: 12, padding: '14px 18px', marginBottom: 20 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: '#0d7c5f', margin: '0 0 4px' }}>
+              📥 Escrows where you (or one of your agents) are the beneficiary
+            </p>
+            <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>
+              Confirm delivery to release the funds to you. The escrow auto-releases once both parties confirm.
+            </p>
+          </div>
+        )}
+
         {/* Create Form */}
-        {showCreate && (
+        {showCreate && view === 'mine' && (
           <div
             style={{
               background: '#fff',
@@ -497,7 +544,11 @@ export default function EscrowDashboard() {
               <div style={{ textAlign: 'center', padding: '48px 0' }}>
                 <p style={{ fontSize: 32, marginBottom: 12 }}>🔒</p>
                 <p style={{ color: '#94a3b8', fontSize: 14 }}>No escrows found.</p>
-                <p style={{ color: '#cbd5e1', fontSize: 12, marginTop: 4 }}>Click "+ Create Escrow" above to lock your first payment.</p>
+                <p style={{ color: '#cbd5e1', fontSize: 12, marginTop: 4 }}>
+                  {view === 'incoming'
+                    ? 'No one has escrowed money to you (or your agents) yet. When they do, it appears here.'
+                    : 'Click "+ Create Escrow" above to lock your first payment.'}
+                </p>
               </div>
             ) : (
               <div style={{ overflowX: 'auto', width: '100%', WebkitOverflowScrolling: 'touch' }}>
@@ -515,7 +566,7 @@ export default function EscrowDashboard() {
                     {escrows.map((e) => {
                       const sc = STATUS_COLORS[e.status] || STATUS_COLORS.ACTIVE;
                       return (
-                        <tr key={e.id} className="hover-row" style={{ borderBottom: '1px solid #f8fafc' }} onClick={() => { setSelected(selected?.id === e.id ? null : e); setActionError(null); setShowDisputeForm(false); setEvidenceText(''); }}>
+                        <tr key={e.id} className="hover-row" style={{ borderBottom: '1px solid #f8fafc', background: view === 'incoming' && e.status === 'ACTIVE' ? 'rgba(13,124,95,0.04)' : undefined }} onClick={() => { setSelected(selected?.id === e.id ? null : e); setActionError(null); setShowDisputeForm(false); setEvidenceText(''); }}>
                           <td style={{ padding: '14px 14px 14px 0' }}>
                             <div style={{ color: '#0d7c5f' }}>{e.reference.slice(0, 14)}...</div>
                             <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>{new Date(e.createdAt).toLocaleDateString()}</div>
@@ -523,6 +574,9 @@ export default function EscrowDashboard() {
                           <td style={{ padding: '14px 14px 14px 0' }}>
                             <div style={{ color: '#0f172a' }}>📤 {e.depositorSCA.slice(0, 10)}...</div>
                             <div style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>📥 {e.beneficiarySCA.slice(0, 10)}...</div>
+                            {view === 'incoming' && e.status === 'ACTIVE' && (
+                              <div style={{ color: '#0d7c5f', fontSize: 10, marginTop: 2, fontWeight: 700 }}>▼ Waiting on your confirmation</div>
+                            )}
                           </td>
                           <td style={{ padding: '14px 14px 14px 0' }}>
                             <div style={{ color: '#0f172a', fontWeight: 700 }}>{e.amount.toFixed(2)}</div>
@@ -713,6 +767,36 @@ export default function EscrowDashboard() {
                   <a href={selected.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textAlign: 'center', padding: 10, background: 'rgba(13,124,95,0.08)', border: '1px solid rgba(13,124,95,0.2)', borderRadius: 8, color: '#0d7c5f', fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>
                     View on ArcScan →
                   </a>
+                )}
+
+                {/* Beneficiary confirm link — shareable so an external EOA can
+                    confirm delivery from their own wallet without a FlareHQ
+                    account. Also surfaced on the Incoming row's detail. */}
+                {selected.status === 'ACTIVE' && selected.confirmUrl && (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: 12 }}>
+                    <p style={{ fontSize: 10, color: '#0d7c5f', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px 0' }}>
+                      Beneficiary confirm link
+                    </p>
+                    <p style={{ fontSize: 11, color: '#166534', margin: '0 0 8px 0', lineHeight: 1.4 }}>
+                      {view === 'incoming'
+                        ? 'You can also confirm from this page, or share this link with an external wallet holder if the beneficiary has no FlareHQ account.'
+                        : 'Share this link with an external beneficiary (no FlareHQ account needed) — they confirm delivery from their own wallet.'}
+                    </p>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        readOnly
+                        value={selected.confirmUrl}
+                        onFocus={(e) => e.target.select()}
+                        style={{ ...inputStyle, flex: 1, fontSize: 11, fontFamily: 'monospace', background: '#fff', borderColor: '#bbf7d0' }}
+                      />
+                      <button
+                        onClick={() => { navigator.clipboard?.writeText(selected.confirmUrl || '').then(() => setActionError(null)).catch(() => {}); }}
+                        style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: '#0d7c5f', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 {selected.disputeReason && (

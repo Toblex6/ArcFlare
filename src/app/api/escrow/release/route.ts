@@ -18,8 +18,10 @@ import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
-import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
+import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID, escrowAbi } from '@/lib/wallet/flarehqContracts';
+import { readContractReliable } from '@/lib/wallet/chainClient';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import type { Hash } from 'viem';
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 
@@ -179,10 +181,36 @@ async function releaseHandler(request: NextRequest) {
     }
     console.log(`✅ Delivery confirmed by ${callerSCA} (verified ${actor.type} ${actor.id}). Tx: ${txHash}`);
 
-    let newStatus = escrow.status;
+    // ── AUTHORITATIVE STATE: never derive confirmation/RELEASED from the
+    // request body + receipt success alone. Re-read getEscrow() on-chain and
+    // mirror the contract — one-sided-confirmed stays ACTIVE with that side's
+    // flag; the dual-confirm auto-release becomes RELEASED. The contract is
+    // the single source of truth for which party has actually confirmed.
+    let onChain = await readContractReliable({
+      address: ESCROW_CONTRACT,
+      abi: escrowAbi,
+      functionName: 'getEscrow',
+      args: [escrow.contractEscrowId as Hash],
+    });
     let depositorConfirmed = escrow.depositorConfirmed || isDepositor;
     let beneficiaryConfirmed = escrow.beneficiaryConfirmed || isBeneficiary;
+    if (onChain) {
+      const s = onChain as any;
+      const depConfirmed = typeof s.depositorConfirmed === 'boolean' ? s.depositorConfirmed : s[5];
+      const benConfirmed = typeof s.beneficiaryConfirmed === 'boolean' ? s.beneficiaryConfirmed : s[6];
+      depositorConfirmed = Boolean(depConfirmed);
+      beneficiaryConfirmed = Boolean(benConfirmed);
+    } else {
+      // Node couldn't serve the state read — fail closed instead of trusting
+      // the body: the DB flags must never advance past what the contract
+      // provably holds.
+      return NextResponse.json(
+        { success: false, error: 'Could not read the on-chain escrow state after confirmation — no state change was recorded. Try again shortly.' },
+        { status: 500 }
+      );
+    }
 
+    let newStatus = escrow.status;
     if (depositorConfirmed && beneficiaryConfirmed) {
       newStatus = 'RELEASED';
     }

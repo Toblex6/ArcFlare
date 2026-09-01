@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { beneficiaryConfirmUrl } from '@/lib/escrow/resolveBeneficiary';
 
 export async function GET(
   _req: NextRequest,
@@ -31,7 +32,12 @@ export async function GET(
         deadline: escrow.deadline,
         status: escrow.status,
         contractAddress: escrow.contractAddress,
+        contractEscrowId: escrow.contractEscrowId || null,
+        beneficiaryKind: escrow.beneficiaryKind || null,
+        beneficiaryConfirmed: escrow.beneficiaryConfirmed,
+        depositorConfirmed: escrow.depositorConfirmed,
         depositorSCA: escrow.status === 'PENDING_FUNDING' ? null : escrow.depositorSCA,
+        confirmUrl: beneficiaryConfirmUrl(escrow.reference),
         funded: escrow.status !== 'PENDING_FUNDING',
         expired,
       },

@@ -16,6 +16,7 @@ import { jwtVerify } from 'jose';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
 import { keccak256, toBytes, isAddress } from 'viem';
+import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -66,6 +67,10 @@ export async function POST(req: NextRequest) {
     // createEscrow call and this DB row agree without any server round-trip.
     const onchainId = keccak256(toBytes(reference));
 
+    // Classify the beneficiary the same way escrow/create does — the link may
+    // be aimed at a FlareHQ actor (merchant/consumer/agent) or an external EOA.
+    const beneficiary = await resolveBeneficiary(beneficiarySCA);
+
     const escrowRecord = await prisma.escrow.create({
       data: {
         reference,
@@ -79,6 +84,7 @@ export async function POST(req: NextRequest) {
         condition: condition || null,
         deadline: deadlineDate,
         merchantId: merchant.id,
+        beneficiaryKind: beneficiary.kind,
       },
     });
 

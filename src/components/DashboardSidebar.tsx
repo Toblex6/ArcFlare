@@ -79,6 +79,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
     const [isMobile, setIsMobile] = useState(false);
     const [open, setOpen] = useState(false);
     const [merchant, setMerchant] = useState<{ businessName: string; email: string } | null>(null);
+    const [incomingCount, setIncomingCount] = useState(0);
 
     useEffect(() => {
         const check = () => setIsMobile(window.innerWidth < 768);
@@ -94,6 +95,25 @@ export default function DashboardSidebar({ active }: { active: string }) {
                 if (data.success) setMerchant({ businessName: data.merchant.businessName, email: data.merchant.email });
             })
             .catch(() => { });
+    }, []);
+
+    // Incoming-escrows badge — how many ACTIVE escrows name the merchant (or
+    // one of their agents) as beneficiary. Polled lightly; purely visual, so
+    // failures are silent.
+    useEffect(() => {
+        let cancelled = false;
+        const poll = async () => {
+            try {
+                const res = await fetch('/api/escrow/list?role=beneficiary');
+                const data = await res.json();
+                if (!cancelled && data.success && data.metrics?.active != null) {
+                    setIncomingCount(Number(data.metrics.active) || 0);
+                }
+            } catch { /* silent */ }
+        };
+        poll();
+        const t = setInterval(poll, 30000);
+        return () => { cancelled = true; clearInterval(t); };
     }, []);
 
     const signOut = async () => {
@@ -194,6 +214,19 @@ export default function DashboardSidebar({ active }: { active: string }) {
                                     >
                                         {ICONS[item.label]}
                                         <span>{item.label}</span>
+                                        {item.label === 'Escrow' && incomingCount > 0 && (
+                                            <span
+                                                title={`${incomingCount} incoming escrow${incomingCount === 1 ? '' : 's'} awaiting your confirmation`}
+                                                style={{
+                                                    marginLeft: 'auto', minWidth: 18, height: 18, padding: '0 5px',
+                                                    borderRadius: 9, background: '#0d7c5f', color: '#fff',
+                                                    fontSize: 10, fontWeight: 700, display: 'inline-flex',
+                                                    alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+                                                }}
+                                            >
+                                                {incomingCount}
+                                            </span>
+                                        )}
                                     </a>
                                 );
                             })}

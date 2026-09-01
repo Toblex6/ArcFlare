@@ -140,6 +140,8 @@ model Escrow {
   disputedBy         String?
   depositorConfirmed Boolean   @default(false)
   beneficiaryConfirmed Boolean  @default(false)
+  beneficiaryKind    String?
+  beneficiaryNotifiedAt DateTime?
   webhookUrl         String?
 }
 
