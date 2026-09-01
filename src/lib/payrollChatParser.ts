@@ -134,6 +134,58 @@ export function parsePayrollCommand(message: string): ParsedIntent {
   return { type: "unrecognized", raw: trimmed };
 }
 
+/**
+ * Loose partial extraction for multi-turn adds. Pulls whatever add-shaped
+ * fields it can from a single free-text message so a pending add survives
+ * greetings ("hi"/"hello") that would otherwise dilute the LLM's context
+ * window. Never used as a source of truth — only a hint merged into the
+ * context the LLM sees (sanitizeAddArgs stays authoritative).
+ */
+export function extractPartialAdd(text: string): {
+  name?: string;
+  address?: string;
+  amount?: number;
+  frequency?: Frequency;
+  intervalDays?: number;
+} {
+  const out: { name?: string; address?: string; amount?: number; frequency?: Frequency; intervalDays?: number } = {};
+  const trimmed = text.trim();
+
+  const addr = trimmed.match(/0x[a-fA-F0-9]{40}/i);
+  if (addr) out.address = addr[0];
+
+  // amount — conservative: only explicit "N usdc", "at $N", "at N usdc",
+  // or "pay/pay/send/sending $N" phrasings so dates/counts are never grabbed
+  const amtMatch =
+    trimmed.match(/(?:^|\s)(\d+(?:\.\d{1,6})?)\s*(?:usdc|u)\b/i) ||
+    trimmed.match(/\bat\s+\$?(\d+(?:\.\d{1,6})?)\s*(?:usdc)?/i) ||
+    trimmed.match(/(?:pay|paying|send|sending)\s+\$?(\d+(?:\.\d{1,6})?)/i);
+  if (amtMatch) out.amount = parseFloat(amtMatch[1]);
+
+  const cadMatch = trimmed.match(/(?:every|per)\s+(\d+)\s*(days?|weeks?|months?)/i);
+  if (cadMatch) {
+    const n = parseInt(cadMatch[1], 10) || 1;
+    const unit = cadMatch[2].toLowerCase();
+    if (unit.startsWith("day")) { out.frequency = "daily"; out.intervalDays = n; }
+    else if (unit.startsWith("week")) { out.frequency = "weekly"; out.intervalDays = n * 7; }
+    else { out.frequency = "monthly"; out.intervalDays = n * 30; }
+  } else if (/\bdaily\b/i.test(trimmed)) { out.frequency = "daily"; out.intervalDays = 1; }
+  else if (/\bweekly\b/i.test(trimmed)) { out.frequency = "weekly"; out.intervalDays = 7; }
+  else if (/\bmonthly\b/i.test(trimmed)) { out.frequency = "monthly"; out.intervalDays = 30; }
+
+  // name — only a bare single word (e.g. "deji") so full sentences aren't
+  // mis-captured. "add them now" has multiple words and is skipped, and a
+  // greeting ("hello", "hi") is never mistaken for a contractor name.
+  if (!addr && trimmed.length <= 60) {
+    const words = trimmed.split(/\s+/).filter((w) => !/^0x/i.test(w));
+    if (words.length === 1 && !/^(hi|hii|hello|hey|heyy|yo|thanks|thank|ty|ok|okay|yes|no|yep|yeah|bye|good|fine|help|list|run|clear|show|add|remove)$/i.test(words[0])) {
+      out.name = words[0].slice(0, 60);
+    }
+  }
+
+  return out;
+}
+
 export const EXAMPLE_COMMANDS = [
   "Add Flare 0xAbC123... as a contractor at 2 USDC monthly",
   "Add Manny 0xAbC123... as a manager at 1 usdc every 4 weeks",

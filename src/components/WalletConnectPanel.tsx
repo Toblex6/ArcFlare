@@ -12,7 +12,7 @@ import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, useS
 import { arcTestnet } from '@/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
+import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
 
 interface WalletConnectPanelProps {
   onConnected?: (result: { walletProvider: string; walletAddress: string }) => void;
@@ -59,9 +59,10 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
     if (connectError) setError(friendlyWalletError(connectError));
   }, [connectError]);
 
-  const injectedConnectors = connectors.filter((c) => c.type === 'injected');
-  const walletConnectConnector = connectors.find((c) => c.type === 'walletConnect');
-  const otherConnectors = connectors.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
+  const deduped = dedupeConnectors(connectors);
+  const injectedConnectors = deduped.filter((c) => c.type === 'injected');
+  const walletConnectConnector = deduped.find((c) => c.type === 'walletConnect');
+  const otherConnectors = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
 
   const isMobile = mounted ? isMobileViewport() : false;
   const hasProvider = mounted ? hasInjectedProvider() : false;
@@ -88,7 +89,14 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
     setShowTechnical(false);
     try {
       if (chainId !== arcTestnet.id) {
-        const net = await ensureArcNetwork({ chainId, switchChainAsync });
+        const getProvider = async () => {
+          try {
+            return await (activeConnector as any)?.getProvider?.();
+          } catch {
+            return null;
+          }
+        };
+        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider });
         if (!net.ok) {
           setNetworkMismatch(true);
           setError(net.message);
@@ -214,9 +222,14 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
           )}
 
           {isMobile && !hasProvider && walletConnectConnector && (
-            <p style={{ fontSize: 'clamp(11px, 1vw, 13px)', color: 'var(--text-secondary)', margin: '4px 0 0', lineHeight: 1.5 }}>
-              On mobile, open this page in your wallet app, or copy the link below and open it there.
-            </p>
+            <>
+              <p style={{ fontSize: 'clamp(12px, 1vw, 14px)', color: 'var(--text)', margin: '4px 0 0', fontWeight: 600, lineHeight: 1.5 }}>
+                Connect your wallet to pay on Arc Testnet.
+              </p>
+              <p style={{ fontSize: 'clamp(11px, 1vw, 13px)', color: 'var(--text-secondary)', margin: '0', lineHeight: 1.5 }}>
+                Open this page in your wallet app, or copy the link below and open it there.
+              </p>
+            </>
           )}
           {isMobile && !hasProvider && pageUrl && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

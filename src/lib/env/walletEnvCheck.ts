@@ -56,6 +56,25 @@ export const CUSTODY_WALLET_VARS: string[] = [
   "AGENT_VALIDATOR_WALLET_ADDRESS",
 ];
 
+// ── Public client configuration (informational, NOT fail-closed) ─────────────
+// NEXT_PUBLIC_* values are inlined into the browser bundle at build time, so a
+// server-side hard failure here cannot guarantee what the client received.
+// Missing values are therefore logged loudly at startup (see assertWalletEnv)
+// instead of failing the boot — but they must never silently look like a
+// working feature. src/lib/wagmi.ts registers NO walletConnect connector when
+// the project ID is absent (desktop extensions only) and warns in the browser;
+// WalletConnectPanel shows an explicit "WalletConnect isn't configured" message
+// instead of a dead button. The WalletConnect Cloud origin allow-list itself
+// cannot be verified from code — it is configured in the WalletConnect Cloud
+// dashboard for whatever origins the deployment actually serves.
+export const PUBLIC_CLIENT_CONFIG_VARS: { keyVar: string; description: string }[] = [
+  {
+    keyVar: "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID",
+    description:
+      "WalletConnect Cloud project ID — enables mobile wallet deep-links/QR; without it payments are desktop-browser-extension-only",
+  },
+];
+
 // ── M10: secrets + contract configuration ─────────────────────────────────────
 // Hard failures (the app is broken without them). Format checks are cheap
 // and catch paste errors (truncated keys, addresses with the wrong length,
@@ -200,5 +219,17 @@ export function assertWalletEnv(env: Record<string, string | undefined> = proces
         "Fix these before running:\n  - " +
         result.errors.join("\n  - ")
     );
+  }
+
+  // Informational: degraded-but-functional public client config. Not an error
+  // (the server can't control what the browser bundle received), but never
+  // silent — a missing WalletConnect project ID means mobile payments are off.
+  for (const { keyVar, description } of PUBLIC_CLIENT_CONFIG_VARS) {
+    if (!env[keyVar]) {
+      console.warn(
+        `[FlareHQ] Configuration warning: ${keyVar} is not set — ${description}. ` +
+          "Set it (public value, safe to expose) to enable the mobile flow."
+      );
+    }
   }
 }

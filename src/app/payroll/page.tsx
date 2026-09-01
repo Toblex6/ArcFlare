@@ -218,7 +218,7 @@ export default function PayrollPage() {
 
   return (
     <div style={S.page}>
-      <DashboardSidebar active="Payroll" />
+      <DashboardSidebar active="Batch Payroll" />
 
       <main style={S.main}>
         <div style={{ marginBottom: 28 }}>
@@ -226,8 +226,13 @@ export default function PayrollPage() {
             Batch Payroll
           </h1>
           <p style={{ color: '#6b5a45', fontSize: 13, margin: 0 }}>
-            Pay any number of recipients in a single onchain batch
+            One-off batch — pay any number of recipients in a single onchain call. For recurring, use <a href="/scheduled" style={{ color: '#c8975a', textDecoration: 'underline' }}>Scheduled Payroll</a> or <a href="/payroll-chat" style={{ color: '#c8975a', textDecoration: 'underline' }}>Payroll Chat</a>.
           </p>
+          {walletBalance !== null && (
+            <p style={{ color: walletBalance !== null && parseFloat(walletBalance) > 0 ? '#10b981' : '#f87171', fontSize: 11, margin: '6px 0 0' }}>
+              Your wallet ({payerSCA.slice(0, 10)}...{payerSCA.slice(-6)}) balance: {walletBalance} USDC
+            </p>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
@@ -244,20 +249,32 @@ export default function PayrollPage() {
               style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}
             >
               <div>
-                <span style={S.label}>Payer SCA</span>
+                <span style={S.label}>Your Wallet (Payer)</span>
                 <input
-                  style={S.input}
+                  style={{ ...S.input, opacity: 0.85 }}
                   value={payerSCA}
-                  onChange={(e) => setPayerSCA(e.target.value)}
+                  readOnly
+                  title="Resolved from your merchant session — editing doesn't change who pays"
                 />
+                <span style={{ fontSize: 10, color: '#6b5a45', marginTop: 4, display: 'block' }}>
+                  Resolved from your merchant session — this is who pays. Server ignores manual edits.
+                </span>
               </div>
               <div>
-                <span style={S.label}>Payer Circle Wallet ID</span>
-                <input
-                  style={S.input}
-                  value={payerWalletId}
-                  onChange={(e) => setPayerWalletId(e.target.value)}
-                />
+                <details style={{ background: 'transparent' }}>
+                  <summary style={{ fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 1, cursor: 'pointer', listStyle: 'none' as any }}>
+                    Advanced: Circle Wallet ID ▸
+                  </summary>
+                  <span style={{ fontSize: 10, color: '#6b5a45', margin: '4px 0', display: 'block' }}>
+                    Leave blank — auto-resolved to your custodial wallet. Only needed for external signing queues.
+                  </span>
+                  <input
+                    style={S.input}
+                    value={payerWalletId}
+                    onChange={(e) => setPayerWalletId(e.target.value)}
+                    placeholder="Auto-resolved — leave blank"
+                  />
+                </details>
               </div>
             </div>
 
@@ -301,7 +318,7 @@ export default function PayrollPage() {
                   style={S.input}
                   value={r.label}
                   onChange={(e) => updateRecipient(i, 'label', e.target.value)}
-                  placeholder="EMP-001"
+                  placeholder="Label (optional, e.g. EMP-001)"
                 />
                 <button
                   onClick={() => removeRecipient(i)}

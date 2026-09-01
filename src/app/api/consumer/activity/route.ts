@@ -21,17 +21,27 @@ export async function GET(req: NextRequest) {
             take: 20,
         });
 
-        const activity = logs.map((log) => ({
-            reference: log.reference,
-            amount: log.amount,
-            currency: log.currency,
-            status: log.status,
-            timestamp: log.timestamp,
-            direction: log.senderEmail === walletAddress ? "out" : "in",
-            counterparty:
-                log.senderEmail === walletAddress ? log.merchantSCA || log.merchant : log.senderEmail,
-            explorerUrl: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
-        }));
+        const now = Date.now();
+        const activity = logs.map((log) => {
+            const isExpired =
+                log.status === "PENDING" && (log as any).expiresAt != null && now > new Date((log as any).expiresAt).getTime();
+            const displayStatus = isExpired ? "EXPIRED" : log.status;
+            return {
+                reference: log.reference,
+                amount: log.amount,
+                currency: log.currency,
+                status: displayStatus,
+                rawStatus: log.status,
+                displayStatus,
+                isExpired,
+                expiresAt: (log as any).expiresAt ?? null,
+                timestamp: log.timestamp,
+                direction: log.senderEmail === walletAddress ? "out" : "in",
+                counterparty:
+                    log.senderEmail === walletAddress ? log.merchantSCA || log.merchant : log.senderEmail,
+                explorerUrl: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
+            };
+        });
 
         return NextResponse.json({ success: true, activity });
     } catch (error: any) {

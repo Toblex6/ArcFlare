@@ -286,6 +286,13 @@ export async function POST(req: NextRequest) {
   }
   const contractors: any[] = Array.isArray(body.contractors) ? body.contractors : [];
   const schedule: string | null = body.schedule || null;
+  // Optional partial-add accumulator the client carries across turns so a
+  // greeting ("hi") can't reset a half-typed contractor. Never a source of
+  // truth — the validated intent is. Treated as untrusted text.
+  const pendingAdd: any =
+    body.pendingAdd && typeof body.pendingAdd === 'object'
+      ? body.pendingAdd
+      : null;
   // The vault the caller is paying from. A consumer's session wallet is the
   // trusted default; a merchant must name their own vault (the page sends
   // the wallet address from their /api/merchant/me profile).
@@ -295,7 +302,10 @@ export async function POST(req: NextRequest) {
   const contextNote =
     `Current payroll state:\n` +
     `- Contractors (${contractors.length}): ${contractors.map((c) => `${c.name} at ${c.amount} USDC ${c.frequency || ''}`).join('; ') || 'none'}\n` +
-    `- Schedule: ${schedule || 'not set'}\n`;
+    `- Schedule: ${schedule || 'not set'}\n` +
+    (pendingAdd
+      ? `- Pending add (parts already given in earlier turns — COMPLETE it when the user fills the gaps; do not re-ask for these): name="${pendingAdd.name || ''}" address="${pendingAdd.address || ''}" amount="${pendingAdd.amount ?? ''}" cadence="${pendingAdd.intervalDays ? `every ${pendingAdd.intervalDays} days` : pendingAdd.frequency || ''}"\n`
+      : '');
 
   // Conversation history (the client sends its last messages) so multi-turn
   // flows work: a user who gave name+address earlier and answers 'every 2

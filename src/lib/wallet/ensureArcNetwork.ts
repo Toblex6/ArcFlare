@@ -14,11 +14,10 @@ export type EnsureArcResult =
   | { ok: true }
   | { ok: false; reason: 'REJECTED' | 'UNSUPPORTED' | 'TIMEOUT' | 'GENERIC'; message: string };
 
-async function addArcTestnet(): Promise<void> {
-  const eth = (window as any)?.ethereum;
-  if (!eth?.request) throw new Error('no ethereum provider');
+async function addArcTestnetViaProvider(provider: any): Promise<void> {
+  if (!provider?.request) throw new Error('no ethereum provider');
   const hexChainId = '0x' + arcTestnet.id.toString(16);
-  await eth.request({
+  await provider.request({
     method: 'wallet_addEthereumChain',
     params: [
       {
@@ -32,9 +31,26 @@ async function addArcTestnet(): Promise<void> {
   });
 }
 
+async function addArcTestnet(opts?: { getProvider?: () => Promise<any> }): Promise<void> {
+  // Prefer the active connector's provider (WalletConnect) when available,
+  // otherwise fall back to window.ethereum for injected wallets.
+  let provider: any = null;
+  if (opts?.getProvider) {
+    try {
+      provider = await opts.getProvider();
+    } catch {
+      // ignore — fall back to window.ethereum
+    }
+  }
+  if (!provider) provider = (window as any)?.ethereum;
+  return addArcTestnetViaProvider(provider);
+}
+
 export async function ensureArcNetwork(opts: {
   chainId: number | undefined;
   switchChainAsync: (args: { chainId: number }) => Promise<unknown>;
+  /** Optional: active connector's provider (WalletConnect) for eip3085 add. */
+  getProvider?: () => Promise<any>;
 }): Promise<EnsureArcResult> {
   const { chainId, switchChainAsync } = opts;
   if (chainId === arcTestnet.id) return { ok: true };
@@ -64,7 +80,7 @@ export async function ensureArcNetwork(opts: {
     // 3. chain not added — try add then switch
     if (isUnknownChain) {
       try {
-        await addArcTestnet();
+        await addArcTestnet({ getProvider: opts.getProvider });
         // many wallets auto-switch after add; verify, else explicitly switch
         try {
           await switchChainAsync({ chainId: arcTestnet.id });

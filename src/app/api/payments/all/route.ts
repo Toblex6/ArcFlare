@@ -49,6 +49,10 @@ export async function GET(req: NextRequest) {
         currency: log.currency || 'USDC',
         chain: log.chain || 'Arc Testnet',
         status: displayStatus,
+        rawStatus: log.status,
+        displayStatus,
+        isExpired,
+        expiresAt: (log as any).expiresAt ?? null,
         sender_email: log.senderEmail || null,
         merchant: log.merchant || null,
         // Ensure date is a string to prevent serialization errors

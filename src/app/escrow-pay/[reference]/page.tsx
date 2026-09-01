@@ -28,7 +28,7 @@ import { USDC_CONTRACT, USDC_DECIMALS } from '@/lib/wallet/erc20';
 import { arcTestnet } from '@/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { friendlyConnectorLabel } from '@/lib/wallet/walletLabels';
+import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
 
 // Minimal ABIs — approve from the ERC-20 surface Checkout uses, createEscrow
 // with the exact signature escrow/create/route.ts sends via Circle.
@@ -87,7 +87,7 @@ export default function EscrowPayPage() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [explorerUrl, setExplorerUrl] = useState<string | null>(null);
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector: activeConnector } = useAccount();
   const { connectors, connect, connectAsync, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const { writeContractAsync } = useWriteContract();
@@ -113,7 +113,8 @@ export default function EscrowPayPage() {
     try {
       if (chainId !== arcTestnet.id) {
         setStatusText('Switching your wallet to Arc Testnet…');
-        const net = await ensureArcNetwork({ chainId, switchChainAsync });
+        const getter = async () => { try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; } };
+        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter });
         if (!net.ok) {
           setStep('error');
           setStatusText(net.message);
@@ -227,12 +228,13 @@ export default function EscrowPayPage() {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {(() => {
-                const isMobile = typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-                const hasProvider = typeof window !== 'undefined' && !!(window as any).ethereum;
+                const isMobile = isMobileViewport();
+                const hasProvider = hasInjectedProvider();
                 const showInjected = !(isMobile && !hasProvider);
-                const injected = connectors.filter((c) => c.type === 'injected');
-                const wc = connectors.find((c) => c.type === 'walletConnect');
-                const others = connectors.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
+                const deduped = dedupeConnectors(connectors);
+                const injected = deduped.filter((c) => c.type === 'injected');
+                const wc = deduped.find((c) => c.type === 'walletConnect');
+                const others = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
                 const doConnect = async (c: (typeof connectors)[number]) => {
                   setConnectError(null);
                   try { await (connectAsync ? connectAsync({ connector: c }) : connect({ connector: c })); }
@@ -269,10 +271,30 @@ export default function EscrowPayPage() {
             </div>
             {connectError && <p style={{ fontSize: 12, color: '#C0563A', margin: '8px 0 0' }}>⚠️ {connectError}</p>}
           </div>
+        ) : chainId !== arcTestnet.id ? (
+          <div>
+            <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 10px' }}>
+              Paying from <strong>{address ? `${address.slice(0, 10)}…${address.slice(-6)}` : 'wallet'}</strong> · {address?.slice(0,6)}...{address?.slice(-4)} · <button onClick={() => disconnect()} style={{ border: 'none', background: 'none', color: '#E8714A', cursor: 'pointer', padding: 0, fontSize: 12 }}>disconnect</button>
+            </p>
+            <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: 10, marginBottom: 10, textAlign: 'center' }}>
+              <p style={{ color: '#b45309', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Wrong network</p>
+              <p style={{ color: '#8A8275', fontSize: 11, margin: 0 }}>This escrow uses Arc Testnet. Switch your wallet to Arc to continue.</p>
+            </div>
+            <button
+              onClick={async () => {
+                const getter = async () => { try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; } };
+                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter });
+                if (!net.ok) { setStep('error'); setStatusText(net.message); }
+              }}
+              style={{ width: '100%', padding: '12px 18px', borderRadius: 10, border: '1px solid #5C7A5C', background: '#fff', color: '#5C7A5C', fontWeight: 700, cursor: 'pointer' }}>
+              Switch to Arc Testnet
+            </button>
+            <p style={{ fontSize: 10, color: '#8A8275', margin: '6px 0 0', textAlign: 'center' }}>Funding is blocked until Arc Testnet is selected.</p>
+          </div>
         ) : (
           <div>
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 10px' }}>
-              Paying from <strong>{address ? `${address.slice(0, 10)}…${address.slice(-6)}` : 'wallet'}</strong> · <button onClick={() => disconnect()} style={{ border: 'none', background: 'none', color: '#E8714A', cursor: 'pointer', padding: 0, fontSize: 12 }}>disconnect</button>
+              Paying from <strong>{address ? `${address.slice(0, 10)}…${address.slice(-6)}` : 'wallet'}</strong> · Arc Testnet ✓ · <button onClick={() => disconnect()} style={{ border: 'none', background: 'none', color: '#E8714A', cursor: 'pointer', padding: 0, fontSize: 12 }}>disconnect</button>
             </p>
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 12px' }}>
               Two wallet confirmations: an ERC-20 approve, then the on-chain escrow deposit — exactly like checkout.

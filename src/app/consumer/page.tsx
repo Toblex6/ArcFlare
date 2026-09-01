@@ -57,7 +57,11 @@ interface ActivityItem {
   direction: "in" | "out";
   counterparty?: string;
   amount: number;
-  status: string;
+  status: string; // displayStatus — derived (EXPIRED when past expiresAt)
+  rawStatus?: string;
+  displayStatus?: string;
+  isExpired?: boolean;
+  expiresAt?: string | null;
   timestamp: string;
   explorerUrl?: string | null;
 }
@@ -786,16 +790,16 @@ export default function ConsumerApp() {
                           {a.direction === "out" ? "Sent" : "Received"}
                           {a.counterparty ? ` ${a.direction === "out" ? "to" : "from"} ${a.counterparty.slice(0, 6)}...${a.counterparty.slice(-4)}` : ""}
                         </p>
-                        <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>
-                          {new Date(a.timestamp).toLocaleString()} · {a.status}
+                        <p style={{ margin: 0, fontSize: 11, color: a.status === "EXPIRED" ? "#C0563A" : a.status === "SUCCESS" ? "#3F7A57" : "var(--flow-text-faint)" }}>
+                          {new Date(a.timestamp).toLocaleString()} · <span style={{ fontWeight: 700, color: a.status === "EXPIRED" ? "#C0563A" : a.status === "SUCCESS" ? "#3F7A57" : "#8a7560" }}>{a.status}</span>
                         </p>
                         {a.explorerUrl ? (
                           <a href={a.explorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>
                             View on ArcScan
                           </a>
                         ) : (
-                          <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>
-                            {a.status !== "SUCCESS" ? "Pending — no transaction yet" : null}
+                          <p style={{ margin: 0, fontSize: 11, color: a.status === "EXPIRED" ? "#C0563A" : "var(--flow-text-faint)" }}>
+                            {a.status === "EXPIRED" ? "Expired — link no longer valid" : a.status !== "SUCCESS" ? "Pending — no transaction yet" : null}
                           </p>
                         )}
                       </div>

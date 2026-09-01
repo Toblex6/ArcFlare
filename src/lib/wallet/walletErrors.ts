@@ -67,7 +67,7 @@ export function mapWalletError(err: unknown): { kind: WalletErrorKind; message: 
   ) {
     return {
       kind: 'WC_TIMEOUT',
-      message: "We couldn't connect to your wallet app. Open this page in your wallet app, or copy the link and try again.",
+      message: "We couldn't open your wallet app. Try again, or copy this link and open it in your wallet app.",
     };
   }
 

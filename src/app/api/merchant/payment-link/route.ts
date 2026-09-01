@@ -110,16 +110,26 @@ export async function GET(req: NextRequest) {
       take: 100,
     });
 
+    const now = Date.now();
     return NextResponse.json({
       success: true,
-      links: payments.map((p) => ({
-        reference: p.reference,
-        amount: p.amount,
-        currency: p.currency,
-        status: p.status,
-        checkoutUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/checkout/${p.reference}`,
-        createdAt: p.timestamp,
-      })),
+      links: payments.map((p) => {
+        const isExpired =
+          p.status === "PENDING" && (p as any).expiresAt != null && now > new Date((p as any).expiresAt).getTime();
+        const displayStatus = isExpired ? "EXPIRED" : p.status;
+        return {
+          reference: p.reference,
+          amount: p.amount,
+          currency: p.currency,
+          status: displayStatus,
+          rawStatus: p.status,
+          displayStatus,
+          isExpired,
+          expiresAt: (p as any).expiresAt ?? null,
+          checkoutUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/checkout/${p.reference}`,
+          createdAt: p.timestamp,
+        };
+      }),
     });
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid session.' }, { status: 401 });

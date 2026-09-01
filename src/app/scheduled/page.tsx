@@ -12,21 +12,6 @@ import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
 
 
-const NAV = [
-  { label: 'Dashboard', href: '/merchant/dashboard' },
-  { label: 'Homepage', href: '/' },
-  { label: 'Transactions', href: '/transactions' },
-  { label: 'Checkout', href: '/merchant/dashboard#checkout' },
-  { label: 'Escrow', href: '/escrow' },
-  { label: 'Agents', href: '/agents' },
-  { label: 'Agent Wallets', href: '/agent-wallets' },
-  { label: 'Jobs', href: '/jobs' },
-  { label: 'Nanopayments', href: '/nano' },
-  { label: 'Payroll', href: '/payroll' },
-  { label: 'Scheduled', href: '/scheduled', active: true },
-  { label: 'Support', href: '/support' },
-];
-
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: '#10b981',
   PAUSED: '#f59e0b',
@@ -220,15 +205,15 @@ export default function ScheduledPaymentsPage() {
 
   return (
     <div style={S.page}>
-      <DashboardSidebar active="Scheduled" />
+      <DashboardSidebar active="Scheduled Payroll" />
 
       <main style={S.main}>
         <div style={{ marginBottom: 28 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f0ece6', margin: '0 0 4px' }}>
-            Recurring Payments
+            Scheduled Payroll
           </h1>
           <p style={{ color: '#6b5a45', fontSize: 13, margin: 0 }}>
-            Schedule USDC payments to run automatically every N days
+            Recurring — schedule USDC payments to run automatically every N days. For one-off batches, use <a href="/payroll" style={{ color: '#c8975a', textDecoration: 'underline' }}>Batch Payroll</a>.
           </p>
         </div>
 

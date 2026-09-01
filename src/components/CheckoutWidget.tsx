@@ -33,7 +33,7 @@ import { USDC_CONTRACT, USDC_DECIMALS, erc20TransferAbi } from '@/src/lib/wallet
 import { arcTestnet } from '@/src/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
+import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
 
 export interface PaymentLogData {
     reference: string;
@@ -115,7 +115,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const [cctpSubmitting, setCctpSubmitting] = useState(false);
     const [cctpError, setCctpError] = useState<string | null>(null);
 
-    const { address, isConnected } = useAccount();
+    const { address, isConnected, connector: activeConnector } = useAccount();
     const { connectors, connect, connectAsync, error: connectError, isPending: isConnecting, reset: resetConnect } = useConnect();
     const { disconnect } = useDisconnect();
     const { writeContractAsync } = useWriteContract();
@@ -124,6 +124,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const [networkMismatch, setNetworkMismatch] = useState(false);
     const [showTechnical, setShowTechnical] = useState(false);
     const [connecting, setConnecting] = useState(false);
+    const [switching, setSwitching] = useState(false);
 
     const fetchLedgerStatus = useCallback(async () => {
         if (!reference) return;
@@ -211,7 +212,10 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             onEvent?.({ type: 'payment_pending' });
 
             if (chainId !== arcTestnet.id) {
-                const net = await ensureArcNetwork({ chainId, switchChainAsync });
+                const providerGetter = async () => {
+                    try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; }
+                };
+                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter });
                 if (!net.ok) {
                     setIsTxPending(false);
                     setNetworkMismatch(true);
@@ -384,12 +388,13 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                     {!isConnected ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {(() => {
-                                const hasProvider = typeof window !== 'undefined' && !!(window as any).ethereum;
-                                const isMobile = typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                                const hasProvider = hasInjectedProvider();
+                                const isMobile = isMobileViewport();
                                 const showInjected = !(isMobile && !hasProvider);
-                                const injectedConnectors = connectors.filter((c) => c.type === 'injected');
-                                const walletConnectConnector = connectors.find((c) => c.type === 'walletConnect');
-                                const otherConnectors = connectors.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
+                                const deduped = dedupeConnectors(connectors);
+                                const injectedConnectors = deduped.filter((c) => c.type === 'injected');
+                                const walletConnectConnector = deduped.find((c) => c.type === 'walletConnect');
+                                const otherConnectors = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
 
                                 const attemptConnect = async (c: (typeof connectors)[number]) => {
                                     resetConnect();
@@ -459,10 +464,41 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 </p>
                             )}
                         </div>
-                    ) : (
+                    ) : chainId !== arcTestnet.id ? (
                         <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11, color: '#6b5a45' }}>
                                 <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)}</span>
+                                <button onClick={() => disconnect()} style={{ background: 'none', border: 'none', color: '#c8975a', cursor: 'pointer', fontSize: 'inherit' }}>
+                                    Disconnect
+                                </button>
+                            </div>
+                            <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
+                                <p style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Wrong network</p>
+                                <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This payment uses Arc Testnet. Switch your wallet to Arc to continue.</p>
+                            </div>
+                            <button
+                                onClick={async () => {
+                                    setSwitching(true);
+                                    setNetworkMismatch(false);
+                                    setSettleError(null);
+                                    try {
+                                        const getter = async () => { try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; } };
+                                        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter });
+                                        if (!net.ok) { setNetworkMismatch(true); setSettleError(net.message); }
+                                    } catch (e: any) { setSettleError(friendlyWalletError(e)); setNetworkMismatch(true); }
+                                    finally { setSwitching(false); }
+                                }}
+                                disabled={switching}
+                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #c8975a', fontSize: 14, fontWeight: 800, cursor: switching ? 'not-allowed' : 'pointer', background: switching ? '#6b5a45' : 'transparent', color: '#c8975a' }}
+                            >
+                                {switching ? 'Switching...' : 'Switch to Arc Testnet'}
+                            </button>
+                            <p style={{ color: '#6b5a45', fontSize: 10, margin: '6px 0 0', textAlign: 'center' }}>Pay is blocked until Arc Testnet is selected — no “Pay anyway”.</p>
+                        </>
+                    ) : (
+                        <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11, color: '#6b5a45' }}>
+                                <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)} · Arc Testnet ✓</span>
                                 <button onClick={() => disconnect()} style={{ background: 'none', border: 'none', color: '#c8975a', cursor: 'pointer', fontSize: 'inherit' }}>
                                     Disconnect
                                 </button>

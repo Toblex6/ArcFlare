@@ -18,7 +18,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { parsePayrollCommand, EXAMPLE_COMMANDS, FREQUENCY_TO_DAYS, Frequency, ParsedIntent } from "@/lib/payrollChatParser";
+import { parsePayrollCommand, extractPartialAdd, EXAMPLE_COMMANDS, FREQUENCY_TO_DAYS, Frequency, ParsedIntent } from "@/lib/payrollChatParser";
 import { friendlyWalletError } from "@/lib/wallet/walletErrors";
 
 interface Contractor {
@@ -99,7 +99,41 @@ export default function PayrollChatPage() {
   const [scheduleIntervalDays, setScheduleIntervalDays] = useState<number | null>(null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [sending, setSending] = useState(false);
+  const [pendingAdd, setPendingAdd] = useState<Partial<Contractor> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ── Draft persistence (localStorage, account-scoped) ────────────────────
+  // Chat working state only — NEVER authorization. The actual payout is
+  // still authorized server-side by the caller's own credential.
+  const accountKey =
+    identity.kind === "merchant"
+      ? `merchant:${identity.businessName}`
+      : identity.kind === "consumer"
+        ? `consumer:${identity.walletAddress}`
+        : null;
+
+  useEffect(() => {
+    if (!accountKey) return;
+    try {
+      const raw = localStorage.getItem(`flarehq:payroll-chat:v1:${accountKey}`);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (Array.isArray(saved.contractors)) setContractors(saved.contractors);
+        if (saved.schedule) setSchedule(saved.schedule);
+        if (saved.scheduleIntervalDays != null) setScheduleIntervalDays(saved.scheduleIntervalDays);
+      }
+    } catch { /* non-fatal — chat still works fresh */ }
+  }, [accountKey]);
+
+  useEffect(() => {
+    if (!accountKey) return;
+    try {
+      localStorage.setItem(
+        `flarehq:payroll-chat:v1:${accountKey}`,
+        JSON.stringify({ contractors, schedule, scheduleIntervalDays })
+      );
+    } catch { /* quota/private-mode — non-fatal */ }
+  }, [accountKey, contractors, schedule, scheduleIntervalDays]);
 
   useEffect(() => {
     const saved = localStorage.getItem("flow-theme");
@@ -250,6 +284,15 @@ export default function PayrollChatPage() {
     setInput("");
     setSending(true);
 
+    // Merge any add-shaped fragments (address/amount/cadence/name) from this
+    // message into the pending add so a greeting ("hi") can't reset a
+    // partially-typed contractor. Sent along to the LLM as extra context.
+    const partial = extractPartialAdd(userText);
+    if (partial && Object.keys(partial).length > 0) {
+      setPendingAdd((prev) => ({ ...(prev || {}), ...partial }));
+    }
+    const pendingRef = pendingAdd;
+
     // Primary path: LLM-backed intent parsing (merchant OR consumer auth).
     // Falls back to the local regex parser on any LLM failure so the
     // exact-phrase commands keep working during outages. Recent chat history
@@ -266,6 +309,7 @@ export default function PayrollChatPage() {
           contractors,
           schedule,
           vaultAddress,
+          pendingAdd: { ...(pendingRef || {}), ...partial },
           history: messages.slice(-12).map((m) => ({ role: m.role, text: m.text })),
         }),
         signal: AbortSignal.timeout(20000),
@@ -294,11 +338,33 @@ export default function PayrollChatPage() {
     try {
       switch (intent.type) {
         case "add_contractor": {
-          setContractors((prev) => [...prev, { name: intent.name, address: intent.address, amount: intent.amount, frequency: intent.frequency, intervalDays: intent.intervalDays }]);
-          const cadence = intent.intervalDays && intent.intervalDays !== FREQUENCY_TO_DAYS[intent.frequency]
-            ? `every ${intent.intervalDays} days`
-            : intent.frequency;
-          if (!llmReply) addMessage("assistant", `Got it. Added ${intent.name} (${intent.address.slice(0, 10)}...) at ${intent.amount} USDC, paid ${cadence}. They'll be included in your next payroll run.`);
+          // Merge with any fields already collected in the pending add (the
+          // LLM's intent is always validated/complete, but the pending add
+          // may hold details the LLM omitted on a partial turn).
+          const merged: Contractor = {
+            name: intent.name || pendingRef?.name || "Unnamed",
+            address: intent.address || pendingRef?.address || "",
+            amount: intent.amount ?? pendingRef?.amount ?? 0,
+            frequency: intent.frequency,
+            intervalDays: intent.intervalDays ?? pendingRef?.intervalDays,
+          };
+          setPendingAdd(null);
+          // Dedup by address (case-insensitive) — a retry/partial LLM turn
+          // must never create a second row for the same wallet. Update the
+          // existing row in place instead.
+          setContractors((prev) => {
+            const idx = prev.findIndex((c) => c.address.toLowerCase() === merged.address.toLowerCase());
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = { ...next[idx], ...merged };
+              return next;
+            }
+            return [...prev, merged];
+          });
+          const cadence = merged.intervalDays && merged.intervalDays !== FREQUENCY_TO_DAYS[merged.frequency]
+            ? `every ${merged.intervalDays} days`
+            : merged.frequency;
+          if (!llmReply) addMessage("assistant", `Got it. Added ${merged.name} (${merged.address.slice(0, 10)}...) at ${merged.amount} USDC, paid ${cadence}. They'll be included in your next payroll run.`);
           break;
         }
 
@@ -306,7 +372,17 @@ export default function PayrollChatPage() {
           if (contractors.length === 0) {
             addMessage("assistant", "No contractors added yet.");
           } else {
-            const list = contractors.map((c, i) => `${i + 1}. ${c.name} (${c.address.slice(0, 10)}...) — ${c.amount} USDC ${c.frequency}`).join("\n");
+            // Render the real cadence the user asked for ("every 2 days")
+            // instead of the bucketed frequency ("daily") — matches the
+            // "add" reply so the list never lies about cadence.
+            const list = contractors
+              .map((c, i) => {
+                const cadence = c.intervalDays && c.intervalDays !== FREQUENCY_TO_DAYS[c.frequency]
+                  ? `every ${c.intervalDays} days`
+                  : c.frequency;
+                return `${i + 1}. ${c.name} (${c.address.slice(0, 10)}...) — ${c.amount} USDC ${cadence}`;
+              })
+              .join("\n");
             addMessage("assistant", `📋 Current contractors:\n${list}`);
           }
           break;
@@ -338,7 +414,14 @@ export default function PayrollChatPage() {
         }
 
         case "remove_contractor": {
-          setContractors((prev) => prev.filter((c) => c.name.toLowerCase() !== intent.name.toLowerCase()));
+          // Match by name OR address — "remove 0xb592..." works as well as
+          // "remove deji", so an ambiguous duplicate can always be targeted.
+          const target = intent.name.toLowerCase();
+          setContractors((prev) =>
+            prev.filter(
+              (c) => c.name.toLowerCase() !== target && c.address.toLowerCase() !== target
+            )
+          );
           if (!llmReply) {
             addMessage("assistant", `Removed ${intent.name} from your contractor list (if they were on it).`);
           }

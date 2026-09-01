@@ -4,14 +4,16 @@
 // WalletConnectPanel, escrow-pay, and consumer onboarding.
 //
 // Never show wagmi internals (injected / viem / connector type) to users.
+// (The old FRIENDLY_BY_TYPE allowlist is gone — see friendlyConnectorLabel.)
 
-const FRIENDLY_BY_TYPE: Record<string, string> = {
-  injected: 'Browser Wallet',
-  walletConnect: 'WalletConnect',
-  coinbaseWallet: 'Coinbase Wallet',
-};
-
-const KNOWN_WALLET_NAMES = ['MetaMask', 'Rabby', 'Coinbase Wallet', 'Brave Wallet', 'Trust Wallet', 'Phantom', 'Rainbow', 'Safe'];
+// Wallet names that are generic/internal placeholders rather than a real
+// wallet's announced name — these get the neutral "Browser Wallet" label.
+// Everything else an EIP-6963 provider announces (MetaMask, Rabby, OKX,
+// Zerion, Bitget, Ledger, Taho, Enkrypt, Coinbase Wallet, …) is shown AS-IS:
+// a real announced name is authoritative. We do NOT keep a known-wallet
+// allowlist — that collapsed legitimate wallets into "Browser Wallet" — and
+// we never invent names.
+const GENERIC_WALLET_NAMES = new Set(['injected', 'browser wallet', 'wallet']);
 
 export function friendlyConnectorLabel(connector: { type?: string; name?: string; id?: string }): string {
   const rawName = (connector.name || connector.id || '').trim();
@@ -20,19 +22,36 @@ export function friendlyConnectorLabel(connector: { type?: string; name?: string
   // WalletConnect is explicit — always that label
   if (connector.type === 'walletConnect' || lower.includes('walletconnect')) return 'WalletConnect';
 
-  // If EIP-6963 / connector already advertises a known wallet name, use it
-  for (const known of KNOWN_WALLET_NAMES) {
-    if (lower.includes(known.toLowerCase())) return known;
-  }
-
-  // Injected generic: don't show "Injected"
-  if (connector.type === 'injected' || lower === 'injected' || !rawName) {
+  // No announced name (or a generic/internal placeholder like "Injected") —
+  // show the neutral fallback instead of wagmi internals.
+  if (!rawName || GENERIC_WALLET_NAMES.has(lower) || (connector.type && lower === connector.type.toLowerCase())) {
     return 'Browser Wallet';
   }
 
-  // Fallback to mapped type or the raw name as-is (already nicer than "injected")
-  if (connector.type && FRIENDLY_BY_TYPE[connector.type]) return FRIENDLY_BY_TYPE[connector.type];
-  return rawName || 'Browser Wallet';
+  // Real announced wallet name — trust it as-is.
+  return rawName;
+}
+
+/**
+ * Stable dedup by connector identity — never by display name alone.
+ * Two distinct wallets can legitimately share the same display name
+ * (e.g. two "MetaMask" entries via different EIP-6963 providers).
+ * We dedupe only on the stable connector identity (uid > id+type).
+ */
+export function dedupeConnectors<T>(connectors: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const c of connectors) {
+    const anyC = c as { uid?: string; id?: string; type?: string; name?: string };
+    // uid is the stable per-connector identity wagmi assigns
+    const key = anyC?.uid
+      ? `uid:${anyC.uid}`
+      : `id:${anyC?.id ?? ''}|type:${anyC?.type ?? ''}|name:${anyC?.name ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
 }
 
 // Mobile detection helpers shared across panels

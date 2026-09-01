@@ -38,12 +38,22 @@ export const arcTestnet = defineChain({
 // shim needed; wagmi handles deduplication.
 const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
 
-// Diagnose WC misconfiguration loudly in dev so mobile deep-links don't stay
-// silently disabled (production hostnames rely on WalletConnect Cloud allowlist).
+// Explicit configuration failure — never let a missing project ID silently
+// look like a working mobile WalletConnect feature. Without it, NO walletConnect
+// connector is registered at all, so mobile users get no QR / deep-link path
+// and desktop is extension-only. We say so loudly, in both dev and production,
+// without exposing anything beyond the public project-ID variable name. The
+// WalletConnect Cloud origin allow-list itself cannot be verified from code —
+// it must be configured in the WalletConnect Cloud dashboard for whichever
+// origins this deployment serves (window.location.origin at runtime).
 if (typeof window !== 'undefined' && !walletConnectProjectId) {
   console.warn(
-    '[FlareHQ] NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set — WalletConnect will be unavailable. ' +
-      'Add it in WalletConnect Cloud (allow https://flarehq.xyz + preview hosts) or payments will be desktop-extension-only.'
+    '[FlareHQ] Configuration error: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set — ' +
+      'mobile WalletConnect is DISABLED (no QR/deep-link connector is registered; only ' +
+      'desktop browser-extension wallets can connect). Create a project in WalletConnect ' +
+      'Cloud and set the variable, allow-listing this deployment origin (' +
+      (typeof window !== 'undefined' ? window.location.origin : 'the production origin') +
+      '), to enable mobile payments.'
   );
 }
 
