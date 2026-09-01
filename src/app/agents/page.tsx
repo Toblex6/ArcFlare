@@ -159,16 +159,45 @@ export default function AgentsPage() {
     setRepError(null);
     setRepResult(null);
     try {
+      // ── Authoritative validatorWalletId resolution (client-side derived,
+      // server-verified) ───────────────────────────────────────────────
+      // The UI now supplies validatorWalletId when it can be derived from
+      // local state the merchant already controls (own agents + own merchant
+      // wallet). When the validator is not an owned agent, we omit the
+      // field and the server derives it authoritatively via DB/env —
+      // either way no client-controlled substitution is possible because
+      // the server checks any supplied value against the DB-derived one.
+      let validatorWalletId: string | undefined;
+      const norm = repValidatorSCA.trim().toLowerCase();
+      const matchedAgent = agents.find((a) => a.scaAddress?.toLowerCase() === norm);
+      if (matchedAgent?.circleWalletId) {
+        validatorWalletId = matchedAgent.circleWalletId;
+      } else {
+        try {
+          const mwRes = await fetch('/api/merchant/wallet');
+          const mwData = await mwRes.json().catch(() => ({}));
+          if (
+            mwData?.wallet?.walletAddress?.toLowerCase() === norm &&
+            mwData?.wallet?.circleWalletId
+          ) {
+            validatorWalletId = mwData.wallet.circleWalletId;
+          }
+        } catch {
+          // best-effort: merchant wallet lookup failure is non-fatal; server will derive
+        }
+      }
+      const body: any = {
+        agentId: repAgentId,
+        validatorSCA: repValidatorSCA,
+        score: parseInt(repScore),
+        tag: repTag,
+        feedbackType: 0,
+      };
+      if (validatorWalletId) body.validatorWalletId = validatorWalletId;
       const res = await fetch('/api/agent/reputation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentId: repAgentId,
-          validatorSCA: repValidatorSCA,
-          score: parseInt(repScore),
-          tag: repTag,
-          feedbackType: 0,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);

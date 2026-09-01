@@ -5,10 +5,60 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKey } from '@/lib/middleware/withApiKey';
+import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { keccak256, toHex } from 'viem';
+
+// ── Authoritative validator wallet resolution ─────────────────────────────
+// Resolves the Circle wallet ID that AUTHORITATIVELY corresponds to
+// validatorSCA by querying DB tables the platform controls. Never trusts
+// a client-supplied walletId — it is only compared against this value.
+// Mirrors src/lib/trust/autoReputation.ts resolution order.
+async function resolveAuthoritativeValidatorWalletId(validatorSCA: string): Promise<string | null> {
+  // 1. AgentRegistry (validator is an agent SCA)
+  try {
+    const agent: any = await (prisma as any).agentRegistry.findFirst({
+      where: { scaAddress: { equals: validatorSCA, mode: 'insensitive' } },
+      select: { circleWalletId: true },
+    });
+    if (agent?.circleWalletId) return agent.circleWalletId;
+  } catch {}
+
+  // 2. Merchant walletAddress
+  try {
+    const merchant: any = await (prisma as any).merchant.findFirst({
+      where: { walletAddress: { equals: validatorSCA, mode: 'insensitive' } },
+      select: { circleWalletId: true },
+    });
+    if (merchant?.circleWalletId) return merchant.circleWalletId;
+  } catch {}
+
+  // 3. ConsumerAccount walletAddress
+  try {
+    const consumer: any = await (prisma as any).consumerAccount.findFirst({
+      where: { walletAddress: { equals: validatorSCA, mode: 'insensitive' } },
+      select: { circleWalletId: true },
+    });
+    if (consumer?.circleWalletId) return consumer.circleWalletId;
+  } catch {}
+
+  // 4. CircleWallet table (address -> walletId)
+  try {
+    const cw: any = await (prisma as any).circleWallet.findFirst({
+      where: { address: { equals: validatorSCA, mode: 'insensitive' } },
+      select: { walletId: true },
+    });
+    if (cw?.walletId) return cw.walletId;
+  } catch {}
+
+  // 5. Env validator fallback (platform validator, same as autoReputation)
+  const envAddr = (process.env.AGENT_VALIDATOR_WALLET_ADDRESS || '').toLowerCase();
+  const envId = process.env.AGENT_VALIDATOR_WALLET_ID || null;
+  if (envAddr && envId && validatorSCA.toLowerCase() === envAddr) return envId;
+
+  return null;
+}
 
 // ── ERC-8004 contracts on Arc Testnet ─────────────────────────────────────────
 const REPUTATION_REGISTRY = '0x8004B663056A597Dffe9eCcC1965A193B7388713';
@@ -40,23 +90,27 @@ async function waitForTx(
 
 // ─── POST /api/agent/reputation ───────────────────────────────────────────────
 // Records reputation feedback from a validator for an agent.
-// Body: { agentId, validatorSCA, score (0-100), tag, circleWalletId }
+// Body: { agentId, validatorSCA, score (0-100), tag, validatorWalletId? }
+// validatorWalletId is OPTIONAL — if supplied it MUST match the authoritative
+// walletId resolved server-side for validatorSCA (see resolveAuthoritative...).
+// If omitted the server derives it. Client-supplied walletId is never trusted
+// as the signing identity — the authoritative value is always used.
 async function reputationHandler(request: NextRequest) {
   try {
     const {
       agentId, // ERC-8004 tokenId e.g. "68210"
       validatorSCA, // Validator wallet address (NOT the agent owner)
-      validatorWalletId, // Circle wallet ID of validator
+      validatorWalletId: clientValidatorWalletId, // Circle wallet ID — OPTIONAL, verified if present
       score, // 0-100 reputation score
       tag, // e.g. "successful_payment", "completed_job"
       feedbackType, // 0 = positive, 1 = negative, 2 = neutral
     } = await request.json();
 
-    if (!agentId || !validatorSCA || !validatorWalletId || score === undefined || !tag) {
+    if (!agentId || !validatorSCA || score === undefined || !tag) {
       return NextResponse.json(
         {
           success: false,
-          error: 'agentId, validatorSCA, validatorWalletId, score and tag are required.',
+          error: 'agentId, validatorSCA, score and tag are required.',
         },
         { status: 400 }
       );
@@ -101,6 +155,50 @@ async function reputationHandler(request: NextRequest) {
         { success: false, error: 'You do not control the wallet named in validatorSCA.' },
         { status: 403 }
       );
+    }
+
+    // ── Authoritative validator wallet binding ──────────────────────────
+    // Never trust a client-supplied walletId as the signing identity.
+    // Resolve the walletId that AUTHORITATIVELY belongs to validatorSCA
+    // via DB/env, and if the client supplied one, require an exact match.
+    const authoritativeWalletId = await resolveAuthoritativeValidatorWalletId(validatorSCA);
+    if (!authoritativeWalletId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Validator wallet not resolvable for validatorSCA — no Circle wallet found for that address. Use a wallet managed by this platform (merchant, agent, or consumer) or configure the platform validator env.',
+        },
+        { status: 400 }
+      );
+    }
+    if (clientValidatorWalletId && String(clientValidatorWalletId) !== String(authoritativeWalletId)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'validatorWalletId does not match the authoritative wallet for validatorSCA.',
+        },
+        { status: 400 }
+      );
+    }
+    // Optional on-chain binding check: the Circle wallet's on-chain address
+    // must equal validatorSCA (defence-in-depth against stale DB rows).
+    // Best-effort: if Circle lookup fails, fall through — DB binding already enforced.
+    try {
+      const circleClientForCheck = getCircleClient();
+      const w = await circleClientForCheck.getWallet({ id: authoritativeWalletId });
+      const onChainAddress = (w as any)?.data?.wallet?.address as string | undefined;
+      if (onChainAddress && onChainAddress.toLowerCase() !== validatorSCA.toLowerCase()) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Validator wallet binding mismatch — Circle wallet address does not equal validatorSCA.',
+          },
+          { status: 400 }
+        );
+      }
+    } catch {
+      // Circle lookup flake is not a user error — proceed with DB binding
     }
 
     const circleClient = getCircleClient();
@@ -152,7 +250,7 @@ async function reputationHandler(request: NextRequest) {
   }
 }
 
-export const POST = withApiKey(reputationHandler);
+export const POST = withApiKeyOrAnySession(reputationHandler as any);
 
 // ─── GET /api/agent/reputation?agentId=xxx ────────────────────────────────────
 // Returns reputation events for an agent from Postgres job history
@@ -216,4 +314,4 @@ async function getReputationHandler(request: Request) {
   }
 }
 
-export const GET = withApiKey(getReputationHandler);
+export const GET = withApiKeyOrAnySession(getReputationHandler as any);
