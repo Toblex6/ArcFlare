@@ -46,17 +46,38 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   const actor = await verifyCallerControlsAddress(req, job.providerSCA);
   if (!actor) return NextResponse.json({ error: "You do not control this job's provider wallet." }, { status: 403 });
 
-  // Resolve provider agent to get authoritative wallet and policy
+  // ── Resolve the provider's authoritative Circle wallet ───────────────────────
+  // Two legitimate provider identities:
+  //   - AgentRegistry agent   → provider acceptance policy applies.
+  //   - Telegram human worker → ConsumerAccount (own Circle wallet, no
+  //     AgentRegistry row). Identity + wallet ownership + job acceptance
+  //     apply; agent-specific policy does not.
+  // The wallet id always comes from the DB, never from the request body.
   const providerAgent = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: job.providerSCA, mode: "insensitive" } } });
-  if (!providerAgent) return NextResponse.json({ error: "provider agent not found" }, { status: 404 });
-  if (!providerAgent.circleWalletId) return NextResponse.json({ error: "provider has no Circle wallet to sign setBudget" }, { status: 400 });
+  let isHumanProvider = false;
+  let providerWalletId: string | null = null;
+  if (providerAgent) {
+    if (!providerAgent.circleWalletId) return NextResponse.json({ error: "provider has no Circle wallet to sign setBudget" }, { status: 400 });
+    providerWalletId = providerAgent.circleWalletId;
+  } else {
+    // The caller has already proven control of job.providerSCA (consumer
+    // session wallet == job.providerSCA). Confirm the account is a real,
+    // wallet-owning ConsumerAccount — never treat an arbitrary address as a
+    // human provider.
+    const human = await (prisma as any).consumerAccount.findFirst({
+      where: { walletAddress: { equals: job.providerSCA, mode: "insensitive" } },
+    });
+    if (!human?.circleWalletId) return NextResponse.json({ error: "provider has no Circle wallet to sign setBudget" }, { status: 404 });
+    isHumanProvider = true;
+    providerWalletId = human.circleWalletId;
+  }
 
   // Fail closed on wallet/SCA mismatch: only the provider's authoritative
   // Circle wallet may sign setBudget.
   const circleClient = getCircleClient();
   let providerWalletAddress: string;
   try {
-    const w = await circleClient.getWallet({ id: providerAgent.circleWalletId });
+    const w = await circleClient.getWallet({ id: providerWalletId! });
     providerWalletAddress = w.data?.wallet?.address as string;
     if (!providerWalletAddress) throw new Error("no address");
   } catch {
@@ -115,35 +136,41 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
     return NextResponse.json({ error: "no budget to set — job has no intended budget and none was provided" }, { status: 400 });
   }
 
-  // ── Provider policy evaluation (D3: real skill/category from procurement) ────
-  // The procurement posting that produced this job carries the posting's
-  // skill/category — flow them into the provider policy evaluation instead of
-  // hardcoding null.
-  let skill: string | null = null;
-  let category: string | null = null;
-  try {
-    const posting = await (prisma as any).procurementPosting.findFirst({
-      where: { resultingJobId: jobIdBig },
-      select: { skill: true, category: true },
-    });
-    if (posting) {
-      skill = posting.skill ?? null;
-      category = posting.category ?? null;
-    }
-  } catch {}
+  // ── Provider policy evaluation — AGENT providers only ─────────────────────────
+  // Agent providers are governed by their acceptance policy (minBudget,
+  // maxConcurrent, minClientTrust, skills). Telegram human providers get no
+  // agent-specific policy — identity + wallet ownership + job acceptance
+  // (verified above) are their checks. Deliberately explicit, not "no checks".
+  if (!isHumanProvider) {
+    // D3: the procurement posting that produced this job carries the posting's
+    // skill/category — flow them into the provider policy evaluation instead of
+    // hardcoding null.
+    let skill: string | null = null;
+    let category: string | null = null;
+    try {
+      const posting = await (prisma as any).procurementPosting.findFirst({
+        where: { resultingJobId: jobIdBig },
+        select: { skill: true, category: true },
+      });
+      if (posting) {
+        skill = posting.skill ?? null;
+        category = posting.category ?? null;
+      }
+    } catch {}
 
-  const policyCheck = await evaluateProviderAcceptance({
-    providerAgentId: providerAgent.id,
-    jobBudget: budgetToSet,
-    clientSCA: job.clientSCA,
-    skill,
-    category,
-    // The job being accepted is itself OPEN; don't let it count against the
-    // provider's own maxConcurrentJobs.
-    excludeJobId: jobIdBig,
-  });
-  if (!policyCheck.allowed) {
-    return NextResponse.json({ error: `Provider policy rejected: ${policyCheck.reason}`, code: "PROVIDER_POLICY_REJECTED" }, { status: 403 });
+    const policyCheck = await evaluateProviderAcceptance({
+      providerAgentId: providerAgent.id,
+      jobBudget: budgetToSet,
+      clientSCA: job.clientSCA,
+      skill,
+      category,
+      // The job being accepted is itself OPEN; don't let it count against the
+      // provider's own maxConcurrentJobs.
+      excludeJobId: jobIdBig,
+    });
+    if (!policyCheck.allowed) {
+      return NextResponse.json({ error: `Provider policy rejected: ${policyCheck.reason}`, code: "PROVIDER_POLICY_REJECTED" }, { status: 403 });
+    }
   }
 
   // Provider signs setBudget (idempotent on-chain? setBudget can only be called
@@ -167,7 +194,13 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
         return NextResponse.json({ success: true, replayed: true, jobId, budget: after.budget.toString(), message: "Budget already set on-chain — replay" });
       }
     } catch {}
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    const circleMessage =
+      e?.response?.data?.message ??
+      e?.response?.data?.errors?.[0]?.message ??
+      e?.data?.message ??
+      e?.message ??
+      String(e);
+    return NextResponse.json({ error: String(circleMessage) }, { status: 500 });
   }
 
   await prisma.erc8183Job.update({
@@ -175,7 +208,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
     data: { budget: budgetToSet, txHashes: { push: txHash } },
   });
 
-  return NextResponse.json({ success: true, jobId, budget: budgetToSet.toString(), txHash, provider: { id: providerAgent.id, scaAddress: providerWalletAddress } });
+  return NextResponse.json({ success: true, jobId, budget: budgetToSet.toString(), txHash, provider: { id: providerAgent?.id ?? null, scaAddress: providerWalletAddress, human: isHumanProvider } });
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {

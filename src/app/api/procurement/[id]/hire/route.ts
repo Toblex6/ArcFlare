@@ -114,9 +114,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const clientAgent = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: posting.clientSCA, mode: "insensitive" } } });
   if (!clientAgent) return await fail("client agent not found", 404);
   const providerAddress = posting.selectedProviderSCA;
+
+  // ── Provider resolution (never trusts a caller-supplied wallet/address) ─────
+  // The provider is whatever address the posting's SELECTED application
+  // recorded (select only accepts rows from this posting's applicant set).
+  // Two legitimate identities:
+  //   - AgentRegistry agent   → agent acceptance/trust policy applies.
+  //   - Telegram human worker → ConsumerAccount (own Circle wallet, no
+  //     AgentRegistry row). Identity + wallet ownership + job acceptance
+  //     apply; agent-specific policy does not. Neutral trust baseline 50.
   const providerAgent = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: providerAddress, mode: "insensitive" } } });
-  if (!providerAgent) return await fail("provider agent not found", 404);
-  if (providerAgent.status !== "ACTIVE_AGENT_PROVISIONED") return await fail("provider not available");
+  let humanProvider: any = null;
+  if (providerAgent) {
+    if (providerAgent.status !== "ACTIVE_AGENT_PROVISIONED") return await fail("provider not available");
+  } else {
+    humanProvider = await (prisma as any).consumerAccount.findFirst({
+      where: { walletAddress: { equals: providerAddress, mode: "insensitive" } },
+    });
+    // An arbitrary address that merely exists in ConsumerAccount is NOT
+    // sufficient — the worker must have a usable Circle wallet to be paid.
+    if (!humanProvider || !humanProvider.circleWalletId || !humanProvider.walletAddress) {
+      return await fail("selected provider has no usable wallet to be paid", 400);
+    }
+  }
 
   // Resolve hiring wallet FIRST — it is the payer identity that authorizes the
   // on-chain createJob (and later the fund), so all policy checks bind to it.
@@ -153,13 +173,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return await fail("evaluator must be distinct from the provider");
   }
 
-  // Trust check (treasury policy minTrustScore)
+  // Trust check (treasury policy minTrustScore) — AGENT providers only.
+  // Agent providers: derived trust score (validated evidence-aware). Telegram
+  // human providers: neutral baseline 50 (no agent history) — same rule the
+  // select route applies; a policy demanding more than neutral rejects.
   const hirerPolicy: any = await (prisma as any).agentTreasuryPolicy.findUnique({ where: { agentRegistryId: clientAgent.id } }).catch(() => null);
   if (hirerPolicy?.minTrustScore !== null && hirerPolicy?.minTrustScore !== undefined) {
-    const { computeTrustScore } = await import("@/lib/trust/trustScore");
-    const providerTrust = await computeTrustScore(providerAgent.id);
-    if (providerTrust.score < Number(hirerPolicy.minTrustScore)) {
-      return await fail(`Trust requirement not met: provider trust ${providerTrust.score} < required ${hirerPolicy.minTrustScore}`, 403, { code: "TRUST_REQUIREMENT_NOT_MET", providerTrust, required: hirerPolicy.minTrustScore });
+    const required = Number(hirerPolicy.minTrustScore);
+    let providerTrustScore = required; // humans default to neutral 50
+    if (providerAgent) {
+      const { computeTrustScore } = await import("@/lib/trust/trustScore");
+      const providerTrust = await computeTrustScore(providerAgent.id);
+      providerTrustScore = providerTrust.score;
+    } else if (50 < required) {
+      return await fail(`Trust requirement not met: provider has no trust history (neutral 50) < required ${required}`, 403, { code: "TRUST_REQUIREMENT_NOT_MET", required });
+    }
+    if (providerTrustScore < required) {
+      return await fail(`Trust requirement not met: provider trust ${providerTrustScore} < required ${required}`, 403, { code: "TRUST_REQUIREMENT_NOT_MET", required });
     }
   }
 
@@ -279,6 +309,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  // ── Notify the hired worker on Telegram (best-effort — never fails hire) ────
+  // Human workers get the actionable nudge at the moment it matters: the
+  // on-chain job exists, and the next step is THEIR signature (budget accept).
+  try {
+    const hired = humanProvider
+      ? humanProvider
+      : await (prisma as any).consumerAccount.findFirst({ where: { walletAddress: { equals: providerAddress, mode: "insensitive" } } });
+    const workerTelegramId = hired?.telegramUserId ?? null;
+    if (workerTelegramId) {
+      const { sendTelegramMessage } = await import("@/lib/telegram/sendTelegramMessage");
+      const { formatUnits } = await import("viem");
+      const title = (posting.title || description).slice(0, 80);
+      const budgetStr = (() => { try { return formatUnits(budgetBigInt, 6); } catch { return "?"; } })();
+      await sendTelegramMessage(
+        String(workerTelegramId),
+        `✅ You've been hired for "${title}" — job #${jobId!.toString()} (${budgetStr} USDC).\nSend /accept ${jobId!.toString()} to set your budget and unlock funding.`
+      );
+    }
+  } catch (e: any) {
+    console.error("[hire] worker telegram notification failed:", e?.message ?? e);
+  }
+
   return NextResponse.json({
     success: true,
     jobId: jobId!.toString(),
@@ -286,7 +338,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     txHash,
     postingId: id,
     client: { id: clientAgent.id, scaAddress: clientWalletAddress },
-    provider: { id: providerAgent.id, scaAddress: providerAddress },
+    provider: { id: providerAgent?.id ?? null, scaAddress: providerAddress, human: !!humanProvider },
     budget: budgetBigInt.toString(),
     nextSteps: { accept: { endpoint: `/api/jobs/${jobId!.toString()}/accept`, method: "POST" }, fund: { endpoint: `/api/jobs/${jobId!.toString()}/fund`, body: {} } },
   });

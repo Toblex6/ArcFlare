@@ -61,11 +61,13 @@ export default function JobsPage() {
       .then((data) => {
         const addr = data?.merchant?.walletAddress;
         if (addr) setClientSCA(addr);
+        const mId = data?.merchant?.id;
+        if (mId) setMerchantId(mId);
       })
       .catch(() => _router.replace('/merchant/login'));
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'board' | 'create' | 'manage'>('board');
+  const [activeTab, setActiveTab] = useState<'board' | 'create' | 'post' | 'manage'>('board');
 
   // Create flow state
   const [step, setStep] = useState(1);
@@ -114,6 +116,24 @@ export default function JobsPage() {
   const [manageLoading, setManageLoading] = useState(false);
   const [manageResult, setManageResult] = useState<any>(null);
   const [manageError, setManageError] = useState<string | null>(null);
+
+  // Post-a-Job (open procurement) state
+  const [merchantId, setMerchantId] = useState<string | null>(null);
+  const [postAgents, setPostAgents] = useState<any[]>([]);
+  const [postAgentId, setPostAgentId] = useState('');
+  const [postTitle, setPostTitle] = useState('');
+  const [postDescription, setPostDescription] = useState('');
+  const [postBudgetMax, setPostBudgetMax] = useState('');
+  const [postSkill, setPostSkill] = useState('');
+  const [postLoading, setPostLoading] = useState(false);
+  const [postResult, setPostResult] = useState<any>(null);
+  const [postError, setPostError] = useState<string | null>(null);
+  const [myPostings, setMyPostings] = useState<any[]>([]);
+  const [postingsLoading, setPostingsLoading] = useState(false);
+  const [expandedPosting, setExpandedPosting] = useState<string | null>(null);
+  const [applicants, setApplicants] = useState<any[]>([]);
+  const [applicantsLoading, setApplicantsLoading] = useState(false);
+  const [selecting, setSelecting] = useState<string | null>(null); // postingId being selected/hired
 
   const callJobsAPI = async (body: any) => {
     const res = await fetch('/api/jobs', {
@@ -184,6 +204,137 @@ export default function JobsPage() {
       setManageLoading(false);
     }
   };
+
+  const loadMyAgents = async () => {
+    try {
+      const res = await fetch('/api/agents/discover?mine=1&status=ACTIVE_AGENT_PROVISIONED&limit=50');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'failed to load agents');
+      setPostAgents(data.agents || []);
+    } catch (e: any) {
+      setPostError(e.message);
+    }
+  };
+
+  const createPosting = async () => {
+    setPostLoading(true);
+    setPostError(null);
+    setPostResult(null);
+    try {
+      if (!postAgentId) throw new Error('Select a hiring agent (the payer/client for this job).');
+      if (!postDescription.trim()) throw new Error('Enter a job description.');
+      if (!postBudgetMax || Number(postBudgetMax) <= 0) throw new Error('Enter a max budget (USDC) greater than 0.');
+      const res = await fetch('/api/procurement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientAgentId: Number(postAgentId),
+          description: postDescription,
+          title: postTitle || undefined,
+          budgetMax: postBudgetMax,
+          skill: postSkill || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Post failed (${res.status})`);
+      setPostResult(data);
+      setPostTitle('');
+      setPostDescription('');
+      setPostBudgetMax('');
+      setPostSkill('');
+      await loadPostings();
+    } catch (e: any) {
+      setPostError(e.message);
+    } finally {
+      setPostLoading(false);
+    }
+  };
+
+  const loadPostings = async () => {
+    setPostingsLoading(true);
+    try {
+      const [open, sel, hired] = await Promise.all([
+        fetch('/api/procurement?status=OPEN'),
+        fetch('/api/procurement?status=SELECTED'),
+        fetch('/api/procurement?status=HIRED'),
+      ]);
+      const data = await Promise.all([open, sel, hired].map((r) => r.json()));
+      const all: any[] = data.flatMap((d) => (d.success ? d.postings || [] : []));
+      setMyPostings(
+        merchantId
+          ? all.filter((p) => String(p.merchantId) === String(merchantId))
+          : all
+      );
+    } catch (e: any) {
+      setPostError(e.message);
+    } finally {
+      setPostingsLoading(false);
+    }
+  };
+
+  const toggleApplicants = async (postingId: string) => {
+    if (expandedPosting === postingId) {
+      setExpandedPosting(null);
+      setApplicants([]);
+      return;
+    }
+    setExpandedPosting(postingId);
+    setApplicantsLoading(true);
+    try {
+      const res = await fetch(`/api/procurement/${postingId}/applicants`);
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'failed to load applicants');
+      setApplicants(data.ranked || []);
+    } catch (e: any) {
+      setPostError(e.message);
+      setApplicants([]);
+    } finally {
+      setApplicantsLoading(false);
+    }
+  };
+
+  const selectAndHire = async (postingId: string, providerAddress: string) => {
+    setSelecting(postingId);
+    setPostError(null);
+    try {
+      const selRes = await fetch(`/api/procurement/${postingId}/select`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerAddress }),
+      });
+      const selData = await selRes.json();
+      if (!selRes.ok) throw new Error(selData.error || `Select failed (${selRes.status})`);
+      const hireRes = await fetch(`/api/procurement/${postingId}/hire`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const hireData = await hireRes.json();
+      if (!hireRes.ok) throw new Error(hireData.error || `Hire failed (${hireRes.status})`);
+      setPostResult({
+        postingId,
+        jobId: hireData.jobId,
+        budget: hireData.budget,
+        message: `Hired! Job #${hireData.jobId} created on-chain. The worker now sends /accept ${hireData.jobId} on Telegram, then you fund and complete from the Manage tab.`,
+      });
+      setExpandedPosting(null);
+      setApplicants([]);
+      await loadPostings();
+    } catch (e: any) {
+      setPostError(e.message);
+    } finally {
+      setSelecting(null);
+    }
+  };
+
+  // Load the merchant's agents + postings when the Post-a-Job tab opens
+  React.useEffect(() => {
+    if (activeTab === 'post' && merchantId) {
+      loadMyAgents();
+      loadPostings();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, merchantId]);
 
   const S = {
     page: {
@@ -332,10 +483,17 @@ export default function JobsPage() {
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-          {(['board', 'create', 'manage'] as const).map((t) => (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' as const }}>
+          {(
+            [
+              ['board', '📋 Job Board'],
+              ['create', '🎯 Direct Hire'],
+              ['post', '📢 Post a Job'],
+              ['manage', '🔧 Manage'],
+            ] as const
+          ).map(([t, label]) => (
             <button key={t} style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>
-              {t === 'board' ? '📋 Job Board' : t === 'create' ? '⚡ Create Job' : '🔧 Manage Job'}
+              {label}
             </button>
           ))}
         </div>
@@ -399,6 +557,48 @@ export default function JobsPage() {
                 border: '1px solid var(--border)',
                 borderRadius: 14,
                 padding: 18,
+                marginTop: 14,
+              }}
+            >
+              <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 10px' }}>
+                Two ways to hire
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 14 }}>
+                  <p style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 12, margin: '0 0 6px' }}>
+                    🎯 Direct Hire
+                  </p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.5, margin: 0 }}>
+                    You already know exactly who does the work (usually one of your agents). You name
+                    their wallet, they sign their price and deliverable. Best for agents — paste their{' '}
+                    <code>scaAddress</code> from the Marketplace card.
+                  </p>
+                  <button style={{ ...S.btnSm(false), marginTop: 10 }} onClick={() => setActiveTab('create')}>
+                    Open Direct Hire →
+                  </button>
+                </div>
+                <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 14 }}>
+                  <p style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 12, margin: '0 0 6px' }}>
+                    📢 Post a Job (workers apply on Telegram)
+                  </p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.5, margin: 0 }}>
+                    You don't know the worker yet. Post an open job, workers discover it via Telegram{' '}
+                    <code>/jobs</code> and apply with <code>/apply</code> — no wallet address needed up
+                    front. You review ranked applicants, select, and hire; the worker then accepts and
+                    sets the budget from Telegram.
+                  </p>
+                  <button style={{ ...S.btnSm(false), marginTop: 10 }} onClick={() => setActiveTab('post')}>
+                    Open Post a Job →
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                background: 'var(--surface-secondary)',
+                border: '1px solid var(--border)',
+                borderRadius: 14,
+                padding: 18,
               }}
             >
               <p
@@ -437,7 +637,13 @@ export default function JobsPage() {
                 style={{ ...S.btn(), marginRight: 12 }}
                 onClick={() => setActiveTab('create')}
               >
-                ⚡ Create Your First Job
+                🎯 Direct Hire
+              </button>
+              <button
+                style={{ ...S.btn(), marginRight: 12, background: '#06b6d4' }}
+                onClick={() => setActiveTab('post')}
+              >
+                📢 Post a Job
               </button>
               <button
                 style={{
@@ -452,7 +658,7 @@ export default function JobsPage() {
                 }}
                 onClick={() => setActiveTab('manage')}
               >
-                🔧 Manage Existing Job
+                🔧 Manage Job
               </button>
             </div>
           </div>
@@ -461,6 +667,26 @@ export default function JobsPage() {
         {/* ── CREATE TAB — step wizard ── */}
         {activeTab === 'create' && (
           <div>
+            <div
+              style={{
+                background: 'rgba(200,151,90,0.08)',
+                border: '1px solid rgba(200,151,90,0.25)',
+                borderRadius: 12,
+                padding: '12px 16px',
+                marginBottom: 16,
+              }}
+            >
+              <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
+                🎯 Direct Hire — you name the provider up front
+              </p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                The provider's wallet is fixed on-chain when the job is created and must sign the
+                budget and deliverable steps. Self-testing? Make the provider one of{' '}
+                <strong>your own agents</strong> (their <code>scaAddress</code> from the Marketplace
+                card) so this wizard can run end-to-end from this browser. To hire a worker you don't
+                know yet, use <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' }} onClick={() => setActiveTab('post')}>Post a Job</button> instead.
+              </p>
+            </div>
             {/* Progress */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 24 }}>
               {STEPS.slice(0, 6).map((s) => (
@@ -567,7 +793,12 @@ export default function JobsPage() {
                               placeholder="0xProviderAddress"
                             />
                             <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginTop: 2 }}>
-                              Who you're giving this job to — the wallet address that receives the escrowed USDC when you accept the work. For agents, copy the <code>scaAddress</code> from the agent's card in the Marketplace; for human workers, ask them for their wallet address (shown by <code>/balance</code> on Telegram).
+                              Who you're giving this job to — the wallet that receives the escrowed
+                              USDC and signs the budget/deliverable steps. For agents, copy the{' '}
+                              <code>scaAddress</code> from the agent's card in the Marketplace. This
+                              address is fixed on-chain at creation and can't be changed later. Human
+                              workers aren't hired this way — use <strong>Post a Job</strong> instead
+                              (they apply via Telegram and no address is needed up front).
                             </span>
                           </div>
                           <div>
@@ -606,6 +837,13 @@ export default function JobsPage() {
                           <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
                             Job ID: <strong style={{ color: 'var(--primary)' }}>#{jobId}</strong> —
                             Provider sets the price.
+                          </p>
+                          <p style={{ color: '#f59e0b', fontSize: 11, margin: '0 0 10px' }}>
+                            ⚠️ This step is <strong>signed by the provider's wallet</strong> — the
+                            worker named in step 1. It must be run from a session that controls that
+                            wallet (for self-tests: your own agent's <code>scaAddress</code>). If you
+                            get "You do not control the providerSCA wallet", the logged-in merchant
+                            session doesn't own the address in this field.
                           </p>
                           <div>
                             <span style={S.label}>Provider SCA</span>
@@ -787,6 +1025,255 @@ export default function JobsPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── POST A JOB TAB — open procurement ── */}
+        {activeTab === 'post' && (
+          <div>
+            <div style={S.card}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 8px' }}>
+                📢 Post a Job for Workers
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, margin: '0 0 16px' }}>
+                Workers discover and apply through Telegram (<code>/jobs</code>,{' '}
+                <code>/apply &lt;jobId&gt; &quot;&lt;your pitch&gt;&quot;</code> — e.g.{' '}
+                <code>/apply job112 &quot;I can build this in 2 days&quot;</code>). You review ranked
+                applicants, select the best, then hire — no wallet address is needed up front. After
+                hiring, the worker sets their budget from Telegram (<code>/accept</code>), then you
+                fund and complete from the Manage tab.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <span style={S.label}>Hiring Agent (client)</span>
+                  <select
+                    style={{ ...S.input, marginBottom: 0, fontFamily: 'monospace' }}
+                    value={postAgentId}
+                    onChange={(e) => setPostAgentId(e.target.value)}
+                  >
+                    <option value="">Select your agent...</option>
+                    {postAgents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name || `Agent #${a.id}`} ({a.scaAddress?.slice(0, 10)}…)
+                      </option>
+                    ))}
+                  </select>
+                  {postAgents.length === 0 && (
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginTop: 4 }}>
+                      No active agents found. Deploy an agent first (Agents / Marketplace).
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <span style={S.label}>Max Budget (USDC)</span>
+                  <input
+                    style={S.input}
+                    type="number"
+                    value={postBudgetMax}
+                    onChange={(e) => setPostBudgetMax(e.target.value)}
+                    placeholder="5.00"
+                  />
+                </div>
+                <div>
+                  <span style={S.label}>Title (optional)</span>
+                  <input
+                    style={S.input}
+                    value={postTitle}
+                    onChange={(e) => setPostTitle(e.target.value)}
+                    placeholder="Security review of swap pool"
+                  />
+                </div>
+                <div>
+                  <span style={S.label}>Skill (optional)</span>
+                  <input
+                    style={S.input}
+                    value={postSkill}
+                    onChange={(e) => setPostSkill(e.target.value)}
+                    placeholder="security-review"
+                  />
+                </div>
+                <div style={{ gridColumn: '1/-1' }}>
+                  <span style={S.label}>Description</span>
+                  <input
+                    style={S.input}
+                    value={postDescription}
+                    onChange={(e) => setPostDescription(e.target.value)}
+                    placeholder="Describe the work workers will bid on"
+                  />
+                </div>
+              </div>
+              {postError && (
+                <p style={{ color: 'var(--danger)', fontSize: 12, margin: '8px 0' }}>❌ {postError}</p>
+              )}
+              {postResult && (
+                <div
+                  style={{
+                    background: 'rgba(16,185,129,0.06)',
+                    border: '1px solid rgba(16,185,129,0.2)',
+                    borderRadius: 10,
+                    padding: 12,
+                    marginTop: 8,
+                  }}
+                >
+                  <p style={{ color: 'var(--success)', fontWeight: 700, fontSize: 12, margin: '0 0 4px' }}>
+                    {postResult.jobId ? `✅ ${postResult.message}` : '✅ Job posted!'}
+                  </p>
+                  {!postResult.jobId && postResult.posting?.id && (
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                      Sharing id: <code>job{postResult.posting.seq}</code> — workers apply with{' '}
+                      <code>/apply job{postResult.posting.seq} &quot;your pitch in quotes&quot;</code> on Telegram.
+                    </p>
+                  )}
+                </div>
+              )}
+              <button
+                style={{ ...S.btn(postLoading), marginTop: 8, marginRight: 8 }}
+                disabled={postLoading}
+                onClick={() => {
+                  if (postAgents.length === 0) loadMyAgents();
+                  createPosting();
+                }}
+              >
+                {postLoading ? 'Posting...' : 'Post Job'}
+              </button>
+              <button style={S.btnSm(false)} onClick={() => { loadMyAgents(); loadPostings(); }}>
+                Load Agents & Refresh
+              </button>
+            </div>
+
+            <div style={S.card}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 16,
+                }}
+              >
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
+                  My Postings
+                </h3>
+                <button style={S.btnSm(false)} onClick={loadPostings}>
+                  {postingsLoading ? 'Loading...' : 'Refresh'}
+                </button>
+              </div>
+              {!postingsLoading && myPostings.length === 0 && (
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                  No postings yet. Post one above.
+                </p>
+              )}
+              {myPostings.map((p) => (
+                <div
+                  key={p.id}
+                  style={{
+                    background: 'var(--surface-secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 12,
+                    padding: 16,
+                    marginBottom: 12,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
+                        {p.title || p.description?.slice(0, 60) || 'Untitled'}
+                        <span style={{ fontFamily: 'monospace', color: 'var(--text-secondary)', fontWeight: 400, fontSize: 11 }}>
+                          {' '}(job{p.seq})
+                        </span>
+                      </p>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: 0 }}>
+                        Budget up to {(() => { try { return (Number(p.budgetMax) / 1e6).toFixed(2); } catch { return '?'; } })()} USDC
+                        {p.skill ? ` · skill: ${p.skill}` : ''}
+                      </p>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: '3px 10px',
+                        borderRadius: 20,
+                        fontWeight: 700,
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        color: 'var(--text-secondary)',
+                        whiteSpace: 'nowrap' as const,
+                      }}
+                    >
+                      {p.status}
+                    </span>
+                  </div>
+                  {p.status === 'OPEN' && (
+                    <button
+                      style={{ ...S.btnSm(expandedPosting === p.id), marginTop: 12 }}
+                      onClick={() => toggleApplicants(p.id)}
+                    >
+                      {expandedPosting === p.id ? 'Hide Applicants' : 'View Applicants'}
+                    </button>
+                  )}
+                  {p.status === 'SELECTED' && (
+                    <button
+                      style={{ ...S.btnSm(false), marginTop: 12, color: 'var(--primary)', fontWeight: 700 }}
+                      disabled={selecting === p.id}
+                      onClick={() => selectAndHire(p.id, p.selectedProviderSCA)}
+                    >
+                      {selecting === p.id ? 'Hiring...' : 'Hire Selected Worker'}
+                    </button>
+                  )}
+                  {p.status === 'HIRED' && p.resultingJobId && (
+                    <p style={{ color: '#06b6d4', fontSize: 12, margin: '12px 0 0' }}>
+                      Hired → job #{p.resultingJobId}. Worker sends{' '}
+                      <code>/accept {p.resultingJobId}</code> on Telegram, then fund & complete from
+                      the Manage tab.
+                    </p>
+                  )}
+                  {expandedPosting === p.id && (
+                    <div style={{ marginTop: 12 }}>
+                      {applicantsLoading ? (
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 11 }}>Loading applicants...</p>
+                      ) : applicants.length === 0 ? (
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 11 }}>No applicants yet.</p>
+                      ) : (
+                        applicants.map((a, i) => (
+                          <div
+                            key={a.applicantAddress}
+                            style={{
+                              background: 'var(--surface)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 10,
+                              padding: 12,
+                              marginBottom: 8,
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: 12,
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <p style={{ color: 'var(--text)', fontSize: 12, margin: '0 0 4px', fontWeight: 700 }}>
+                                #{i + 1} · score {a.score}
+                                <span style={{ fontFamily: 'monospace', color: 'var(--text-secondary)', fontWeight: 400 }}>
+                                  {' '}{a.applicantAddress?.slice(0, 14)}…
+                                </span>
+                              </p>
+                              <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: 0 }}>
+                                {a.pitch?.slice(0, 120)}
+                                {a.proposedAmount ? ` · bid ${(Number(a.proposedAmount) / 1e6).toFixed(4)} USDC` : ''}
+                              </p>
+                            </div>
+                            <button
+                              style={{ ...S.btnSm(false), whiteSpace: 'nowrap' as const, color: 'var(--primary)', fontWeight: 700 }}
+                              disabled={selecting === p.id}
+                              onClick={() => selectAndHire(p.id, a.applicantAddress)}
+                            >
+                              {selecting === p.id ? 'Working...' : 'Select & Hire'}
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

@@ -12,7 +12,9 @@
  * bot connection.
  *
  * Wiring notes (what each handler actually calls):
- *  - /apply  → submitApplication() from src/lib/jobs/applicantScoring.ts
+ *  - /apply  → procurement applications (ProcurementPosting) only; legacy
+ *    direct-hire Erc8183Jobs are BLOCKED (provider fixed at createJob time,
+ *    no reassignment) and the worker is steered to procurement postings.
  *  - /deliver → the same flow as src/app/api/jobs/submit/route.ts:
  *    job lookup, Circle getWallet → providerSCA match, then
  *    verifyCallerControlsAddress() + createContractTransaction() from
@@ -79,6 +81,33 @@ export async function handleStart(telegramUserId: string, displayName: string): 
  * created. If a Telegram worker lacks AgentRegistry identity, the apply
  * still succeeds as a procurement applicant with address-only identity.
  */
+// Human-facing posting id: `job<N>` (semantic, shown in /jobs). Resolves to
+// the posting by its autoincrement `seq`; the raw cuid id is also accepted
+// for backward compatibility.
+async function resolvePostingId(jobId: string): Promise<string | null> {
+  const seqMatch = /^job(\d+)$/i.exec(jobId.trim());
+  if (seqMatch) {
+    const p = await (prisma as any).procurementPosting.findUnique({ where: { seq: Number(seqMatch[1]) } });
+    return p?.id ?? null;
+  }
+  const p = await (prisma as any).procurementPosting.findUnique({ where: { id: jobId } });
+  return p?.id ?? null;
+}
+
+// Strips one layer of matching surrounding quotes from a Telegram pitch, so
+// `/apply job112 "I can build this"` stores the pitch without the quotes.
+function stripQuotes(text: string): string {
+  const t = text.trim();
+  if (t.length >= 2) {
+    const first = t[0];
+    const last = t[t.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return t.slice(1, -1).trim();
+    }
+  }
+  return t;
+}
+
 export async function handleApply(
   telegramUserId: string,
   jobId: string,
@@ -88,104 +117,167 @@ export async function handleApply(
   if (!session) {
     return { text: `You need to /start first before applying to jobs.` };
   }
-  if (!pitchText || !pitchText.trim()) {
-    return { text: `Please provide a pitch after the job id, e.g. /apply ${jobId} I can deliver in 2 days.` };
+  const cleanedPitch = stripQuotes(pitchText || "");
+  if (!cleanedPitch) {
+    return { text: `Please provide a pitch after the job id, e.g. /apply ${jobId} "I can deliver in 2 days" — put your pitch in quotes.` };
   }
   const applicantAddress = session.walletAddress;
 
   // 1) Procurement path — reuse Build 5 primitives directly (no new model)
-  // ProcurementPosting.id is a cuid (non-numeric), Erc8183Job.jobId is numeric bigint string
+  // ProcurementPosting.id is a cuid (non-numeric) and `job<N>` is its
+  // human-facing alias; Erc8183Job.jobId is numeric bigint string.
   try {
-    const procurement = await (prisma as any).procurementPosting.findUnique({ where: { id: jobId } });
-    if (procurement) {
-      if (procurement.status !== "OPEN") {
-        return { text: `That posting is ${procurement.status}, not open for applications.` };
-      }
-      // Derive applicantAgentId if wallet maps to an AgentRegistry (optional, not required)
-      let applicantAgentId: number | null = null;
-      try {
-        const ag = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: applicantAddress, mode: "insensitive" } }, select: { id: true } });
-        if (ag) applicantAgentId = ag.id;
-      } catch {}
-      try {
-        await (prisma as any).procurementApplication.create({
-          data: {
-            procurementId: jobId,
-            applicantAgentId,
-            applicantAddress: applicantAddress.toLowerCase(),
-            pitch: String(pitchText),
-            proposedAmount: null,
-            portfolioLinks: [],
-          },
-        });
-        return { text: `Application submitted for procurement ${jobId}. You'll be notified if you're selected.` };
-      } catch (e: any) {
-        if (e?.code === "P2002" || String(e.message).includes("already applied") || String(e.message).includes("Unique constraint")) {
-          return { text: `You've already applied to this job.` };
+    const procurementId = await resolvePostingId(jobId);
+    if (procurementId) {
+      const procurement = await (prisma as any).procurementPosting.findUnique({ where: { id: procurementId } });
+      if (procurement) {
+        if (procurement.status !== "OPEN") {
+          return { text: `That posting is ${procurement.status}, not open for applications.` };
         }
-        return { text: `Couldn't submit your application: ${e.message}` };
+        // Derive applicantAgentId if wallet maps to an AgentRegistry (optional, not required)
+        let applicantAgentId: number | null = null;
+        try {
+          const ag = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: applicantAddress, mode: "insensitive" } }, select: { id: true } });
+          if (ag) applicantAgentId = ag.id;
+        } catch {}
+        try {
+          await (prisma as any).procurementApplication.create({
+            data: {
+              procurementId,
+              applicantAgentId,
+              applicantAddress: applicantAddress.toLowerCase(),
+              pitch: String(cleanedPitch),
+              proposedAmount: null,
+              portfolioLinks: [],
+            },
+          });
+          return { text: `Application submitted for procurement ${procurementId}. You'll be notified if you're selected.` };
+        } catch (e: any) {
+          if (e?.code === "P2002" || String(e.message).includes("already applied") || String(e.message).includes("Unique constraint")) {
+            return { text: `You've already applied to this job.` };
+          }
+          return { text: `Couldn't submit your application: ${e.message}` };
+        }
       }
     }
   } catch {}
 
-  // 2) Legacy path — Erc8183Job + JobApplication (kept for existing jobs that still use it)
-  // Only if targetId is a numeric jobId
-  const { submitApplication } = await import('@/lib/jobs/applicantScoring');
-  try {
-    await submitApplication({
-      jobId,
-      applicantAddress,
-      pitch: pitchText,
-    });
-    return { text: `Application submitted for job ${jobId}. You'll be notified if you're selected.` };
-  } catch (err) {
-    const message = (err as Error).message;
-    if (message.includes('already applied')) {
-      return { text: `You've already applied to this job.` };
+  // 2) Legacy direct-hire Erc8183Job — BLOCKED, not silently stored.
+  // The provider was fixed on-chain at createJob time and the ERC-8183
+  // contract has no provider reassignment, so an application here could
+  // never be acted on. Steer workers to procurement postings instead.
+  if (/^\d+$/.test(jobId)) {
+    const legacy = await prisma.erc8183Job.findUnique({ where: { jobId: BigInt(jobId) } }).catch(() => null);
+    if (legacy) {
+      return {
+        text:
+          `Job #${jobId} is a direct-hire job — its provider was assigned when it was created, so it can't be applied for.\n` +
+          `Watch /jobs for open procurement postings (marked "procurement") and apply to those.`,
+      };
     }
-    if (message.includes('not found')) {
-      return { text: `Job or posting ${jobId} not found. Use /jobs to see open work.` };
-    }
-    return { text: `Couldn't submit your application: ${message}` };
   }
+  return { text: `Job or posting ${jobId} not found. Use /jobs to see open work.` };
 }
 
 /**
- * /jobs — lists open procurement postings (primary) plus legacy OPEN
- * Erc8183Jobs for backwards compatibility. Explicitly labels each line.
+ * /jobs — lists open procurement postings (the only jobs that accept
+ * applications). Legacy direct-hire Erc8183Jobs are intentionally NOT listed:
+ * their provider was fixed at createJob time, so applying is impossible —
+ * listing them would invite dead-end /apply calls.
  */
 export async function handleListJobs(): Promise<BotReply> {
-  // Primary: procurement postings (Build 5) — these are the jobs that
-  // actually support assignment/selection.
   const postings = await (prisma as any).procurementPosting.findMany({
     where: { status: 'OPEN' },
     take: 10,
     orderBy: { createdAt: 'desc' },
   });
 
-  if (postings.length > 0) {
-    const lines = postings.map((p: any) => {
-      const budget = (() => { try { return formatUnits(BigInt(p.budgetMax), 6); } catch { return "?"; } })();
-      const title = p.title || p.description?.slice(0, 50) || "Untitled";
-      return `• *${title}* — ${budget} USDC (procurement)\n  /apply ${p.id} <your pitch>`;
-    });
-    // Also show legacy count hint if any
-    return { text: `Open procurement postings:\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
-  }
-
-  // Fallback: legacy Erc8183Job OPEN jobs (old system) — kept for jobs that still use it
-  const jobs = await prisma.erc8183Job.findMany({
-    where: { status: 'OPEN' },
-    take: 10,
-    orderBy: { createdAt: 'desc' },
-  });
-
-  if (jobs.length === 0) {
+  if (postings.length === 0) {
     return { text: `No open jobs right now. Check back soon.` };
   }
 
-  const lines = jobs.map((j) => `• *${j.description}* — ${formatUnits(j.budget, 6)} USDC\n  /apply ${j.jobId.toString()} <your pitch>`);
-  return { text: `Open jobs (legacy):\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
+  const lines = postings.map((p: any) => {
+    const budget = (() => { try { return formatUnits(BigInt(p.budgetMax), 6); } catch { return "?"; } })();
+    const title = p.title || p.description?.slice(0, 50) || "Untitled";
+    const humanId = `job${p.seq}`;
+    return `• *${title}* — ${budget} USDC (procurement)\n  /apply ${humanId} "<your pitch>"`;
+  });
+  return { text: `Open procurement postings:\n\n${lines.join('\n\n')}`, parseMode: 'Markdown' };
+}
+
+/**
+ * /accept <jobId> [amount] — provider-side budget authorization.
+ * Calls the REAL /api/jobs/[jobId]/accept route (src/app/api/jobs/[jobId]/accept/
+ * route.ts) through its auth wrapper (withApiKeyOrAnySession, which admits
+ * consumer_token sessions) with a consumer_token cookie. No bypass: job lookup,
+ * providerSCA match, verifyCallerControlsAddress, provider policy and the Circle
+ * setBudget tx all happen inside the route. The wallet id is resolved from the
+ * DB (ConsumerAccount/AgentRegistry) by the route — never from this command.
+ *
+ * Amount is optional: the route prefers the job's intended budget (persisted at
+ * hire time); a supplied amount is used only when the job has none.
+ */
+export async function handleAccept(
+  telegramUserId: string,
+  jobId: string,
+  amount?: string
+): Promise<BotReply> {
+  const session = await getTelegramConsumerSession(telegramUserId);
+  if (!session) {
+    return { text: `You need to /start first.` };
+  }
+
+  if (!/^\d+$/.test(jobId)) {
+    return { text: `Invalid job id. Usage: /accept <jobId> [amount]` };
+  }
+
+  if (amount !== undefined && amount !== '') {
+    if (!AMOUNT_RE.test(amount) || Number(amount) <= 0) {
+      return { text: `Invalid amount. Use a positive number with up to 6 decimals, e.g. /accept ${jobId} 1.5` };
+    }
+  }
+
+  const account = await prisma.consumerAccount.findUnique({ where: { walletAddress: session.walletAddress } });
+  if (!account?.circleWalletId) {
+    return { text: `Your account has no Circle wallet to sign the budget.` };
+  }
+
+  try {
+    const { POST } = await import('@/app/api/jobs/[jobId]/accept/route');
+    const token = await issueConsumerSessionToken(account.id, account.walletAddress);
+    const request = new NextRequest(`http://internal/api/jobs/${jobId}/accept`, {
+      method: 'POST',
+      headers: { cookie: `consumer_token=${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(amount !== undefined && amount !== '' ? { budget: amount } : {}),
+    });
+
+    const res = await POST(request, { params: Promise.resolve({ jobId }) });
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data?.replayed) {
+        return { text: `Job #${jobId} already has its budget set (${data.budget ?? '?'} USDC) — nothing more to do.` };
+      }
+      const message = String(data?.error ?? `error ${res.status}`);
+      if (res.status === 403) {
+        return { text: `You can only accept jobs assigned to your wallet.` };
+      }
+      return { text: `Couldn't accept job #${jobId}: ${message}` };
+    }
+
+    if (data?.replayed) {
+      return { text: `Job #${jobId} already has its budget set (${data.budget ?? '?'} USDC).` };
+    }
+
+    return {
+      text:
+        `Budget set for job #${jobId} (${data.budget ?? '?'} USDC).\n` +
+        `Tx: https://testnet.arcscan.app/tx/${data.txHash}\n` +
+        `The client can now fund the escrow.`,
+    };
+  } catch (err) {
+    return { text: `Couldn't accept job #${jobId}: ${(err as Error).message}` };
+  }
 }
 
 /**
@@ -398,7 +490,8 @@ export async function handleHelp(): Promise<BotReply> {
     text:
       `Commands:\n` +
       `/jobs — see open jobs\n` +
-      `/apply <jobId> <pitch> — apply to a job\n` +
+      `/apply <jobId> "<your pitch>" — apply to a job (put your pitch in quotes, e.g. /apply job112 "I can build this")\n` +
+      `/accept <jobId> [amount] — accept a job you were hired for and set its budget\n` +
       `/deliver <jobId> <link/text> — submit completed work\n` +
       `/balance — check your balance\n` +
       `/withdraw <address> [amount] — withdraw funds to your own wallet\n` +

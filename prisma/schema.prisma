@@ -296,6 +296,12 @@ model Erc8183Job {
   agent           Agent?   @relation(fields: [agentId], references: [id])
   applications    JobApplication[]
   validation      Erc8183JobValidation?
+  // Admin moderation (platform owner flags a malicious/bad job). removedAt
+  // non-null means an admin removed it — hidden from boards, further backend
+  // transitions for it are refused. On-chain escrow state (if any) is
+  // untouched and remains one-way by contract design.
+  removedAt       DateTime?
+  removedReason   String?
 
   @@index([jobId])
   @@index([clientSCA])
@@ -639,6 +645,7 @@ model ProcurementPosting {
   selectedProviderSCA  String?
   resultingJobId       BigInt?
   merchantId           String?
+  seq                  Int      @default(autoincrement()) @unique // human-facing "job<N>" id for Telegram /apply
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   applications         ProcurementApplication[]

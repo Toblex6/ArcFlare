@@ -190,17 +190,20 @@ async function testCrossChainAuth() {
   ok('unknown key rejected', badKey.status === 401, `status=${badKey.status}`);
 }
 
-// ── Test: jobs create requires control of clientSCA ────────────────────────
+// ── Test: jobs create requires authentication + control of clientSCA ───────
+// The route is wrapped in withApiKeyOrAnySession, so an anonymous create is
+// rejected (401) before any address-control check can run — fail-closed.
 async function testJobsControl() {
   console.log('\n[jobs]');
   const rando = ethers.Wallet.createRandom().address;
+  const rando2 = ethers.Wallet.createRandom().address;
   const res = await fetch(`${BASE}/api/jobs`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
-    body: JSON.stringify({ action: 'create', clientSCA: rando, providerSCA: rando, amountUSDC: '1', description: 'auth test' }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'create', clientSCA: rando, providerSCA: rando2, amountUSDC: '1', description: 'auth test' }),
   });
   const data = await j(res);
-  ok('job create with uncontrolled clientSCA rejected', res.status === 403, `status=${res.status} ${JSON.stringify(data).slice(0, 160)}`);
+  ok('job create without auth rejected (401)', res.status === 401, `status=${res.status} ${JSON.stringify(data).slice(0, 160)}`);
 }
 
 // ── Test: Batch 6 apply — invalid job id is a clean 404 (no onchain) ───────

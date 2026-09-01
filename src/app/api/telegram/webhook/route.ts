@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   handleStart,
   handleApply,
+  handleAccept,
   handleListJobs,
   handleDeliver,
   handleBalance,
@@ -133,7 +134,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       case '/apply': {
         const [jobId, ...pitchParts] = parsed.args;
         if (!jobId || pitchParts.length === 0) {
-          reply = { text: `Usage: /apply <jobId> <your pitch>` };
+          reply = { text: `Input the job id and your pitch, e.g. /apply job112 "I can build this in 2 days". Put your pitch in quotes.` };
         } else {
           reply = await handleApply(telegramUserId, jobId, pitchParts.join(' '));
         }
@@ -145,6 +146,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           reply = { text: `Usage: /deliver <jobId> <link or description>` };
         } else {
           reply = await handleDeliver(telegramUserId, jobId, submissionParts.join(' '));
+        }
+        break;
+      }
+      case '/accept': {
+        const [jobId, amount] = parsed.args;
+        if (!jobId) {
+          reply = { text: `Usage: /accept <jobId> [amount]` };
+        } else {
+          reply = await handleAccept(telegramUserId, jobId, amount);
         }
         break;
       }

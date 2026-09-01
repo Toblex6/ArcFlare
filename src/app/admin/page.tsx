@@ -3,6 +3,7 @@
 // src/app/admin/page.tsx
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface AdminStats {
@@ -88,9 +89,17 @@ export default function AdminDashboard() {
                         <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>Platform Overview</h1>
                         <p style={{ color: '#6b5a45', fontSize: 13, margin: 0 }}>Across every merchant and consumer — last 30 days</p>
                     </div>
-                    <button onClick={signOut} style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 8, padding: '8px 16px', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}>
-                        Sign out
-                    </button>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <Link href="/admin/jobs" style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 8, padding: '8px 16px', color: '#9ca3af', fontSize: 12, textDecoration: 'none' }}>
+                            Job Moderation
+                        </Link>
+                        <Link href="/admin/disputes" style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 8, padding: '8px 16px', color: '#9ca3af', fontSize: 12, textDecoration: 'none' }}>
+                            Disputes
+                        </Link>
+                        <button onClick={signOut} style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 8, padding: '8px 16px', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}>
+                            Sign out
+                        </button>
+                    </div>
                 </div>
 
                 {error && (

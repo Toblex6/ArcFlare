@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { submitApplication } from "@/lib/jobs/applicantScoring";
+import { prisma } from "@/lib/prisma";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 
 // POST /api/jobs/[jobId]/apply
@@ -8,6 +8,14 @@ import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAd
 // SECURITY: the caller must prove they control `applicantAddress` using the
 // same multi-party choke point the escrow/complete routes use (merchant,
 // consumer, or internal-service agent). Never trusts the body address alone.
+//
+// LEGACY DIRECT-HIRE JOBS CANNOT BE APPLIED FOR: the ERC-8183 contract fixes
+// the provider at createJob time and has no provider reassignment, so a
+// JobApplication row could never be acted on. This route therefore refuses
+// applications outright (409) and steers to procurement postings — the flow
+// that actually supports apply → select → hire. The application-scoring
+// machinery (submitApplication/getRankedApplicants) remains for historical
+// rows only.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
@@ -15,7 +23,7 @@ export async function POST(
   try {
     const { jobId } = await params;
     const body = await req.json().catch(() => ({}));
-    const { applicantAddress, pitch, proposedAmount, portfolioLinks } = body;
+    const { applicantAddress, pitch } = body;
 
     if (!applicantAddress || !pitch) {
       return NextResponse.json(
@@ -32,27 +40,30 @@ export async function POST(
       );
     }
 
-    const application = await submitApplication({
-      jobId,
-      applicantAddress,
-      pitch: String(pitch),
-      proposedAmount: proposedAmount === undefined || proposedAmount === null || proposedAmount === "" ? undefined : BigInt(proposedAmount),
-      portfolioLinks: Array.isArray(portfolioLinks) ? portfolioLinks.map((l: unknown) => String(l)) : undefined,
-    });
+    // Job must exist to distinguish "unknown job" (404) from a real
+    // direct-hire job that cannot be applied for (409).
+    let parsedId: bigint;
+    try {
+      parsedId = BigInt(jobId);
+    } catch {
+      return NextResponse.json({ success: false, error: `invalid job id ${jobId}` }, { status: 400 });
+    }
+    const job = await prisma.erc8183Job.findUnique({ where: { jobId: parsedId } });
+    if (!job) {
+      return NextResponse.json({ success: false, error: `job ${jobId} not found` }, { status: 404 });
+    }
 
-    return NextResponse.json({
-      success: true,
-      applicationId: application.applicationId,
-      message: "Application submitted.",
-    });
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          `Job #${jobId} is a direct-hire job — its provider was fixed on-chain when it was created and cannot be changed, so applications are not accepted. ` +
+          `Post or apply to open procurement postings instead (see /api/procurement).`,
+        code: "DIRECT_HIRE_NO_APPLICATIONS",
+      },
+      { status: 409 }
+    );
   } catch (error: any) {
-    // P2002 = unique constraint violation (jobId + applicantAddress) —
-    // this is the race-safe duplicate detection. The pre-check in
-    // submitApplication covers the common case; this catches the two
-    // requests arriving simultaneously.
-    const isDuplicate = error?.code === "P2002" || /already applied/i.test(error?.message || "");
-    const isNotFound = /not found|invalid job id/i.test(error?.message || "");
-    const status = isNotFound ? 404 : isDuplicate ? 409 : 500;
-    return NextResponse.json({ success: false, error: error.message }, { status });
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

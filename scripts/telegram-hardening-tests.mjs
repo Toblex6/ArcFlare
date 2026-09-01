@@ -9,7 +9,8 @@
  *  - webhook secret-token gate (missing / wrong / correct)
  *  - /start: exactly one account on repeat calls (idempotency), and
  *    fail-closed first contact when CIRCLE_WALLET_SET_ID is not configured
- *  - /apply: duplicate application rejected (single JobApplication row)
+ *  - /apply: legacy direct-hire jobs are BLOCKED — steer reply, zero
+ *    JobApplication rows (provider fixed at createJob, no reassignment)
  *  - /withdraw: malformed address rejected; confirmation gate (nothing
  *    moves on the first message; /confirm executes); TTL expiry
  *
@@ -187,9 +188,9 @@ async function main() {
     }
   }
 
-  // ══ 3. /apply DUPLICATE REJECTION ═══════════════════════════════════
+  // ══ 3. /apply STEER — legacy direct-hire jobs are BLOCKED ════════════
 
-  console.log('\n[apply] duplicate application rejected');
+  console.log('\n[apply] legacy direct-hire job → steer, no application row');
   {
     const jobId = BigInt(SEED_JOB_ID);
     const applicantAddress = ethers.Wallet.createRandom().address;
@@ -218,12 +219,12 @@ async function main() {
 
     const a1 = await update(`/apply ${jobId.toString()} harness pitch one`, Number(TG_APPLIER_USER));
     const n1 = await prisma.jobApplication.count({ where: { jobId } });
-    ok('first /apply → 200', a1.status === 200, `got ${a1.status}`);
-    ok('one application row created', n1 === 1, `count ${n1}`);
+    ok('first /apply on legacy job → 200 (webhook always ok)', a1.status === 200, `got ${a1.status}`);
+    ok('NO application row created (steer, not stored)', n1 === 0, `count ${n1}`);
 
     const a2 = await update(`/apply ${jobId.toString()} harness pitch two`, Number(TG_APPLIER_USER));
     const n2 = await prisma.jobApplication.count({ where: { jobId } });
-    ok('duplicate /apply rejected (still one row)', a2.status === 200 && n2 === 1, `got ${a2.status}, count ${n2}`);
+    ok('second /apply → 200, still zero rows', a2.status === 200 && n2 === 0, `got ${a2.status}, count ${n2}`);
 
     const a3 = await update('/apply 12345 only-a-job-id-no-pitch', Number(TG_APPLIER_USER));
     ok('missing pitch → 200 usage reply, no row', a3.status === 200, `got ${a3.status}`);

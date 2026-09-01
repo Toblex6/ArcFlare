@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
     const minTrust = searchParams.get("minTrust") ? Number(searchParams.get("minTrust")) : null;
     const limit = Math.min(Number(searchParams.get("limit") || "20"), 100);
     const offset = Number(searchParams.get("offset") || "0");
+    const mine = searchParams.get("mine") === "1";              // scope to the caller's own agents
 
     // Build where clause — keep DB filters to indexed/scalar fields only;
     // JSON fields (skills, pricing) are filtered in-memory below to avoid
@@ -31,6 +33,17 @@ export async function GET(request: NextRequest) {
     const where: any = {
       status: "ACTIVE_AGENT_PROVISIONED", // only discoverable agents
     };
+
+    // Merchant-scoped listing (?mine=1): only agents the authenticated
+    // merchant owns. No other tenant's agents are ever returned — the scope
+    // is derived from the session, never from a caller-supplied id.
+    if (mine) {
+      const merchant = await resolveMerchant(request).catch(() => null);
+      if (!merchant?.id) {
+        return NextResponse.json({ error: "authentication required for mine=1" }, { status: 401 });
+      }
+      where.merchantId = merchant.id;
+    }
 
     // Reputation filter (scalar, DB-side)
     if (minReputation) {
