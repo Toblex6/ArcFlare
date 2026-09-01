@@ -123,6 +123,8 @@ export default function PendingSignaturesPanel() {
     }
     setBroadcastId(req.id);
     setError(null);
+    // Full server payload stays out of the UI — developer console only.
+    console.debug('[PendingSignaturesPanel] broadcasting request', req.id, req.payload);
     try {
       const abi = [abiFromSignature(intent.abiFunctionSignature)];
       const txHash = await writeContractAsync({
@@ -213,13 +215,22 @@ export default function PendingSignaturesPanel() {
               {(req.payload as any)?.reference && <span>Ref: {(req.payload as any).reference.slice(0, 16)}...</span>}
               {(req.payload as any)?.amount && <span>Amount: {(req.payload as any).amount} USDC</span>}
               {(req.payload as any)?.recipientSCA && <span>To: {(req.payload as any).recipientSCA.slice(0, 10)}... <button onClick={() => navigator.clipboard?.writeText((req.payload as any).recipientSCA)} style={{ fontSize: 10, marginLeft: 6 }}>Copy</button></span>}
-              <span style={{ fontFamily: 'monospace' }}>Contract: {intent.to.slice(0, 10)}... · {intent.abiFunctionSignature}</span>
+              <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                Contract: {intent.to.slice(0, 10)}…{intent.to.slice(-6)}
+                <button onClick={() => navigator.clipboard?.writeText(intent.to)} style={{ fontSize: 10, marginLeft: 6 }}>Copy</button>
+                {' '}· {intent.abiFunctionSignature}
+              </span>
+              {intent.value && intent.value !== '0' && (
+                <span>Value attached: {intent.value} wei</span>
+              )}
+              {address?.toLowerCase() === intent.from.toLowerCase() && (
+                <span>Signing as: your connected wallet ({intent.from.slice(0, 10)}…{intent.from.slice(-4)})</span>
+              )}
               {address?.toLowerCase() !== intent.from.toLowerCase() && (
                 <span style={{ color: 'var(--danger)', fontWeight: 600 }}>
                   ⚠ Bound to {intent.from.slice(0, 10)}…{intent.from.slice(-4)} — connect that wallet to broadcast.
                 </span>
               )}
-              <details><summary style={{ cursor: 'pointer', fontSize: 10 }}>Details</summary><pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 10 }}>{JSON.stringify(req.payload, null, 2)}</pre></details>
             </div>
             <button
               onClick={() => handleBroadcast(req)}
