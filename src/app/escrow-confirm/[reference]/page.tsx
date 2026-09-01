@@ -23,7 +23,7 @@ import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, us
 import { arcTestnet } from '@/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
+import { friendlyConnectorLabel } from '@/lib/wallet/walletLabels';
 
 const confirmDeliveryAbi = [
   {
@@ -67,7 +67,7 @@ export default function EscrowConfirmPage() {
   const [explorerUrl, setExplorerUrl] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  const { address, isConnected, connector: activeConnector } = useAccount();
+  const { address, isConnected } = useAccount();
   const { connectors, connect, connectAsync, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const { writeContractAsync } = useWriteContract();
@@ -99,8 +99,7 @@ export default function EscrowConfirmPage() {
     try {
       if (chainId !== arcTestnet.id) {
         setStatusText('Switching your wallet to Arc Testnet…');
-        const getter = async () => { try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; } };
-        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter });
+        const net = await ensureArcNetwork({ chainId, switchChainAsync });
         if (!net.ok) {
           setStep('error');
           setStatusText(net.message);
@@ -216,13 +215,12 @@ export default function EscrowConfirmPage() {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {(() => {
-                const isMobile = isMobileViewport();
-                const hasProvider = hasInjectedProvider();
+                const isMobile = typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                const hasProvider = typeof window !== 'undefined' && !!(window as any).ethereum;
                 const showInjected = !(isMobile && !hasProvider);
-                const deduped = dedupeConnectors(connectors);
-                const injected = deduped.filter((c) => c.type === 'injected');
-                const wc = deduped.find((c) => c.type === 'walletConnect');
-                const others = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
+                const injected = connectors.filter((c) => c.type === 'injected');
+                const wc = connectors.find((c) => c.type === 'walletConnect');
+                const others = connectors.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
                 const doConnect = async (c: (typeof connectors)[number]) => {
                   setConnectError(null);
                   try { await (connectAsync ? connectAsync({ connector: c }) : connect({ connector: c })); }
@@ -280,8 +278,7 @@ export default function EscrowConfirmPage() {
             </div>
             <button
               onClick={async () => {
-                const getter = async () => { try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; } };
-                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter });
+                const net = await ensureArcNetwork({ chainId, switchChainAsync });
                 if (!net.ok) { setStep('error'); setStatusText(net.message); }
               }}
               style={{ width: '100%', padding: '12px 18px', borderRadius: 10, border: '1px solid #5C7A5C', background: '#fff', color: '#5C7A5C', fontWeight: 700, cursor: 'pointer' }}>
