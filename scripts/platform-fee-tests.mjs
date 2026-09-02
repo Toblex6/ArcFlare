@@ -13,7 +13,7 @@ async function simulateFeeDebit({
   payment,
   merchantRow,
   sellerAddress,
-  feeBps = 100,
+  feeBps = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10),
   merchantBalance,
   transferImpl,
   sellerDelta,
@@ -129,7 +129,7 @@ async function simulateFeeDebit({
     }
   } catch (e) {
     // Outer catch — mirrors route.ts outer fee try/catch that creates FAILED
-    const FEE_BPS_FALLBACK = feeBps ?? 100;
+    const FEE_BPS_FALLBACK = feeBps ?? 25;
     const feeFallback = Math.round((payment.amount * FEE_BPS_FALLBACK / 10000) * 1e6) / 1e6;
     platformFeeRows.push({
       paymentLogId: payment.id,
@@ -412,6 +412,37 @@ async function run() {
     assert('(g) missing SELLER_ADDRESS DEFERRED', platformFeeRows[0]?.status === 'DEFERRED', JSON.stringify(platformFeeRows[0]));
     assert('(g) deferredReason "non-Circle wallet, cannot auto-debit" (parity with route)', platformFeeRows[0]?.deferredReason === 'non-Circle wallet, cannot auto-debit', `got "${platformFeeRows[0]?.deferredReason}"`);
     assert('(g) no transfer when SELLER_ADDRESS missing', called === false, 'transfer was called');
+  }
+
+  // (h) default bps reads 25 (not 100) when PLATFORM_FEE_BPS is unset
+  {
+    const savedBps = process.env.PLATFORM_FEE_BPS;
+    delete process.env.PLATFORM_FEE_BPS;
+
+    // exact default expression the route uses
+    const defaultBps = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
+    assert('(h) env fallback default bps is 25', defaultBps === 25, `got ${defaultBps}`);
+
+    // simulateFeeDebit's own default mirrors the route — omit feeBps entirely
+    clearRows();
+    const payment = { id: 'pay_h', amount: 100, merchantId: 'merch_123', status: 'SUCCESS', reference: 'ref_h' };
+    const merchantRow = { id: 'merch_123', walletProvider: 'CIRCLE', circleWalletId: 'cw_abc', walletAddress: '0xMerchant1111111111111111111111111111111111' };
+    const sellerAddress = '0xSeller111111111111111111111111111111111111';
+    let capturedAmountStr = null;
+    await simulateFeeDebit({
+      payment,
+      merchantRow,
+      sellerAddress,
+      merchantBalance: 10_000_000n,
+      transferImpl: async (args) => { capturedAmountStr = args.amount; return { arcTxHash: '0xfeeH', circleTxId: 'ctx_h' }; },
+      sellerDelta: 250_000n, // 0.25 USDC — 25 bps on a 100 USDC payment
+    });
+    const row = platformFeeRows[0];
+    assert('(h) unset PLATFORM_FEE_BPS debits 0.25 (100 * 25/10000)', row?.status === 'SUCCESS' && row?.amountCharged === 0.25, JSON.stringify(row));
+    assert('(h) default amountStr "0.25"', capturedAmountStr === '0.25', `got "${capturedAmountStr}"`);
+    assert('(h) amountReceived ~0.25 (delta)', Math.abs((row?.amountReceived ?? 0) - 0.25) < 1e-9, `got ${row?.amountReceived}`);
+
+    if (savedBps !== undefined) process.env.PLATFORM_FEE_BPS = savedBps;
   }
 
   console.log('──────────────────────────────────────────────────────────────');

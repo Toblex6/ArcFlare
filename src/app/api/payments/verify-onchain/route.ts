@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
 
         // ── Platform fee debit (post-SUCCESS, never touches customer->merchant verification) ──
         try {
-            const FEE_BPS = parseInt(process.env.PLATFORM_FEE_BPS ?? '100', 10);
+            const FEE_BPS = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
             const rawFee = payment.amount * FEE_BPS / 10000;
             const feeAmount = Math.round(rawFee * 1_000_000) / 1_000_000;
             const feeRounded = Math.round(feeAmount * 1e6) / 1e6;
@@ -296,7 +296,7 @@ export async function POST(req: NextRequest) {
         } catch (e: any) {
             console.error('Platform fee debit error:', e.message);
             try {
-                const FEE_BPS_FALLBACK = parseInt(process.env.PLATFORM_FEE_BPS ?? '100', 10);
+                const FEE_BPS_FALLBACK = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
                 const feeFallback = Math.round((payment.amount * FEE_BPS_FALLBACK / 10000) * 1e6) / 1e6;
                 await (prisma as any).platformFee.create({
                     data: {
