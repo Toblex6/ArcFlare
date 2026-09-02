@@ -14,6 +14,7 @@ interface NavItem {
     label: string;
     href: string;
     disabled?: boolean;
+    disabledReason?: string;
     external?: boolean;
 }
 
@@ -46,12 +47,21 @@ const SECTIONS: NavSection[] = [
         ],
     },
     {
+        group: 'PAYROLL',
+        items: [
+            { label: 'Batch Payroll', href: '/payroll' },
+            { label: 'Payroll Chat', href: '/payroll-chat' },
+            { label: 'Scheduled Payroll', href: '/scheduled' },
+        ],
+    },
+    {
         group: 'AI & AGENTS',
         items: [
             { label: 'Marketplace', href: '/marketplace' },
-            { label: 'Agent Brain', href: '/agent-brain' },
+            { label: 'Agent Brain', href: '/agent-brain', disabled: true, disabledReason: 'LLM reasoning engine is rate-limited (Groq 429s), calls will intermittently fail' },
             { label: 'Agents', href: '/agents' },
             { label: 'Jobs', href: '/jobs' },
+            { label: 'Direct Hire', href: '/jobs', disabled: true, disabledReason: 'Direct Hire wizard is deprecated — use Post a Job instead' },
             { label: 'AI Assistant', href: '/merchant/assistant' },
         ],
     },
@@ -72,6 +82,10 @@ const ICONS: Record<string, JSX.Element> = {
     'AI Assistant': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
     'Agent Wallets': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><circle cx="7" cy="15" r="1.5" /></svg>,
     'Get Test Tokens': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /></svg>,
+    'Batch Payroll': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>,
+    'Payroll Chat': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
+    'Scheduled Payroll': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>,
+    'Direct Hire': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>,
 };
 
 export default function DashboardSidebar({ active }: { active: string }) {
@@ -183,13 +197,14 @@ export default function DashboardSidebar({ active }: { active: string }) {
                                     return (
                                         <span
                                             key={item.label}
-                                            title="Coming soon"
+                                            title={item.disabledReason ?? 'Coming soon'}
                                             style={{
                                                 display: 'flex', alignItems: 'center', gap: 10,
                                                 padding: '9px 12px', borderRadius: 9,
                                                 fontSize: 13, fontWeight: 500,
-                                                color: '#3f3a35', cursor: 'not-allowed',
+                                                color: '#6b7280', cursor: 'not-allowed',
                                                 border: '1px solid transparent',
+                                                opacity: 0.45,
                                             }}
                                         >
                                             {ICONS[item.label]}
