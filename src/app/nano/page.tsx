@@ -21,11 +21,6 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 // inline NAV array (with dead /checkout and /support links) was removed.
 
 // ── Types ──────────────────────────────────────────────────────────────
-interface BalanceData {
-  wallet: { formatted: string };
-  gateway: { formattedAvailable: string; formattedTotal: string };
-}
-
 interface PaymentLog {
   id: string;
   reference: string;
@@ -119,12 +114,6 @@ const styles = {
     letterSpacing: 1,
     marginBottom: 4,
     display: "block" as const,
-  } as React.CSSProperties,
-  balanceGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 16,
-    marginBottom: 24,
   } as React.CSSProperties,
   balanceCard: {
     background: "var(--surface)",
@@ -261,7 +250,6 @@ export default function NanoPaymentsPage() {
   const [autoSettleResult, setAutoSettleResult] = useState<any>(null);
 
   // ── x402 State ──────────────────────────────────────────────────────
-  const [x402Balances, setX402Balances] = useState<BalanceData | null>(null);
   const [buyerWallet, setBuyerWallet] = useState<{ address: string; gatewayBalance: string; walletBalance: string } | null>(null);
   const [x402Payments, setX402Payments] = useState<PaymentLog[]>([]);
   const [x402Loading, setX402Loading] = useState(true);
@@ -368,56 +356,42 @@ export default function NanoPaymentsPage() {
   const fetchX402Data = async () => {
     setX402Loading(true);
     setError(null);
+
+    // 1. Fetch THIS merchant's buyer x402 wallet (EOA + its own gateway
+    // balance) — the old "Wallet Balance (Buyer)" card actually displayed
+    // the platform seller's raw wallet, mislabeled.
     try {
-      // 1. Fetch seller gateway + on-chain balances – required
-      const balanceRes = await fetch("/api/x402/seller/balance", {
+      const meRes = await fetch("/api/x402/eoa-wallet/me", { headers: authHeaders() });
+      const meData = await meRes.json();
+      if (meData.success) {
+        setBuyerWallet({
+          address: meData.address,
+          gatewayBalance: meData.gatewayBalance,
+          walletBalance: meData.walletBalance,
+        });
+      }
+    } catch {
+      // optional — leave previous state
+    }
+
+    // 2. Fetch payment history – optional, fallback on error
+    try {
+      const paymentsRes = await fetch("/api/payments/all?chain=x402", {
         headers: authHeaders(),
       });
-      const balanceData = await balanceRes.json();
-      // Route previously omitted `success` entirely — page showed 0.00
-      // even with a funded gateway. Accept either shape defensively.
-      if (balanceData.success !== false && balanceData.gateway) setX402Balances(balanceData);
-
-      // 1b. Fetch THIS merchant's buyer x402 wallet (EOA + its own gateway
-      // balance) — the old "Wallet Balance (Buyer)" card actually displayed
-      // the platform seller's raw wallet, mislabeled.
-      try {
-        const meRes = await fetch("/api/x402/eoa-wallet/me", { headers: authHeaders() });
-        const meData = await meRes.json();
-        if (meData.success) {
-          setBuyerWallet({
-            address: meData.address,
-            gatewayBalance: meData.gatewayBalance,
-            walletBalance: meData.walletBalance,
-          });
-        }
-      } catch {
-        // optional — leave previous state
-      }
-
-      // 2. Fetch payment history – optional, fallback on error
-      try {
-        const paymentsRes = await fetch("/api/payments/all?chain=x402", {
-          headers: authHeaders(),
-        });
-        const paymentsData = await paymentsRes.json();
-        if (paymentsData.success) setX402Payments(paymentsData.data || []);
-      } catch {
-        // If history fetch fails, just use an empty array
-        setX402Payments([]);
-      }
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setX402Loading(false);
+      const paymentsData = await paymentsRes.json();
+      if (paymentsData.success) setX402Payments(paymentsData.data || []);
+    } catch {
+      // If history fetch fails, just use an empty array
+      setX402Payments([]);
     }
+
+    setX402Loading(false);
   };
 
   useEffect(() => {
     if (activeTab === "x402") {
       fetchX402Data();
-      const interval = setInterval(fetchX402Data, 15000);
-      return () => clearInterval(interval);
     }
   }, [activeTab]);
 
@@ -712,7 +686,7 @@ export default function NanoPaymentsPage() {
                     </span>
                     <button
                       onClick={() => {
-                        navigator.clipboard.writeText(buyerWallet.address);
+                        navigator.clipboard.writeText(buyerWallet.address).catch(() => {});
                         setCopied(true);
                         setTimeout(() => setCopied(false), 1500);
                       }}
