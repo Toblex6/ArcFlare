@@ -269,6 +269,7 @@ export default function NanoPaymentsPage() {
   const [depositAmount, setDepositAmount] = useState("1");
   const [depositing, setDepositing] = useState(false);
   const [depositResult, setDepositResult] = useState<any>(null);
+  const [copied, setCopied] = useState(false);
 
   const [resourceUrl, setResourceUrl] = useState(
     "/api/nano/pay/agent-lookup?scaAddress=0x7a8214dad7630a7a39054e0121acdbc7a65821c9"
@@ -664,31 +665,18 @@ export default function NanoPaymentsPage() {
           <>
             {error && <div style={styles.errorBox}>❌ {error}</div>}
 
-            {/* ── BALANCE CARDS ── */}
-            <div style={styles.balanceGrid}>
-              <div style={styles.balanceCard}>
-                <p style={styles.balanceLabel}>Gateway Balance (Platform Seller)</p>
-                <p style={styles.balanceValue}>
-                  {x402Balances?.gateway?.formattedAvailable || "0.00"}{" "}
-                  <span style={styles.balanceUnit}>USDC</span>
-                </p>
-                <p style={styles.balanceSub}>
-                  Total: {x402Balances?.gateway?.formattedTotal || "0.00"} USDC · Seller wallet:{" "}
-                  {x402Balances?.wallet?.formatted || "0.00"} USDC
-                </p>
-              </div>
-              <div style={styles.balanceCard}>
-                <p style={styles.balanceLabel}>Your x402 Buyer Wallet</p>
-                <p style={styles.balanceValue}>
-                  {buyerWallet?.gatewayBalance || "0.00"}{" "}
-                  <span style={styles.balanceUnit}>USDC</span>
-                </p>
-                <p style={styles.balanceSub}>
-                  {buyerWallet
-                    ? `Gateway available · EOA wallet: ${buyerWallet.walletBalance} USDC`
-                    : "Resolved from your login when you load this tab"}
-                </p>
-              </div>
+            {/* ── BALANCE CARD ── */}
+            <div style={{ ...styles.balanceCard, marginBottom: 24 }}>
+              <p style={styles.balanceLabel}>Your x402 Buyer Wallet</p>
+              <p style={styles.balanceValue}>
+                {buyerWallet?.gatewayBalance || "0.00"}{" "}
+                <span style={styles.balanceUnit}>USDC</span>
+              </p>
+              <p style={styles.balanceSub}>
+                {buyerWallet
+                  ? `Gateway available · EOA wallet: ${buyerWallet.walletBalance} USDC`
+                  : "Resolved from your login when you load this tab"}
+              </p>
             </div>
 
             {/* ── DEPOSIT ── */}
@@ -699,7 +687,61 @@ export default function NanoPaymentsPage() {
               <p style={{ color: "var(--text-secondary)", fontSize: 13, margin: "0 0 16px" }}>
                 Transfer USDC from your x402 wallet into Circle Gateway (your wallet is resolved from your login, not entered manually).
               </p>
-              <div style={styles.row}>
+              {buyerWallet?.address ? (
+                <div
+                  style={{
+                    background: "var(--surface-secondary)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    padding: 12,
+                    marginBottom: 12,
+                  }}
+                >
+                  <span style={styles.label}>Your x402 Buyer EOA — Deposits pull from here</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                    <span
+                      style={{
+                        flex: 1,
+                        fontFamily: "monospace",
+                        fontSize: 12,
+                        color: "var(--text)",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {buyerWallet.address}
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(buyerWallet.address);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 8,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface)",
+                        color: "var(--text)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {copied ? "✓ Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <p style={{ color: "var(--text-secondary)", fontSize: 11, margin: "8px 0 0", lineHeight: 1.4 }}>
+                    Deposits pull from this wallet, not your main Circle wallet. Fund this address with USDC first if the
+                    deposit fails with insufficient balance.
+                  </p>
+                </div>
+              ) : (
+                <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: "0 0 12px" }}>
+                  {x402Loading ? "Loading wallet address..." : "No buyer wallet yet — it will be created on first load."}
+                </p>
+              )}
+              <div style={{ ...styles.row, alignItems: "center" }}>
                 <input
                   style={styles.inputSmall}
                   type="number"
@@ -710,6 +752,22 @@ export default function NanoPaymentsPage() {
                 <button style={btnStyle(depositing)} disabled={depositing} onClick={handleDeposit}>
                   {depositing ? "Depositing..." : "Deposit"}
                 </button>
+                {buyerWallet && (
+                  <span
+                    style={{
+                      alignSelf: "center",
+                      color: "var(--text-secondary)",
+                      fontSize: 11,
+                      fontFamily: "monospace",
+                      background: "var(--surface-secondary)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                    }}
+                  >
+                    EOA: {buyerWallet.walletBalance} USDC
+                  </span>
+                )}
               </div>
               {depositResult && (
                 <div style={styles.successBox}>
