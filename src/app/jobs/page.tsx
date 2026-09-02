@@ -90,7 +90,7 @@ export default function JobsPage() {
       .then((d) => {
         if (!cancelled && d?.success) setWalletBalance(d.balance);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       cancelled = true;
     };
@@ -548,7 +548,7 @@ export default function JobsPage() {
           {(
             [
               ['board', '📋 Job Board'],
-              ['create', '🎯 Direct Hire'],
+              //['create', '🎯 Direct Hire'],
               ['post', '📢 Post a Job'],
               ['manage', '🔧 Manage'],
             ] as const
