@@ -1,16 +1,24 @@
 /**
  * reputation-regression-tests.ts
  *
- * Focused regression for the Agents → Reputation defect:
- *  - src/app/agents/page.tsx did NOT send validatorWalletId (400)
- *  - /api/agent/reputation required validatorWalletId but never validated it
- *  - route was withApiKey-only, making dashboard (cookie session) unusable
+ * Focused regression for the Agents → Record Reputation validator UX fix:
+ *  - validatorSCA is no longer free-text on the form — the client resolves the
+ *    merchant's authoritative controlled wallets (their own Circle wallet from
+ *    /api/merchant/wallet + owned agents that have circleWalletId, excluding the
+ *    target agent's own tokenId) and renders the validator as a read-only input
+ *    (exactly one eligible) or a bounded <select> (multiple), or a clear inline
+ *    error + disabled submit (zero eligible)
+ *  - the submit sends validatorSCA/validatorWalletId derived ONLY from those
+ *    resolved options ("This reputation will be signed by your wallet.")
+ *  - /api/agent/reputation is UNCHANGED: withApiKeyOrAnySession, server-side
+ *    verifyCallerControlsAddress(validatorSCA), authoritative wallet resolution,
+ *    optional validatorWalletId that must match the authoritative value
  *
  * Proves:
- *  1. required validatorWalletId is supplied correctly (client derives, server verifies)
- *  2. unauthorized callers remain rejected (403)
- *  3. valid intended caller (merchant session / anySession) passes the auth gate
- *  4. no client-controlled wallet can be substituted for the authoritative validator identity
+ *  1. the form no longer accepts an arbitrary free-text validatorSCA
+ *  2. the authoritative caller wallet is used (resolution is server/session-derived)
+ *  3. a different/random wallet cannot be substituted through the request
+ *  4. existing valid reputation submission behavior remains intact
  *
  * Static proofs run without a dev server. Live HTTP proofs run if BASE is reachable.
  * Run: npx tsx scripts/reputation-regression-tests.ts [baseUrl]
@@ -127,22 +135,92 @@ async function main() {
     "signing identity changed"
   );
 
-  // 3. Client: agents page now supplies validatorWalletId
+  // 3. Client: Record Reputation validator UX — validatorSCA is NO LONGER free
+  //    text. The form resolves the merchant's authoritative controlled wallets
+  //    (own Circle wallet via /api/merchant/wallet + owned agents with
+  //    circleWalletId, excluding the target agent's own tokenId) and renders the
+  //    validator read-only/select; submit derives validatorSCA only from those
+  //    options. Backend unchanged and still authoritative.
+
+  // 3a. The arbitrary free-text validatorSCA input is gone.
   ok(
-    "client imports no hard-coded walletId — derives from agents list",
-    agentsSrc.includes("validatorWalletId") && agentsSrc.includes("matchedAgent"),
-    "client does not supply validatorWalletId"
+    "client no longer renders free-text validatorSCA input (old placeholder gone)",
+    !agentsSrc.includes('placeholder="0x... (NOT the agent owner)"'),
+    "old free-text placeholder still present"
   );
   ok(
-    "client resolves merchant wallet via /api/merchant/wallet",
-    agentsSrc.includes("/api/merchant/wallet") && agentsSrc.includes("circleWalletId"),
+    "validator rendered as bounded <select> over repValidatorOptions OR readOnly input",
+    agentsSrc.includes("<select") && agentsSrc.includes("readOnly") && agentsSrc.includes("repValidatorOptions.map"),
+    "no select/readOnly validator widget"
+  );
+  ok(
+    "single eligible validator rendered read-only (not an editable <input>)",
+    agentsSrc.includes("value={repValidatorSCA || repValidatorOptions[0].validatorSCA}"),
+    "single-option validator input is not readOnly"
+  );
+
+  // 3b. Authoritative caller wallet is used (server/session-derived, not typed).
+  ok(
+    "client resolves merchant authoritative wallet via /api/merchant/wallet",
+    agentsSrc.includes("fetch('/api/merchant/wallet')"),
     "no merchant wallet lookup"
   );
   ok(
-    "client only sends validatorWalletId if resolvable (server derives otherwise)",
-    /if \(validatorWalletId\) body\.validatorWalletId = validatorWalletId/.test(agentsSrc),
-    "client always sends or never sends"
+    "merchant-wallet validator option gated on walletAddress + circleWalletId",
+    agentsSrc.includes("merchantWallet?.walletAddress && merchantWallet?.circleWalletId"),
+    "merchant wallet not gated on circleWalletId"
   );
+  ok(
+    "owned-agent validator options gated on scaAddress + circleWalletId, target agent excluded",
+    agentsSrc.includes("a.scaAddress && a.circleWalletId && String(a.tokenId) !== String(repAgentId || '')"),
+    "owned agents not gated/excluded correctly"
+  );
+  ok(
+    "helper text present: 'This reputation will be signed by your wallet.'",
+    agentsSrc.includes("This reputation will be signed by your wallet."),
+    "helper text missing"
+  );
+  ok(
+    "zero eligible options handled: submit disabled + inline error",
+    agentsSrc.includes("repValidatorOptions.length === 0") && agentsSrc.includes("No eligible validator wallet found"),
+    "no zero-state handling"
+  );
+
+  // 3c. A different/random wallet cannot be substituted through the request.
+  ok(
+    "submit derives validatorSCA ONLY from resolved options (selected = repValidatorOptions.find)",
+    agentsSrc.includes("const selected = repValidatorOptions.find("),
+    "validatorSCA not sourced from resolved options"
+  );
+  ok(
+    "submit body sends selected.validatorSCA + selected.circleWalletId",
+    agentsSrc.includes("validatorSCA: selected.validatorSCA") && agentsSrc.includes("validatorWalletId: selected.circleWalletId"),
+    "submit body does not use the resolved selected option"
+  );
+  ok(
+    "no path sends a raw typed string as validatorSCA (old 'validatorSCA: repValidatorSCA' gone)",
+    !agentsSrc.includes("validatorSCA: repValidatorSCA"),
+    "raw typed validatorSCA still sent"
+  );
+  ok(
+    "submit refuses a non-resolvable typed validator (throws before POST when no option matches)",
+    agentsSrc.includes("No eligible validator wallet selected"),
+    "no guard against a typed value outside repValidatorOptions"
+  );
+
+  // 3d. Existing valid reputation submission behavior retained.
+  ok(
+    "client still POSTs reputation to /api/agent/reputation",
+    agentsSrc.includes("fetch('/api/agent/reputation'"),
+    "reputation POST target changed"
+  );
+  ok(
+    "submit still sends agentId / score / tag",
+    agentsSrc.includes("agentId: repAgentId") && agentsSrc.includes("score: parseInt(repScore)") && agentsSrc.includes("tag: repTag"),
+    "agentId/score/tag not sent"
+  );
+
+  // Server-side (kept): walletId is never trusted blindly — authoritative binding enforced.
   ok(
     "client does not trust body-supplied walletId blindly (server verifies)",
     repSrc.includes("authoritativeWalletId") && repSrc.includes("Circle wallet address does not equal validatorSCA"),
@@ -253,6 +331,20 @@ async function main() {
         tag: "evil_attempt",
       }, { Cookie: evilCookie });
       ok("evil merchant claiming validator they don't control → 403", evilAttempt.status === 403, `got ${evilAttempt.status} ${JSON.stringify(evilAttempt.data).slice(0,180)}`);
+
+      // 3. Random/uncontrolled wallet substitution: the CORRECT merchant posts a
+      // random address (not their merchant wallet, not any owned agent SCA) as
+      // validatorSCA with no validatorWalletId → 403 (session is valid, but they
+      // don't control that address). Proves an arbitrary/different wallet cannot
+      // be substituted through the request even by the legitimate caller.
+      const randomSCA = ethers.Wallet.createRandom().address;
+      const randomAttempt = await req("POST", "/api/agent/reputation", {
+        agentId: tokenId,
+        validatorSCA: randomSCA,
+        score: 80,
+        tag: "random_wallet_attempt",
+      }, { Cookie: cookie });
+      ok("random validator wallet cannot be substituted (correct merchant, unowned SCA) → 403", randomAttempt.status === 403, `got ${randomAttempt.status} ${JSON.stringify(randomAttempt.data).slice(0,180)}`);
 
       // 4. No substitution: correct SCA but wrong walletId → 400 authoritative mismatch
       const wrongWalletId = "ffffffff-ffff-ffff-ffff-ffffffffffff";

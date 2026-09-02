@@ -42,6 +42,12 @@ interface ReputationResult {
   message: string;
 }
 
+interface RepValidatorOption {
+  validatorSCA: string;
+  circleWalletId: string;
+  label: string;
+}
+
 interface ValidationResult {
   success: boolean;
   action: string;
@@ -90,6 +96,9 @@ export default function AgentsPage() {
   const [repLoading, setRepLoading] = useState(false);
   const [repResult, setRepResult] = useState<ReputationResult | null>(null);
   const [repError, setRepError] = useState<string | null>(null);
+  const [repValidatorOptions, setRepValidatorOptions] = useState<RepValidatorOption[]>([]);
+  const [merchantWallet, setMerchantWallet] = useState<{ walletAddress: string | null; circleWalletId: string | null } | null>(null);
+  const [repWalletLoaded, setRepWalletLoaded] = useState(false);
 
   // Validation state
   const [valTab, setValTab] = useState<'request' | 'respond' | 'status'>('request');
@@ -115,6 +124,54 @@ export default function AgentsPage() {
       .catch(() => { })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/merchant/wallet')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.wallet) {
+          setMerchantWallet({
+            walletAddress: d.wallet.walletAddress || null,
+            circleWalletId: d.wallet.circleWalletId || null,
+          });
+        }
+      })
+      .catch(() => { })
+      .finally(() => { if (!cancelled) setRepWalletLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const buildOptions = (): RepValidatorOption[] => {
+      const options: RepValidatorOption[] = [];
+      if (merchantWallet?.walletAddress && merchantWallet?.circleWalletId) {
+        options.push({
+          validatorSCA: merchantWallet.walletAddress,
+          circleWalletId: merchantWallet.circleWalletId,
+          label: 'Merchant wallet',
+        });
+      }
+      for (const a of agents) {
+        if (a.scaAddress && a.circleWalletId && String(a.tokenId) !== String(repAgentId || '')) {
+          options.push({
+            validatorSCA: a.scaAddress,
+            circleWalletId: a.circleWalletId,
+            label: `${a.name} · Token #${a.tokenId}`,
+          });
+        }
+      }
+      return options;
+    };
+    const next = buildOptions();
+    setRepValidatorOptions(next);
+    setRepValidatorSCA((current) => {
+      const stillEligible = next.some(
+        (o) => o.validatorSCA.toLowerCase() === (current || '').trim().toLowerCase()
+      );
+      return stillEligible ? current : (next[0]?.validatorSCA || '');
+    });
+  }, [agents, merchantWallet, repAgentId]);
 
   const deployAgent = async () => {
     setDeploying(true);
@@ -159,41 +216,20 @@ export default function AgentsPage() {
     setRepError(null);
     setRepResult(null);
     try {
-      // ── Authoritative validatorWalletId resolution (client-side derived,
-      // server-verified) ───────────────────────────────────────────────
-      // The UI now supplies validatorWalletId when it can be derived from
-      // local state the merchant already controls (own agents + own merchant
-      // wallet). When the validator is not an owned agent, we omit the
-      // field and the server derives it authoritatively via DB/env —
-      // either way no client-controlled substitution is possible because
-      // the server checks any supplied value against the DB-derived one.
-      let validatorWalletId: string | undefined;
-      const norm = repValidatorSCA.trim().toLowerCase();
-      const matchedAgent = agents.find((a) => a.scaAddress?.toLowerCase() === norm);
-      if (matchedAgent?.circleWalletId) {
-        validatorWalletId = matchedAgent.circleWalletId;
-      } else {
-        try {
-          const mwRes = await fetch('/api/merchant/wallet');
-          const mwData = await mwRes.json().catch(() => ({}));
-          if (
-            mwData?.wallet?.walletAddress?.toLowerCase() === norm &&
-            mwData?.wallet?.circleWalletId
-          ) {
-            validatorWalletId = mwData.wallet.circleWalletId;
-          }
-        } catch {
-          // best-effort: merchant wallet lookup failure is non-fatal; server will derive
-        }
+      const selected = repValidatorOptions.find(
+        (o) => o.validatorSCA.toLowerCase() === (repValidatorSCA || '').trim().toLowerCase()
+      );
+      if (!selected) {
+        throw new Error('No eligible validator wallet selected. Add a merchant Circle wallet or deploy an agent first.');
       }
       const body: any = {
         agentId: repAgentId,
-        validatorSCA: repValidatorSCA,
+        validatorSCA: selected.validatorSCA,
+        validatorWalletId: selected.circleWalletId,
         score: parseInt(repScore),
         tag: repTag,
         feedbackType: 0,
       };
-      if (validatorWalletId) body.validatorWalletId = validatorWalletId;
       const res = await fetch('/api/agent/reputation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -553,13 +589,52 @@ export default function AgentsPage() {
                 />
               </div>
               <div>
-                <span style={S.label}>Validator SCA Address</span>
-                <input
-                  style={S.input}
-                  value={repValidatorSCA}
-                  onChange={(e) => setRepValidatorSCA(e.target.value)}
-                  placeholder="0x... (NOT the agent owner)"
-                />
+                <span style={S.label}>Validator SCA (signing wallet)</span>
+                {loading || !repWalletLoaded ? (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
+                    Resolving your signing wallet…
+                  </p>
+                ) : repValidatorOptions.length === 0 ? (
+                  <div
+                    style={{
+                      background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.2)',
+                      borderRadius: 10,
+                      padding: 12,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>
+                      No eligible validator wallet found — add a Circle wallet to your merchant account or deploy an agent before recording reputation.
+                    </p>
+                  </div>
+                ) : repValidatorOptions.length === 1 ? (
+                  <input
+                    style={S.input}
+                    value={repValidatorSCA || repValidatorOptions[0].validatorSCA}
+                    readOnly
+                    aria-label="Validator SCA (signing wallet)"
+                  />
+                ) : (
+                  <select
+                    style={S.input}
+                    value={repValidatorSCA}
+                    onChange={(e) => setRepValidatorSCA(e.target.value)}
+                    aria-label="Validator SCA (signing wallet)"
+                  >
+                    {repValidatorOptions.map((o) => (
+                      <option key={o.validatorSCA} value={o.validatorSCA}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '0 0 10px', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {repValidatorSCA || repValidatorOptions[0]?.validatorSCA || '—'}
+                </p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px' }}>
+                  This reputation will be signed by your wallet.
+                </p>
               </div>
               <div>
                 <span style={S.label}>Score (0-100)</span>
@@ -585,7 +660,7 @@ export default function AgentsPage() {
             </div>
             <button
               style={{ ...S.btn, opacity: repLoading ? 0.6 : 1 }}
-              disabled={repLoading}
+              disabled={repLoading || loading || !repWalletLoaded || repValidatorOptions.length === 0}
               onClick={submitReputation}
             >
               {repLoading ? 'Submitting to Arc...' : '⭐ Record Reputation Onchain'}
