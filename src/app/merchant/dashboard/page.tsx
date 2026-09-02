@@ -321,7 +321,8 @@ export default function MerchantDashboard() {
   useEffect(() => {
     if (checkingAuth || !merchant) return;
     fetchLiveDatabaseState();
-    fetchPlatformFees();
+    // Platform Fees — hidden until backend fix (UI only, backend intact)
+    // fetchPlatformFees();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchLiveDatabaseState(true);
     }, 5000);
@@ -425,110 +426,112 @@ export default function MerchantDashboard() {
           ))}
         </div>
 
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ width: 36, height: 36, background: "#ffe4e6", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: "#be123c", flexShrink: 0 }}>
-              %
+        {/* Platform Fees — hidden until backend fix (UI only, backend intact). Re-enable by removing this JSX comment wrapper and restoring fetchPlatformFees() call in useEffect.
+          <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ width: 36, height: 36, background: "#ffe4e6", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: "#be123c", flexShrink: 0 }}>
+                %
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <p style={{ fontSize: 10, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 4px 0" }}>Platform Fees</p>
+                <p style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", fontFamily: "monospace", margin: "0 0 2px 0" }}>
+                  ${(feeSummary?.totals.successFeesUSDC ?? 0).toFixed(2)} <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 400 }}>USDC</span>
+                </p>
+                {feeSummary && (
+                  <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "6px 0 0 0" }}>
+                    Platform fee ({(feeSummary.feeBps / 100).toFixed(2)}% per transaction), charged after each successful checkout.
+                  </p>
+                )}
+                {(feeSummary?.totals.deferredCount ?? 0) > 0 && (
+                  <p style={{ fontSize: 11, color: "#d97706", margin: "6px 0 0 0" }}>
+                    ◔ {feeSummary?.totals.deferredCount} fee{feeSummary && feeSummary.totals.deferredCount === 1 ? "" : "s"} pending — will be collected later
+                  </p>
+                )}
+                {merchant.walletProvider && merchant.walletProvider !== "CIRCLE" && (
+                  <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "6px 0 0 0" }}>
+                    Your payouts go to an external wallet, so fees are not auto-debited — they accrue as pending here and are collected later.
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  if (!feesExpanded && (!feeSummary || feesError)) fetchPlatformFees();
+                  setFeesExpanded((v) => !v);
+                }}
+                disabled={feesLoading}
+                style={{
+                  flexShrink: 0, background: "var(--surface)", border: "1px solid var(--border)",
+                  borderRadius: 8, padding: "6px 12px", color: "var(--text-secondary)",
+                  fontSize: 11, cursor: feesLoading ? "not-allowed" : "pointer", fontWeight: 700,
+                }}
+              >
+                {feesLoading ? "Loading..." : feesExpanded ? "Hide fee history" : "View fee history"}
+              </button>
             </div>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <p style={{ fontSize: 10, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.5, margin: "0 0 4px 0" }}>Platform Fees</p>
-              <p style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", fontFamily: "monospace", margin: "0 0 2px 0" }}>
-                ${(feeSummary?.totals.successFeesUSDC ?? 0).toFixed(2)} <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 400 }}>USDC</span>
-              </p>
-              {feeSummary && (
-                <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "6px 0 0 0" }}>
-                  Platform fee ({(feeSummary.feeBps / 100).toFixed(2)}% per transaction), charged after each successful checkout.
-                </p>
-              )}
-              {(feeSummary?.totals.deferredCount ?? 0) > 0 && (
-                <p style={{ fontSize: 11, color: "#d97706", margin: "6px 0 0 0" }}>
-                  ◔ {feeSummary?.totals.deferredCount} fee{feeSummary && feeSummary.totals.deferredCount === 1 ? "" : "s"} pending — will be collected later
-                </p>
-              )}
-              {merchant.walletProvider && merchant.walletProvider !== "CIRCLE" && (
-                <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "6px 0 0 0" }}>
-                  Your payouts go to an external wallet, so fees are not auto-debited — they accrue as pending here and are collected later.
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => {
-                if (!feesExpanded && (!feeSummary || feesError)) fetchPlatformFees();
-                setFeesExpanded((v) => !v);
-              }}
-              disabled={feesLoading}
-              style={{
-                flexShrink: 0, background: "var(--surface)", border: "1px solid var(--border)",
-                borderRadius: 8, padding: "6px 12px", color: "var(--text-secondary)",
-                fontSize: 11, cursor: feesLoading ? "not-allowed" : "pointer", fontWeight: 700,
-              }}
-            >
-              {feesLoading ? "Loading..." : feesExpanded ? "Hide fee history" : "View fee history"}
-            </button>
+
+            {feesError && !feesLoading && <p style={{ color: "var(--danger)", fontSize: 12, margin: "12px 0 0 0" }}>❌ {feesError}</p>}
+
+            {feesExpanded && feeSummary && (
+              <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--surface-secondary)" }}>
+                {feeSummary.fees.length === 0 ? (
+                  <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: 0, textAlign: "center", padding: "16px 0" }}>
+                    No platform fees recorded yet.
+                  </p>
+                ) : (
+                  <>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: 12, minWidth: 520 }}>
+                        <thead>
+                          <tr>
+                            {["Reference", "Payment", "Fee", "Status", "Date"].map((h) => (
+                              <th key={h} style={{ textAlign: "left", padding: "8px 10px 8px 0", color: "var(--text-secondary)", textTransform: "uppercase", fontSize: 9, letterSpacing: 0.5, borderBottom: "1px solid var(--border)" }}>
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {feeSummary.fees.map((f) => {
+                            const s = FEE_STATUS_STYLES[f.status] ?? { bg: "var(--background)", border: "var(--border)", color: "var(--text-secondary)", label: f.status };
+                            return (
+                              <tr key={f.id}>
+                                <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", color: "var(--primary)", verticalAlign: "top" }}>
+                                  {f.paymentLog ? `${f.paymentLog.reference.slice(0, 12)}...` : "—"}
+                                </td>
+                                <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", color: "var(--text)", verticalAlign: "top" }}>
+                                  {f.paymentLog ? `$${f.paymentLog.amount.toFixed(2)}` : "—"}
+                                </td>
+                                <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", color: "var(--text)", fontWeight: 700, verticalAlign: "top" }}>
+                                  ${f.amountCharged.toFixed(4)}
+                                </td>
+                                <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", verticalAlign: "top" }}>
+                                  <span style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10, padding: "4px 8px", fontSize: 9, fontWeight: 700, color: s.color, display: "inline-block" }}>
+                                    {s.label}
+                                  </span>
+                                  {f.deferredReason && (f.status === "DEFERRED" || f.status === "FAILED") && (
+                                    <div style={{ fontSize: 9, color: "var(--text-secondary)", marginTop: 4 }}>{f.deferredReason}</div>
+                                  )}
+                                </td>
+                                <td style={{ padding: "10px 0", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 10, verticalAlign: "top" }}>
+                                  {new Date(f.createdAt).toLocaleDateString()}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {feeSummary.totals.totalCount > feeSummary.fees.length && (
+                      <p style={{ fontSize: 10, color: "var(--text-secondary)", margin: "10px 0 0 0" }}>
+                        Showing first {feeSummary.fees.length} of {feeSummary.totals.totalCount} fees.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
-
-          {feesError && !feesLoading && <p style={{ color: "var(--danger)", fontSize: 12, margin: "12px 0 0 0" }}>❌ {feesError}</p>}
-
-          {feesExpanded && feeSummary && (
-            <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--surface-secondary)" }}>
-              {feeSummary.fees.length === 0 ? (
-                <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: 0, textAlign: "center", padding: "16px 0" }}>
-                  No platform fees recorded yet.
-                </p>
-              ) : (
-                <>
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: 12, minWidth: 520 }}>
-                      <thead>
-                        <tr>
-                          {["Reference", "Payment", "Fee", "Status", "Date"].map((h) => (
-                            <th key={h} style={{ textAlign: "left", padding: "8px 10px 8px 0", color: "var(--text-secondary)", textTransform: "uppercase", fontSize: 9, letterSpacing: 0.5, borderBottom: "1px solid var(--border)" }}>
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {feeSummary.fees.map((f) => {
-                          const s = FEE_STATUS_STYLES[f.status] ?? { bg: "var(--background)", border: "var(--border)", color: "var(--text-secondary)", label: f.status };
-                          return (
-                            <tr key={f.id}>
-                              <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", color: "var(--primary)", verticalAlign: "top" }}>
-                                {f.paymentLog ? `${f.paymentLog.reference.slice(0, 12)}...` : "—"}
-                              </td>
-                              <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", color: "var(--text)", verticalAlign: "top" }}>
-                                {f.paymentLog ? `$${f.paymentLog.amount.toFixed(2)}` : "—"}
-                              </td>
-                              <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", color: "var(--text)", fontWeight: 700, verticalAlign: "top" }}>
-                                ${f.amountCharged.toFixed(4)}
-                              </td>
-                              <td style={{ padding: "10px 10px 10px 0", borderBottom: "1px solid var(--border)", verticalAlign: "top" }}>
-                                <span style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 10, padding: "4px 8px", fontSize: 9, fontWeight: 700, color: s.color, display: "inline-block" }}>
-                                  {s.label}
-                                </span>
-                                {f.deferredReason && (f.status === "DEFERRED" || f.status === "FAILED") && (
-                                  <div style={{ fontSize: 9, color: "var(--text-secondary)", marginTop: 4 }}>{f.deferredReason}</div>
-                                )}
-                              </td>
-                              <td style={{ padding: "10px 0", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 10, verticalAlign: "top" }}>
-                                {new Date(f.createdAt).toLocaleDateString()}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  {feeSummary.totals.totalCount > feeSummary.fees.length && (
-                    <p style={{ fontSize: 10, color: "var(--text-secondary)", margin: "10px 0 0 0" }}>
-                      Showing first {feeSummary.fees.length} of {feeSummary.totals.totalCount} fees.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
+          */}
 
         <div id="checkout" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
           <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 4px 0" }}>Create Payment Link</h3>
