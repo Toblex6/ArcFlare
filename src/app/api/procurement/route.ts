@@ -51,7 +51,11 @@ async function postHandler(req: NextRequest) {
       merchantId: (actor as any).id ?? null,
     },
   });
-  return NextResponse.json({ success: true, posting });
+  const postingJson = {
+    ...posting,
+    resultingJobId: posting.resultingJobId === null || posting.resultingJobId === undefined ? null : posting.resultingJobId.toString(),
+  };
+  return NextResponse.json({ success: true, posting: postingJson });
 }
 
 async function getHandler(req: NextRequest) {
@@ -68,7 +72,11 @@ async function getHandler(req: NextRequest) {
     take: limit,
     include: { applications: false },
   });
-  return NextResponse.json({ success: true, postings });
+  const postingsJson = postings.map((p: any) => ({
+    ...p,
+    resultingJobId: p.resultingJobId === null || p.resultingJobId === undefined ? null : p.resultingJobId.toString(),
+  }));
+  return NextResponse.json({ success: true, postings: postingsJson });
 }
 
 export async function POST(req: NextRequest) {

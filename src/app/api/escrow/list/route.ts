@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     if (role === 'beneficiary') {
       const controlled = await getCallerControlledAddresses(request);
       if (controlled.size === 0) {
-        return NextResponse.json({ success: true, metrics: {}, escrows: [], role: 'beneficiary' });
+        return NextResponse.json({ success: true, metrics: { total: 0, active: 0, released: 0, disputed: 0, refunded: 0, totalLocked: 0, totalReleased: 0 }, escrows: [], role: 'beneficiary' });
       }
       const all = await (prisma as any).escrow.findMany({
         orderBy: { createdAt: 'desc' },
@@ -51,14 +51,28 @@ export async function GET(request: NextRequest) {
       const incoming = all.filter(
         (e: any) => controlled.has(String(e.beneficiarySCA).toLowerCase())
       );
-      const activeIncoming = incoming.filter((e: any) => e.status === 'ACTIVE');
+      const active = incoming.filter((e: any) => e.status === 'ACTIVE').length;
+      const released = incoming.filter((e: any) => e.status === 'RELEASED').length;
+      const disputed = incoming.filter((e: any) => e.status === 'DISPUTED').length;
+      const refunded = incoming.filter((e: any) => e.status === 'REFUNDED').length;
+      const totalLocked = incoming
+        .filter((e: any) => e.status === 'ACTIVE' || e.status === 'DISPUTED')
+        .reduce((sum: number, e: any) => sum + e.amount, 0);
+      const totalReleased = incoming
+        .filter((e: any) => e.status === 'RELEASED')
+        .reduce((sum: number, e: any) => sum + e.amount, 0);
 
       return NextResponse.json({
         success: true,
         role: 'beneficiary',
         metrics: {
           total: incoming.length,
-          active: activeIncoming.length,
+          active,
+          released,
+          disputed,
+          refunded,
+          totalLocked: parseFloat(totalLocked.toFixed(4)),
+          totalReleased: parseFloat(totalReleased.toFixed(4)),
         },
         escrows: incoming.map((e: any) => ({
           ...e,
