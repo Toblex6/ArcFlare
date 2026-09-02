@@ -8,46 +8,47 @@ datasource db {
 }
 
 model PaymentLog {
-  id               String    @id @default(uuid())
-  reference        String    @unique
-  idempotencyKey   String?   @unique
+  id               String             @id @default(uuid())
+  reference        String             @unique
+  idempotencyKey   String?            @unique
   amount           Float
   currency         String
   chain            String
-  senderEmail      String    // 'pending@checkout' until a real payer settles (matches merchant links' convention)
-  direction        String    @default("send") // "send" | "request" — explicit, not inferred
+  senderEmail      String // 'pending@checkout' until a real payer settles (matches merchant links' convention)
+  direction        String             @default("send") // "send" | "request" — explicit, not inferred
   merchant         String
   status           String
   arcTxHash        String?
-  cctpSourceTxHash String?   @unique
+  cctpSourceTxHash String?            @unique
   webhookUrl       String?
-  timestamp        DateTime  @default(now())
+  timestamp        DateTime           @default(now())
   expiresAt        DateTime?
   agentSCA         String?
   circleTxId       String?
   payerSCA         String?
   merchantSCA      String?
-  merchantId       String?   // FK to Merchant.id — resolves the real payout wallet at settlement
-  listingId        String?   // set when this payment was for a marketplace ApiListing (loose ref, same convention as merchantId above)
-  gatewayReference String?   // Circle Gateway's batch settlement reference (a UUID) — NOT an onchain
-                             // tx hash. Settlement happens later in a batch; arcTxHash stays null
-                             // until a real onchain hash exists for it (not tracked yet, see
-                             // merchant/analytics route's notTracked section).
-  upstreamOk       Boolean?  // For marketplace/x402-proxied payments: whether the upstream targetUrl
-                             // responded successfully AFTER payment settled. Null = not applicable
-                             // (non-proxied payment) or not yet recorded.
-  upstreamStatus   Int?      // The upstream's actual HTTP status code, for merchant debugging.
-  updatedAt        DateTime? @updatedAt
+  merchantId       String? // FK to Merchant.id — resolves the real payout wallet at settlement
+  listingId        String? // set when this payment was for a marketplace ApiListing (loose ref, same convention as merchantId above)
+  gatewayReference String? // Circle Gateway's batch settlement reference (a UUID) — NOT an onchain
+  // tx hash. Settlement happens later in a batch; arcTxHash stays null
+  // until a real onchain hash exists for it (not tracked yet, see
+  // merchant/analytics route's notTracked section).
+  upstreamOk       Boolean? // For marketplace/x402-proxied payments: whether the upstream targetUrl
+  // responded successfully AFTER payment settled. Null = not applicable
+  // (non-proxied payment) or not yet recorded.
+  upstreamStatus   Int? // The upstream's actual HTTP status code, for merchant debugging.
+  updatedAt        DateTime?          @updatedAt
   ledgerEntries    AgentLedgerEntry[]
+  platformFees     PlatformFee[]
 
   @@index([listingId])
 }
 
 model AgentRegistry {
-  id             Int            @id @default(autoincrement())
+  id             Int                  @id @default(autoincrement())
   name           String
-  tokenId        String         @unique
-  scaAddress     String         @unique
+  tokenId        String               @unique
+  scaAddress     String               @unique
   circleWalletId String?
   ownerNode      String
   metadataURI    String?
@@ -55,12 +56,12 @@ model AgentRegistry {
   description    String?
   skills         Json?
   pricing        Json?
-  reputation     Int            @default(50)
+  reputation     Int                  @default(50)
   lastActiveAt   DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @default(now()) @updatedAt
-  idempotencyKey String?        @unique
-  merchantId     String?        // owning merchant — null only for legacy/pre-scoping rows
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @default(now()) @updatedAt
+  idempotencyKey String?              @unique
+  merchantId     String? // owning merchant — null only for legacy/pre-scoping rows
   agents         Agent[]
   wallets        CircleWallet[]
   ledgerEntries  AgentLedgerEntry[]
@@ -70,21 +71,21 @@ model AgentRegistry {
 }
 
 model ApiListing {
-  id              String    @id @default(uuid())
-  slug            String    @unique // used in the gated route path: /api/x402/marketplace/pay/[slug]
+  id              String   @id @default(uuid())
+  slug            String   @unique // used in the gated route path: /api/x402/marketplace/pay/[slug]
   name            String
   description     String?
-  categories      String[]  @default([])
-  pricePerRequest String?   // "$X.XX" format, passed straight into withGateway() unchanged — null for agent listings (hire uses separate flow)
+  categories      String[] @default([])
+  pricePerRequest String? // "$X.XX" format, passed straight into withGateway() unchanged — null for agent listings (hire uses separate flow)
   docsUrl         String?
-  targetUrl       String?   // upstream API this listing proxies to once payment clears — null for agent listings
-  status          String    @default("DRAFT") // "DRAFT" | "PUBLISHED" | "SUSPENDED"
-  merchantId      String?   // owning provider — null only for legacy/pre-scoping rows
+  targetUrl       String? // upstream API this listing proxies to once payment clears — null for agent listings
+  status          String   @default("DRAFT") // "DRAFT" | "PUBLISHED" | "SUSPENDED"
+  merchantId      String? // owning provider — null only for legacy/pre-scoping rows
   // Agent listing support — when present, this is an agent listing (hire action)
   // instead of a service listing (pay-per-request proxy)
-  agentRegistryId Int?     // references AgentRegistry.id — when set, this is an agent listing
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  agentRegistryId Int? // references AgentRegistry.id — when set, this is an agent listing
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([merchantId])
   @@index([status])
@@ -118,31 +119,31 @@ model Agent {
 }
 
 model Escrow {
-  id                 String    @id @default(uuid())
-  reference          String    @unique
-  idempotencyKey     String?   @unique
-  amount             Float
-  currency           String
-  depositorSCA       String
-  beneficiarySCA     String
-  contractAddress    String
-  status             String
-  condition          String?
-  contractEscrowId   String?
-  deadline           DateTime?
-  createdAt          DateTime  @default(now())
-  merchantId         String?   // owning merchant — null only for legacy/pre-scoping rows
+  id               String    @id @default(uuid())
+  reference        String    @unique
+  idempotencyKey   String?   @unique
+  amount           Float
+  currency         String
+  depositorSCA     String
+  beneficiarySCA   String
+  contractAddress  String
+  status           String
+  condition        String?
+  contractEscrowId String?
+  deadline         DateTime?
+  createdAt        DateTime  @default(now())
+  merchantId       String? // owning merchant — null only for legacy/pre-scoping rows
 
-  txHash             String?
-  releaseTxHash      String?
-  disputeTxHash      String?
-  disputeReason      String?
-  disputedBy         String?
-  depositorConfirmed Boolean   @default(false)
-  beneficiaryConfirmed Boolean  @default(false)
-  beneficiaryKind    String?
+  txHash                String?
+  releaseTxHash         String?
+  disputeTxHash         String?
+  disputeReason         String?
+  disputedBy            String?
+  depositorConfirmed    Boolean   @default(false)
+  beneficiaryConfirmed  Boolean   @default(false)
+  beneficiaryKind       String?
   beneficiaryNotifiedAt DateTime?
-  webhookUrl         String?
+  webhookUrl            String?
 }
 
 model Stream {
@@ -197,21 +198,21 @@ model Merchant {
   // Open string, not a two-value enum: "CIRCLE" | "METAMASK" | "WALLETCONNECT" |
   // "COINBASE" | "SAFE" | "DELEGATED_SESSION" (future). Each maps to a
   // WalletProvider implementation in src/lib/wallet/ — see resolve.ts.
-  walletProvider   String    @default("CIRCLE")
-  walletAddress    String?   // SCA address (Circle) or connected EOA (external)
-  circleWalletId   String?   // Circle wallet ID, only set when walletProvider = CIRCLE
-  sessionVersion   Int       @default(0) // M18 — bumped on password reset; invalidates all outstanding session tokens
+  walletProvider String  @default("CIRCLE")
+  walletAddress  String? // SCA address (Circle) or connected EOA (external)
+  circleWalletId String? // Circle wallet ID, only set when walletProvider = CIRCLE
+  sessionVersion Int     @default(0) // M18 — bumped on password reset; invalidates all outstanding session tokens
 }
 
 model WalletSignatureRequest {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   merchantId  String
-  action      String    // "escrow.release" | "payroll.run" | "scheduled.execute" | etc.
-  actionRefId String    // the Escrow/PayrollBatch/ScheduledPayment id this resumes
-  payload     Json      // unsigned tx / EIP-712 typed-data payload the wallet needs to sign
-  status      String    @default("PENDING") // PENDING | SIGNED | EXPIRED | REJECTED
+  action      String // "escrow.release" | "payroll.run" | "scheduled.execute" | etc.
+  actionRefId String // the Escrow/PayrollBatch/ScheduledPayment id this resumes
+  payload     Json // unsigned tx / EIP-712 typed-data payload the wallet needs to sign
+  status      String   @default("PENDING") // PENDING | SIGNED | EXPIRED | REJECTED
   signedTx    String?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
   expiresAt   DateTime
 
   @@index([merchantId])
@@ -219,16 +220,16 @@ model WalletSignatureRequest {
 }
 
 model ConsumerAccount {
-  id             String    @id @default(uuid())
-  walletAddress  String    @unique
-  walletType     String    @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
-  circleWalletId String?
-  walletSetId    String?   // needed to provision this same SCA address on additional chains (e.g. for bridging)
-  email          String?   @unique // optional — recovery/notifications only, never required
-  telegramUserId String?   @unique // Telegram bot identity (Telegram users are consumer_token accounts)
+  id               String   @id @default(uuid())
+  walletAddress    String   @unique
+  walletType       String   @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
+  circleWalletId   String?
+  walletSetId      String? // needed to provision this same SCA address on additional chains (e.g. for bridging)
+  email            String?  @unique // optional — recovery/notifications only, never required
+  telegramUserId   String?  @unique // Telegram bot identity (Telegram users are consumer_token accounts)
   onboardingSource String? // "telegram" | "web" | etc — how this account was created
-  createdAt      DateTime  @default(now())
-  lastSeenAt     DateTime  @default(now())
+  createdAt        DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
 }
 
 model TelegramWithdrawalIntent {
@@ -249,22 +250,22 @@ model Job {
   status      String
   createdAt   DateTime @default(now())
   agentId     String
-  merchantId  String?  // owning merchant — null only for legacy/pre-scoping rows
+  merchantId  String? // owning merchant — null only for legacy/pre-scoping rows
   agent       Agent    @relation(fields: [agentId], references: [id])
 }
 
 model JobNanopaymentStream {
-  id               String   @id @default(cuid())
-  jobId            String   @unique
+  id               String    @id @default(cuid())
+  jobId            String    @unique
   streamId         String
   workerAddress    String
   totalBudget      String
   trancheCount     Int
-  tranchesReleased Int      @default(0)
+  tranchesReleased Int       @default(0)
   token            String
   criteriaHash     String?
   closedAt         DateTime?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime  @default(now())
 }
 
 model JobNanopaymentTranche {
@@ -278,8 +279,8 @@ model JobNanopaymentTranche {
 }
 
 model Erc8183Job {
-  id              String   @id @default(uuid())
-  jobId           BigInt   @unique
+  id              String                @id @default(uuid())
+  jobId           BigInt                @unique
   clientSCA       String
   providerSCA     String
   evaluatorSCA    String
@@ -290,12 +291,12 @@ model Erc8183Job {
   reasonHash      String?
   txHashes        String[]
   hook            String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
   expiredAt       DateTime
   agentId         String?
-  merchantId      String?  // owning merchant — null only for legacy/pre-scoping rows
-  agent           Agent?   @relation(fields: [agentId], references: [id])
+  merchantId      String? // owning merchant — null only for legacy/pre-scoping rows
+  agent           Agent?                @relation(fields: [agentId], references: [id])
   applications    JobApplication[]
   validation      Erc8183JobValidation?
   // Admin moderation (platform owner flags a malicious/bad job). removedAt
@@ -314,18 +315,18 @@ model Erc8183Job {
 }
 
 model Erc8183JobValidation {
-  id             String   @id @default(cuid())
-  jobId          BigInt   @unique
-  job            Erc8183Job @relation(fields: [jobId], references: [jobId], onDelete: Cascade)
+  id             String             @id @default(cuid())
+  jobId          BigInt             @unique
+  job            Erc8183Job         @relation(fields: [jobId], references: [jobId], onDelete: Cascade)
   validatorSCA   String
-  requestHash    String?  @unique
+  requestHash    String?            @unique
   requestTxHash  String?
   responseTxHash String?
-  status         String   @default("PENDING") // PENDING, REQUESTED, PASSED, FAILED
+  status         String             @default("PENDING") // PENDING, REQUESTED, PASSED, FAILED
   tag            String?
-  required       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  required       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
   ledgerEntries  AgentLedgerEntry[]
 
   @@index([validatorSCA])
@@ -334,14 +335,14 @@ model Erc8183JobValidation {
 }
 
 model JobApplication {
-  id               String       @id @default(cuid())
+  id               String     @id @default(cuid())
   jobId            BigInt
   applicantAddress String
   proposedAmount   String?
   pitch            String
-  portfolioLinks   String[]     @default([])
-  createdAt        DateTime     @default(now())
-  job              Erc8183Job   @relation(fields: [jobId], references: [jobId])
+  portfolioLinks   String[]   @default([])
+  createdAt        DateTime   @default(now())
+  job              Erc8183Job @relation(fields: [jobId], references: [jobId])
 
   @@unique([jobId, applicantAddress])
   @@index([jobId])
@@ -429,7 +430,7 @@ model PayrollBatch {
   webhookUrl     String?
   createdAt      DateTime  @default(now())
   completedAt    DateTime?
-  merchantId     String?   // owning merchant (H8 tenant scoping); null for x402-funded rows
+  merchantId     String? // owning merchant (H8 tenant scoping); null for x402-funded rows
 
   @@index([merchantId])
 }
@@ -437,9 +438,9 @@ model PayrollBatch {
 model X402EoaWallet {
   id              String   @id @default(uuid())
   address         String   @unique
-  encryptedKey    String   // AES-256-GCM ciphertext (was plaintext "privateKey" — never shipped that way)
-  keyIv           String   // GCM initialization vector, base64
-  keyAuthTag      String   // GCM auth tag, base64
+  encryptedKey    String // AES-256-GCM ciphertext (was plaintext "privateKey" — never shipped that way)
+  keyIv           String // GCM initialization vector, base64
+  keyAuthTag      String // GCM auth tag, base64
   merchantId      String?  @unique // one wallet per merchant for now; null only for pre-migration rows
   agentRegistryId Int?     @unique // one wallet per agent (agent payments); mutually exclusive with merchantId
   label           String?
@@ -460,7 +461,7 @@ model AgentBrainMemory {
 model MerchantBudget {
   id           String   @id @default(uuid())
   merchantId   String
-  category     String   // e.g. "payroll", "marketing", "supplies" — freeform, merchant-defined
+  category     String // e.g. "payroll", "marketing", "supplies" — freeform, merchant-defined
   monthlyLimit Float
   currency     String   @default("USDC")
   createdAt    DateTime @default(now())
@@ -476,7 +477,7 @@ model MerchantReminder {
   amount       Float?
   dueDate      DateTime
   recurring    Boolean  @default(false)
-  intervalDays Int?     // only set if recurring
+  intervalDays Int? // only set if recurring
   completed    Boolean  @default(false)
   createdAt    DateTime @default(now())
 
@@ -487,10 +488,10 @@ model MerchantReminder {
 model Notification {
   id         String   @id @default(uuid())
   merchantId String
-  type       String   // e.g. "payment.received", "escrow.funded" — see NOTIFICATION_EVENTS in src/lib/notifications.ts
+  type       String // e.g. "payment.received", "escrow.funded" — see NOTIFICATION_EVENTS in src/lib/notifications.ts
   title      String
   message    String
-  data       Json?    // arbitrary event payload (reference, amount, txHash, etc.)
+  data       Json? // arbitrary event payload (reference, amount, txHash, etc.)
   read       Boolean  @default(false)
   createdAt  DateTime @default(now())
 
@@ -505,7 +506,7 @@ model NotificationPreference {
   emailEnabled   Boolean  @default(true)
   webhookEnabled Boolean  @default(false)
   inAppEnabled   Boolean  @default(true)
-  webhookUrl     String?  // default target when an event doesn't carry its own webhookUrl
+  webhookUrl     String? // default target when an event doesn't carry its own webhookUrl
   mutedEvents    String[] @default([]) // event type strings the merchant opted OUT of — default is everything ON
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -517,23 +518,23 @@ model DisputeEvidence {
   submittedBy String
   role        String
   type        String   @default("text") // "text" | "link" | "image" | "screenshot" | "pdf" |
-                                        // "chat_export" | "receipt" | "shipping_confirmation" |
-                                        // "transaction_proof"
-  content     String   // raw text, OR a URL for anything file-based
-  mimeType    String?  // set when type implies a file — lets normalizers dispatch without
-                       // guessing from extension (e.g. "application/pdf", "image/png")
+  // "chat_export" | "receipt" | "shipping_confirmation" |
+  // "transaction_proof"
+  content     String // raw text, OR a URL for anything file-based
+  mimeType    String? // set when type implies a file — lets normalizers dispatch without
+  // guessing from extension (e.g. "application/pdf", "image/png")
   createdAt   DateTime @default(now())
-  
+
   @@index([reference])
 }
 
 model DisputeAnalysis {
   id          String    @id @default(uuid())
-  reference   String    // Escrow.reference
+  reference   String // Escrow.reference
   status      String    @default("PENDING") // "PENDING" | "COMPLETE" | "FAILED"
-  version     Int       @default(1)          // bumped per re-run; never overwritten
-  provider    String    // e.g. "groq:llama-3.3-70b-versatile"
-  result      Json?     // full DisputeAnalysisResult — see types.ts
+  version     Int       @default(1) // bumped per re-run; never overwritten
+  provider    String // e.g. "groq:llama-3.3-70b-versatile"
+  result      Json? // full DisputeAnalysisResult — see types.ts
   error       String?
   createdAt   DateTime  @default(now())
   completedAt DateTime?
@@ -569,25 +570,25 @@ model StuckSettlement {
 // moved; the ledger is the index for agent economics.
 
 model AgentLedgerEntry {
-  id                  String   @id @default(cuid())
+  id                  String                @id @default(cuid())
   agentRegistryId     Int
-  agent               AgentRegistry @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
-  type                String   // REVENUE | AGENT_PAYMENT | SUBCONTRACTOR_SPEND | JOB_ESCROW_LOCK | JOB_ESCROW_RELEASE | PAYROLL_SPEND | STREAM_REVENUE | STREAM_SPEND | GAS | REFUND | ADJUSTMENT
-  amount              String   // 6-decimal USDC integer string (bigint string) — never float
-  token               String   @default("USDC")
-  direction           String   // CREDIT | DEBIT
+  agent               AgentRegistry         @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
+  type                String // REVENUE | AGENT_PAYMENT | SUBCONTRACTOR_SPEND | JOB_ESCROW_LOCK | JOB_ESCROW_RELEASE | PAYROLL_SPEND | STREAM_REVENUE | STREAM_SPEND | GAS | REFUND | ADJUSTMENT
+  amount              String // 6-decimal USDC integer string (bigint string) — never float
+  token               String                @default("USDC")
+  direction           String // CREDIT | DEBIT
   counterpartyAgentId Int?
   paymentLogId        String?
-  paymentLog          PaymentLog? @relation(fields: [paymentLogId], references: [id])
+  paymentLog          PaymentLog?           @relation(fields: [paymentLogId], references: [id])
   jobId               BigInt?
   jobValidationId     String?
   jobValidation       Erc8183JobValidation? @relation(fields: [jobValidationId], references: [id])
   streamId            String?
   txHash              String?
-  dedupeKey           String   @unique // txHash:agentId:type when on-chain, else sourceType:sourceId:agentId:type
+  dedupeKey           String                @unique // txHash:agentId:type when on-chain, else sourceType:sourceId:agentId:type
   description         String?
   metadata            Json?
-  createdAt           DateTime @default(now())
+  createdAt           DateTime              @default(now())
 
   @@index([agentRegistryId, createdAt])
   @@index([agentRegistryId, type])
@@ -598,59 +599,76 @@ model AgentLedgerEntry {
 }
 
 model AgentTreasuryPolicy {
-  id                           Int      @id @default(autoincrement())
-  agentRegistryId              Int      @unique
-  agent                        AgentRegistry @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
-  reserveMinimum               String   @default("0") // 6-dec units bigint string
-  maxSpendPerJob               String   @default("0") // 0 = no cap beyond spendLimit
-  maxSpendPerDay               String   @default("0")
-  maxSubcontractorSpendPerDay  String   @default("0")
-  autoPaySubcontractors        Boolean  @default(false)
-  reinvestPercent              Int      @default(0) // 0..100
-  minTrustScore                Int?     // 0..100, null = no minimum (default preserves current behavior)
-  createdAt                    DateTime @default(now())
-  updatedAt                    DateTime @updatedAt
+  id                          Int           @id @default(autoincrement())
+  agentRegistryId             Int           @unique
+  agent                       AgentRegistry @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
+  reserveMinimum              String        @default("0") // 6-dec units bigint string
+  maxSpendPerJob              String        @default("0") // 0 = no cap beyond spendLimit
+  maxSpendPerDay              String        @default("0")
+  maxSubcontractorSpendPerDay String        @default("0")
+  autoPaySubcontractors       Boolean       @default(false)
+  reinvestPercent             Int           @default(0) // 0..100
+  minTrustScore               Int? // 0..100, null = no minimum (default preserves current behavior)
+  createdAt                   DateTime      @default(now())
+  updatedAt                   DateTime      @updatedAt
 
   @@map("agent_treasury_policies")
 }
 
 model AgentProviderPolicy {
-  id                  Int      @id @default(autoincrement())
-  agentRegistryId     Int      @unique
+  id                  Int           @id @default(autoincrement())
+  agentRegistryId     Int           @unique
   agent               AgentRegistry @relation(fields: [agentRegistryId], references: [id], onDelete: Cascade)
-  minBudget           String   @default("0") // 6-dec units bigint string
-  maxConcurrentJobs   Int      @default(5)
-  minClientTrustScore Int?     // null = no minimum
-  allowedSkills       Json?    // string[] or null = any skill
-  allowedCategories   Json?    // string[] or null = any category
-  autoAccept          Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  minBudget           String        @default("0") // 6-dec units bigint string
+  maxConcurrentJobs   Int           @default(5)
+  minClientTrustScore Int? // null = no minimum
+  allowedSkills       Json? // string[] or null = any skill
+  allowedCategories   Json? // string[] or null = any category
+  autoAccept          Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   @@map("agent_provider_policies")
 }
 
+model PlatformFee {
+  id             String     @id @default(uuid())
+  paymentLogId   String // FK to PaymentLog.id
+  paymentLog     PaymentLog @relation(fields: [paymentLogId], references: [id])
+  merchantId     String
+  amountCharged  Float // feeAmount computed = payment.amount * FEE_BPS / 10000
+  amountReceived Float? // measured delta once/if succeeds
+  status         String // PENDING|SUCCESS|FAILED|DEFERRED
+  txHash         String?
+  deferredReason String?
+  createdAt      DateTime   @default(now())
+
+  @@index([merchantId])
+  @@index([status])
+  @@map("platform_fees")
+}
+
 model ProcurementPosting {
-  id                   String   @id @default(cuid())
-  clientAgentId        Int
-  clientAgent          AgentRegistry @relation(fields: [clientAgentId], references: [id], onDelete: Cascade)
-  clientSCA            String
-  title                String?
-  description          String
-  requirements         Json?    // string[] requirements
-  budgetMax            String   // 6-dec bigint string
-  budgetMin            String?  // optional 6-dec
-  skill                String?
-  category             String?
-  status               String   @default("OPEN") // OPEN | SELECTED | HIRED | CLOSED | CANCELLED
-  selectedProviderId   Int?
-  selectedProviderSCA  String?
-  resultingJobId       BigInt?
-  merchantId           String?
-  seq                  Int      @default(autoincrement()) @unique // human-facing "job<N>" id for Telegram /apply
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  applications         ProcurementApplication[]
+  id                  String                   @id @default(cuid())
+  clientAgentId       Int
+  clientAgent         AgentRegistry            @relation(fields: [clientAgentId], references: [id], onDelete: Cascade)
+  clientSCA           String
+  title               String?
+  description         String
+  requirements        Json? // string[] requirements
+  budgetMax           String // 6-dec bigint string
+  budgetMin           String? // optional 6-dec
+  skill               String?
+  category            String?
+  status              String                   @default("OPEN") // OPEN | SELECTED | HIRED | CLOSED | CANCELLED
+  selectedProviderId  Int?
+  selectedProviderSCA String?
+  resultingJobId      BigInt?
+  merchantId          String?
+  seq                 Int                      @unique @default(autoincrement()) // human-facing "job<N>" id for Telegram /apply
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  applications        ProcurementApplication[]
 
   @@index([clientAgentId])
   @@index([status])
@@ -658,15 +676,15 @@ model ProcurementPosting {
 }
 
 model ProcurementApplication {
-  id                String   @id @default(cuid())
-  procurementId     String
-  procurement       ProcurementPosting @relation(fields: [procurementId], references: [id], onDelete: Cascade)
-  applicantAgentId  Int?
-  applicantAddress  String
-  pitch             String
-  proposedAmount    String?  // 6-dec bigint string
-  portfolioLinks    String[] @default([])
-  createdAt         DateTime @default(now())
+  id               String             @id @default(cuid())
+  procurementId    String
+  procurement      ProcurementPosting @relation(fields: [procurementId], references: [id], onDelete: Cascade)
+  applicantAgentId Int?
+  applicantAddress String
+  pitch            String
+  proposedAmount   String? // 6-dec bigint string
+  portfolioLinks   String[]           @default([])
+  createdAt        DateTime           @default(now())
 
   @@unique([procurementId, applicantAddress])
   @@index([procurementId])
