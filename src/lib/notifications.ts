@@ -53,6 +53,13 @@ export const NOTIFICATION_EVENTS = {
         label: 'CCTP transfer completed',
         description: 'A cross-chain USDC bridge into Arc finished successfully.',
     },
+    // SUBTASK D (minimal additive use): validator-side fan-out for
+    // ERC-8004 validation requests, sent via notifyValidator.ts AFTER the
+    // on-chain validationRequest succeeds. No other route uses this event.
+    'validation.requested': {
+        label: 'Validation requested',
+        description: 'You (or your agent) were selected as validator for an agent validation request.',
+    },
 } as const;
 
 export type NotificationEventType = keyof typeof NOTIFICATION_EVENTS;

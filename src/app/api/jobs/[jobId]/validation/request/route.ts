@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { getJobValidationPolicy, recordValidationRequest } from "@/lib/jobs/jobValidationPolicy";
+import { notifyValidator } from "@/lib/notifyValidator";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { createPublicClient, http, keccak256, toHex } from "viem";
 
@@ -65,7 +66,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
     const txHash = await waitForTx(circleClient, tx.data.id);
     const updated = await recordValidationRequest(jobIdBigInt, requestHash, txHash);
-    return NextResponse.json({ success: true, jobId, agentId: agent.tokenId, validatorSCA: policy.validatorSCA, requestHash, requestURI, txHash, explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`, status: updated.status, message: `Validation requested for job ${jobId} — validator ${policy.validatorSCA} must now respond` });
+    // SUBTASK D — notify the validator AFTER on-chain success only.
+    // policy.validatorSCA is authoritative: it is the exact `validator`
+    // argument sent to ValidationRegistry.validationRequest above.
+    // Best-effort: failure must NOT invalidate the successful request.
+    // (Idempotent replays return earlier and never re-notify. Receiver gap:
+    // no validator pending inbox exists — see note in src/lib/notifyValidator.ts.)
+    let validatorNotified = { notified: false } as Awaited<ReturnType<typeof notifyValidator>>;
+    try {
+      validatorNotified = await notifyValidator({ validatorSCA: policy.validatorSCA, agentTokenId: agent.tokenId.toString(), agentName: (agent as any).name ?? null, requestTag, requestHash, requestURI, txHash, jobId });
+    } catch (notifyError: any) {
+      console.error("[job-validation/request] validator notification failed (non-fatal):", notifyError?.message);
+      validatorNotified = { notified: false, reason: notifyError?.message || "notify-failed" };
+    }
+    return NextResponse.json({ success: true, jobId, agentId: agent.tokenId, validatorSCA: policy.validatorSCA, requestHash, requestURI, txHash, explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`, status: updated.status, validatorNotified, message: `Validation requested for job ${jobId} — validator ${policy.validatorSCA} must now respond` });
   };
   return withApiKeyOrAnySession(handler as any)(req);
 }

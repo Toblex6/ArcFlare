@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { notifyValidator } from '@/lib/notifyValidator';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 
@@ -192,6 +193,32 @@ async function validationHandler(request: NextRequest) {
 
       console.log(`✅ Validation requested for agent ${agentId}. RequestHash: ${requestHash}`);
 
+      // SUBTASK D — notify the validator AFTER on-chain success only.
+      // validatorSCA here is authoritative: it is the exact `validator`
+      // argument sent to ValidationRegistry.validationRequest above.
+      // Best-effort: failure must NOT invalidate the successful request.
+      // NOTE (receiver gap): there is no validator pending inbox — no
+      // ValidationRequest table, no event indexer, and the /agents dashboard
+      // validation tab is manual requestHash entry. The validator discovers
+      // the pending request via this notification (requestHash included) and
+      // responds via action "respond". A real inbox needs a persisted request
+      // record + query route — deliberately out of scope here.
+      let validatorNotified = { notified: false } as Awaited<ReturnType<typeof notifyValidator>>;
+      try {
+        validatorNotified = await notifyValidator({
+          validatorSCA,
+          agentTokenId: agentId.toString(),
+          agentName: agent.name ?? null,
+          requestTag,
+          requestHash,
+          requestURI,
+          txHash,
+        });
+      } catch (notifyError: any) {
+        console.error('[validation/request] validator notification failed (non-fatal):', notifyError?.message);
+        validatorNotified = { notified: false, reason: notifyError?.message || 'notify-failed' };
+      }
+
       return NextResponse.json({
         success: true,
         action: 'request',
@@ -202,6 +229,7 @@ async function validationHandler(request: NextRequest) {
         requestURI,
         txHash,
         explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        validatorNotified,
         nextStep: `Call POST /api/agent/validation with action: "respond" and requestHash: "${requestHash}"`,
         message: `Validation requested for agent #${agentId}. Validator ${validatorSCA} must now respond.`,
       });
