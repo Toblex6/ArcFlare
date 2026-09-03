@@ -313,6 +313,31 @@ async function jobsHandler(request: Request) {
         return NextResponse.json({ success: false, error: 'self-hire not allowed: clientSCA and providerSCA cannot be the same address' }, { status: 400 });
       }
 
+      // Provider must be a known FlareHQ wallet (registered agent or consumer)
+      // BEFORE the on-chain createJob — the provider address is immutable after
+      // creation, so an unknown address would leave the job unserviceable.
+      const providerAgent = await (prisma as any).agentRegistry.findFirst({
+        where: { scaAddress: { equals: providerSCA, mode: 'insensitive' } },
+        select: { id: true, merchantId: true },
+      });
+      let humanProvider: any = null;
+      if (!providerAgent) {
+        humanProvider = await (prisma as any).consumerAccount.findFirst({
+          where: { walletAddress: { equals: providerSCA, mode: 'insensitive' } },
+          select: { id: true, telegramUserId: true },
+        });
+        if (!humanProvider) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'providerSCA is not a registered agent or known wallet — the provider must have an account on FlareHQ before being hired directly. Use Post a Job if you want to hire from open applicants instead.',
+            },
+            { status: 400 }
+          );
+        }
+      }
+
       // The job's client wallet pays the escrow — the caller must control it.
       if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
         return NextResponse.json(
@@ -358,7 +383,10 @@ async function jobsHandler(request: Request) {
         // RPC hiccup — never block creation on a read-only check.
       }
 
-      // Save to Postgres
+      // Save to Postgres (best-effort legacy mirror — the Direct Hire lifecycle
+      // reads on-chain state via requireJob, and granular routes key on
+      // Erc8183Job, so this row is not required downstream; the success
+      // response below is preserved regardless).
       await prisma.job
         .create({
           data: {
@@ -369,7 +397,35 @@ async function jobsHandler(request: Request) {
             agentId: providerSCA, // using providerSCA as agentId reference
           },
         })
-        .catch(() => { }); // Job model may need agentId FK — graceful fail
+        .catch((dbError) => {
+          console.error(`[jobs:create] prisma.job.create failed for on-chain job ${String(jobId)}:`, dbError);
+        });
+
+      // Best-effort provider notification — never fails an otherwise successful
+      // creation. Reuses the existing Telegram hire nudge (same mechanism as
+      // jobs/complete + procurement hire) for ConsumerAccount providers with a
+      // linked telegramUserId. AgentRegistry providers have no direct Telegram
+      // identity, and owner-merchant notify() has no registered job-hire event
+      // — so agent notification is skipped with a log. No new channel invented.
+      try {
+        const hired = humanProvider
+          ? humanProvider
+          : await (prisma as any).consumerAccount.findFirst({
+              where: { walletAddress: { equals: providerSCA, mode: 'insensitive' } },
+              select: { telegramUserId: true },
+            });
+        if (hired?.telegramUserId) {
+          const { sendTelegramMessage } = await import('@/lib/telegram/sendTelegramMessage');
+          await sendTelegramMessage(
+            String(hired.telegramUserId),
+            `✅ You've been directly hired for job #${String(jobId)} (${amountUSDC} USDC): "${String(description).slice(0, 80)}".\nNext: set your budget so the client can fund escrow.`
+          );
+        } else if (providerAgent) {
+          console.log(`[jobs:create] agent provider ${providerSCA} (registry id ${String(providerAgent.id)}) hired for job ${String(jobId)} — no job-hire notify event registered for owner merchant ${String(providerAgent.merchantId ?? 'none')}, skipping owner notify.`);
+        }
+      } catch (e: any) {
+        console.error('[jobs:create] provider notification failed:', e?.message ?? String(e));
+      }
 
       return NextResponse.json({
         success: true,
