@@ -5,6 +5,17 @@ import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 
+// ProcurementPosting.resultingJobId is BigInt? — the only BigInt column on this
+// model (budgetMax/Min are strings, seq/ids are Int). NextResponse.json uses
+// JSON.stringify which throws "Do not know how to serialize a BigInt", so every
+// GET/POST response must pass through here. Null stays null.
+function serializePosting(p: any) {
+  return {
+    ...p,
+    resultingJobId: p.resultingJobId === null || p.resultingJobId === undefined ? null : p.resultingJobId.toString(),
+  };
+}
+
 function toUnits(v: any): string {
   const s = String(v).trim();
   if (/^\d+$/.test(s)) return s;
@@ -51,10 +62,7 @@ async function postHandler(req: NextRequest) {
       merchantId: (actor as any).id ?? null,
     },
   });
-  const postingJson = {
-    ...posting,
-    resultingJobId: posting.resultingJobId === null || posting.resultingJobId === undefined ? null : posting.resultingJobId.toString(),
-  };
+  const postingJson = serializePosting(posting);
   return NextResponse.json({ success: true, posting: postingJson });
 }
 
@@ -72,10 +80,7 @@ async function getHandler(req: NextRequest) {
     take: limit,
     include: { applications: false },
   });
-  const postingsJson = postings.map((p: any) => ({
-    ...p,
-    resultingJobId: p.resultingJobId === null || p.resultingJobId === undefined ? null : p.resultingJobId.toString(),
-  }));
+  const postingsJson = postings.map((p: any) => serializePosting(p));
   return NextResponse.json({ success: true, postings: postingsJson });
 }
 
