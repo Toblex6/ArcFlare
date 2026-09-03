@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
-import { createPublicClient, http, parseAbiItem } from 'viem';
+import { createPublicClient, http, parseAbiItem, decodeEventLog } from 'viem';
 import { arcTestnet } from 'viem/chains';
 import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
 
@@ -108,33 +108,113 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
       return NextResponse.json({ error: 'Transaction polling timed out' }, { status: 408 });
     }
 
-    // 6. Indexing via Viem (Robust log search)
+    // 6. Indexing via Viem — recover the REAL ERC-8004 tokenId minted by THIS tx.
+    // Failure modes handled here: Transfer log parse errors, receipt absence, and RPC
+    // flakiness (endpoints are intermittently out-of-sync — retry, don't assume failure).
+    // NEVER synthesize a fallback identity: persisting a fake tokenId as ACTIVE would
+    // violate real ERC-8004 identity meaning (id vs tokenId vs scaAddress are NOT
+    // interchangeable), so a missing log yields a truthful pending state, not ACTIVE.
     const publicClient = createPublicClient({
       chain: arcTestnet,
       transport: http(),
     });
 
-    const latestBlock = await publicClient.getBlockNumber();
-    const searchWindow = BigInt(500);
-    const fromBlock = latestBlock > searchWindow ? latestBlock - searchWindow : BigInt(0);
+    const transferEvent = parseAbiItem(
+      'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'
+    );
+    const registryAddress = (IDENTITY_REGISTRY as string).toLowerCase();
+    const ownerAddress = (ownerWallet.address as string).toLowerCase();
+    const txHashLower = (txHash as string).toLowerCase();
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    const transferLogs = await publicClient.getLogs({
-      address: IDENTITY_REGISTRY as `0x${string}`,
-      event: parseAbiItem(
-        'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'
-      ),
-      args: { to: ownerWallet.address as `0x${string}` },
-      fromBlock,
-      toBlock: latestBlock,
-    });
+    let tokenId: string | null = null;
+    for (let attempt = 1; attempt <= 3 && !tokenId; attempt++) {
+      try {
+        // (a) Precise path: parse THIS tx's receipt — ties the tokenId to our register() call.
+        // Receipt may be absent while RPC nodes are out of sync → retry, don't assume failure.
+        const receipt = await publicClient.getTransactionReceipt({
+          hash: txHash as `0x${string}`,
+        });
+        if (receipt) {
+          for (const log of receipt.logs) {
+            if (log.address.toLowerCase() !== registryAddress) continue;
+            let decoded: { args?: { to?: string; tokenId?: bigint } };
+            try {
+              decoded = decodeEventLog({
+                abi: [transferEvent],
+                data: log.data,
+                topics: log.topics as any,
+              }) as any;
+            } catch {
+              continue; // Not a Transfer log — keep scanning.
+            }
+            if (
+              decoded.args?.to?.toLowerCase() === ownerAddress &&
+              decoded.args.tokenId != null
+            ) {
+              tokenId = decoded.args.tokenId.toString();
+              break;
+            }
+          }
+          if (tokenId) break;
+        }
+        // (b) Fallback path: windowed log search for nodes that serve logs but not receipts.
+        // Prefer logs from OUR txHash so we never attribute someone else's mint.
+        const latestBlock = await publicClient.getBlockNumber();
+        const searchWindow = BigInt(500);
+        const fromBlock = latestBlock > searchWindow ? latestBlock - searchWindow : BigInt(0);
 
-    // Extract real ERC-8004 NFT Token ID with fallback handling
-    const tokenId =
-      transferLogs.length > 0
-        ? transferLogs[transferLogs.length - 1].args.tokenId!.toString()
-        : `ERC8004-FALLBACK-${Math.floor(Math.random() * 1000000)}`;
+        const transferLogs = await publicClient.getLogs({
+          address: IDENTITY_REGISTRY as `0x${string}`,
+          event: transferEvent,
+          args: { to: ownerWallet.address as `0x${string}` },
+          fromBlock,
+          toBlock: latestBlock,
+        });
+        const ownLogs = transferLogs.filter(
+          (l) => (l.transactionHash ?? '').toLowerCase() === txHashLower
+        );
+        const pool = ownLogs.length > 0 ? ownLogs : transferLogs;
+        if (pool.length > 0 && pool[pool.length - 1].args.tokenId != null) {
+          tokenId = pool[pool.length - 1].args.tokenId!.toString();
+        }
+      } catch {
+        // Transient RPC failure (TLS bad-record-MAC, ECONNRESET, out-of-sync node) — retry below.
+      }
+      if (!tokenId && attempt < 3) await sleep(1500 * attempt);
+    }
 
-    // 7. ✅ PERSIST DATA: Explicit escape hatch used here to bypass cached client types
+    if (!tokenId) {
+      // Truthful pending state: on-chain register() confirmed (txHash exists) but the
+      // Transfer log could not be recovered, so the real tokenId is UNKNOWN.
+      // - Do NOT persist an AgentRegistry row: any placeholder would be a fake ERC-8004
+      //   identity, and the agent must NOT be marked ACTIVE/provisioned.
+      // - Do NOT delete the Circle wallets: they are preserved for operator retry/recovery.
+      // - Surface txHash + inspection info so the operator can retry or inspect on explorer.
+      // - Retry-safe: nothing was written, so a retry can never collide on a fake tokenId
+      //   (@unique) and never orphans wallet references.
+      return NextResponse.json(
+        {
+          error:
+            'Identity Transfer log not recovered — agent NOT provisioned. On-chain registration may have succeeded; inspect txHash and retry.',
+          status: 'PENDING_IDENTITY_CONFIRMATION',
+          retryable: true,
+          txHash,
+          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          wallets: {
+            owner: ownerWallet.address,
+            validator: validatorWallet.address,
+          },
+          registry: IDENTITY_REGISTRY,
+          ownerAddress: ownerWallet.address,
+          hint: 'Re-run POST /api/agent/deploy or inspect the tx receipt Transfer logs to recover the real tokenId; no fallback identity was persisted and no wallet was deleted.',
+        },
+        { status: 502 }
+      );
+    }
+
+    // 7. ✅ PERSIST DATA: reachable ONLY with a real on-chain tokenId recovered above.
+    // Explicit escape hatch used here to bypass cached client types
     const registeredAgent = await (prisma as any).agentRegistry.create({
       data: {
         name: agentName,
