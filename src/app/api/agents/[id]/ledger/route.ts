@@ -3,13 +3,17 @@ import { prisma } from "@/lib/prisma";
 import { computeTreasuryView, getRecentEntries } from "@/lib/ledger/treasuryService";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
+import { resolveAgentRef } from "@/lib/agents/resolveAgentRef";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
+  // User-facing reference lookup: accepts Registry ID, ERC-8004 Token or SCA
+  // address (auto, ambiguity refused). Numeric registry ids remain canonical.
+  const { agent, ambiguous } = await resolveAgentRef(id, "auto");
+  if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
+  const agentId = agent.id;
+
   // Authorization: caller must control this agent (ownership model)
   try {
     const wallet = await getOrCreateAgentWallet(agentId).catch(() => null);

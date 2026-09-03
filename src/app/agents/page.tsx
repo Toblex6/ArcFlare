@@ -82,6 +82,18 @@ export default function AgentsPage() {
   const [trustLoading, setTrustLoading] = useState(false);
   const [trustError, setTrustError] = useState<string|null>(null);
 
+  // Economics / Trust loaders — accept any agent identifier (Registry ID,
+  // ERC-8004 Token, or SCA address); the backend resolves all three.
+  const loadEco = async (agentIdRef: string) => {
+    setEcoLoading(true); setEcoError(null);
+    try{ const r=await fetch(`/api/agents/${agentIdRef}/ledger`); const d=await r.json(); if(!r.ok) throw new Error(d.error||'failed'); setEcoData(d); }catch(e:any){ setEcoError(e.message);} finally{ setEcoLoading(false); }
+  };
+  const loadTrust = async (agentIdRef: string) => {
+    setTrustLoading(true); setTrustError(null);
+    try{ const r=await fetch(`/api/agents/${agentIdRef}/track-record`); const d=await r.json(); if(!r.ok) throw new Error(d.error||'failed'); setTrustData(d.trackRecord); }catch(e:any){ setTrustError(e.message);} finally{ setTrustLoading(false); }
+  };
+
+
   // Deploy state
   const [deploying, setDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState<any>(null);
@@ -494,7 +506,17 @@ export default function AgentsPage() {
                               fontFamily: 'monospace',
                             }}
                           >
-                            Token #{agent.tokenId}
+                            Registry ID: {agent.id}
+                          </p>
+                          <p
+                            style={{
+                              color: 'var(--text-secondary)',
+                              fontSize: 10,
+                              margin: 0,
+                              fontFamily: 'monospace',
+                            }}
+                          >
+                            ERC-8004 Token: #{agent.tokenId}
                           </p>
                         </div>
                       </div>
@@ -508,7 +530,7 @@ export default function AgentsPage() {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
-                        <span style={S.label}>SCA Address</span>
+                        <span style={S.label}>SCA Wallet</span>
                         <p
                           style={{
                             color: 'var(--primary)',
@@ -931,12 +953,28 @@ export default function AgentsPage() {
           <div style={S.card}>
             <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Agent Economics</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 16px' }}>Treasury, P&L and recent ledger entries (derived from on-chain events).</p>
+            <div style={{ marginBottom: 12 }}>
+              <select
+                style={S.input}
+                value={ecoAgentId}
+                onChange={(e) => {
+                  const a = agents.find((x) => String(x.id) === e.target.value);
+                  if (!a) return;
+                  setEcoAgentId(String(a.id));
+                  loadEco(String(a.id));
+                }}
+              >
+                <option value="">— Select an agent —</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={String(a.id)}>
+                    {a.name} — Registry ID {a.id} · Token #{a.tokenId}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              <input style={{ ...S.input, marginBottom: 0, flex: 1 }} value={ecoAgentId} onChange={e=>setEcoAgentId(e.target.value)} placeholder="Agent registry id (e.g. 1)" />
-              <button style={S.btn} disabled={ecoLoading} onClick={async()=>{
-                setEcoLoading(true); setEcoError(null);
-                try{ const r=await fetch(`/api/agents/${ecoAgentId}/ledger`); const d=await r.json(); if(!r.ok) throw new Error(d.error||'failed'); setEcoData(d); }catch(e:any){ setEcoError(e.message);} finally{ setEcoLoading(false); }
-              }}>{ecoLoading?'Loading...':'Load'}</button>
+              <input style={{ ...S.input, marginBottom: 0, flex: 1 }} value={ecoAgentId} onChange={e=>setEcoAgentId(e.target.value)} placeholder="Registry ID, ERC-8004 Token, or SCA address" />
+              <button style={S.btn} disabled={ecoLoading} onClick={()=>loadEco(ecoAgentId)}>{ecoLoading?'Loading...':'Load'}</button>
             </div>
             {ecoError && <p style={{ color:'var(--danger)', fontSize:12 }}>❌ {ecoError}</p>}
             {ecoData && (
@@ -983,12 +1021,28 @@ export default function AgentsPage() {
           <div style={S.card}>
             <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px' }}>Verifiable Track Record</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 16px' }}>Every trust number has an underlying source (jobs, validation, ledger, reputation). Score 0..100 · confidence 0..100 · methodology 1.0</p>
+            <div style={{ marginBottom: 12 }}>
+              <select
+                style={S.input}
+                value={trustId}
+                onChange={(e) => {
+                  const a = agents.find((x) => String(x.id) === e.target.value);
+                  if (!a) return;
+                  setTrustId(String(a.id));
+                  loadTrust(String(a.id));
+                }}
+              >
+                <option value="">— Select an agent —</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={String(a.id)}>
+                    {a.name} — Registry ID {a.id} · Token #{a.tokenId}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              <input style={{ ...S.input, marginBottom: 0, flex: 1 }} value={trustId} onChange={e=>setTrustId(e.target.value)} placeholder="Agent registry id (e.g. 1)" />
-              <button style={S.btn} disabled={trustLoading} onClick={async()=>{
-                setTrustLoading(true); setTrustError(null);
-                try{ const r=await fetch(`/api/agents/${trustId}/track-record`); const d=await r.json(); if(!r.ok) throw new Error(d.error||'failed'); setTrustData(d.trackRecord); }catch(e:any){ setTrustError(e.message);} finally{ setTrustLoading(false); }
-              }}>{trustLoading?'Loading...':'Load'}</button>
+              <input style={{ ...S.input, marginBottom: 0, flex: 1 }} value={trustId} onChange={e=>setTrustId(e.target.value)} placeholder="Registry ID, ERC-8004 Token, or SCA address" />
+              <button style={S.btn} disabled={trustLoading} onClick={()=>loadTrust(trustId)}>{trustLoading?'Loading...':'Load'}</button>
             </div>
             {trustError && <p style={{ color:'var(--danger)', fontSize:12 }}>❌ {trustError}</p>}
             {trustData && (
