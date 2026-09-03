@@ -5,6 +5,10 @@ import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-
 import { createPublicClient, http, parseAbiItem, decodeEventLog } from 'viem';
 import { arcTestnet } from 'viem/chains';
 import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
+import {
+  checkAgentDeployAllowed,
+  releaseAgentDeployClaim,
+} from '@/src/lib/agent-deploy-guard';
 
 const prisma = new PrismaClient();
 
@@ -34,8 +38,48 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
     if (body.pricePerRequest && !pricingInput) pricingInput = { pricePerRequest: body.pricePerRequest };
     if (body.pricePerJob && !pricingInput) pricingInput = { pricePerJob: body.pricePerJob };
 
+    // 0. Cost-control gate (SUBTASK F): keyed by the AUTHORITATIVE merchant id
+    // resolved by withMerchantAuth — never client-supplied merchantId. Runs
+    // BEFORE any Circle wallet provisioning or on-chain register so a flood
+    // cannot mint wallets or burn gas. 10/min per merchant, keyless burst
+    // throttle, replayed idempotency keys → 409, budget exhausted → 429.
+    // No "max 1 agent" cap: distinct idempotency keys always allow legitimate
+    // repeated deployment (multiple agents per merchant) up to the budget.
+    const idempotencyKey =
+      typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : undefined;
+    const deployGate = checkAgentDeployAllowed(merchant.id, idempotencyKey);
+    if (!deployGate.allowed) {
+      if (deployGate.reason === 'duplicate') {
+        return NextResponse.json(
+          {
+            error: 'Duplicate agent deploy — replay of an in-progress request.',
+            replayed: true,
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json(
+        {
+          error:
+            deployGate.reason === 'unauthenticated'
+              ? 'Merchant identity could not be resolved for deploy throttling.'
+              : 'Agent deploy throttled — slow down and retry.',
+          retryAfterMs: deployGate.retryAfterMs ?? null,
+        },
+        {
+          status: 429,
+          headers: deployGate.retryAfterMs
+            ? { 'Retry-After': String(Math.ceil(deployGate.retryAfterMs / 1000)) }
+            : undefined,
+        }
+      );
+    }
+
     // 1. Initialize Circle Client
     if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
+      // Terminal failure BEFORE any wallet or on-chain side effect — free the
+      // claim so the client can retry with the same idempotency key.
+      releaseAgentDeployClaim(merchant.id, idempotencyKey);
       throw new Error('Circle infrastructure variables missing from environment configurations.');
     }
     const circleClient = initiateDeveloperControlledWalletsClient({
@@ -50,6 +94,9 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
 
     const walletSetId = walletSet.data?.walletSet?.id;
     if (!walletSetId) {
+      // No wallets or on-chain side effects yet — free the idempotency claim
+      // so a retry with the same key is not treated as a replay.
+      releaseAgentDeployClaim(merchant.id, idempotencyKey);
       return NextResponse.json(
         { error: 'Failed to initialize Circle Wallet Set' },
         { status: 500 }
@@ -68,6 +115,10 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
     const validatorWallet = walletsResponse.data?.wallets?.[1];
 
     if (!ownerWallet || !validatorWallet || !ownerWallet.address) {
+      // Wallets may have been provisioned but none is usable; nothing moved
+      // on-chain. Free the claim so a retry with the same key is possible
+      // (retry provisions a fresh wallet set — pre-existing behavior).
+      releaseAgentDeployClaim(merchant.id, idempotencyKey);
       return NextResponse.json({ error: 'Failed to provision SCA wallets' }, { status: 500 });
     }
 

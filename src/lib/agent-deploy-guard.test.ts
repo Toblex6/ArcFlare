@@ -6,6 +6,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   checkAgentDeployAllowed,
   releaseAgentDeployClaim,
@@ -97,4 +99,27 @@ test("released claim allows retry with the same key", () => {
   // Releasing an unknown/empty claim is a no-op false, never an error.
   assert.equal(releaseAgentDeployClaim(MERCHANT_A, "nope"), false);
   assert.equal(releaseAgentDeployClaim(MERCHANT_A, undefined), false);
+});
+
+// WIRING INVARIANT (read-only source check, no imports of next/prisma):
+// the deploy route must call the gate AFTER withMerchantAuth resolves the
+// merchant and BEFORE any Circle wallet provisioning / on-chain register, so
+// the guard can never fire late or against client-supplied identity.
+test("deploy route fires the guard before Circle provisioning and on-chain register", () => {
+  const src = readFileSync(
+    path.join(process.cwd(), "src", "app", "api", "agent", "deploy", "route.ts"),
+    "utf8"
+  );
+  // First textual hit is the import/handler signature; the guard must appear
+  // after the middleware reference and before Circle/on-chain calls.
+  const idxAuth = src.indexOf("withMerchantAuth");
+  const idxGuard = src.indexOf("checkAgentDeployAllowed(merchant.id");
+  const idxCircle = src.indexOf("initiateDeveloperControlledWalletsClient(");
+  const idxRegister = src.indexOf("createContractExecutionTransaction");
+  assert.ok(idxAuth !== -1 && idxGuard !== -1 && idxCircle !== -1 && idxRegister !== -1);
+  assert.ok(idxGuard > idxAuth, "guard must run after authoritative merchant auth");
+  assert.ok(idxGuard < idxCircle, "guard must run before Circle client init");
+  assert.ok(idxGuard < idxRegister, "guard must run before the on-chain register tx");
+  // Merchant-scoped key only — no client-controlled merchantId in the gate call.
+  assert.ok(!src.includes("checkAgentDeployAllowed(body"), "gate must never key on client input");
 });
