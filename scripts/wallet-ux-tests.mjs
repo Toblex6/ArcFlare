@@ -125,6 +125,34 @@ ok('dedupe keys by id+type+name when uid missing', (() => {
   ok('generic failure is friendly', mapWalletError('Some unknown blockchain error 0x123').message === "We couldn't connect your wallet. Please try again.");
   ok('error kinds are typed', mapWalletError('user denied').kind === 'USER_REJECTED' && mapWalletError('qr code expired').kind === 'WC_TIMEOUT');
 
+  // --- Funds / gas-allowance errors: shared mapper centralizes them ---
+  const FUNDS_COPY = "This payment can't be completed with the funds currently in this wallet. Top up (or check the token allowance) and try again.";
+  // viem custom-error shape: ContractFunctionExecutionError carries a
+  // shortMessage that embeds the solidity custom error name (e.g. OutOfFunds).
+  {
+    const viemErr = Object.assign(
+      new Error('Execution reverted with the following reason: OutOfFunds()'),
+      { shortMessage: 'The contract function "transfer" reverted. Error: OutOfFunds()' }
+    );
+    const mapped = mapWalletError(viemErr);
+    ok('viem OutOfFunds custom error -> INSUFFICIENT_FUNDS', mapped.kind === 'INSUFFICIENT_FUNDS', `got ${mapped.kind}`);
+    ok('viem OutOfFunds -> friendly funds copy', mapped.message === FUNDS_COPY, `got "${mapped.message}"`);
+    ok('viem OutOfFunds copy does not leak internals', !/viem|wagmi|contract function/i.test(mapped.message));
+    ok('viem OutOfFunds copy does NOT claim "no changes were made"', !mapped.message.toLowerCase().includes('no changes were made'));
+  }
+  {
+    const mapped = mapWalletError('ERC-20 transfer reverted: out of funds');
+    ok("'out of funds' string -> INSUFFICIENT_FUNDS", mapped.kind === 'INSUFFICIENT_FUNDS' && mapped.message === FUNDS_COPY, `got ${mapped.kind}`);
+  }
+  {
+    const mapped = mapWalletError('Gas required exceeds allowance or always failing transaction.');
+    ok("'gas required exceeds allowance' -> INSUFFICIENT_FUNDS (not shadowed by timeout/rejected branches)", mapped.kind === 'INSUFFICIENT_FUNDS' && mapped.message === FUNDS_COPY, `got ${mapped.kind}`);
+  }
+  {
+    const mapped = mapWalletError('Some unknown blockchain error 0x456');
+    ok('unrelated error still maps to GENERIC (no funds false-positive regression)', mapped.kind === 'GENERIC');
+  }
+
   // --- withTimeout: REAL module ---
   await withTimeout(Promise.resolve('fast'), 1000).then((v) => ok('withTimeout passes through fast promise', v === 'fast'));
   await withTimeout(new Promise((resolve) => setTimeout(() => resolve('slow'), 200)), 10, 'Timed out').then(

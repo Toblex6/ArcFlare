@@ -12,6 +12,7 @@ export type WalletErrorKind =
   | 'WALLET_NOT_FOUND'
   | 'WC_TIMEOUT'
   | 'UNSUPPORTED_NETWORK'
+  | 'INSUFFICIENT_FUNDS'
   | 'GENERIC';
 
 const VIEM_VERSION_RE = /Version:\s*viem@[^\s]+/gi;
@@ -99,7 +100,22 @@ export function mapWalletError(err: unknown): { kind: WalletErrorKind; message: 
     };
   }
 
-  // 6. Fallback — never expose raw package internals
+  // 6. Not enough funds / gas allowance to complete the send. Note: a funds
+  // failure can also surface AFTER a broadcast (the chain reverted the tx),
+  // so we must NOT claim "no changes were made" here.
+  if (
+    lower.includes('outoffunds') ||
+    lower.includes('out of funds') ||
+    lower.includes('gas required exceeds allowance')
+  ) {
+    return {
+      kind: 'INSUFFICIENT_FUNDS',
+      message:
+        "This payment can't be completed with the funds currently in this wallet. Top up (or check the token allowance) and try again.",
+    };
+  }
+
+  // 7. Fallback — never expose raw package internals
   return {
     kind: 'GENERIC',
     message: "We couldn't connect your wallet. Please try again.",
