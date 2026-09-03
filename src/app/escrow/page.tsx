@@ -60,6 +60,38 @@ function formatTime(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
+// ── metrics guards (Incoming-safe) ─────────────────────────────────────
+// The Incoming view (?role=beneficiary) shares the depositor metrics contract
+// ({ total, active, released, disputed, refunded, totalLocked, totalReleased }),
+// but the page must never trust the wire shape: a partial/empty metrics object
+// (or a string amount — Prisma Decimal serializes as string over JSON) used to
+// throw inside .toFixed() and trip the "Something went wrong" boundary.
+// normalizeMetrics() coerces anything into the full contract (missing → 0) at
+// ingestion; fmtAmount() formats defensively at render. Depositor/"Mine"
+// behavior is unchanged — full contracts pass through untouched.
+function toNum(v: unknown, fallback = 0): number {
+  const n = typeof v === 'string' ? parseFloat(v) : (v as number);
+  return Number.isFinite(n) ? (n as number) : fallback;
+}
+
+function normalizeMetrics(m: unknown): EscrowMetrics {
+  const o = (m ?? {}) as Partial<Record<keyof EscrowMetrics, unknown>>;
+  return {
+    total: toNum(o.total),
+    active: toNum(o.active),
+    released: toNum(o.released),
+    disputed: toNum(o.disputed),
+    refunded: toNum(o.refunded),
+    totalLocked: toNum(o.totalLocked),
+    totalReleased: toNum(o.totalReleased),
+  };
+}
+
+function fmtAmount(v: unknown, digits = 2): string {
+  return toNum(v).toFixed(digits);
+}
+// ── end metrics guards ──
+
 const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
@@ -129,8 +161,8 @@ export default function EscrowDashboard() {
       const res = await fetch(url);
       const json = await res.json();
       if (json.success) {
-        setEscrows(json.escrows);
-        setMetrics(json.metrics);
+        setEscrows(Array.isArray(json.escrows) ? json.escrows : []);
+        setMetrics(normalizeMetrics(json.metrics));
         setError(null);
       } else {
         setError(json.error);
@@ -509,8 +541,8 @@ export default function EscrowDashboard() {
             }}
           >
             {[
-              { label: 'Total Locked', value: `${metrics.totalLocked.toFixed(2)} USDC`, sub: `${metrics.active} active escrows`, color: '#0d7c5f', bg: '#f0fdf4', border: '#bbf7d0' },
-              { label: 'Total Released', value: `${metrics.totalReleased.toFixed(2)} USDC`, sub: `${metrics.released} completed`, color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+              { label: 'Total Locked', value: `${fmtAmount(metrics.totalLocked)} USDC`, sub: `${metrics.active} active escrows`, color: '#0d7c5f', bg: '#f0fdf4', border: '#bbf7d0' },
+              { label: 'Total Released', value: `${fmtAmount(metrics.totalReleased)} USDC`, sub: `${metrics.released} completed`, color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
               { label: 'Disputed', value: metrics.disputed.toString(), sub: 'Pending admin review', color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
               { label: 'Refunded', value: metrics.refunded.toString(), sub: 'Returned to depositor', color: '#64748b', bg: '#f8fafc', border: '#e2e8f0' },
             ].map((m, i) => (
@@ -579,7 +611,7 @@ export default function EscrowDashboard() {
                             )}
                           </td>
                           <td style={{ padding: '14px 14px 14px 0' }}>
-                            <div style={{ color: '#0f172a', fontWeight: 700 }}>{e.amount.toFixed(2)}</div>
+                            <div style={{ color: '#0f172a', fontWeight: 700 }}>{fmtAmount(e.amount)}</div>
                             <div style={{ color: '#d97706', fontSize: 10 }}>{e.currency}</div>
                           </td>
                           <td style={{ padding: '14px 14px 14px 0', maxWidth: 140 }}>
@@ -640,7 +672,7 @@ export default function EscrowDashboard() {
               <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {[
                   { label: 'Reference', value: selected.reference },
-                  { label: 'Amount', value: `${selected.amount.toFixed(2)} ${selected.currency}` },
+                  { label: 'Amount', value: `${fmtAmount(selected.amount)} ${selected.currency}` },
                   { label: 'Depositor SCA', value: selected.depositorSCA },
                   { label: 'Beneficiary SCA', value: selected.beneficiarySCA },
                   { label: 'Condition', value: selected.condition || 'None set' },
