@@ -769,6 +769,99 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
   }
 }
 
+// ── Truthful upstream-failure semantics ───────────────────────────────────────
+// Prod incident: x402 settles $0.002 BEFORE runBrain executes (withGateway does
+// verify → settle → handler; see src/lib/x402.ts — DO NOT move settlement),
+// then Groq answers HTTP 429 (openai/gpt-oss-20b, TPM 8000). The old code
+// folded that into HTTP 200 + success:true + "I ran into a problem talking to
+// my reasoning engine", hiding a temporary rate-limit behind a fake success.
+// These helpers keep the operational category visible instead: Groq 429 →
+// HTTP 429, Groq 5xx / network failure → HTTP 503, malformed → HTTP 502, each
+// with success:false plus retry guidance. Settlement is intentionally NOT
+// moved: serving reasoning before payment would let callers free-ride, and
+// withGateway() is frozen — the PaymentLog row withGateway writes already
+// records upstreamOk/upstreamStatus for post-hoc refund triage.
+// NOTE: after settlement, GatewayClient.pay() (src/app/api/x402/pay/route.ts)
+// surfaces a non-2xx brain response as `Payment failed: <error.error text>` and
+// discards the other fields — so the retry guidance is ALSO embedded in the
+// human-readable `error` string, not only in the structured fields.
+interface BrainUpstreamFailure {
+  code: "GROQ_RATE_LIMITED" | "GROQ_UNAVAILABLE" | "GROQ_BAD_RESPONSE";
+  status: 429 | 502 | 503;
+  error: string;
+  retryable: boolean;
+  retryAfterMs?: number;
+}
+
+class BrainUpstreamError extends Error {
+  failure: BrainUpstreamFailure;
+  constructor(failure: BrainUpstreamFailure) {
+    super(failure.error);
+    this.name = "BrainUpstreamError";
+    this.failure = failure;
+  }
+}
+
+function parseRetryAfterMs(
+  headers: { get(name: string): string | null },
+  errText: string
+): number | undefined {
+  const headerVal = headers?.get?.("retry-after") ?? headers?.get?.("Retry-After");
+  if (headerVal) {
+    const secs = Number(headerVal);
+    if (Number.isFinite(secs) && secs >= 0) return Math.round(secs * 1000);
+    const when = Date.parse(headerVal); // HTTP-date form — best effort
+    if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  }
+  const m =
+    /retry\s*(?:after|in)?\s*(\d+(?:\.\d+)?)\s*s/i.exec(errText || "") ||
+    /try again in\s*(\d+(?:\.\d+)?)\s*s/i.exec(errText || "");
+  if (m) return Math.round(parseFloat(m[1]) * 1000);
+  return undefined;
+}
+
+function mapGroqFailure(
+  status: number,
+  headers: { get(name: string): string | null },
+  errText: string
+): BrainUpstreamFailure {
+  const retryAfterMs = parseRetryAfterMs(headers, errText);
+  const retryHint =
+    retryAfterMs !== undefined
+      ? ` Retry after ~${Math.ceil(retryAfterMs / 1000)}s before trying again.`
+      : " Wait ~30-60s before trying again.";
+  if (status === 429) {
+    return {
+      code: "GROQ_RATE_LIMITED",
+      status: 429,
+      error:
+        `Reasoning engine rate-limited (Groq 429 on ${GROQ_MODEL}, TPM quota).` +
+        " This is temporary — your $0.002 x402 settlement already completed and is logged for triage." +
+        retryHint,
+      retryable: true,
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    };
+  }
+  if (status >= 500 || status === 408 || status === 425) {
+    return {
+      code: "GROQ_UNAVAILABLE",
+      status: 503,
+      error:
+        `Reasoning engine unavailable (Groq ${status}).` +
+        " This is temporary — your $0.002 x402 settlement already completed and is logged for triage." +
+        retryHint,
+      retryable: true,
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    };
+  }
+  return {
+    code: "GROQ_BAD_RESPONSE",
+    status: 502,
+    error: `Reasoning engine returned an unexpected status (${status}). Please try again.`,
+    retryable: false,
+  };
+}
+
 // ── Agent Memory (Postgres) ───────────────────────────────────────────────────
 // Stored shape is OpenAI/Groq-style chat messages:
 // { role: "user"|"assistant"|"tool", content, tool_calls?, tool_call_id? }
@@ -872,10 +965,11 @@ IMPORTANT:
     iters++;
 
     let data: any;
+    let res: Response;
     try {
       // FIX #4: wrap the Groq call + parse so a malformed/unexpected
       // response returns a clean error instead of an unhandled throw.
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -890,30 +984,45 @@ IMPORTANT:
           tool_choice: "auto",
         }),
       });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        console.error(`[brain] Groq error ${res.status}:`, errText);
-        return {
-          response: "I ran into a problem talking to my reasoning engine. Please try again.",
-          toolsUsed,
-          results,
-        };
-      }
-      data = await res.json();
     } catch (fetchErr: any) {
       console.error("[brain] Groq fetch failed:", fetchErr);
-      return {
-        response: "I couldn't reach my reasoning engine right now. Please try again shortly.",
-        toolsUsed,
-        results,
-      };
+      throw new BrainUpstreamError({
+        code: "GROQ_UNAVAILABLE",
+        status: 503,
+        error:
+          "I couldn't reach my reasoning engine right now (network error). " +
+          "This is temporary — your $0.002 x402 settlement already completed and is logged for triage. " +
+          "Wait ~30-60s before trying again.",
+        retryable: true,
+      });
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[brain] Groq error ${res.status}:`, errText);
+      throw new BrainUpstreamError(mapGroqFailure(res.status, res.headers, errText));
+    }
+    try {
+      data = await res.json();
+    } catch (parseErr: any) {
+      console.error("[brain] Groq returned malformed JSON:", parseErr);
+      throw new BrainUpstreamError({
+        code: "GROQ_BAD_RESPONSE",
+        status: 502,
+        error: "Reasoning engine returned a malformed response. Please try again.",
+        retryable: false,
+      });
     }
 
     const choice = data.choices?.[0];
     if (!choice) {
       console.error("[brain] Groq returned no choices:", JSON.stringify(data));
-      return { response: "I didn't get a usable response back. Please try again.", toolsUsed, results };
+      throw new BrainUpstreamError({
+        code: "GROQ_BAD_RESPONSE",
+        status: 502,
+        error: "Reasoning engine returned no usable response. Please try again.",
+        retryable: true,
+      });
     }
 
     const msg = choice.message;
@@ -987,6 +1096,12 @@ IMPORTANT:
 // ── Route Handler ─────────────────────────────────────────────────────────────
 const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
   const body = await req.json().catch(() => ({}));
+  // SECURITY: any client-supplied payer field in the body is deliberately
+  // ignored here — it is not even destructured. The x402 payer is resolved
+  // server-side by withGateway() from the verified payment signature (and by
+  // the /api/x402/pay wrapper from the authenticated session's own Gateway
+  // wallet). Never trust a user-supplied EOA as payer identity, and never
+  // fall back to a shared default payer — fail closed instead.
   const { message, sessionId = `session_${Date.now()}`, context = "" } = body;
 
   if (!message) {
@@ -1006,21 +1121,47 @@ const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
   const baseUrl = host ? `${forwardedProto}://${host}` : API_BASE;
 
   console.log(`[brain] ${sessionId}: ${message.slice(0, 80)}`);
-  const { response, toolsUsed, results } = await runBrain(message, sessionId, context, baseUrl);
+  try {
+    const { response, toolsUsed, results } = await runBrain(message, sessionId, context, baseUrl);
 
-  return NextResponse.json({
-    success: true,
-    response,
-    toolsUsed,
-    results,
-    sessionId,
-    agent: {
-      tokenId: process.env.AGENT_TOKEN_ID || "847277",
-      address: process.env.AGENT_OWNER_WALLET_ADDRESS,
-      standard: "ERC-8004",
-      network: "Arc Testnet",
-    },
-  });
+    return NextResponse.json({
+      success: true,
+      response,
+      toolsUsed,
+      results,
+      sessionId,
+      agent: {
+        tokenId: process.env.AGENT_TOKEN_ID || "847277",
+        address: process.env.AGENT_OWNER_WALLET_ADDRESS,
+        standard: "ERC-8004",
+        network: "Arc Testnet",
+      },
+    });
+  } catch (e: any) {
+    // Truthful failure semantics: a temporary Groq outage is NOT a success —
+    // return the mapped status (429/502/503) with success:false so neither
+    // the UI nor the x402 pay wrapper can mistake it for a completed call.
+    if (e instanceof BrainUpstreamError) {
+      const f = e.failure;
+      return NextResponse.json(
+        {
+          success: false,
+          error: f.error,
+          code: f.code,
+          retryable: f.retryable,
+          ...(f.retryAfterMs !== undefined ? { retryAfterMs: f.retryAfterMs } : {}),
+          toolsUsed: [],
+          results: [],
+        },
+        { status: f.status }
+      );
+    }
+    console.error("[brain] Unexpected error:", e);
+    return NextResponse.json(
+      { success: false, error: "Brain request failed unexpectedly.", code: "BRAIN_INTERNAL", retryable: false },
+      { status: 500 }
+    );
+  }
 };
 
 export const POST = withGateway(brainHandler, "$0.002", "/api/agent/brain");

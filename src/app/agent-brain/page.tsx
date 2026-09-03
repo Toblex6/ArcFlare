@@ -109,33 +109,65 @@ function standardBadgeFor(toolName: string): { label: string; color: string } | 
 
 export default function AgentBrainPage() {
     const [message, setMessage] = useState("");
-    const [eoaAddress, setEoaAddress] = useState("");
     const [sessionId, setSessionId] = useState("session-" + Date.now());
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<BrainResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [rateLimited, setRateLimited] = useState(false);
 
     const callBrain = async () => {
-        if (!message.trim() || !eoaAddress.trim()) {
-            setError("Message and EOA wallet address are required.");
+        if (!message.trim()) {
+            setError("Message is required.");
+            setRateLimited(false);
             return;
         }
         setLoading(true);
         setError(null);
+        setRateLimited(false);
         setResult(null);
 
         try {
+            // NOTE: no payer address is sent — the x402 payer is resolved
+            // server-side from the authenticated session's own Gateway wallet
+            // (see /api/x402/pay). A client-supplied EOA must never be trusted
+            // as payer identity, so the dead EOA field was removed entirely.
             const res = await fetch(`${API_BASE}/api/x402/pay`, {
                 method: "POST",
                 headers: authHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
                     resourceUrl: `${window.location.origin}/api/agent/brain`,
-                    eoaAddress,
                     body: JSON.stringify({ message, sessionId }),
                 }),
             });
             const data = await res.json();
-            if (!data.success) throw new Error(data.error || "Brain call failed");
+            // The brain can also report failure inside the paid envelope
+            // (success:false + code + retryAfterMs) — surface that truthfully
+            // instead of treating every settled call as completed work.
+            const inner = data.resourceData && typeof data.resourceData === "object" ? data.resourceData : null;
+            const brainFailure = inner && inner.success === false ? inner : null;
+            const failureText: string | null =
+                brainFailure?.error || (!data.success ? data.error : null) || null;
+            if (brainFailure || !data.success) {
+                const text = failureText || "Brain call failed";
+                const limited =
+                    /rate-limit|rate limited|429|too many requests|\btpm\b|retry after/i.test(text) ||
+                    brainFailure?.code === "GROQ_RATE_LIMITED";
+                if (limited) {
+                    const waitSecs =
+                        brainFailure?.retryAfterMs !== undefined
+                            ? Math.ceil(brainFailure.retryAfterMs / 1000)
+                            : null;
+                    setRateLimited(true);
+                    throw new Error(
+                        `⏳ Reasoning engine is temporarily rate-limited (Groq TPM quota). ` +
+                        `Your $0.002 x402 settlement already completed and is logged. ` +
+                        (waitSecs !== null
+                            ? `Wait ~${waitSecs}s, then retry (retrying costs another $0.002).`
+                            : `Wait ~30-60s, then retry (retrying costs another $0.002).`)
+                    );
+                }
+                throw new Error(text);
+            }
             setResult(data.resourceData || data);
         } catch (e: any) {
             setError(e.message);
@@ -173,14 +205,22 @@ export default function AgentBrainPage() {
                         </p>
 
                         <div style={{ display: "flex", flexDirection: "column" as const, gap: 14 }}>
-                            <div>
-                                <span style={styles.label}>Your EOA Wallet Address (needs Gateway balance)</span>
-                                <input
-                                    style={styles.input}
-                                    value={eoaAddress}
-                                    onChange={(e) => setEoaAddress(e.target.value)}
-                                    placeholder="0x..."
-                                />
+                            <div
+                                style={{
+                                    background: "var(--surface-secondary)",
+                                    border: "1px solid var(--border)",
+                                    borderRadius: 10,
+                                    padding: "12px 14px",
+                                }}
+                            >
+                                <span style={styles.label}>Payer wallet — resolved server-side (read-only)</span>
+                                <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, lineHeight: 1.6 }}>
+                                    No address entry needed: the $0.002 x402 payment is taken from your
+                                    account&apos;s own Gateway EOA balance, resolved server-side from your
+                                    authenticated session. x402 requires EOA wallets — Circle smart-contract
+                                    wallets (SCAs) cannot be payers — and the backend never accepts a
+                                    client-supplied payer address.
+                                </p>
                             </div>
                             <div>
                                 <span style={styles.label}>Message</span>
@@ -224,8 +264,8 @@ export default function AgentBrainPage() {
                             </div>
 
                             <button
-                                style={btnStyle(loading || !message || !eoaAddress)}
-                                disabled={loading || !message || !eoaAddress}
+                                style={btnStyle(loading || !message)}
+                                disabled={loading || !message}
                                 onClick={callBrain}
                             >
                                 {loading ? "Brain thinking..." : "⚡ Call Brain ($0.002 USDC)"}
@@ -236,13 +276,23 @@ export default function AgentBrainPage() {
                             <div
                                 style={{
                                     marginTop: 16,
-                                    background: "rgba(239,68,68,0.08)",
-                                    border: "1px solid rgba(239,68,68,0.2)",
+                                    background: rateLimited ? "rgba(245,158,11,0.08)" : "rgba(239,68,68,0.08)",
+                                    border: rateLimited
+                                        ? "1px solid rgba(245,158,11,0.25)"
+                                        : "1px solid rgba(239,68,68,0.2)",
                                     borderRadius: 12,
                                     padding: 16,
                                 }}
                             >
-                                <p style={{ color: "var(--danger)", fontSize: 13, margin: 0 }}>❌ {error}</p>
+                                <p
+                                    style={{
+                                        color: rateLimited ? "var(--warning, #f59e0b)" : "var(--danger)",
+                                        fontSize: 13,
+                                        margin: 0,
+                                    }}
+                                >
+                                    {rateLimited ? error : `❌ ${error}`}
+                                </p>
                             </div>
                         )}
 
