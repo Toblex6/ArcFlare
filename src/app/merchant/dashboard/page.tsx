@@ -321,8 +321,7 @@ export default function MerchantDashboard() {
   useEffect(() => {
     if (checkingAuth || !merchant) return;
     fetchLiveDatabaseState();
-    // Platform Fees — hidden until backend fix (UI only, backend intact)
-    // fetchPlatformFees();
+    fetchPlatformFees();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchLiveDatabaseState(true);
     }, 5000);
@@ -426,7 +425,6 @@ export default function MerchantDashboard() {
           ))}
         </div>
 
-        {/* Platform Fees — hidden until backend fix (UI only, backend intact). Re-enable by removing this JSX comment wrapper and restoring fetchPlatformFees() call in useEffect.
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
               <div style={{ width: 36, height: 36, background: "#ffe4e6", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: "#be123c", flexShrink: 0 }}>
@@ -530,8 +528,8 @@ export default function MerchantDashboard() {
                 )}
               </div>
             )}
-          </div>
-          */}
+            </div>
+
 
         <div id="checkout" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, marginBottom: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
           <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 4px 0" }}>Create Payment Link</h3>
