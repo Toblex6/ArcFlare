@@ -255,7 +255,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             const lower = String((err as any)?.shortMessage ?? (err as any)?.message ?? '').toLowerCase();
             const friendly = lower.includes('user rejected') || lower.includes('user denied')
                 ? 'Payment cancelled. No funds were moved.'
-                : lower.includes('insufficient') ? 'Insufficient funds for this transaction.'
+                : lower.includes('insufficient') || lower.includes('out of funds') || lower.includes('outoffunds') || lower.includes('gas required exceeds allowance') ? 'Insufficient funds for this transaction.'
                 : msg;
             setSettleError(friendly);
             onEvent?.({ type: 'payment_error', error: friendly });

@@ -282,7 +282,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
         success: false,
         error: error.message,
         hint:
-          error.message.includes('balance') || error.message.includes('insufficient')
+          error.message.includes('balance') || error.message.includes('insufficient') || error.message.includes('OutOfFunds') || error.message.toLowerCase().includes('out of funds') || error.message.toLowerCase().includes('gas required exceeds allowance')
             ? 'The depositor SCA wallet needs USDC. Fund at https://faucet.circle.com — select ARC-TESTNET.'
             : undefined,
       },
