@@ -13,8 +13,9 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
+import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
 
@@ -201,6 +202,58 @@ async function requireJob(jobId: string | number): Promise<any> {
         : `Could not read job #${jobId} state from Arc Testnet RPC: ${e.message}`
     );
   }
+}
+
+// On-chain status codes → the UPPERCASE DB status strings the Erc8183Job
+// lifecycle (and every downstream consumer) uses. Mirrors JOB_STATUS.
+const DB_STATUS_BY_ONCHAIN: Record<number, string> = {
+  0: 'OPEN',
+  1: 'FUNDED',
+  2: 'SUBMITTED',
+  3: 'COMPLETED',
+  4: 'REJECTED',
+  5: 'EXPIRED',
+};
+
+/**
+ * Ensure a canonical Erc8183Job row exists for an on-chain job BEFORE a flat
+ * lifecycle step writes to it.
+ *
+ * Why: pre-change Direct-Hire jobs (created by the old flat create, which only
+ * wrote a legacy prisma.job mirror) have NO Erc8183Job row today. A plain
+ * update() against a missing row throws P2025 AFTER the on-chain tx already
+ * ran — leaving money moved but the DB silent. This helper closes that gap.
+ *
+ * findUnique FIRST: if the row already exists it is returned untouched
+ * (read-only, never overwritten). ONLY when MISSING do we read authoritative
+ * on-chain getJob() and backfill the row from that truth — including the
+ * on-chain status and budget — so a backfilled row reflects what is actually
+ * true on-chain, before the caller's own update() applies the current step on
+ * top. Never writes a status from scratch that ignores on-chain state.
+ */
+async function ensureErc8183JobBackfilled(jobId: string, req?: Request): Promise<any> {
+  const jobIdBig = BigInt(jobId);
+  const existing = await prisma.erc8183Job.findUnique({ where: { jobId: jobIdBig } });
+  if (existing) return existing;
+
+  const onChain = await requireJob(jobId);
+  const merchant = req ? await resolveMerchant(req as any).catch(() => null) : null;
+  const created = await prisma.erc8183Job.create({
+    data: {
+      jobId: jobIdBig,
+      clientSCA: onChain.client,
+      providerSCA: onChain.provider,
+      evaluatorSCA: onChain.evaluator || onChain.client,
+      description: onChain.description,
+      budget: BigInt(onChain.budget ?? 0),
+      status: DB_STATUS_BY_ONCHAIN[Number(onChain.status)] || 'OPEN',
+      txHashes: [],
+      expiredAt: new Date(Number(onChain.expiredAt) * 1000),
+      hook: onChain.hook ?? null,
+      merchantId: merchant?.id ?? null,
+    },
+  });
+  return created;
 }
 
 async function readUsdcBalance(owner: string): Promise<bigint> {
@@ -431,22 +484,28 @@ async function jobsHandler(request: Request) {
         // RPC hiccup — never block creation on a read-only check.
       }
 
-      // Save to Postgres (best-effort legacy mirror — the Direct Hire lifecycle
-      // reads on-chain state via requireJob, and granular routes key on
-      // Erc8183Job, so this row is not required downstream; the success
-      // response below is preserved regardless).
-      await prisma.job
+      // Save to Postgres — canonical Erc8183Job record, the same persistence
+      // the downstream lifecycle (accept/fund/submit/complete) and the
+      // ledger/ranking/reputation/Telegram consumers key off. This makes a
+      // directly-hired job converge onto the canonical lifecycle.
+      const merchant = await resolveMerchant(request as any).catch(() => null);
+      await prisma.erc8183Job
         .create({
           data: {
-            id: `erc8183_${jobId}`,
+            jobId: BigInt(jobId),
+            clientSCA,
+            providerSCA,
+            evaluatorSCA: evaluatorSCA || clientSCA,
             description,
-            amount: parseFloat(amountUSDC),
-            status: 'PENDING',
-            agentId: providerSCA, // using providerSCA as agentId reference
+            budget: 0n, // budget is set later by accept/setBudget
+            status: 'OPEN',
+            txHashes: [txHash],
+            expiredAt: new Date(Number(expiredAt) * 1000),
+            merchantId: merchant?.id ?? null,
           },
         })
         .catch((dbError) => {
-          console.error(`[jobs:create] prisma.job.create failed for on-chain job ${String(jobId)}:`, dbError);
+          console.error(`[jobs:create] erc8183Job.create failed for on-chain job ${String(jobId)}:`, dbError);
         });
 
       // Best-effort provider notification — never fails an otherwise successful
@@ -487,7 +546,7 @@ async function jobsHandler(request: Request) {
         txHash,
         explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
         ...(balanceWarning ? { warning: balanceWarning } : {}),
-        nextStep: `POST /api/jobs { action:'setBudget', jobId:'${jobId}', providerSCA:'${providerSCA}', amountUSDC:'${amountUSDC}' }`,
+        nextStep: `POST /api/jobs/${jobId}/accept { budget: '${amountUSDC}' }`,
         message: `Job #${jobId} created on Arc Testnet — status: Open`,
       });
     }
@@ -535,6 +594,11 @@ async function jobsHandler(request: Request) {
 
       const amountWei = BigInt(Math.round(parseFloat(amountUSDC) * 1_000_000));
 
+      // Ensure the canonical row exists (backfill pre-change orphans from
+      // on-chain truth) BEFORE the on-chain tx, so the update below can never
+      // hit P2025 on a missing row after money has moved.
+      await ensureErc8183JobBackfilled(jobId, request);
+
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
         blockchain: 'ARC-TESTNET' as any,
@@ -546,6 +610,11 @@ async function jobsHandler(request: Request) {
 
       if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
+
+      await prisma.erc8183Job.update({
+        where: { jobId: BigInt(jobId) },
+        data: { budget: amountWei, txHashes: { push: txHash } },
+      });
 
       return NextResponse.json({
         success: true,
@@ -702,6 +771,10 @@ async function jobsHandler(request: Request) {
         );
       }
 
+      // Ensure the canonical row exists (backfill pre-change orphans from
+      // on-chain truth) BEFORE the on-chain tx.
+      await ensureErc8183JobBackfilled(jobId, request);
+
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: 'ARC-TESTNET' as any,
@@ -713,6 +786,28 @@ async function jobsHandler(request: Request) {
 
       if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
+
+      await prisma.erc8183Job.update({
+        where: { jobId: BigInt(jobId) },
+        data: { status: 'FUNDED', txHashes: { push: txHash } },
+      });
+
+      // best-effort ledger: escrow lock for client if client is an agent
+      try {
+        const { recordLedgerEntry, resolveAgentIdBySca } = await import('@/lib/ledger/ledgerService');
+        const clientAgentId = await resolveAgentIdBySca(String(clientSCA)).catch(() => null);
+        if (clientAgentId) {
+          await recordLedgerEntry({
+            agentRegistryId: clientAgentId,
+            type: 'JOB_ESCROW_LOCK',
+            amount: budget,
+            direction: 'DEBIT',
+            jobId: BigInt(jobId),
+            txHash,
+            description: `escrow lock for job ${jobId}`,
+          });
+        }
+      } catch (e: any) { console.error('[ledger] fund lock failed:', e.message); }
 
       return NextResponse.json({
         success: true,
@@ -765,6 +860,10 @@ async function jobsHandler(request: Request) {
 
       const deliverableHash = keccak256(toHex(deliverable)) as `0x${string}`;
 
+      // Ensure the canonical row exists (backfill pre-change orphans from
+      // on-chain truth) BEFORE the on-chain tx.
+      await ensureErc8183JobBackfilled(jobId, request);
+
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
         blockchain: 'ARC-TESTNET' as any,
@@ -776,6 +875,11 @@ async function jobsHandler(request: Request) {
 
       if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
+
+      await prisma.erc8183Job.update({
+        where: { jobId: BigInt(jobId) },
+        data: { status: 'SUBMITTED', deliverableHash, txHashes: { push: txHash } },
+      });
 
       return NextResponse.json({
         success: true,
@@ -813,6 +917,11 @@ async function jobsHandler(request: Request) {
 
       // ── PREFLIGHT
       const jobToComplete = await requireJob(jobId);
+      // The provider identity is authoritative from on-chain getJob() — never
+      // from the request body (complete is signed by the evaluator/client, so
+      // any providerSCA in the body would be untrusted). Used by the ledger
+      // REVENUE credit, auto-reputation, and the Telegram notify below.
+      const providerSCA = String(jobToComplete.provider || '');
       if ((jobToComplete.evaluator || '').toLowerCase() !== clientSCA.toLowerCase()) {
         throw new PreflightError(
           409,
@@ -832,7 +941,26 @@ async function jobsHandler(request: Request) {
         throw new PreflightError(400, `Job #${jobId} has expired — no further actions are possible.`);
       }
 
+      // Senate-identical validation gate: if this job has a validation policy
+      // with required=true, block release until the validator PASSED it.
+      const validationGate = await isValidationSatisfiedForJob(BigInt(jobId));
+      if (!validationGate.allowed) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Validation required — ${validationGate.reason}`,
+            code: 'VALIDATION_REQUIRED',
+            validationStatus: validationGate.reason,
+          },
+          { status: 409 }
+        );
+      }
+
       const reasonHash = keccak256(toHex('deliverable-approved')) as `0x${string}`;
+
+      // Ensure the canonical row exists (backfill pre-change orphans from
+      // on-chain truth) BEFORE the on-chain tx.
+      await ensureErc8183JobBackfilled(jobId, request);
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
@@ -845,6 +973,103 @@ async function jobsHandler(request: Request) {
 
       if (!tx.data?.id) throw new Error('Circle transaction returned no ID.');
       const txHash = await waitForTx(circleClient, tx.data.id);
+
+      // Persist the canonical record the same way /api/jobs/complete does.
+      await prisma.erc8183Job.update({
+        where: { jobId: BigInt(jobId) },
+        data: { status: 'COMPLETED', reasonHash, txHashes: { push: txHash } },
+      });
+
+      // On-chain budget is the authoritative released amount.
+      const budget = BigInt(jobToComplete.budget);
+
+      // Best-effort canonical post-completion side-effects (never fail the
+      // completion) — mirrored from /api/jobs/complete.
+      try {
+        const { recordLedgerEntry, resolveAgentIdBySca } = await import('@/lib/ledger/ledgerService');
+        const { getJobValidationPolicy } = await import('@/lib/jobs/jobValidationPolicy');
+        let jobValidationId: string | null = null;
+        try {
+          const pol = await getJobValidationPolicy(BigInt(jobId));
+          if (pol && pol.required) jobValidationId = pol.id;
+        } catch {}
+        const providerAgentId = await resolveAgentIdBySca(String(providerSCA)).catch(() => null);
+        const clientAgentId = await resolveAgentIdBySca(String(clientSCA)).catch(() => null);
+        if (providerAgentId) {
+          try {
+            await recordLedgerEntry({
+              agentRegistryId: providerAgentId,
+              type: 'REVENUE',
+              amount: budget,
+              direction: 'CREDIT',
+              counterpartyAgentId: clientAgentId ?? null,
+              jobId: BigInt(jobId),
+              jobValidationId,
+              txHash,
+              description: `job ${jobId} payment`,
+            });
+          } catch {}
+        }
+        if (clientAgentId) {
+          try {
+            await recordLedgerEntry({
+              agentRegistryId: clientAgentId,
+              type: 'JOB_ESCROW_RELEASE',
+              amount: budget,
+              direction: 'CREDIT',
+              jobId: BigInt(jobId),
+              jobValidationId,
+              txHash,
+              description: `escrow unlock for job ${jobId}`,
+            });
+          } catch {}
+        }
+        if (clientAgentId && clientAgentId !== providerAgentId) {
+          try {
+            await recordLedgerEntry({
+              agentRegistryId: clientAgentId,
+              type: 'SUBCONTRACTOR_SPEND',
+              amount: budget,
+              direction: 'DEBIT',
+              counterpartyAgentId: providerAgentId ?? null,
+              jobId: BigInt(jobId),
+              jobValidationId,
+              txHash,
+              description: `subcontractor spend for job ${jobId}`,
+            });
+          } catch {}
+        }
+      } catch {}
+
+      // Best-effort auto-reputation for validated jobs (deduped internally).
+      try {
+        const { maybeAutoReputationForValidatedJob } = await import('@/lib/trust/autoReputation');
+        const { resolveAgentIdBySca } = await import('@/lib/ledger/ledgerService');
+        const { getJobValidationPolicy } = await import('@/lib/jobs/jobValidationPolicy');
+        let jv: any = null;
+        try { jv = await getJobValidationPolicy(BigInt(jobId)); } catch {}
+        if (jv && jv.required) {
+          const providerAgentId = await resolveAgentIdBySca(String(providerSCA)).catch(() => null);
+          let providerTokenId: string | null = null;
+          if (providerAgentId) {
+            try { const ag: any = await (prisma as any).agentRegistry.findUnique({ where: { id: providerAgentId }, select: { tokenId: true } }); providerTokenId = String(ag?.tokenId ?? ''); } catch {}
+            if (!providerTokenId) providerTokenId = null;
+          }
+          await maybeAutoReputationForValidatedJob({ jobId: BigInt(jobId), providerAgentId, providerTokenId, jobValidationId: jv.id, txHash });
+        }
+      } catch {}
+
+      // Best-effort Telegram completion notification (ConsumerAccount providers only).
+      try {
+        const providerConsumer = await (prisma as any).consumerAccount.findFirst({
+          where: { walletAddress: { equals: providerSCA, mode: 'insensitive' } },
+        });
+        if (providerConsumer?.telegramUserId) {
+          const { sendTelegramMessage } = await import('@/lib/telegram/sendTelegramMessage');
+          const amount = formatUnits(budget, 6);
+          await sendTelegramMessage(String(providerConsumer.telegramUserId), `✅ Job #${jobId} paid: ${amount} USDC. New balance: /balance`);
+        }
+      } catch (e: any) { console.error('[telegram/notify] completion message failed:', e?.message ?? String(e)); }
 
       // Read final job state
       const jobData = (await publicClient.readContract({

@@ -267,7 +267,7 @@ async function main() {
   // ── (d) notification ───────────────────────────────────────────────────
   console.log("[d] best-effort provider notification");
   const notifyIdx = createBranch.indexOf("sendTelegramMessage(");
-  const dbWriteIdx = createBranch.indexOf("prisma.job");
+  const dbWriteIdx = createBranch.indexOf("prisma.erc8183Job");
   const successRetIdx = createBranch.lastIndexOf("return NextResponse.json({");
   const successIdx = createBranch.indexOf("success: true");
   ok("Telegram notify call exists in create branch", notifyIdx !== -1);
@@ -287,22 +287,24 @@ async function main() {
 
   // ── (e) DB write failure observable, response preserved ────────────────
   console.log("[e] DB-write failure observable");
-  ok("no silent bare catch on prisma.job.create", !createBranch.includes(".catch(() => { })") && !createBranch.includes(".catch(()=>{})"), "silent swallow must be gone");
-  ok("real error object is logged server-side", createBranch.includes("[jobs:create] prisma.job.create failed for on-chain job") && createBranch.includes("dbError"));
+  ok("no silent bare catch on erc8183Job.create", !createBranch.includes(".catch(() => { })") && !createBranch.includes(".catch(()=>{})"), "silent swallow must be gone");
+  ok("real error object is logged server-side", createBranch.includes("[jobs:create] erc8183Job.create failed for on-chain job") && createBranch.includes("dbError"));
   ok("success response preserved after DB write", successIdx > dbWriteIdx && createBranch.slice(successIdx, successIdx + 400).includes("txHash"));
   ok("no Prisma schema/model change in scope (Job.agentId still required FK — write stays best-effort)", true);
 
-  // ── Downstream proof: prisma.job row NOT required ──────────────────────
-  console.log("[downstream] prisma.job row not required later");
-  // Strip string literals/comments so the log string "[jobs:create] prisma.job.create…"
+  // ── Downstream proof: canonical Erc8183Job (legacy prisma.job mirror removed) ──
+  console.log("[downstream] canonical erc8183Job row is the persistence; legacy prisma.job unqueried");
+  // Strip string literals/comments so the log string "[jobs:create] erc8183Job.create…"
   // isn't miscounted as a code reference.
   const codeOnly = src
     .replace(/`[^`]*`/g, '``')
     .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
     .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
-    .replace(/\/\/[^\n]*/g, '');
+    .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments (incl. helper JSDoc)
+    .replace(/\/\/[^\n]*/g, '');        // line comments
   const jobRefs = (codeOnly.match(/prisma\.job\b(?!\w)/g) || []).length;
-  ok("prisma.job referenced exactly once in code (the create write)", jobRefs === 1, `found ${jobRefs}`);
+  ok("legacy prisma.job no longer referenced in code (dead mirror removed)", jobRefs === 0, `found ${jobRefs}`);
+  ok("create persists canonical erc8183Job row", (codeOnly.match(/prisma\.erc8183Job\s*\n?\s*\.create/g) || []).length >= 1);
   ok("no prisma.job reads in lifecycle (setBudget/fund/submit/complete/GET)", !src.includes("prisma.job.find") && !src.includes("prisma.job.update"));
   const requireJobUses = (src.match(/requireJob\(/g) || []).length;
   ok("later actions read on-chain state via requireJob", requireJobUses >= 4, `found ${requireJobUses}`);
