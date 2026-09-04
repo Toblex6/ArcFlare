@@ -47,13 +47,24 @@ const SCA_RE = /^0x[a-fA-F0-9]{40}$/;
  */
 const MAX_PLAUSIBLE_REGISTRY_ID = 1_000_000;
 
+/**
+ * Prisma maps `AgentRegistry.id` to Postgres INTEGER (signed int4, max 2^31-1).
+ * The explicit-`id` branch must never hand an int4-overflowing (or non-safe)
+ * integer to Prisma — a bare `Number.isInteger` guard lets values like
+ * 3000000000 or a 30-digit tokenId reached it and Prisma would throw instead
+ * of returning null. Bound to the int4 range so the never-throws contract
+ * (clean not-found) holds. (The `auto` path separately bounds ids to
+ * MAX_PLAUSIBLE_REGISTRY_ID, so it never reaches here out of range.)
+ */
+const INT4_MAX = 2_147_483_647;
+
 function normalizeSca(value: string): string {
   return value.trim();
 }
 
 async function findById(rawId: string | number): Promise<any | null> {
   const id = typeof rawId === "number" ? rawId : Number(String(rawId).trim());
-  if (!Number.isInteger(id) || id <= 0) return null;
+  if (!Number.isSafeInteger(id) || id <= 0 || id > INT4_MAX) return null;
   return (prisma as any).agentRegistry.findUnique({ where: { id } });
 }
 

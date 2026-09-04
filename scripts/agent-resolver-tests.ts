@@ -65,10 +65,28 @@ async function main() {
       ["undefined ref", undefined, "auto"],
       ["malformed address 0x123", "0x123", "scaAddress"],
       ["non-numeric tokenId 0xabc", "0xabc", "tokenId"],
+      // Subtask D: int4 overflow in explicit-id mode must return clean null.
+      ["explicit-id int4 overflow (3000000000)", 3000000000, "id"],
+      ["explicit-id int4 overflow as string (\u201C3000000000\u201D)", "3000000000", "id"],
+      ["explicit-id exceeding MAX_SAFE_INTEGER (30-digit)", "900719925474099300000000000000", "id"],
+      ["explicit-id uint32-max+1 (4294967296)", "4294967296", "id"],
     ] as const) {
       const r = await resolveAgentRef(ref as any, type as any);
       ok(`unknown/malformed ref returns null agent: ${label}`, r.agent === null,
          `got agent ${JSON.stringify(r.agent?.id)}`);
+    }
+
+    // 4b. Subtask D: an overflowing id must resolve to not-found WITHOUT
+    // throwing a Prisma/DB error — the resolver's never-throws contract.
+    {
+      let threw = false;
+      try {
+        await resolveAgentRef("3000000000", "id");
+      } catch (e: any) {
+        threw = true;
+        console.log(`  ⚠️ resolver threw on int4 overflow: ${e?.message ?? e}`);
+      }
+      ok("explicit-id int4 overflow returns null without throwing (never-throws contract)", !threw);
     }
 
     // 5. explicit tokenId never falls through to id
