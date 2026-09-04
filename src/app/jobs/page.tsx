@@ -67,7 +67,7 @@ export default function JobsPage() {
       .catch(() => _router.replace('/merchant/login'));
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'board' | 'create' | 'post' | 'manage'>('board');
+  const [activeTab, setActiveTab] = useState<'board' | 'create' | 'post' | 'manage' | 'mine'>('board');
 
   // Create flow state
   const [step, setStep] = useState(1);
@@ -134,6 +134,39 @@ export default function JobsPage() {
   const [applicants, setApplicants] = useState<any[]>([]);
   const [applicantsLoading, setApplicantsLoading] = useState(false);
   const [selecting, setSelecting] = useState<string | null>(null); // postingId being selected/hired
+
+  // My Jobs tab — read-only view over GET /api/jobs/mine (role=all, single
+  // request). role=all was chosen over two role=provider/role=client fetches
+  // because one round-trip returns both sides and the backend already tags
+  // each row with isProvider/isClient, so a single list with a role badge per
+  // row is cleaner than two sections for the same data shape.
+  const [myJobs, setMyJobs] = useState<any[]>([]);
+  const [myJobsLoading, setMyJobsLoading] = useState(false);
+  const [myJobsError, setMyJobsError] = useState<string | null>(null);
+
+  const loadMyJobs = async () => {
+    setMyJobsLoading(true);
+    setMyJobsError(null);
+    try {
+      const res = await fetch('/api/jobs/mine?role=all');
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || `Load failed (${res.status})`);
+      setMyJobs(data.jobs || []);
+    } catch (e: any) {
+      setMyJobsError(e.message);
+      setMyJobs([]);
+    } finally {
+      setMyJobsLoading(false);
+    }
+  };
+
+  // Fetch when the My Jobs tab opens (same lazy-load pattern as the Post tab).
+  React.useEffect(() => {
+    if (activeTab === 'mine') {
+      loadMyJobs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Agent treasury funding (hire gate needs the agent's ledger treasury)
   const [agentTreasury, setAgentTreasury] = useState<any>(null);
@@ -551,6 +584,7 @@ export default function JobsPage() {
               //['create', '🎯 Direct Hire'],
               ['post', '📢 Post a Job'],
               ['manage', '🔧 Manage'],
+              ['mine', '🗂️ My Jobs'],
             ] as const
           ).map(([t, label]) => (
             <button key={t} style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>
@@ -1376,6 +1410,128 @@ export default function JobsPage() {
           </div>
         )}
 
+        {/* ── MY JOBS TAB — provider inbox (read-only over GET /api/jobs/mine) ── */}
+        {activeTab === 'mine' && (
+          <div style={S.card}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}
+            >
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
+                🗂️ My Jobs
+              </h3>
+              <button style={S.btnSm(false)} onClick={loadMyJobs} disabled={myJobsLoading}>
+                {myJobsLoading ? 'Loading...' : 'Refresh'}
+              </button>
+            </div>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, margin: '0 0 16px' }}>
+              Every job where one of your controlled wallets is the client or the provider —
+              no job id needed. To act on a job, open it in the Manage tab.
+            </p>
+            {myJobsError && (
+              <div>
+                <p style={{ color: 'var(--danger)', fontSize: 12, margin: '0 0 4px' }}>
+                  ❌ {myJobsError}
+                </p>
+                {myJobsError.toLowerCase().includes('auth') && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>
+                    You are not logged in.{' '}
+                    <a href="/merchant/login" style={{ color: 'var(--primary)' }}>
+                      Log in as merchant →
+                    </a>
+                  </p>
+                )}
+              </div>
+            )}
+            {!myJobsLoading && !myJobsError && myJobs.length === 0 && (
+              <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                No jobs yet. If you were hired, the job appears here automatically — ask the
+                client to confirm they used your wallet address. To hire someone, use{' '}
+                <button
+                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' }}
+                  onClick={() => setActiveTab('post')}
+                >
+                  Post a Job
+                </button>
+                .
+              </p>
+            )}
+            {myJobs.map((j) => (
+              <div
+                key={j.id}
+                style={{
+                  background: 'var(--surface-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 12,
+                  padding: 16,
+                  marginBottom: 12,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
+                      Job #{j.jobId}{' '}
+                      <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 11 }}>
+                        ·{' '}
+                        {(() => {
+                          try {
+                            return `${(Number(j.budget) / 1e6).toFixed(2)} USDC`;
+                          } catch {
+                            return `${j.budget} (raw)`;
+                          }
+                        })()}
+                      </span>
+                    </p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '0 0 8px' }}>
+                      {(j.description || '').slice(0, 80)}
+                      {(j.description || '').length > 80 ? '…' : ''}
+                    </p>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+                      {j.isProvider && (
+                        <span style={{ fontSize: 10, padding: '3px 10px', borderRadius: 20, fontWeight: 700, background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.3)', color: '#06b6d4', whiteSpace: 'nowrap' as const }}>
+                          🙋 Hired for this job
+                        </span>
+                      )}
+                      {j.isClient && (
+                        <span style={{ fontSize: 10, padding: '3px 10px', borderRadius: 20, fontWeight: 700, background: 'rgba(200,151,90,0.08)', border: '1px solid rgba(200,151,90,0.3)', color: 'var(--primary)', whiteSpace: 'nowrap' as const }}>
+                          🧑‍💼 Managing this job
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      padding: '3px 10px',
+                      borderRadius: 20,
+                      fontWeight: 700,
+                      background: `${STATUS_COLORS[j.status] || 'var(--text-secondary)'}15`,
+                      color: STATUS_COLORS[j.status] || 'var(--text-secondary)',
+                      border: `1px solid ${STATUS_COLORS[j.status] || 'var(--text-secondary)'}30`,
+                      whiteSpace: 'nowrap' as const,
+                    }}
+                  >
+                    {j.status}
+                  </span>
+                </div>
+                <button
+                  style={{ ...S.btnSm(false), marginTop: 12, color: 'var(--primary)', fontWeight: 700 }}
+                  onClick={() => {
+                    setLookupJobId(String(j.jobId));
+                    setActiveTab('manage');
+                  }}
+                >
+                  Manage this job →
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* ── MANAGE TAB ── */}
         {activeTab === 'manage' && (
           <div style={S.card}>
@@ -1545,6 +1701,10 @@ export default function JobsPage() {
                           manageAction === 'fund' ||
                           manageAction === 'complete') && (
                             <div>
+                              {/* Role-correctness audit: approve/fund/complete are all
+                                  client-signed (body.clientSCA) — never provider-facing.
+                                  Dynamic label so the signer is explicit per action.
+                                  State/API mapping unchanged: manageClientSCA → clientSCA. */}
                               <span
                                 style={{
                                   fontSize: 10,
@@ -1555,7 +1715,7 @@ export default function JobsPage() {
                                   display: 'block',
                                 }}
                               >
-                                Client SCA
+                                Client Wallet — signs {manageAction}
                               </span>
                               <input
                                 style={S.input}
@@ -1563,6 +1723,11 @@ export default function JobsPage() {
                                 onChange={(e) => setManageClientSCA(e.target.value)}
                                 placeholder="0xClientAddress"
                               />
+                              <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 10 }}>
+                                You (the client/payer) sign this from the wallet named as client
+                                on-chain. If you get a caller-control error, the logged-in session
+                                doesn't own this address.
+                              </span>
                             </div>
                           )}
                         {manageAction === 'approve' && (
@@ -1589,6 +1754,10 @@ export default function JobsPage() {
                         {manageAction === 'submit' && (
                           <>
                             <div>
+                              {/* Role-correctness audit: submit is provider-signed
+                                  (body.providerSCA) — never client-facing. "Provider SCA"
+                                  renamed to "Provider Wallet" for plain language.
+                                  State/API mapping unchanged: manageProviderSCA → providerSCA. */}
                               <span
                                 style={{
                                   fontSize: 10,
@@ -1599,7 +1768,7 @@ export default function JobsPage() {
                                   display: 'block',
                                 }}
                               >
-                                Provider SCA
+                                Provider Wallet — signs submit
                               </span>
                               <input
                                 style={S.input}
@@ -1607,6 +1776,10 @@ export default function JobsPage() {
                                 onChange={(e) => setManageProviderSCA(e.target.value)}
                                 placeholder="0xProviderAddress"
                               />
+                              <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 10 }}>
+                                The worker named at creation signs this from their wallet. Must
+                                be run from a session that controls that address.
+                              </span>
                             </div>
                             <div>
                               <span
