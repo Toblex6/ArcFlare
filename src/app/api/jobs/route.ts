@@ -318,13 +318,46 @@ async function jobsHandler(request: Request) {
       // creation, so an unknown address would leave the job unserviceable.
       const providerAgent = await (prisma as any).agentRegistry.findFirst({
         where: { scaAddress: { equals: providerSCA, mode: 'insensitive' } },
-        select: { id: true, merchantId: true },
+        select: { id: true, merchantId: true, status: true, circleWalletId: true },
       });
+      if (providerAgent) {
+        // Serviceability gate (before any chain interaction): the Direct Hire
+        // lifecycle is executed BY the provider — setBudget and submit are
+        // signed from the provider's Circle wallet (walletAddress: providerSCA
+        // on the Circle contract-execution call). A registered agent that is
+        // not fully provisioned, or that has no Circle wallet, can never move
+        // the job past Open — reject at create instead of minting a dead job.
+        // Same status gate as the validated procurement hire path.
+        if (providerAgent.status !== 'ACTIVE_AGENT_PROVISIONED') {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                `providerSCA is a registered agent (registry id ${providerAgent.id}) whose status is '${providerAgent.status}', not ACTIVE_AGENT_PROVISIONED — ` +
+                `only fully provisioned agents can service a Direct Hire job, because the provider's wallet must sign setBudget and submit on-chain. ` +
+                `Hire a provisioned agent or use the procurement flow instead.`,
+            },
+            { status: 400 }
+          );
+        }
+        if (!providerAgent.circleWalletId) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                `providerSCA is a registered agent (registry id ${providerAgent.id}) with no Circle wallet — ` +
+                `the Direct Hire lifecycle requires the provider's Circle wallet to sign setBudget and submit on-chain, so this job could never progress past Open. ` +
+                `Re-provision the agent's wallet before hiring it directly.`,
+            },
+            { status: 400 }
+          );
+        }
+      }
       let humanProvider: any = null;
       if (!providerAgent) {
         humanProvider = await (prisma as any).consumerAccount.findFirst({
           where: { walletAddress: { equals: providerSCA, mode: 'insensitive' } },
-          select: { id: true, telegramUserId: true },
+          select: { id: true, telegramUserId: true, circleWalletId: true },
         });
         if (!humanProvider) {
           return NextResponse.json(
@@ -332,6 +365,21 @@ async function jobsHandler(request: Request) {
               success: false,
               error:
                 'providerSCA is not a registered agent or known wallet — the provider must have an account on FlareHQ before being hired directly. Use Post a Job if you want to hire from open applicants instead.',
+            },
+            { status: 400 }
+          );
+        }
+        // Serviceability gate (same real supported path as the validated
+        // procurement hire route): a known wallet without a usable Circle
+        // wallet cannot sign provider-side lifecycle calls — reject at create.
+        if (!humanProvider.circleWalletId) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'providerSCA is a known wallet but has no Circle wallet attached — ' +
+                "the Direct Hire lifecycle requires the provider's Circle wallet to sign setBudget and submit on-chain, so this job could never progress past Open. " +
+                'The provider must complete wallet onboarding before being hired directly.',
             },
             { status: 400 }
           );
