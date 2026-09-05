@@ -66,3 +66,45 @@ export function extractIdentityMintFromLogs(
   }
   return null;
 }
+
+/**
+ * Minimal structural view of a server-side AgentDeployIntent row — enough for
+ * the pure matching below without importing Prisma (keeps this module free of
+ * DB/network deps so it stays unit-testable under plain node).
+ */
+export interface DeployIntentLike {
+  ownerSca?: string | null;
+  registerTxHash?: string | null;
+  createdAt?: Date | string;
+}
+
+/**
+ * Binds a recovered mint to the caller's server-side deploy intent(s).
+ *
+ * The recovered holder (mint.to, derived from the authoritative receipt) must
+ * equal an intent's recorded `ownerSca`. When an intent has already recorded
+ * this exact txHash as its registerTxHash it is preferred; otherwise the
+ * earliest intent holding that SCA wins. Returns null when NO intent binds this
+ * holder — callers must refuse (a mint to an SCA this merchant never deployed
+ * for is another merchant's registration, never attachable).
+ */
+export function matchDeployIntentToMint<T extends DeployIntentLike>(
+  intents: T[] | null | undefined,
+  mintedHolder: string,
+  txHash: string
+): T | null {
+  if (!Array.isArray(intents)) return null;
+  const holder = String(mintedHolder ?? "").toLowerCase();
+  const txLower = String(txHash ?? "").toLowerCase();
+  const holderMatches = intents.filter(
+    (i) => i && String(i.ownerSca ?? "").toLowerCase() === holder
+  );
+  if (holderMatches.length === 0) return null;
+  return (
+    holderMatches.find(
+      (i) => i.registerTxHash && String(i.registerTxHash).toLowerCase() === txLower
+    ) ??
+    holderMatches[0] ??
+    null
+  );
+}

@@ -8,6 +8,7 @@ import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerch
 import {
   checkAgentDeployAllowed,
   releaseAgentDeployClaim,
+  normalizeAgentDeployIdempotencyKey,
 } from '@/src/lib/agent-deploy-guard';
 
 const prisma = new PrismaClient();
@@ -47,16 +48,37 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
     // repeated deployment (multiple agents per merchant) up to the budget.
     const idempotencyKey =
       typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : undefined;
+    // Normalized form persisted on the deploy-intent row (same convention as the
+    // guard: trim + 120-char cap). The DB-level uniqueness below complements the
+    // guard's in-memory claim across instances/restarts.
+    const normalizedIdempotencyKey = idempotencyKey
+      ? normalizeAgentDeployIdempotencyKey(idempotencyKey)
+      : undefined;
     const deployGate = checkAgentDeployAllowed(merchant.id, idempotencyKey);
     if (!deployGate.allowed) {
       if (deployGate.reason === 'duplicate') {
-        return NextResponse.json(
-          {
-            error: 'Duplicate agent deploy — replay of an in-progress request.',
-            replayed: true,
-          },
-          { status: 409 }
-        );
+        // Same-instance replay of an in-progress/completed deploy. Surface the
+        // underlying intent when present so a PENDING registration points the
+        // merchant at recovery instead of a dead-end 409.
+        let replayBody: Record<string, unknown> = {
+          error: 'Duplicate agent deploy — replay of an in-progress request.',
+          replayed: true,
+        };
+        if (normalizedIdempotencyKey) {
+          const existingIntent = await (prisma as any).agentDeployIntent
+            .findFirst({
+              where: { merchantId: merchant.id, idempotencyKey: normalizedIdempotencyKey },
+              select: { status: true, registerTxHash: true },
+            })
+            .catch(() => null);
+          if (existingIntent?.registerTxHash) replayBody.txHash = existingIntent.registerTxHash;
+          if (existingIntent?.status === 'PENDING_IDENTITY_CONFIRMATION') {
+            replayBody.error =
+              'Duplicate agent deploy — this idempotency key has a pending on-chain registration. Recover it via POST /api/agent/deploy/recover with the txHash.';
+            replayBody.hint = 'POST /api/agent/deploy/recover';
+          }
+        }
+        return NextResponse.json(replayBody, { status: 409 });
       }
       return NextResponse.json(
         {
@@ -73,6 +95,30 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
             : undefined,
         }
       );
+    }
+
+    // 0b. DB-level idempotency backstop (the guard above is in-memory, so two
+    // concurrent instances / a restart can both pass it for the same key). A
+    // persisted intent proves this key already progressed past wallet
+    // provisioning — refuse BEFORE creating another Circle wallet set. This is
+    // the deploy-side half of "no second wallet set / no duplicate register";
+    // the recovery endpoint never provisions anything.
+    if (normalizedIdempotencyKey) {
+      const existingIntent = await (prisma as any).agentDeployIntent.findFirst({
+        where: { merchantId: merchant.id, idempotencyKey: normalizedIdempotencyKey },
+        select: { id: true, status: true, registerTxHash: true },
+      });
+      if (existingIntent) {
+        const replayBody: Record<string, unknown> = {
+          error:
+            existingIntent.status === 'COMPLETED'
+              ? 'Duplicate agent deploy — this idempotency key already completed.'
+              : 'Duplicate agent deploy — replay of an in-progress request.',
+          replayed: true,
+        };
+        if (existingIntent.registerTxHash) replayBody.txHash = existingIntent.registerTxHash;
+        return NextResponse.json(replayBody, { status: 409 });
+      }
     }
 
     // 1. Initialize Circle Client
@@ -122,6 +168,46 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
       return NextResponse.json({ error: 'Failed to provision SCA wallets' }, { status: 500 });
     }
 
+    // 3.5 Persist the SERVER-SIDE DEPLOY INTENT BEFORE the on-chain register.
+    // Every field is server-derived (authenticated merchantId + the Circle
+    // responses above) — never client-supplied. This is the authoritative
+    // merchant → wallet-set → SCA binding that lets /api/agent/deploy/recover
+    // later prove ownership of an orphaned registration WITHOUT trusting a
+    // client-supplied walletSetId/ownerAddress/tokenId and WITHOUT weakening
+    // getCallerControlledAddresses(). The row stays recoverable even if the
+    // register response is lost or token extraction later fails.
+    let deployIntentId: string;
+    try {
+      const deployIntent = await (prisma as any).agentDeployIntent.create({
+        data: {
+          merchantId: merchant.id,
+          walletSetId: walletSetId,
+          ownerSca: ownerWallet.address,
+          validatorSca: validatorWallet.address,
+          circleWalletId: ownerWallet.id ?? null,
+          ...(normalizedIdempotencyKey
+            ? { idempotencyKey: normalizedIdempotencyKey }
+            : {}),
+          status: 'PROVISIONING',
+        },
+      });
+      deployIntentId = deployIntent.id;
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        // A concurrent instance created the intent first (the guard is
+        // in-memory) — refuse rather than provision a second wallet set.
+        return NextResponse.json(
+          { error: 'Duplicate agent deploy — replay of an in-progress request.', replayed: true },
+          { status: 409 }
+        );
+      }
+      throw e;
+    }
+    const markIntent = (patch: Record<string, unknown>) =>
+      (prisma as any).agentDeployIntent
+        .update({ where: { id: deployIntentId }, data: patch })
+        .catch(() => {});
+
     // 4. Register identity via Contract Execution using Circle's SDK engine
     const registerTx = await circleClient.createContractExecutionTransaction({
       walletAddress: ownerWallet.address!,
@@ -134,6 +220,10 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
 
     const txId = registerTx.data?.id;
     if (!txId) {
+      // Circle never accepted a registration for this intent — no on-chain tx
+      // exists to recover, so the intent is terminal (still safely preserved,
+      // never re-provisioned by a same-key retry).
+      await markIntent({ status: 'FAILED' });
       return NextResponse.json(
         { error: 'Identity registration failed to initiate' },
         { status: 500 }
@@ -151,6 +241,13 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
         break;
       }
       if (data?.transaction?.state === 'FAILED') {
+        // On-chain revert is terminal: no identity was minted to recover.
+        await markIntent({
+          status: 'FAILED',
+          ...(data.transaction.txHash
+            ? { registerTxHash: data.transaction.txHash }
+            : {}),
+        });
         return NextResponse.json({ error: 'On-chain registration reverted' }, { status: 502 });
       }
     }
@@ -158,6 +255,11 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
     if (!txHash) {
       return NextResponse.json({ error: 'Transaction polling timed out' }, { status: 408 });
     }
+
+    // 5b. Circle confirmed the on-chain register: bind the txHash to the intent
+    // now (before token extraction) so a later extraction failure leaves a fully
+    // recoverable PENDING intent instead of an anonymous orphan.
+    await markIntent({ registerTxHash: txHash });
 
     // 6. Indexing via Viem — recover the REAL ERC-8004 tokenId minted by THIS tx.
     // Failure modes handled here: Transfer log parse errors, receipt absence, and RPC
@@ -241,9 +343,12 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
       // - Do NOT persist an AgentRegistry row: any placeholder would be a fake ERC-8004
       //   identity, and the agent must NOT be marked ACTIVE/provisioned.
       // - Do NOT delete the Circle wallets: they are preserved for operator retry/recovery.
+      // - The deploy intent stays recoverable: POST /api/agent/deploy/recover can later
+      //   prove this merchant owns this wallet set + SCA and persist the real identity.
       // - Surface txHash + inspection info so the operator can retry or inspect on explorer.
       // - Retry-safe: nothing was written, so a retry can never collide on a fake tokenId
       //   (@unique) and never orphans wallet references.
+      await markIntent({ status: 'PENDING_IDENTITY_CONFIRMATION' });
       return NextResponse.json(
         {
           error:
@@ -266,23 +371,57 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
 
     // 7. ✅ PERSIST DATA: reachable ONLY with a real on-chain tokenId recovered above.
     // Explicit escape hatch used here to bypass cached client types
-    const registeredAgent = await (prisma as any).agentRegistry.create({
-      data: {
-        name: agentName,
-        tokenId: tokenId,
-        scaAddress: ownerWallet.address,
-        circleWalletId: ownerWallet.id,
-        walletSetId: walletSetId,
-        validatorSca: validatorWallet.address,
-        ownerNode: ownerNode,
-        metadataURI: metadataUri,
-        status: 'ACTIVE_AGENT_PROVISIONED',
-        merchantId: merchant.id,
-        ...(descriptionInput ? { description: descriptionInput } : {}),
-        ...(skillsInput ? { skills: skillsInput } : {}),
-        ...(pricingInput ? { pricing: pricingInput } : {}),
-      },
-    });
+    let registeredAgent: any;
+    try {
+      registeredAgent = await (prisma as any).agentRegistry.create({
+        data: {
+          name: agentName,
+          tokenId: tokenId,
+          scaAddress: ownerWallet.address,
+          circleWalletId: ownerWallet.id,
+          walletSetId: walletSetId,
+          validatorSca: validatorWallet.address,
+          ownerNode: ownerNode,
+          metadataURI: metadataUri,
+          status: 'ACTIVE_AGENT_PROVISIONED',
+          merchantId: merchant.id,
+          ...(descriptionInput ? { description: descriptionInput } : {}),
+          ...(skillsInput ? { skills: skillsInput } : {}),
+          ...(pricingInput ? { pricing: pricingInput } : {}),
+        },
+      });
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        // A concurrent recovery/deploy already persisted this identity
+        // (@unique tokenId / scaAddress) — return the existing row if it is
+        // this merchant's, never a duplicate.
+        const after = await (prisma as any).agentRegistry.findFirst({
+          where: {
+            OR: [{ tokenId: tokenId }, { scaAddress: ownerWallet.address }],
+          },
+        });
+        if (after && (!after.merchantId || after.merchantId === merchant.id)) {
+          await markIntent({ status: 'COMPLETED' });
+          return NextResponse.json({
+            success: true,
+            replayed: true,
+            agent: after,
+            txHash,
+            explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+            wallets: {
+              owner: ownerWallet.address,
+              validator: validatorWallet.address,
+            },
+          });
+        }
+        return NextResponse.json(
+          { error: 'This ERC-8004 identity was already claimed by another merchant.' },
+          { status: 409 }
+        );
+      }
+      throw e;
+    }
+    await markIntent({ status: 'COMPLETED' });
 
     return NextResponse.json({
       success: true,

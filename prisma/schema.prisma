@@ -72,6 +72,32 @@ model AgentRegistry {
   procurements   ProcurementPosting[]
 }
 
+// Server-side deploy intent for POST /api/agent/deploy. Persisted AFTER Circle
+// wallet-set + wallets are provisioned and BEFORE the ERC-8004 register(), so a
+// registration whose response is lost / whose tokenId cannot be extracted can be
+// recovered by POST /api/agent/deploy/recover WITHOUT trusting any client-
+// supplied walletSetId / ownerAddress / validatorSca / tokenId. Every field here
+// is server-derived from the authenticated merchant and Circle's responses —
+// never from the request body — which is what makes the merchant → wallet-set →
+// SCA binding authoritative for recovery.
+model AgentDeployIntent {
+  id             String    @id @default(uuid())
+  merchantId     String // owning merchant (authenticated) — authoritative scope for recovery
+  walletSetId    String    @unique // Circle wallet set created for THIS deploy (never reused)
+  ownerSca       String // SCA the ERC-8004 register() mints to (owner wallet)
+  validatorSca   String // companion validator SCA provisioned in the same wallet set
+  circleWalletId String? // Circle wallet id of ownerSca, for AgentRegistry wallet re-link
+  idempotencyKey String? // normalized deploy-guard reference, when the client supplied one
+  status         String    @default("PROVISIONING") // PROVISIONING | PENDING_IDENTITY_CONFIRMATION | COMPLETED | FAILED
+  registerTxHash String? // on-chain register tx once Circle confirms it
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@unique([merchantId, idempotencyKey])
+  @@index([merchantId, status])
+  @@index([registerTxHash])
+}
+
 model ApiListing {
   id              String   @id @default(uuid())
   slug            String   @unique // used in the gated route path: /api/x402/marketplace/pay/[slug]
