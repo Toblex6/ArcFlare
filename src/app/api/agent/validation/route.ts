@@ -9,7 +9,10 @@ import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { notifyValidator } from '@/lib/notifyValidator';
-import { syncJobValidationResponseByRequestHash } from '@/lib/jobs/jobValidationPolicy';
+import {
+  syncJobValidationResponseByRequestHash,
+  resolveResponseValidator,
+} from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 
@@ -250,12 +253,43 @@ async function validationHandler(request: NextRequest) {
         );
       }
 
-      // Ownership check — caller must actually control validatorSCA.
-      // NOTE: can't verify this validatorSCA matches whoever the original
-      // request named as validator — there's no ValidationRequest table
-      // storing that, only the onchain event. A real membership check here
-      // needs that stored (or an onchain read of validationRequest data
-      // before responding), not built as part of this pass.
+      // AUTHORIZATION — prove this responder IS the designated validator for
+      // this requestHash, BEFORE any on-chain interaction.
+      //
+      // Source of truth: the on-chain ValidationRegistry (getValidationStatus)
+      // records the `validator` named by the original validationRequest, so it
+      // decides who may respond. The client-supplied validatorSCA is only a
+      // hint and MUST equal it (case-insensitively). For job-linked requests
+      // resolveResponseValidator also requires the persisted
+      // Erc8183JobValidation.validatorSCA to agree with on-chain — on a silent
+      // disagreement it fails closed (ok=false) so the DB and the registry can
+      // never conflict. A caller controlling some OTHER valid validator wallet
+      // cannot answer this request.
+      const designated = await resolveResponseValidator(requestHash);
+      if (!designated.ok || !designated.validatorAddress) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              designated.reason ||
+              'Cannot authorize this validation response — the designated validator could not be proven.',
+          },
+          { status: 403 }
+        );
+      }
+      if (validatorSCA.toLowerCase() !== designated.validatorAddress.toLowerCase()) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'You are not the designated validator for this requestHash.',
+          },
+          { status: 403 }
+        );
+      }
+
+      // Ownership check — caller must actually control the (now-verified)
+      // designated validator. validatorSCA already equals designated.validatorAddress
+      // above, so this proves ownership of the correct wallet. Not weakened.
       const respondActor = await verifyCallerControlsAddress(request, validatorSCA);
       if (!respondActor) {
         return NextResponse.json(
@@ -269,7 +303,7 @@ async function validationHandler(request: NextRequest) {
       const responseHash = keccak256(toHex(tag)) as `0x${string}`;
 
       const tx = await circleClient.createContractExecutionTransaction({
-        walletAddress: validatorSCA,
+        walletAddress: designated.validatorAddress,
         blockchain: 'ARC-TESTNET' as any,
         contractAddress: VALIDATION_REGISTRY,
         abiFunctionSignature: 'validationResponse(bytes32,uint8,string,bytes32,string)',

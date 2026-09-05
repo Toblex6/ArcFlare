@@ -59,12 +59,14 @@ let scenario: {
   validationByJobId: any | null;
   jobRow: any | null;
   updateShouldThrow: boolean;
+  /** Authoritative on-chain validator (fed to the mocked status reader). */
+  onChainValidator?: string | null;
 } = { validationByHash: null, validationByJobId: null, jobRow: null, updateShouldThrow: false };
 
 const calls = { validationUpdate: [] as any[], validationCreate: [] as any[] };
 
 function resetScenario(overrides: Partial<typeof scenario> = {}) {
-  scenario = { validationByHash: null, validationByJobId: null, jobRow: null, updateShouldThrow: false, ...overrides };
+  scenario = { validationByHash: null, validationByJobId: null, jobRow: null, updateShouldThrow: false, onChainValidator: null, ...overrides };
   calls.validationUpdate.length = 0;
   calls.validationCreate.length = 0;
 }
@@ -119,6 +121,23 @@ mock.module("@circle-fin/developer-controlled-wallets", {
 });
 
 async function respond(body: Record<string, unknown>) {
+  // The respond path now resolves the authoritative designated validator from
+  // on-chain (getValidationStatus). Feed the hermetic test a fake reader that
+  // mirrors the scenario, so no testnet RPC is contacted.
+  const jvp = await import("@/lib/jobs/jobValidationPolicy");
+  const onChainValidator =
+    scenario.onChainValidator ??
+    scenario.validationByHash?.validatorSCA ??
+    VALIDATOR.toLowerCase();
+  jvp.__setOnChainStatusReaderForTests((async () => ({
+    validatorAddress: onChainValidator,
+    agentId: BigInt(onChainValidator === "0x0000000000000000000000000000000000000000" ? 0 : 68210),
+    response: 0,
+    passed: false,
+    pending: true,
+    tag: "",
+    lastUpdate: 123n,
+  })) as any);
   const route = await import("@/app/api/agent/validation/route");
   const res = await (route as any).POST(
     new Request("http://localhost/api/agent/validation", {

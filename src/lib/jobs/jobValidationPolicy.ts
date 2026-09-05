@@ -254,6 +254,106 @@ export async function getOnChainValidationStatus(requestHash: string): Promise<{
 }
 
 /**
+ * Resolve the authoritative DESIGNATED validator for a RESPONSE to requestHash.
+ *
+ * Source of truth: the on-chain ValidationRegistry (getValidationStatus). The
+ * registry records the `validator` argument of the original validationRequest,
+ * so it IS who may respond. The client-supplied `validatorSCA` is never trusted
+ * as proof here — a responder route must compare what it received against the
+ * validator this returns (case-insensitively) and reject on mismatch.
+ *
+ * For JOB-LINKED requests (an Erc8183JobValidation row keyed by requestHash)
+ * the persisted validatorSCA must AGREE with the authoritative on-chain
+ * validator; a silent disagreement means the DB and the registry conflict, so
+ * we FAIL CLOSED (ok=false — no response allowed) rather than guess which is
+ * right.
+ *
+ * ok=false also covers two more fail-closed cases: no on-chain request is
+ * visible for the hash yet (cannot authenticate a designated validator), or the
+ * on-chain read throws (we cannot prove identity, so a response must not
+ * proceed on unproven identity).
+ */
+export interface ResponseValidatorResolution {
+  /** Authoritative designated validator, lowercased. Empty string when !ok. */
+  validatorAddress: string;
+  /** True when requestHash maps to a job-backed Erc8183JobValidation row. */
+  jobLinked: boolean;
+  /** When false the caller MUST reject the response (fail closed). */
+  ok: boolean;
+  reason?: string;
+}
+
+// Test seam — hermetic scripts/*tests.ts override the real RPC-backed reader so
+// they need no testnet connection. Production callers never touch this.
+export type OnChainStatusReader = typeof getOnChainValidationStatus;
+let onChainStatusReader: OnChainStatusReader = getOnChainValidationStatus;
+export function __setOnChainStatusReaderForTests(fn: OnChainStatusReader): void {
+  onChainStatusReader = fn;
+}
+
+export async function resolveResponseValidator(
+  requestHash: string
+): Promise<ResponseValidatorResolution> {
+  let onChain;
+  try {
+    onChain = await onChainStatusReader(requestHash);
+  } catch (e: any) {
+    return {
+      validatorAddress: "",
+      jobLinked: false,
+      ok: false,
+      reason: `on-chain validation status unavailable: ${e?.message ?? e}`,
+    };
+  }
+
+  const onChainValidator = (onChain?.validatorAddress || "").toLowerCase();
+  const onChainExists =
+    onChainValidator !== "0x0000000000000000000000000000000000000000";
+
+  let policy: JobValidationPolicy | null = null;
+  try {
+    policy = await getJobValidationPolicyByRequestHash(requestHash);
+  } catch (e: any) {
+    return {
+      validatorAddress: "",
+      jobLinked: false,
+      ok: false,
+      reason: `designated-validator lookup failed: ${e?.message ?? e}`,
+    };
+  }
+  const jobLinked = !!policy;
+
+  if (onChainExists) {
+    if (policy && onChainValidator !== policy.validatorSCA.toLowerCase()) {
+      return {
+        validatorAddress: "",
+        jobLinked: true,
+        ok: false,
+        reason:
+          "on-chain designated validator disagrees with the job's persisted validator — refusing to respond",
+      };
+    }
+    return { validatorAddress: onChainValidator, jobLinked, ok: true };
+  }
+
+  if (policy) {
+    return {
+      validatorAddress: "",
+      jobLinked: true,
+      ok: false,
+      reason:
+        "validation request not yet visible on-chain — cannot authorize a response",
+    };
+  }
+  return {
+    validatorAddress: "",
+    jobLinked: false,
+    ok: false,
+    reason: "no on-chain validation request found for this requestHash",
+  };
+}
+
+/**
  * Check if a job's validation requirement is satisfied (PASSED on-chain).
  * For normal jobs (no policy), returns true (not gated).
  * For gated jobs, returns true only if on-chain status is PASSED.
