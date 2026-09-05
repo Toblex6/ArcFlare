@@ -14,7 +14,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
-import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
@@ -1145,6 +1145,22 @@ async function getJobHandler(request: Request) {
     const expiredAt = new Date(Number(jobData.expiredAt) * 1000).toISOString();
     const isExpired = Date.now() > Number(jobData.expiredAt) * 1000;
 
+    // Role flags for the Manage view, derived from the canonical ownership gate
+    // (getCallerControlledAddresses — the same trust set /api/jobs/mine uses).
+    // Purely informative read-model additions: they tell the UI whether the
+    // authenticated caller controls the provider/client SCA so it can show
+    // role-correct actions. Authorization itself stays in the lifecycle routes
+    // (verifyCallerControlsAddress) — these flags never authorize anything.
+    let controlled = new Set<string>();
+    try {
+      controlled = await getCallerControlledAddresses(request as any);
+    } catch {
+      controlled = new Set<string>();
+    }
+    const isProvider = controlled.has(String(jobData.provider ?? '').toLowerCase());
+    const isClient = controlled.has(String(jobData.client ?? '').toLowerCase());
+    const budgetZero = BigInt(jobData.budget ?? 0) === 0n;
+
     return NextResponse.json({
       success: true,
       job: {
@@ -1159,6 +1175,10 @@ async function getJobHandler(request: Request) {
         expiredAt,
         isExpired,
         hook: jobData.hook,
+        // Role-correct Manage-view flags (read-model only, see above).
+        isProvider,
+        isClient,
+        budgetZero,
       },
       contractAddress: AGENTIC_COMMERCE_CONTRACT,
       arcScanUrl: `https://testnet.arcscan.app/address/${AGENTIC_COMMERCE_CONTRACT}`,

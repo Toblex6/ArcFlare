@@ -117,7 +117,7 @@ export default function JobsPage() {
   const [manageProviderSCA, setManageProviderSCA] = useState('');
   const [manageClientSCA, setManageClientSCA] = useState('');
   const [manageAction, setManageAction] = useState<
-    'submit' | 'complete' | 'fund' | 'approve' | null
+    'submit' | 'complete' | 'fund' | 'approve' | 'accept' | null
   >(null);
   const [manageLoading, setManageLoading] = useState(false);
   const [manageResult, setManageResult] = useState<any>(null);
@@ -249,6 +249,25 @@ export default function JobsPage() {
     setManageError(null);
     setManageResult(null);
     try {
+      if (manageAction === 'accept') {
+        // Provider-only Open + zero-budget task. Reuses the existing
+        // POST /api/jobs/[jobId]/accept route (the same one the Provider Inbox
+        // and Telegram /accept use) — all lifecycle, provider policy, and
+        // caller-control authorization stay server-side; the provider's signing
+        // wallet is resolved from the DB, never accepted from the body here.
+        const budget = toUsdcSixDec(amountUSDC);
+        if (!budget) throw new Error('Enter a valid budget (USDC) to accept the job.');
+        const res = await fetch(`/api/jobs/${lookupJobId}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ budget }),
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+        setManageResult(data);
+        await lookupJob(); // refresh job state (flags + budget update)
+        return;
+      }
       let body: any = { action: manageAction, jobId: lookupJobId };
       if (manageAction === 'submit')
         body = { ...body, providerSCA: manageProviderSCA, deliverable };
@@ -1833,6 +1852,16 @@ export default function JobsPage() {
                           Fund Escrow
                         </button>
                       )}
+                      {lookupResult.status === 'Open' &&
+                        lookupResult.budgetZero &&
+                        lookupResult.isProvider && (
+                          <button
+                            style={S.btnSm(manageAction === 'accept')}
+                            onClick={() => setManageAction('accept')}
+                          >
+                            Accept / Set Budget
+                          </button>
+                        )}
                       {lookupResult.status === 'Funded' && (
                         <button
                           style={S.btnSm(manageAction === 'submit')}
@@ -1966,6 +1995,33 @@ export default function JobsPage() {
                             </div>
                           </>
                         )}
+                        {manageAction === 'accept' && (
+                          <div>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: 'var(--text-secondary)',
+                                textTransform: 'uppercase',
+                                letterSpacing: 1,
+                                marginBottom: 4,
+                                display: 'block',
+                              }}
+                            >
+                              Budget (USDC)
+                            </span>
+                            <input
+                              style={S.input}
+                              value={amountUSDC}
+                              onChange={(e) => setAmountUSDC(e.target.value)}
+                              placeholder="e.g. 1.000000"
+                            />
+                            <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 10 }}>
+                              You (the provider) set your price here. It is signed from your
+                              provider wallet by the existing accept route — the client then
+                              funds escrow.
+                            </span>
+                          </div>
+                        )}
                         {manageError && (
                           <p style={{ color: 'var(--danger)', fontSize: 12, margin: '0 0 8px' }}>
                             ❌ {manageError}
@@ -1976,7 +2032,7 @@ export default function JobsPage() {
                           disabled={manageLoading}
                           onClick={runManageAction}
                         >
-                          {manageLoading ? 'Sending to Arc...' : `Execute: ${manageAction}`}
+                          {manageLoading ? 'Sending to Arc...' : `Execute: ${manageAction === 'accept' ? 'Accept / Set Budget' : manageAction}`}
                         </button>
                       </div>
                     )}
