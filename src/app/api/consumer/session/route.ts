@@ -42,7 +42,7 @@ function buildChallengeMessage(domain: string, address: string, nonce: string): 
   ].join('\n');
 }
 
-async function issueSession(account: { id: string; walletAddress: string; walletType?: string | null }) {
+async function issueSession(account: { id: string; walletAddress: string; walletType?: string | null; circleWalletId?: string | null }) {
   const token = await issueConsumerSessionToken(account.id, account.walletAddress);
 
   const res = NextResponse.json({
@@ -53,6 +53,7 @@ async function issueSession(account: { id: string; walletAddress: string; wallet
       // EXTERNAL (bring-your-own) vs CIRCLE (FlareHQ-managed) — the UI uses
       // this to gate features that need a FlareHQ wallet (e.g. bridging).
       walletType: account.walletType ?? null,
+      circleWalletId: (account as any).circleWalletId ?? null,
     },
   });
 
@@ -123,6 +124,7 @@ export async function GET(req: NextRequest) {
         id: payload.consumerId as string,
         walletAddress: payload.walletAddress as string,
         walletType: acct?.walletType ?? null,
+        circleWalletId: (acct as any)?.circleWalletId ?? null,
       },
     });
   } catch {

@@ -7,8 +7,19 @@ import Image from "next/image";
 import { useSignMessage } from "wagmi";
 import type { Address } from "viem";
 import { friendlyWalletError } from "@/lib/wallet/walletErrors";
+import {
+  buildDiscoveryParams,
+  isServiceable,
+  serviceabilityLabel,
+  getIdentifierLabels,
+  formatScaShort,
+  formatTrust,
+  formatPricing,
+  isolateValidAgents,
+  getAppropriateAction,
+} from "@/lib/consumer/discoveryHelpers";
 
-type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain";
+type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover";
 
 interface ActionResult {
   success: boolean;
@@ -21,6 +32,7 @@ interface ActionResult {
 
 const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "home", label: "Home", icon: "🏠" },
+  { id: "discover", label: "Discover", icon: "🔍" },
   { id: "send", label: "Send", icon: "💸" },
   { id: "save", label: "Save", icon: "🐷" },
   { id: "request", label: "Request", icon: "📥" },
@@ -121,12 +133,31 @@ export default function ConsumerApp() {
   const [editAmount, setEditAmount] = useState("");
   const [editFrequency, setEditFrequency] = useState("7");
 
+  // ── Consumer discovery (Discover → inspect → trust → hire) ──
+  const [discoverAgents, setDiscoverAgents] = useState<any[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [discoverSearch, setDiscoverSearch] = useState("");
+  const [discoverSkill, setDiscoverSkill] = useState("");
+  const [discoverMinTrust, setDiscoverMinTrust] = useState("");
+  const [discoverSortBy, setDiscoverSortBy] = useState("trust");
+  const [discoverHasMore, setDiscoverHasMore] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<any | null>(null);
+  const [cardData, setCardData] = useState<any | null>(null);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [cardError, setCardError] = useState<string | null>(null);
+  const [consumerWalletId, setConsumerWalletId] = useState<string | null>(null);
+  const [hireBusy, setHireBusy] = useState(false);
+  const [hireResult, setHireResult] = useState<ActionResult | null>(null);
+  const [hireBudget, setHireBudget] = useState("5");
+  const [hireDescription, setHireDescription] = useState("");
+
   // ── Deep links (/consumer?view=save etc.) — captured once at mount so the
   // payroll page's bottom nav can land on a specific view ──
   const initialViewRef = useRef<View | null>(null);
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("view");
-    const valid: View[] = ["home", "send", "save", "request", "crosschain"];
+    const valid: View[] = ["home", "discover", "send", "save", "request", "crosschain"];
     if (requested && valid.includes(requested as View)) {
       initialViewRef.current = requested as View;
     }
@@ -249,6 +280,118 @@ export default function ConsumerApp() {
       })
       .catch(console.error);
   }, []);
+
+  // ── Consumer discovery: load consumer walletId for hiring + discovery fetching ──
+  useEffect(() => {
+    if (!walletAddress) return;
+    fetch("/api/consumer/session")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.account) {
+          if (data.account.circleWalletId) setConsumerWalletId(data.account.circleWalletId);
+        }
+      })
+      .catch(() => {});
+  }, [walletAddress]);
+
+  const fetchDiscovery = async () => {
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    try {
+      const params = buildDiscoveryParams({
+        search: discoverSearch || undefined,
+        skill: discoverSkill || undefined,
+        minTrust: discoverMinTrust ? Number(discoverMinTrust) : null,
+        sortBy: discoverSortBy,
+        limit: 20,
+      });
+      const res = await fetch(`/api/agents/discover?${params}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `Discovery unavailable (${res.status})`);
+      if (!data || !Array.isArray(data.agents)) throw new Error("Discovery response malformed");
+      const valid = isolateValidAgents(data.agents);
+      setDiscoverAgents(valid);
+      setDiscoverHasMore(!!data.pagination?.hasMore);
+      if (valid.length < (data.agents?.length ?? 0)) {
+        console.warn(`[discover] filtered ${data.agents.length - valid.length} malformed agent(s)`);
+      }
+    } catch (e: any) {
+      setDiscoverError(e.message || "Could not load discovery");
+      setDiscoverAgents([]);
+    } finally {
+      setDiscoverLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (view === "discover") fetchDiscovery();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  const openAgentDetail = async (agent: any) => {
+    setSelectedAgent(agent);
+    setCardData(null);
+    setCardError(null);
+    setHireResult(null);
+    setCardLoading(true);
+    const id = agent?.id;
+    if (!id) {
+      setCardError("Agent record missing registry ID");
+      setCardLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/agents/${id}/card`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `Card unavailable (${res.status})`);
+      const card = data?.agentCard ?? data;
+      if (!card || typeof card !== "object") throw new Error("Card response malformed");
+      setCardData(card);
+      // Prefill hire description from agent context
+      if (card.description) setHireDescription(`Hire ${card.name}: ${String(card.description).slice(0, 80)}`);
+    } catch (e: any) {
+      setCardError(e.message);
+    } finally {
+      setCardLoading(false);
+    }
+  };
+
+  const handleHire = async () => {
+    if (!selectedAgent || !cardData) return;
+    if (!walletAddress) {
+      setHireResult({ success: false, error: "Connect a wallet before hiring." });
+      return;
+    }
+    if (!consumerWalletId) {
+      setHireResult({ success: false, error: "Hiring requires a FlareHQ-managed wallet (CIRCLE). Create a FlareHQ wallet or connect one that has a Circle wallet." });
+      return;
+    }
+    if (!isServiceable(cardData.status ?? selectedAgent.status)) {
+      setHireResult({ success: false, error: "This agent is not currently serviceable — hiring would fail validation." });
+      return;
+    }
+    setHireBusy(true);
+    setHireResult(null);
+    try {
+      const res = await fetch(`/api/agents/${selectedAgent.id}/hire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientWalletId: consumerWalletId,
+          description: hireDescription || `Hire ${cardData.name}`,
+          criteria: { requirements: [hireDescription || "Deliver as described"] },
+          budget: Number(hireBudget) || 1,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || `Hire failed (${res.status})`);
+      setHireResult({ success: true, message: `Hire started — job ${data.jobId} created`, reference: data.jobId, txHash: data.txHash, explorerUrl: `https://testnet.arcscan.app/tx/${data.txHash}` });
+    } catch (e: any) {
+      setHireResult({ success: false, error: e.message });
+    } finally {
+      setHireBusy(false);
+    }
+  };
 
   // ── Wallet / session functions ──
   const connectExisting = async () => {
@@ -1125,6 +1268,277 @@ export default function ConsumerApp() {
               </>
             )}
           </section>
+        )}
+
+        {/* ── Discover view ── */}
+        {view === "discover" && (
+          <section>
+            <h2 style={styles.flowTitle}>Discover agents</h2>
+            <p style={{ color: "var(--flow-text-faint)", fontSize: 13, margin: "0 0 14px", lineHeight: 1.5 }}>
+              Browse discoverable agents → inspect what they do, trust & serviceability → hire via the existing hiring route. Data is live from the Agent Registry; one bad record never hides the rest.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+              <input
+                style={styles.input}
+                value={discoverSearch}
+                onChange={(e) => setDiscoverSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && fetchDiscovery()}
+                placeholder="Search by name or description"
+                aria-label="Search agents"
+              />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const }}>
+                <input
+                  style={{ ...styles.input, flex: "1 1 120px", minWidth: 120 }}
+                  value={discoverSkill}
+                  onChange={(e) => setDiscoverSkill(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && fetchDiscovery()}
+                  placeholder="Skill / category (e.g. audit)"
+                  aria-label="Filter by skill"
+                />
+                <input
+                  style={{ ...styles.input, width: 110 }}
+                  value={discoverMinTrust}
+                  onChange={(e) => setDiscoverMinTrust(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && fetchDiscovery()}
+                  placeholder="Min trust 0-100"
+                  inputMode="numeric"
+                  aria-label="Minimum trust"
+                />
+                <select
+                  value={discoverSortBy}
+                  onChange={(e) => setDiscoverSortBy(e.target.value)}
+                  style={{ ...styles.input, width: 130, cursor: "pointer" } as any}
+                  aria-label="Sort agents"
+                >
+                  <option value="trust">Trust ↓</option>
+                  <option value="reputation">Reputation ↓</option>
+                  <option value="createdAt">Newest</option>
+                  <option value="price">Price</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={styles.submitButton} onClick={fetchDiscovery} disabled={discoverLoading}>
+                  {discoverLoading ? "Searching…" : "Search"}
+                </button>
+                <button
+                  style={{ ...styles.secondaryButton, marginTop: 8, flex: 1 }}
+                  onClick={() => { setDiscoverSearch(""); setDiscoverSkill(""); setDiscoverMinTrust(""); setDiscoverSortBy("trust"); setTimeout(fetchDiscovery, 0); }}
+                >
+                  Clear filters
+                </button>
+              </div>
+            </div>
+
+            {discoverError && (
+              <div style={styles.resultError}>
+                <p style={styles.resultText}>⚠️ {discoverError}</p>
+                <button style={styles.doneButton} onClick={fetchDiscovery}>Retry</button>
+              </div>
+            )}
+
+            {!discoverError && discoverLoading && (
+              <p style={{ color: "var(--flow-text-faint)", fontSize: 13 }}>Loading agents…</p>
+            )}
+
+            {!discoverError && !discoverLoading && discoverAgents.length === 0 && (
+              <div style={{ background: "var(--flow-surface-2)", borderRadius: 12, padding: "20px 16px", textAlign: "center" as const }}>
+                <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14 }}>No agents found</p>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)" }}>
+                  Try a broader search or lower the trust filter. Discovery uses the live Agent Registry — only agents with status ACTIVE_AGENT_PROVISIONED appear.
+                </p>
+              </div>
+            )}
+
+            {!discoverError && !discoverLoading && discoverAgents.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {discoverAgents.map((a) => {
+                  // Isolate malformed — never crash whole list
+                  try {
+                    const svc = serviceabilityLabel(a.status);
+                    const trustText = formatTrust(a.trust);
+                    const priceText = formatPricing(a.pricing);
+                    const ids = getIdentifierLabels(a);
+                    const action = getAppropriateAction(a, !!walletAddress);
+                    const skills: any[] = Array.isArray(a.skills) ? a.skills.slice(0, 4) : [];
+                    return (
+                      <div key={String(a.id)} style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column" as const, gap: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{a.name || `Agent ${a.id}`}</p>
+                            {a.description ? <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--flow-text-muted)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any, overflow: "hidden" }}>{String(a.description).slice(0, 160)}</p> : <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>No description listed</p>}
+                          </div>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 8, whiteSpace: "nowrap" as const, background: svc.tone === "ok" ? "rgba(63,122,87,0.12)" : svc.tone === "warn" ? "rgba(200,150,60,0.14)" : "rgba(0,0,0,0.06)", color: svc.tone === "ok" ? "#3F7A57" : svc.tone === "warn" ? "#8a6d2b" : "var(--flow-text-faint)" }}>{svc.label}</span>
+                        </div>
+                        {skills.length > 0 && (
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+                            {skills.map((s: any, i: number) => (
+                              <span key={i} style={{ fontSize: 10, background: "var(--flow-surface-2)", border: "1px solid var(--flow-border)", borderRadius: 20, padding: "2px 8px", color: "var(--flow-text-muted)" }}>
+                                {typeof s === "string" ? s : s?.name || String(s).slice(0, 20)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 11, color: "var(--flow-text-faint)", display: "flex", flexDirection: "column" as const, gap: 2 }}>
+                          {trustText ? <span style={{ fontWeight: 600, color: "var(--flow-text-muted)" }}>{trustText}{a.trust?.methodologyVersion ? ` · ${a.trust.methodologyVersion}` : ""}</span> : <span>Trust data unavailable</span>}
+                          {priceText ? <span>Pricing: {priceText} · {a.pricing?.currency || "USDC"}</span> : <span style={{ fontStyle: "italic" as const }}>Pricing not listed</span>}
+                          <span>Registry ID: {ids.registryId ?? "—"} · ERC-8004 Token: {ids.tokenId ?? "—"} · SCA: {formatScaShort(ids.scaAddress)}</span>
+                          {a.trackRecord && <span>{a.trackRecord.completedJobs} completed · {a.trackRecord.validatedJobs} validated{a.trackRecord.validationPassRate !== null && a.trackRecord.validationPassRate !== undefined ? ` · ${Math.round(a.trackRecord.validationPassRate * 100)}% pass` : ""}</span>}
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button style={{ ...styles.submitButton, marginTop: 0, flex: 1, padding: "10px 0" } as any} onClick={() => openAgentDetail(a)}>Inspect</button>
+                          <span title={action.hint} style={{ flex: 1, display: "flex" as const }}>
+                            <button
+                              style={{ flex: 1, padding: "10px 0", borderRadius: 12, border: "1px solid var(--flow-border)", background: action.disabled ? "var(--flow-surface-2)" : "var(--flow-surface)", color: action.disabled ? "var(--flow-text-faint)" : "var(--flow-text)", fontWeight: 600, cursor: action.disabled ? "not-allowed" : "pointer", fontSize: 12 }}
+                              disabled={action.disabled}
+                              onClick={() => openAgentDetail(a)}
+                            >
+                              {action.label}
+                            </button>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  } catch {
+                    return null;
+                  }
+                })}
+                {discoverHasMore && <p style={{ fontSize: 11, color: "var(--flow-text-faint)", textAlign: "center" as const }}>More agents available — refine filters to narrow results (limit 20).</p>}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ── Agent detail modal (inspect → trust/capability/economics → hire) ── */}
+        {selectedAgent && (
+          <div
+            style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+            onClick={() => { setSelectedAgent(null); setCardData(null); setCardError(null); setHireResult(null); }}
+          >
+            <div
+              style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "85vh", display: "flex", flexDirection: "column" as const, boxShadow: "0 12px 40px rgba(0,0,0,0.25)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--flow-border)", flexShrink: 0 }}>
+                <h3 style={{ margin: 0, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{cardData?.name || selectedAgent?.name || `Agent ${selectedAgent?.id}`}</h3>
+                <button aria-label="Close agent detail" onClick={() => { setSelectedAgent(null); setCardData(null); setCardError(null); setHireResult(null); }} style={{ background: "transparent", border: "1px solid var(--flow-border)", borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: "var(--flow-text-muted)" }}>✕</button>
+              </div>
+              <div style={{ padding: 16, overflowY: "auto" as const, display: "flex", flexDirection: "column" as const, gap: 12, fontSize: 12 }}>
+                {cardLoading && <p style={{ color: "var(--flow-text-faint)" }}>Loading card…</p>}
+                {cardError && (
+                  <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, padding: 12, color: "#C0563A" }}>
+                    Card unavailable: {cardError}
+                  </div>
+                )}
+                {!cardLoading && !cardError && cardData && (() => {
+                  const d: any = cardData;
+                  const svc = serviceabilityLabel(d.status ?? selectedAgent?.status);
+                  const ids = getIdentifierLabels({ ...d, ...d.identity, id: selectedAgent?.id, tokenId: d.identity?.tokenId ?? d.tokenId ?? d.agentId });
+                  const trust = d.trust ?? selectedAgent?.trust ?? null;
+                  const tr = d.trackRecord ?? null;
+                  const rep = d.reputationSummary ?? null;
+                  const pricingText = formatPricing(d.pricing) ?? formatPricing(selectedAgent?.pricing);
+                  const action = getAppropriateAction({ status: d.status ?? selectedAgent?.status }, !!walletAddress);
+                  return (
+                    <>
+                      {d.description && <p style={{ margin: 0, color: "var(--flow-text-muted)", lineHeight: 1.5 }}>{String(d.description).slice(0, 400)}</p>}
+                      {!d.description && <p style={{ margin: 0, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>No description provided by this agent.</p>}
+                      {Array.isArray(d.capabilities) && d.capabilities.length > 0 && (
+                        <div>
+                          <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 11, color: "var(--flow-text-muted)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>What this agent does</p>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+                            {d.capabilities.slice(0, 8).map((c: any, i: number) => (
+                              <span key={i} style={{ fontSize: 11, background: "var(--flow-surface-2)", border: "1px solid var(--flow-border)", borderRadius: 20, padding: "3px 10px" }}>{typeof c === "string" ? c : c?.name || JSON.stringify(c).slice(0, 30)}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {(!d.capabilities || d.capabilities.length === 0) && Array.isArray(d.skills) && d.skills.length > 0 && (
+                        <div>
+                          <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 11, color: "var(--flow-text-muted)", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>Capabilities</p>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+                            {d.skills.slice(0, 8).map((s: any, i: number) => (
+                              <span key={i} style={{ fontSize: 11, background: "var(--flow-surface-2)", border: "1px solid var(--flow-border)", borderRadius: 20, padding: "3px 10px" }}>{typeof s === "string" ? s : s?.name || JSON.stringify(s).slice(0, 30)}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div style={{ background: svc.tone === "ok" ? "rgba(63,122,87,0.08)" : "rgba(200,150,60,0.08)", border: `1px solid ${svc.tone === "ok" ? "rgba(63,122,87,0.2)" : "rgba(200,150,60,0.2)"}`, borderRadius: 10, padding: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: 0.5, color: svc.tone === "ok" ? "#3F7A57" : "#8a6d2b" }}>Serviceability</span>
+                        <span style={{ fontWeight: 700, fontSize: 12, color: svc.tone === "ok" ? "#3F7A57" : "#8a6d2b" }}>{svc.label}</span>
+                      </div>
+                      {trust && typeof trust.score === "number" ? (
+                        <div style={{ background: "var(--flow-surface-2)", borderRadius: 10, padding: 10 }}>
+                          <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 12 }}>Trust {trust.score}/100 <span style={{ fontWeight: 400, color: "var(--flow-text-faint)", fontSize: 11 }}>(confidence {trust.confidence ?? "—"}{trust.methodologyVersion ? ` · ${trust.methodologyVersion}` : ""})</span></p>
+                          {trust.breakdown && typeof trust.breakdown === "object" && Object.keys(trust.breakdown).length > 0 && (
+                            <div style={{ fontSize: 11, color: "var(--flow-text-faint)", display: "flex", flexDirection: "column" as const, gap: 2 }}>
+                              {Object.entries(trust.breakdown).map(([k, v]) => (
+                                <span key={k} style={{ display: "flex", justifyContent: "space-between" }}><span>{k.replace(/([A-Z])/g, " $1").replace(/^./, (c: string) => c.toUpperCase())}</span><span>{String(v)}</span></span>
+                              ))}
+                            </div>
+                          )}
+                          {tr && <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--flow-text-faint)" }}>{tr.completedJobs ?? 0} completed · {tr.validatedJobs ?? 0} validated{tr.validationPassRate !== null && tr.validationPassRate !== undefined ? ` · ${Math.round(tr.validationPassRate * 100)}% pass` : ""} · {tr.validatedVolumeUSDC ?? "0.00"} USDC volume</p>}
+                        </div>
+                      ) : (
+                        <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>Trust data unavailable — the backend did not supply a trust score for this agent.</p>
+                      )}
+                      {rep || tr ? (
+                        <div style={{ fontSize: 11, color: "var(--flow-text-muted)" }}>
+                          {rep?.onChain && <p style={{ margin: "0 0 4px" }}>On-chain reputation: {rep.onChain.reputationScore ?? "—"} {rep.onChain.readOk === false ? "(read unavailable)" : ""}</p>}
+                          {tr && <p style={{ margin: 0 }}>Track record: {tr.totalJobs ?? tr.completedJobs ?? 0} total · {tr.failedJobs ?? 0} failed · {tr.uniqueValidators ?? 0} unique validators</p>}
+                          {!rep && !tr && <p style={{ margin: 0, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>Reputation data unavailable</p>}
+                        </div>
+                      ) : (
+                        <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>Reputation/validation state unavailable</p>
+                      )}
+                      <div style={{ background: "var(--flow-surface-2)", borderRadius: 10, padding: 10 }}>
+                        <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5, color: "var(--flow-text-muted)" }}>Economics</p>
+                        {pricingText ? <p style={{ margin: "0 0 4px" }}>Pricing: <strong>{pricingText}</strong> {d.pricing?.currency || d.currency || "USDC"}</p> : <p style={{ margin: "0 0 4px", fontStyle: "italic" as const, color: "var(--flow-text-faint)" }}>Pricing not listed</p>}
+                        {d.supportedChains && <p style={{ margin: "0 0 4px", fontSize: 11, color: "var(--flow-text-faint)" }}>Chains: {Array.isArray(d.supportedChains) ? d.supportedChains.join(", ") : String(d.supportedChains)}</p>}
+                        {d.supportedTokens && <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>Tokens: {Array.isArray(d.supportedTokens) ? d.supportedTokens.join(", ") : String(d.supportedTokens)}</p>}
+                      </div>
+                      <div style={{ background: "var(--flow-surface-2)", borderRadius: 10, padding: 10 }}>
+                        <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5, color: "var(--flow-text-muted)" }}>Identity</p>
+                        <p style={{ margin: "0 0 4px", fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" as const }}><span style={{ fontFamily: "Inter, sans-serif", color: "var(--flow-text-faint)" }}>Registry ID:</span> {ids.registryId ?? "—"}</p>
+                        <p style={{ margin: "0 0 4px", fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" as const }}><span style={{ fontFamily: "Inter, sans-serif", color: "var(--flow-text-faint)" }}>ERC-8004 Token ID:</span> {ids.tokenId ?? "—"}</p>
+                        <p style={{ margin: 0, fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" as const }}><span style={{ fontFamily: "Inter, sans-serif", color: "var(--flow-text-faint)" }}>SCA:</span> {ids.scaAddress ?? "—"}</p>
+                      </div>
+                      <div style={{ borderTop: "1px solid var(--flow-border)", paddingTop: 12, display: "flex", flexDirection: "column" as const, gap: 8 }}>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5, color: "var(--flow-text-muted)" }}>Start interaction</p>
+                        {!walletAddress && <p style={{ margin: 0, fontSize: 11, color: "#C0563A" }}>Connect a wallet to hire — discovery is public, hiring requires you control the payer wallet.</p>}
+                        {walletAddress && !consumerWalletId && <p style={{ margin: 0, fontSize: 11, color: "#8a6d2b" }}>Hiring via the existing direct-hire route requires a FlareHQ-managed wallet (CIRCLE). Your current wallet is external — create a FlareHQ wallet to hire, or use a browser wallet that has a Circle wallet linked.</p>}
+                        <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
+                          <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: "var(--flow-text-muted)" }}>Budget (USDC)</label>
+                            <input style={{ ...styles.input, padding: "8px 12px" }} value={hireBudget} onChange={(e) => setHireBudget(e.target.value)} placeholder="5" inputMode="decimal" />
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: "var(--flow-text-muted)" }}>Description</label>
+                            <input style={{ ...styles.input, padding: "8px 12px" }} value={hireDescription} onChange={(e) => setHireDescription(e.target.value)} placeholder="What should the agent do?" />
+                          </div>
+                        </div>
+                        <button
+                          style={{ padding: "12px 0", borderRadius: 12, border: "none", background: action.disabled || !consumerWalletId ? "#8a7560" : "#1C1B19", color: "#FBF8F3", fontWeight: 700, cursor: action.disabled || !consumerWalletId || hireBusy ? "not-allowed" : "pointer", opacity: hireBusy ? 0.6 : 1 }}
+                          disabled={action.disabled || !consumerWalletId || hireBusy || !hireBudget}
+                          onClick={handleHire}
+                          title={action.hint}
+                        >
+                          {action.disabled ? action.label : hireBusy ? "Hiring…" : `Hire ${d.name || selectedAgent?.name || "agent"} (POST /api/agents/${selectedAgent?.id}/hire)`}
+                        </button>
+                        {action.disabled && <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>{action.hint} No payment was attempted.</p>}
+                        {hireResult && (
+                          <div style={hireResult.success ? { background: "rgba(63,122,87,0.08)", border: "1px solid rgba(63,122,87,0.2)", borderRadius: 10, padding: 10, color: "#3F7A57" } : { background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, padding: 10, color: "#C0563A" }}>
+                            <p style={{ margin: 0, fontSize: 12 }}>{hireResult.success ? `✅ ${hireResult.message}` : `❌ ${hireResult.error}`}</p>
+                            {hireResult.explorerUrl && <a href={hireResult.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#E8714A" }}>View transaction</a>}
+                          </div>
+                        )}
+                        <p style={{ margin: 0, fontSize: 10, color: "var(--flow-text-faint)" }}>Hiring reuses the existing direct-hire route — no second backend, no fake checkout. The payer wallet is resolved server-side via Circle and caller-control verification.</p>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
