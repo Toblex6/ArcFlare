@@ -17,7 +17,15 @@ export const InitializeSchema = z.object({
   // acceptance. Other currencies are NOT deployable yet (SwapPool has no
   // liquidity, the EURC path isn't wired into settle/verify) — expanding
   // this enum is a future task when multi-currency actually goes live.
-  currency: z.enum(['USDC']).default('USDC'),
+  //
+  // Phase 1 (multicurrency read-model): EURC is accepted so initialization
+  // can RECORD a EURC-denominated invoice, but actual EURC settlement/transfer
+  // is NOT enabled. `tokenAddress`, when provided, must be a supported token
+  // (resolved via resolveCurrency); otherwise the symbol alone is canonical.
+  currency: z.enum(['USDC', 'EURC']).default('USDC'),
+  // Canonical ERC-20 address of the settlement token. Optional for USDC (USDC
+  // remains the legacy default); when present it MUST match a supported token.
+  tokenAddress: scaAddress.optional(),
   email: z.string().email().optional(),
   merchant: z.string().min(1).max(100).optional(),
   agentSCA: scaAddress.optional(),

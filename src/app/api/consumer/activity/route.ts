@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { prisma } from "@/src/lib/prisma";
+import { resolveRowCurrency, tokenAddressFor } from "@/src/lib/tokens/resolveCurrency";
 
 export async function GET(req: NextRequest) {
     try {
@@ -26,6 +27,13 @@ export async function GET(req: NextRequest) {
             const isExpired =
                 log.status === "PENDING" && (log as any).expiresAt != null && now > new Date((log as any).expiresAt).getTime();
             const displayStatus = isExpired ? "EXPIRED" : log.status;
+            // Canonical settlement-token identity; legacy rows default to USDC.
+            let token: { symbol: "USDC" | "EURC"; address: string; decimals: number };
+            try {
+                token = resolveRowCurrency({ currency: log.currency, tokenAddress: (log as any).tokenAddress });
+            } catch {
+                token = { symbol: "USDC", address: tokenAddressFor("USDC"), decimals: 6 };
+            }
             return {
                 reference: log.reference,
                 amount: log.amount,
@@ -40,6 +48,7 @@ export async function GET(req: NextRequest) {
                 counterparty:
                     log.senderEmail === walletAddress ? log.merchantSCA || log.merchant : log.senderEmail,
                 explorerUrl: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
+                token,
             };
         });
 

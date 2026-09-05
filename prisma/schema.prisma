@@ -13,6 +13,10 @@ model PaymentLog {
   idempotencyKey   String?            @unique
   amount           Float
   currency         String
+  // Canonical ERC-20 address of the settlement token (Phase 1 multicurrency).
+  // NULL = legacy USDC row (resolve via supportedTokens before use). Additive
+  // only — the existing `currency` field is unchanged.
+  tokenAddress     String?
   chain            String
   senderEmail      String // 'pending@checkout' until a real payer settles (matches merchant links' convention)
   direction        String             @default("send") // "send" | "request" — explicit, not inferred
@@ -604,6 +608,10 @@ model AgentLedgerEntry {
   type                String // REVENUE | AGENT_PAYMENT | SUBCONTRACTOR_SPEND | JOB_ESCROW_LOCK | JOB_ESCROW_RELEASE | PAYROLL_SPEND | STREAM_REVENUE | STREAM_SPEND | GAS | REFUND | ADJUSTMENT
   amount              String // 6-decimal USDC integer string (bigint string) — never float
   token               String                @default("USDC")
+  // Canonical ERC-20 address of the accounted token (Phase 1 multicurrency).
+  // NULL = legacy USDC entry (resolve via supportedTokens before use). Keeps
+  // the existing `token` field untouched — additive only.
+  tokenAddress        String?
   direction           String // CREDIT | DEBIT
   counterpartyAgentId Int?
   paymentLogId        String?

@@ -479,17 +479,31 @@ async function main() {
 
   console.log('\n[validation] unsupported currency rejected with 400, no row created');
   {
-    // Regression-proof: InitializeSchema.currency is a strict USDC-only enum.
+    // Regression-proof: InitializeSchema.currency accepts exactly 'USDC' | 'EURC'
+    // (Phase 1 multicurrency read-model — EURC records a EURC-denominated
+    // invoice with a canonical tokenAddress; actual EURC settlement is Phase 2).
     // TETHER is the historical finding value; lowercase 'usdc' proves there
     // is no case-insensitive fuzzy matching.
     const before = await prisma.paymentLog.count();
-    for (const bad of [{ currency: 'TETHER' }, { currency: 'usdc' }, { currency: 'EURC' }]) {
+    for (const bad of [{ currency: 'TETHER' }, { currency: 'usdc' }]) {
       const res = await post('/api/payments/initialize', { amount: AMOUNT, currency: bad.currency }, { 'x-api-key': keyA });
       const data = await j(res);
-      ok(`non-USDC currency rejected 400 (${bad.currency})`, res.status === 400 && /Validation failed/i.test(data.error || ''), `got ${res.status}: ${JSON.stringify(data).slice(0, 160)}`);
+      ok(`unsupported currency rejected 400 (${bad.currency})`, res.status === 400 && /Validation failed/i.test(data.error || ''), `got ${res.status}: ${JSON.stringify(data).slice(0, 160)}`);
     }
+    const afterRejections = await prisma.paymentLog.count();
+    ok('no PaymentLog row created by rejected currencies', afterRejections === before, `rows ${before} → ${afterRejections}`);
+
+    // Phase 1 multicurrency: EURC initialization is now ACCEPTED (read-model
+    // only — settlement behavior is unchanged).
+    const eurc = await post('/api/payments/initialize', { amount: AMOUNT, currency: 'EURC' }, { 'x-api-key': keyA });
+    const eurcData = await j(eurc);
+    if (eurcData.reference) createdRefs.push(eurcData.reference);
+    ok('EURC initialization accepted (Phase 1 read-model)', eurc.status === 200 && eurcData.success === true, `got ${eurc.status}: ${JSON.stringify(eurcData).slice(0, 160)}`);
+    ok('EURC init returns canonical token identity', eurcData.token?.symbol === 'EURC' && typeof eurcData.token?.address === 'string' && eurcData.token?.decimals === 6, JSON.stringify(eurcData.token || null));
+    const eurcRow = eurcData.reference ? await prisma.paymentLog.findFirst({ where: { reference: eurcData.reference } }) : null;
+    ok('EURC row persists canonical currency + tokenAddress', !!eurcRow && eurcRow.currency === 'EURC' && typeof eurcRow.tokenAddress === 'string' && eurcRow.tokenAddress.length === 42, JSON.stringify({ currency: eurcRow?.currency, tokenAddress: eurcRow?.tokenAddress }));
     const after = await prisma.paymentLog.count();
-    ok('no PaymentLog row created by rejected currencies', after === before, `rows ${before} → ${after}`);
+    ok('exactly one PaymentLog row created by the accepted EURC init', after === afterRejections + 1, `rows ${afterRejections} → ${after}`);
   }
 
   // ══ SUMMARY ═══════════════════════════════════════════════════════════

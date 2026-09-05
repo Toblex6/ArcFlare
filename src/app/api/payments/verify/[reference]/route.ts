@@ -1,6 +1,7 @@
 // src/app/api/payments/verify/[reference]/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 
 export async function GET(
   request: Request,
@@ -65,6 +66,16 @@ function fireWebhook(url: string, payload: object) {
 async function formatResponse(payment: any) {
   const hasSettled = payment.status === 'SUCCESS';
 
+  // Canonical settlement-token identity. Legacy rows (NULL tokenAddress) default
+  // to USDC; genuinely unsupported historical data degrades to USDC rather than
+  // crashing the read path.
+  let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+  try {
+    token = resolveRowCurrency({ currency: payment.currency, tokenAddress: payment.tokenAddress });
+  } catch {
+    token = { symbol: 'USDC', address: tokenAddressFor('USDC'), decimals: 6 };
+  }
+
   // Live merchant-name lookup, resolved fresh every time via merchantId —
   // NOT stored on PaymentLog itself. `payment.merchant` (below) stays exactly
   // as it's always been (businessName, used as a join key elsewhere in the
@@ -113,5 +124,8 @@ async function formatResponse(payment: any) {
     issuedAt: payment.timestamp,
     settledAt: hasSettled ? payment.updatedAt : null,
     expiresAt: payment.expiresAt || null,
+    // Canonical settlement-token identity (additive). EURC is a read-model-only
+    // token in Phase 1 — see currency.ts / CheckoutWidget notes.
+    token,
   };
 }

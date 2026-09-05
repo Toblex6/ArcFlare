@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
+import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,16 @@ export async function GET(req: NextRequest) {
         log.status === 'PENDING' && log.expiresAt != null && new Date() > log.expiresAt;
       const displayStatus = isExpired ? 'EXPIRED' : log.status;
 
+      // Canonical settlement-token identity. Legacy rows default to USDC;
+      // unsupported historical data degrades to USDC rather than failing the
+      // whole merchant payment view.
+      let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+      try {
+        token = resolveRowCurrency({ currency: log.currency, tokenAddress: (log as any).tokenAddress });
+      } catch {
+        token = { symbol: 'USDC', address: tokenAddressFor('USDC'), decimals: 6 };
+      }
+
       return {
         id: log.id,
         reference: log.reference,
@@ -60,6 +71,8 @@ export async function GET(req: NextRequest) {
         arc_tx_hash: log.arcTxHash || null,
         explorer_url: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
         gateway_reference: (log as any).gatewayReference || null,
+        // Canonical settlement-token identity (additive).
+        token,
         // No real CCTP telemetry (nonce, attestation status) is tracked anywhere
         // in the schema today — the block that used to be here was fabricated
         // (Math.random() nonce, hardcoded source/target domains) and has been

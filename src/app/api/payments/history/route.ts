@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 
 // Force Next.js to treat this route as a dynamic live-data feed
 export const dynamic = 'force-dynamic';
@@ -41,17 +42,27 @@ export async function GET() {
           settlementCurrency: 'USDC',
           primaryChain: 'Arc-L1',
         },
-        transactions: logs.map((log: LogRowType) => ({
-          id: log.id,
-          reference: log.reference,
-          amount: log.amount,
-          currency: log.currency,
-          chain: log.chain,
-          senderEmail: log.senderEmail,
-          merchant: log.merchant,
-          status: log.status,
-          timestamp: log.timestamp,
-        })),
+        transactions: logs.map((log: LogRowType) => {
+          // Canonical settlement-token identity; legacy rows default to USDC.
+          let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+          try {
+            token = resolveRowCurrency({ currency: log.currency, tokenAddress: (log as any).tokenAddress });
+          } catch {
+            token = { symbol: 'USDC', address: tokenAddressFor('USDC'), decimals: 6 };
+          }
+          return {
+            id: log.id,
+            reference: log.reference,
+            amount: log.amount,
+            currency: log.currency,
+            chain: log.chain,
+            senderEmail: log.senderEmail,
+            merchant: log.merchant,
+            status: log.status,
+            timestamp: log.timestamp,
+            token,
+          };
+        }),
       },
       { status: 200 }
     );

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { parseBody, InitializeSchema } from '@/src/lib/validation';
+import { resolveCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { resolveInitializeCaller } from '@/src/lib/middleware/withMerchantAuth';
 
 export async function POST(req: NextRequest) {
@@ -30,7 +31,14 @@ export async function POST(req: NextRequest) {
     const { data, error: validationError } = parseBody(InitializeSchema, body);
     if (validationError) return validationError as NextResponse;
 
-    const { amount, currency, email, merchant, agentSCA, webhookUrl, payoutAddress, direction } = data;
+    const { amount, currency, email, merchant, agentSCA, webhookUrl, payoutAddress, direction, tokenAddress } = data;
+
+    // Resolve the canonical settlement token for this invoice (Phase 1
+    // read-model). Rejects unsupported symbols/addresses and guards against
+    // symbol/address mismatch. Persisted below so every payment record carries
+    // exact token identity. NOTE: this does NOT enable EURC settlement — it
+    // only records/returns the resolved identity (Phase 1 scope).
+    const token = resolveCurrency({ currency, tokenAddress });
 
     // 4. If agentSCA provided, verify it exists in AgentRegistry
     let resolvedSenderEmail = email || 'autonomous-agent@arc.network';
@@ -148,7 +156,8 @@ export async function POST(req: NextRequest) {
       data: {
         reference: transactionReference,
         amount: Number(amount),
-        currency: currency ?? 'USDC',
+        currency: token.symbol,
+        tokenAddress: token.address,
         chain: 'Arc Testnet v1.0',
         senderEmail: resolvedSenderEmail,
         direction: direction || 'send',
@@ -177,9 +186,16 @@ export async function POST(req: NextRequest) {
       data: {
         reference: transactionReference,
         amount,
-        currency: currency ?? 'USDC',
+        currency: token.symbol,
         status: 'ready',
         authorization_url: `/checkout/${transactionReference}`,
+      },
+      // Canonical settlement-token identity (Phase 1 read-model). EURC is NOT
+      // settleable yet — this informs the checkout data path only.
+      token: {
+        symbol: token.symbol,
+        address: token.address,
+        decimals: token.decimals,
       },
     });
   } catch (error: any) {

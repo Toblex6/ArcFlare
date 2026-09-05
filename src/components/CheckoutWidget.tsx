@@ -48,6 +48,17 @@ export interface PaymentLogData {
     merchantSCA: string | null;
     paid_at: string | null;
     arcTxHash: string | null;
+    /**
+     * Canonical settlement-token identity resolved from the payment record
+     * (Phase 1 multicurrency READ-MODEL only). Legacy rows resolve to USDC.
+     *
+     * This is intentionally CARRIED but NOT USED for the transfer yet: the
+     * writeContract below still signs USDC via USDC_CONTRACT so current USDC
+     * settlement is byte-for-byte unchanged. Phase 2 will switch the transfer
+     * token to `token.address` when EURC settlement actually goes live. Do not
+     * use this to fabricate an EURC payment path.
+     */
+    token?: { symbol: string; address: string; decimals: number } | null;
 }
 
 interface AgentData {
