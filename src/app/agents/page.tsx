@@ -7,6 +7,11 @@ import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
+import {
+  normalizeInboxResponse,
+  truncateAddress as truncateInboxAddress,
+  type ClassifiedInboxItem,
+} from '@/src/lib/validation/validatorInbox';
 
 
 const NAV = [
@@ -113,7 +118,7 @@ export default function AgentsPage() {
   const [repWalletLoaded, setRepWalletLoaded] = useState(false);
 
   // Validation state
-  const [valTab, setValTab] = useState<'request' | 'respond' | 'status'>('request');
+  const [valTab, setValTab] = useState<'inbox' | 'request' | 'respond' | 'status'>('inbox');
   const [valAgentId, setValAgentId] = useState('');
   const [valOwnerSCA, setValOwnerSCA] = useState('');
   const [valValidatorSCA, setValValidatorSCA] = useState('');
@@ -123,6 +128,56 @@ export default function AgentsPage() {
   const [valLoading, setValLoading] = useState(false);
   const [valResult, setValResult] = useState<ValidationResult | null>(null);
   const [valError, setValError] = useState<string | null>(null);
+
+  // Validator Inbox — durable discovery for requests assigned to wallets the
+  // caller controls. Read-only list over GET /api/agent/validation/inbox;
+  // responding reuses the existing respond form/flow below (no second API).
+  const [inboxItems, setInboxItems] = useState<ClassifiedInboxItem[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxError, setInboxError] = useState<string | null>(null);
+  const [inboxAuth, setInboxAuth] = useState(false);
+  const [inboxLimitations, setInboxLimitations] = useState<string[]>([]);
+
+  const loadInbox = async () => {
+    setInboxLoading(true);
+    setInboxError(null);
+    setInboxAuth(false);
+    try {
+      const res = await fetch('/api/agent/validation/inbox');
+      const data = await res.json().catch(() => null);
+      if (res.status === 401) {
+        setInboxAuth(true);
+        throw new Error(
+          (data && data.error) || 'Authentication required — connect a wallet that controls a validator address.'
+        );
+      }
+      if (!res.ok) throw new Error((data && data.error) || 'Failed to load validator inbox.');
+      // normalizeInboxResponse is total: one malformed record never hides the rest.
+      setInboxItems(normalizeInboxResponse(data));
+      setInboxLimitations(Array.isArray(data?.limitations) ? data.limitations : []);
+    } catch (e: any) {
+      setInboxError(e.message);
+    } finally {
+      setInboxLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'validation' && valTab === 'inbox') loadInbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, valTab]);
+
+  // Review → Respond: open the EXISTING respond form pre-filled with this
+  // request. The final transaction still goes through hardened
+  // POST /api/agent/validation (resolveResponseValidator +
+  // verifyCallerControlsAddress) — nothing is duplicated or bypassed here.
+  const reviewInboxItem = (row: ClassifiedInboxItem) => {
+    const hash = typeof row.item.requestHash === 'string' ? row.item.requestHash : '';
+    const validator = typeof row.item.validatorSCA === 'string' ? row.item.validatorSCA : '';
+    if (hash) setValRequestHash(hash);
+    if (validator) setValValidatorSCA(validator);
+    setValTab('respond');
+  };
 
   // Load agents — the full registry list for this merchant. The old load
   // path (/api/agent/status?name=Agent) silently hid any agent whose name
@@ -740,9 +795,11 @@ export default function AgentsPage() {
               Two-step flow: owner requests → validator responds.
             </p>
             <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-              {(['request', 'respond', 'status'] as const).map((t) => (
+              {(['inbox', 'request', 'respond', 'status'] as const).map((t) => (
                 <button key={t} style={S.tab(valTab === t)} onClick={() => setValTab(t)}>
-                  {t === 'request'
+                  {t === 'inbox'
+                    ? '0. Validator Inbox'
+                    : t === 'request'
                     ? '1. Request'
                     : t === 'respond'
                       ? '2. Respond'
@@ -750,6 +807,182 @@ export default function AgentsPage() {
                 </button>
               ))}
             </div>
+
+            {valTab === 'inbox' && (
+              <div>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 12px' }}>
+                  Requests assigned to a validator wallet you control — the durable place to find
+                  work even if the notification was missed. Discovery only; responding uses the
+                  existing Respond step (POST /api/agent/validation).
+                </p>
+                <div style={{ marginBottom: 12 }}>
+                  <button style={S.btnGhost} disabled={inboxLoading} onClick={loadInbox}>
+                    {inboxLoading ? 'Loading…' : '↻ Refresh Inbox'}
+                  </button>
+                </div>
+                {inboxLoading ? (
+                  <p style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 12 }}>
+                    Loading your validation requests...
+                  </p>
+                ) : inboxAuth ? (
+                  <div
+                    style={{
+                      background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.2)',
+                      borderRadius: 10,
+                      padding: 14,
+                    }}
+                  >
+                    <p style={{ color: 'var(--danger)', fontSize: 12, margin: '0 0 4px', fontWeight: 700 }}>
+                      🔒 No wallet connected / authorization failed
+                    </p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                      {inboxError || 'Sign in with a wallet that controls a validator address to see its queue.'}
+                    </p>
+                  </div>
+                ) : inboxError ? (
+                  <div
+                    style={{
+                      background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.2)',
+                      borderRadius: 10,
+                      padding: 14,
+                    }}
+                  >
+                    <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>❌ {inboxError}</p>
+                  </div>
+                ) : inboxItems.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '28px 0' }}>
+                    <p style={{ fontSize: 28, marginBottom: 8 }}>📥</p>
+                    <p style={{ color: 'var(--text)', fontSize: 13, fontWeight: 700, margin: '0 0 4px' }}>
+                      No pending validations
+                    </p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                      Nothing assigned to your validator wallets right now. New requests appear here
+                      after the on-chain validation request lands.
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {inboxItems.map((row, i) => {
+                      const it = row.item;
+                      const key =
+                        (typeof it.requestHash === 'string' && it.requestHash) || `row-${i}`;
+                      const badgeColor =
+                        row.classification === 'pending'
+                          ? 'var(--primary)'
+                          : row.classification === 'responded'
+                            ? 'var(--success)'
+                            : 'var(--text-secondary)';
+                      return (
+                        <div
+                          key={key}
+                          style={{
+                            background: 'var(--surface-secondary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 12,
+                            padding: 16,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: 8,
+                              gap: 8,
+                              flexWrap: 'wrap' as const,
+                            }}
+                          >
+                            <span style={S.badge(badgeColor)}>
+                              {row.classification === 'pending'
+                                ? 'PENDING'
+                                : row.classification === 'responded'
+                                  ? 'RESOLVED'
+                                  : 'UNAVAILABLE'}
+                            </span>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                              {row.reason}
+                            </span>
+                          </div>
+                          <p
+                            style={{
+                              color: 'var(--text)',
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              margin: '0 0 8px',
+                              wordBreak: 'break-all',
+                            }}
+                          >
+                            {typeof it.requestHash === 'string' && it.requestHash
+                              ? it.requestHash
+                              : 'hash pending — on-chain request not yet recorded'}
+                          </p>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
+                              <span style={S.label}>Job / Agent</span>
+                              <p style={{ color: 'var(--text)', fontSize: 12, margin: 0 }}>
+                                {it.job?.jobId != null && String(it.job.jobId) !== ''
+                                  ? `Job #${it.job.jobId}`
+                                  : 'Direct agent validation'}
+                              </p>
+                              {it.job?.description ? (
+                                <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '4px 0 0' }}>
+                                  {it.job.description}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
+                              <span style={S.label}>Criteria / Tag</span>
+                              <p style={{ color: 'var(--text)', fontSize: 12, margin: 0, fontFamily: 'monospace' }}>
+                                {it.tag || it.onChain?.tag || '—'}
+                              </p>
+                            </div>
+                            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
+                              <span style={S.label}>Requester (client)</span>
+                              <p style={{ color: 'var(--text)', fontSize: 11, margin: 0, fontFamily: 'monospace' }}>
+                                {truncateInboxAddress(it.job?.clientSCA)}
+                              </p>
+                            </div>
+                            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
+                              <span style={S.label}>Target (provider)</span>
+                              <p style={{ color: 'var(--text)', fontSize: 11, margin: 0, fontFamily: 'monospace' }}>
+                                {truncateInboxAddress(it.job?.providerSCA)}
+                              </p>
+                            </div>
+                          </div>
+                          <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '0 0 10px' }}>
+                            Created: {it.createdAt ? new Date(it.createdAt).toLocaleString() : '—'}
+                            {' · '}DB status: {it.status || '—'}
+                            {it.onChain && typeof it.onChain.pending === 'boolean'
+                              ? ` · On-chain: ${it.onChain.pending ? 'pending' : it.onChain.passed ? 'PASSED' : 'responded'}`
+                              : it.onChainUnavailable
+                                ? ' · On-chain: unavailable'
+                                : ''}
+                          </p>
+                          {row.actionable ? (
+                            <button style={S.btn} onClick={() => reviewInboxItem(row)}>
+                              Review → Respond
+                            </button>
+                          ) : (
+                            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                              {row.classification === 'responded'
+                                ? 'Already resolved — no action needed.'
+                                : 'Not respondable — inspect via Check Status.'}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {inboxLimitations.length > 0 && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '12px 0 0' }}>
+                    Note: {inboxLimitations[0]}
+                  </p>
+                )}
+              </div>
+            )}
 
             {valTab === 'request' && (
               <>
