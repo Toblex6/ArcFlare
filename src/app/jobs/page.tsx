@@ -7,6 +7,12 @@ import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
+import {
+  formatBudgetUsdc,
+  getProviderNextAction,
+  normalizeMineResponse,
+  truncateAddress,
+} from '@/src/lib/jobs/providerInbox';
 
 
 const NAV = [
@@ -135,38 +141,54 @@ export default function JobsPage() {
   const [applicantsLoading, setApplicantsLoading] = useState(false);
   const [selecting, setSelecting] = useState<string | null>(null); // postingId being selected/hired
 
-  // My Jobs tab — read-only view over GET /api/jobs/mine (role=all, single
-  // request). role=all was chosen over two role=provider/role=client fetches
-  // because one round-trip returns both sides and the backend already tags
-  // each row with isProvider/isClient, so a single list with a role badge per
-  // row is cleaner than two sections for the same data shape.
-  const [myJobs, setMyJobs] = useState<any[]>([]);
-  const [myJobsLoading, setMyJobsLoading] = useState(false);
-  const [myJobsError, setMyJobsError] = useState<string | null>(null);
+  // My Jobs tab — role-scoped read-only views over GET /api/jobs/mine.
+  // The provider inbox ("Jobs for Me") loads role=provider so a directly-hired
+  // provider discovers jobs where their controlled wallet is the providerSCA —
+  // no hidden job id needed. The client section loads role=client. Both lists
+  // are server-scoped by getCallerControlledAddresses; the backend tags each
+  // row with isProvider/isClient. Role correctness note: hiding client-only
+  // controls here is UX only — server-side authorization (caller-control
+  // checks in the lifecycle routes) remains authoritative.
+  const [mineRole, setMineRole] = useState<'provider' | 'client'>('provider');
+  const [providerJobs, setProviderJobs] = useState<any[]>([]);
+  const [providerLoading, setProviderLoading] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [clientJobs, setClientJobs] = useState<any[]>([]);
+  const [clientLoading, setClientLoading] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
 
-  const loadMyJobs = async () => {
-    setMyJobsLoading(true);
-    setMyJobsError(null);
+  const loadMineRole = async (role: 'provider' | 'client') => {
+    const setLoading = role === 'provider' ? setProviderLoading : setClientLoading;
+    const setError = role === 'provider' ? setProviderError : setClientError;
+    const setJobs = role === 'provider' ? setProviderJobs : setClientJobs;
+    setLoading(true);
+    setError(null);
     try {
-      const res = await fetch('/api/jobs/mine?role=all');
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || `Load failed (${res.status})`);
-      setMyJobs(data.jobs || []);
+      const res = await fetch(`/api/jobs/mine?role=${role}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || `Load failed (${res.status})`);
+      // Malformed/empty payloads must not crash — normalize to a safe array.
+      setJobs(normalizeMineResponse(data));
     } catch (e: any) {
-      setMyJobsError(e.message);
-      setMyJobs([]);
+      setError(e?.message || 'Load failed');
+      setJobs([]);
     } finally {
-      setMyJobsLoading(false);
+      setLoading(false);
     }
   };
+  // Back-compat alias (old single-list loader): refresh the visible role list.
+  const loadMyJobs = async () => {
+    await loadMineRole(mineRole);
+  };
 
-  // Fetch when the My Jobs tab opens (same lazy-load pattern as the Post tab).
+  // Fetch when the My Jobs tab opens + when the role sub-tab switches (same
+  // lazy-load pattern as the Post tab).
   React.useEffect(() => {
     if (activeTab === 'mine') {
-      loadMyJobs();
+      loadMineRole(mineRole);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, mineRole]);
 
   // Agent treasury funding (hire gate needs the agent's ledger treasury)
   const [agentTreasury, setAgentTreasury] = useState<any>(null);
@@ -1424,111 +1446,252 @@ export default function JobsPage() {
               <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
                 🗂️ My Jobs
               </h3>
-              <button style={S.btnSm(false)} onClick={loadMyJobs} disabled={myJobsLoading}>
-                {myJobsLoading ? 'Loading...' : 'Refresh'}
+              <button
+                style={S.btnSm(false)}
+                onClick={loadMyJobs}
+                disabled={mineRole === 'provider' ? providerLoading : clientLoading}
+              >
+                {(mineRole === 'provider' ? providerLoading : clientLoading) ? 'Loading...' : 'Refresh'}
               </button>
             </div>
-            <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, margin: '0 0 16px' }}>
-              Every job where one of your controlled wallets is the client or the provider —
-              no job id needed. To act on a job, open it in the Manage tab.
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, margin: '0 0 12px' }}>
+              Jobs discovered through your own controlled wallets — no hidden job id needed.
+              The lists below are server-scoped: you only ever see jobs where you are the
+              provider or the client. To act on a job, open it in the Manage tab.
             </p>
-            {myJobsError && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' as const }}>
+              <button style={S.tab(mineRole === 'provider')} onClick={() => setMineRole('provider')}>
+                💼 Jobs for Me (Provider)
+              </button>
+              <button style={S.tab(mineRole === 'client')} onClick={() => setMineRole('client')}>
+                🧑‍💼 Jobs I Posted (Client)
+              </button>
+            </div>
+            {mineRole === 'provider' ? (
               <div>
-                <p style={{ color: 'var(--danger)', fontSize: 12, margin: '0 0 4px' }}>
-                  ❌ {myJobsError}
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
+                  💼 Jobs for Me — Provider Inbox
+                </h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, margin: '0 0 16px' }}>
+                  Direct-hire jobs where one of your controlled wallets is the provider
+                  (<code>GET /api/jobs/mine?role=provider</code>). If a client hired you,
+                  the job appears here automatically.
                 </p>
-                {myJobsError.toLowerCase().includes('auth') && (
-                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>
-                    You are not logged in.{' '}
-                    <a href="/merchant/login" style={{ color: 'var(--primary)' }}>
-                      Log in as merchant →
-                    </a>
+                {providerLoading && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                    Loading your provider jobs...
                   </p>
                 )}
-              </div>
-            )}
-            {!myJobsLoading && !myJobsError && myJobs.length === 0 && (
-              <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
-                No jobs yet. If you were hired, the job appears here automatically — ask the
-                client to confirm they used your wallet address. To hire someone, use{' '}
-                <button
-                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' }}
-                  onClick={() => setActiveTab('post')}
-                >
-                  Post a Job
-                </button>
-                .
-              </p>
-            )}
-            {myJobs.map((j) => (
-              <div
-                key={j.id}
-                style={{
-                  background: 'var(--surface-secondary)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 12,
-                  padding: 16,
-                  marginBottom: 12,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
-                      Job #{j.jobId}{' '}
-                      <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 11 }}>
-                        ·{' '}
-                        {(() => {
-                          try {
-                            return `${(Number(j.budget) / 1e6).toFixed(2)} USDC`;
-                          } catch {
-                            return `${j.budget} (raw)`;
-                          }
-                        })()}
-                      </span>
+                {providerError && (
+                  <div>
+                    <p style={{ color: 'var(--danger)', fontSize: 12, margin: '0 0 4px' }}>
+                      ❌ {providerError}
                     </p>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '0 0 8px' }}>
-                      {(j.description || '').slice(0, 80)}
-                      {(j.description || '').length > 80 ? '…' : ''}
-                    </p>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
-                      {j.isProvider && (
-                        <span style={{ fontSize: 10, padding: '3px 10px', borderRadius: 20, fontWeight: 700, background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.3)', color: '#06b6d4', whiteSpace: 'nowrap' as const }}>
-                          🙋 Hired for this job
-                        </span>
-                      )}
-                      {j.isClient && (
-                        <span style={{ fontSize: 10, padding: '3px 10px', borderRadius: 20, fontWeight: 700, background: 'rgba(200,151,90,0.08)', border: '1px solid rgba(200,151,90,0.3)', color: 'var(--primary)', whiteSpace: 'nowrap' as const }}>
-                          🧑‍💼 Managing this job
-                        </span>
-                      )}
-                    </div>
+                    {providerError.toLowerCase().includes('auth') && (
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>
+                        You are not logged in.{' '}
+                        <a href="/merchant/login" style={{ color: 'var(--primary)' }}>
+                          Log in as merchant →
+                        </a>
+                      </p>
+                    )}
                   </div>
-                  <span
+                )}
+                {!providerLoading && !providerError && providerJobs.length === 0 && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                    No provider jobs yet. If a client hired you, the job appears here
+                    automatically — ask the client to confirm they used your provider
+                    wallet address.
+                  </p>
+                )}
+                {providerJobs.map((j: any) => {
+                  const next = getProviderNextAction(j);
+                  const needsAction = next.kind === 'accept' || next.kind === 'submit';
+                  return (
+                    <div
+                      key={j.id ?? j.jobId}
+                      style={{
+                        background: 'var(--surface-secondary)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 12,
+                        padding: 16,
+                        marginBottom: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
+                            Job #{j.jobId}{' '}
+                            <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 11 }}>
+                              · {formatBudgetUsdc(j.budget)}
+                            </span>
+                          </p>
+                          <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px', lineHeight: 1.5 }}>
+                            {j.description || 'No description provided.'}
+                          </p>
+                          <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '0 0 8px', fontFamily: 'monospace' }}>
+                            Client: {truncateAddress(j.clientSCA)}
+                          </p>
+                          {j.deliverableHash && (
+                            <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '0 0 8px', fontFamily: 'monospace' }}>
+                              Deliverable submitted: {String(j.deliverableHash).slice(0, 18)}…
+                            </p>
+                          )}
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+                            <span style={{ fontSize: 10, padding: '3px 10px', borderRadius: 20, fontWeight: 700, background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.3)', color: '#06b6d4', whiteSpace: 'nowrap' as const }}>
+                              🙋 Hired for this job
+                            </span>
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            padding: '3px 10px',
+                            borderRadius: 20,
+                            fontWeight: 700,
+                            background: `${STATUS_COLORS[j.status] || 'var(--text-secondary)'}15`,
+                            color: STATUS_COLORS[j.status] || 'var(--text-secondary)',
+                            border: `1px solid ${STATUS_COLORS[j.status] || 'var(--text-secondary)'}30`,
+                            whiteSpace: 'nowrap' as const,
+                          }}
+                        >
+                          {j.status}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          background: needsAction ? 'rgba(200,151,90,0.08)' : 'var(--surface)',
+                          border: `1px solid ${needsAction ? 'rgba(200,151,90,0.3)' : 'var(--border)'}`,
+                          borderRadius: 10,
+                          padding: '10px 12px',
+                          marginTop: 12,
+                        }}
+                      >
+                        <p style={{ color: needsAction ? 'var(--primary)' : 'var(--text)', fontWeight: 700, fontSize: 12, margin: '0 0 4px' }}>
+                          {needsAction ? '👉 ' : ''}{next.title}
+                        </p>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.5, margin: 0 }}>
+                          {next.detail}
+                        </p>
+                      </div>
+                      {/* Provider role shows provider actions only. Client-only
+                          controls (approve / fund / complete) are intentionally
+                          absent here — the server remains authoritative and
+                          rejects any action the caller does not control. */}
+                      <button
+                        style={{ ...S.btnSm(false), marginTop: 12, color: 'var(--primary)', fontWeight: 700 }}
+                        onClick={() => {
+                          setLookupJobId(String(j.jobId));
+                          setActiveTab('manage');
+                        }}
+                      >
+                        Manage this job →
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div>
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
+                  🧑‍💼 Jobs I Posted — Client View
+                </h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, margin: '0 0 16px' }}>
+                  Direct-hire jobs where one of your controlled wallets is the client
+                  (<code>GET /api/jobs/mine?role=client</code>). Fund and complete them
+                  from the Manage tab.
+                </p>
+                {clientLoading && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                    Loading your client jobs...
+                  </p>
+                )}
+                {clientError && (
+                  <div>
+                    <p style={{ color: 'var(--danger)', fontSize: 12, margin: '0 0 4px' }}>
+                      ❌ {clientError}
+                    </p>
+                    {clientError.toLowerCase().includes('auth') && (
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>
+                        You are not logged in.{' '}
+                        <a href="/merchant/login" style={{ color: 'var(--primary)' }}>
+                          Log in as merchant →
+                        </a>
+                      </p>
+                    )}
+                  </div>
+                )}
+                {!clientLoading && !clientError && clientJobs.length === 0 && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+                    No client jobs yet. To hire someone, use{' '}
+                    <button
+                      style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' }}
+                      onClick={() => setActiveTab('post')}
+                    >
+                      Post a Job
+                    </button>
+                    .
+                  </p>
+                )}
+                {clientJobs.map((j: any) => (
+                  <div
+                    key={j.id ?? j.jobId}
                     style={{
-                      fontSize: 10,
-                      padding: '3px 10px',
-                      borderRadius: 20,
-                      fontWeight: 700,
-                      background: `${STATUS_COLORS[j.status] || 'var(--text-secondary)'}15`,
-                      color: STATUS_COLORS[j.status] || 'var(--text-secondary)',
-                      border: `1px solid ${STATUS_COLORS[j.status] || 'var(--text-secondary)'}30`,
-                      whiteSpace: 'nowrap' as const,
+                      background: 'var(--surface-secondary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      padding: 16,
+                      marginBottom: 12,
                     }}
                   >
-                    {j.status}
-                  </span>
-                </div>
-                <button
-                  style={{ ...S.btnSm(false), marginTop: 12, color: 'var(--primary)', fontWeight: 700 }}
-                  onClick={() => {
-                    setLookupJobId(String(j.jobId));
-                    setActiveTab('manage');
-                  }}
-                >
-                  Manage this job →
-                </button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>
+                          Job #{j.jobId}{' '}
+                          <span style={{ fontWeight: 400, color: 'var(--text-secondary)', fontSize: 11 }}>
+                            · {formatBudgetUsdc(j.budget)}
+                          </span>
+                        </p>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px', lineHeight: 1.5 }}>
+                          {j.description || 'No description provided.'}
+                        </p>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '0 0 8px', fontFamily: 'monospace' }}>
+                          Provider: {truncateAddress(j.providerSCA)}
+                        </p>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+                          <span style={{ fontSize: 10, padding: '3px 10px', borderRadius: 20, fontWeight: 700, background: 'rgba(200,151,90,0.08)', border: '1px solid rgba(200,151,90,0.3)', color: 'var(--primary)', whiteSpace: 'nowrap' as const }}>
+                            🧑‍💼 Managing this job
+                          </span>
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          padding: '3px 10px',
+                          borderRadius: 20,
+                          fontWeight: 700,
+                          background: `${STATUS_COLORS[j.status] || 'var(--text-secondary)'}15`,
+                          color: STATUS_COLORS[j.status] || 'var(--text-secondary)',
+                          border: `1px solid ${STATUS_COLORS[j.status] || 'var(--text-secondary)'}30`,
+                          whiteSpace: 'nowrap' as const,
+                        }}
+                      >
+                        {j.status}
+                      </span>
+                    </div>
+                    <button
+                      style={{ ...S.btnSm(false), marginTop: 12, color: 'var(--primary)', fontWeight: 700 }}
+                      onClick={() => {
+                        setLookupJobId(String(j.jobId));
+                        setActiveTab('manage');
+                      }}
+                    >
+                      Manage this job →
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
 
