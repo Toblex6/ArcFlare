@@ -95,6 +95,27 @@ async function main() {
       body: JSON.stringify({ recipients: [{ address: "0x123", amount: "0.01" }] }),
     });
     ok("invalid recipient address → 400", badBody.status === 400, `got ${badBody.status}`);
+
+    // ── 5. EURC token refused before any 402 challenge (Phase 1 safety) ────
+    const eurc = await fetch(`${BASE}/api/payroll/fund`, {
+      method: "POST",
+      headers: payHeaders,
+      body: JSON.stringify({
+        token: "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a", // EURC — not settleable in Phase 1
+        recipients: [{ address: "0x0000000000000000000000000000000000000001", amount: "0.01" }],
+      }),
+    });
+    const eurcData = await eurc.json().catch(() => ({}));
+    ok("EURC payroll token → 400 (no 402 challenge issued)", eurc.status === 400, `got ${eurc.status}`);
+    ok("error names EURC / Phase 2", /EURC/.test(eurcData.error || "") && /Phase 2/.test(eurcData.error || ""), eurcData.error);
+
+    // ── 6. USDC (default, no token) still 402-challenges — gate is EURC-only ─
+    const usdc = await fetch(`${BASE}/api/payroll/fund`, {
+      method: "POST",
+      headers: payHeaders,
+      body: JSON.stringify({ recipients: [{ address: "0x0000000000000000000000000000000000000001", amount: "0.01" }] }),
+    });
+    ok("USDC default still 402-challenges (gate is EURC-only)", usdc.status === 402, `got ${usdc.status}`);
   } finally {
     await prisma.merchant.update({
       where: { id: merchant.id },

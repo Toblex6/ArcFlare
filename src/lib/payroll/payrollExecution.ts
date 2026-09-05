@@ -45,7 +45,7 @@ import { paymentRequiredResponse, verifyPayment, settlePayment } from "@/lib/x40
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { checkSpendAllowed, getSpendLimitContract, recordSpend } from "@/lib/agents/spendLimitEnforcer";
 import { recoverFromSpendLimitRaceFailure, enqueueForReview } from "@/lib/jobs/settlementRecovery";
-import { getTokenBySymbol, isSupportedToken, getUsdcAddress } from "@/lib/tokens/supportedTokens";
+import { getTokenBySymbol, isSupportedToken, getUsdcAddress, getTokenByAddress } from "@/lib/tokens/supportedTokens";
 import { parseEventValue } from "@/lib/contracts/receiptParser";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 
@@ -208,6 +208,21 @@ export async function fundPayrollViaX402(
   }
   if (!isSupportedToken(tokenAddress)) {
     return NextResponse.json({ error: `unsupported payroll token ${tokenAddress} — see supportedTokens.ts` }, { status: 400 });
+  }
+
+  // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────────
+  // x402 settlement is USDC-only. The on-chain payroll contract funding path
+  // (fundBatchFor) receives funds swept from an x402 USDC settlement. Passing
+  // a non-USDC token would cause fundBatchFor to revert (the relayer holds
+  // USDC, not EURC), but we reject early with a clear message rather than
+  // letting it hit the contract and produce a confusing revert. EURC payroll
+  // support ships in Phase 2.
+  const resolvedToken = token ? getTokenByAddress(tokenAddress) : null;
+  if (resolvedToken?.symbol === 'EURC') {
+    return NextResponse.json(
+      { error: "EURC payroll is not yet supported — x402 settlement is USDC-only. EURC payroll support ships in Phase 2." },
+      { status: 400 }
+    );
   }
 
   const totalAmount = recipients.reduce((sum, r) => sum + r.amount, BigInt(0));

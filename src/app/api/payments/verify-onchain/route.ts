@@ -44,6 +44,22 @@ export async function POST(req: NextRequest) {
         if (payment.status === 'SUCCESS') {
             return NextResponse.json({ success: true, alreadySettled: true });
         }
+
+        // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────
+        // verify-onchain only understands USDC transfers (ERC-20 Transfer logs
+        // from the USDC contract). An EURC payment must never be silently settled
+        // by a USDC transfer of matching amount — that would be a false positive.
+        // EURC settlement support ships in Phase 2.
+        if (payment.currency && payment.currency.toUpperCase() === 'EURC') {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: 'EURC settlement is not yet supported. This payment is denominated in EURC — on-chain verification for EURC is coming in Phase 2.',
+                },
+                { status: 400 }
+            );
+        }
+
         if (!payment.merchantSCA) {
             return NextResponse.json(
                 { success: false, error: 'This payment has no recipient wallet on file.' },

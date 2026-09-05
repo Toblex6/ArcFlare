@@ -506,6 +506,64 @@ async function main() {
     ok('exactly one PaymentLog row created by the accepted EURC init', after === afterRejections + 1, `rows ${afterRejections} → ${after}`);
   }
 
+  // ══ EURC PHASE 1 SAFETY GATES ═════════════════════════════════════════
+
+  console.log('\n[safety] EURC invoice cannot be falsely verified as settled by a USDC transfer');
+  {
+    const { res, data } = await initPayment(keyA, { currency: 'EURC' });
+    ok('EURC row initialized', res.status === 200 && !!data.reference, `got ${res.status}: ${JSON.stringify(data).slice(0, 160)}`);
+    const rowBefore = await paymentRow(data.reference);
+    ok('EURC row persists currency=EURC', rowBefore?.currency === 'EURC', rowBefore?.currency);
+
+    // A REAL USDC transfer to the merchant for the exact invoice amount.
+    // Without the Phase 1 gate this would be falsely accepted as settling the
+    // EURC invoice; with the gate verify-onchain must refuse it and the row
+    // must stay PENDING.
+    const walletClient = createWalletClient({ account: buyer, chain: arcTestnet, transport: http(RPC) });
+    const txHash = await walletClient.writeContract({
+      address: USDC, abi: erc20Abi, functionName: 'transfer',
+      args: [merchantA.walletAddress, AMOUNT_UNITS],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+    const v = await post('/api/payments/verify-onchain', { reference: data.reference, txHash });
+    const vData = await j(v);
+    ok('verify-onchain refuses to settle an EURC invoice with a USDC tx', v.status === 400 && vData.success === false, `got ${v.status}: ${JSON.stringify(vData).slice(0, 160)}`);
+    ok('error names EURC / Phase 2 (user-visible, not a generic 500)', /EURC/.test(vData.error || '') && /Phase 2/.test(vData.error || ''), vData.error);
+    const rowAfter = await paymentRow(data.reference);
+    ok('EURC row stays PENDING — not falsely SUCCESS', rowAfter?.status === 'PENDING', rowAfter?.status);
+    ok('no arcTxHash recorded on the EURC row', rowAfter?.arcTxHash == null, rowAfter?.arcTxHash);
+  }
+
+  console.log('\n[safety] EURC invoice cannot be settled via /api/payments/settle (USDC path)');
+  {
+    // Internal-key settle of a platform-agent payer row is the one remaining
+    // funded settle flow — the same authorization that legitimately settles
+    // USDC rows must be refused for an EURC-denominated row.
+    const { res, data } = await initPayment(INTERNAL_KEY, { currency: 'EURC', agentSCA: PLATFORM_AGENT, merchant: 'FlareHQ Agent Invoice' });
+    ok('EURC platform-agent row initialized', res.status === 200 && !!data.reference, `got ${res.status}: ${JSON.stringify(data).slice(0, 160)}`);
+    const rowBefore = await paymentRow(data.reference);
+    const pay = await post('/api/payments/settle', { reference: data.reference }, { 'x-api-key': INTERNAL_KEY });
+    const payData = await j(pay);
+    ok('settle refuses EURC row with 400', pay.status === 400 && payData.success === false, `got ${pay.status}: ${JSON.stringify(payData).slice(0, 160)}`);
+    ok('error names EURC / Phase 2', /EURC/.test(payData.error || '') && /Phase 2/.test(payData.error || ''), payData.error);
+    const rowAfter = await paymentRow(data.reference);
+    ok('EURC row untouched by the refused settle (still PENDING, no tx)', rowAfter?.status === 'PENDING' && rowAfter?.arcTxHash == null && rowAfter?.circleTxId == null, JSON.stringify({ status: rowAfter?.status, arcTxHash: rowAfter?.arcTxHash, circleTxId: rowAfter?.circleTxId }));
+    ok('no PROCESSING lock left behind (status identical to before the attempt)', rowAfter?.status === rowBefore?.status, `${rowBefore?.status} → ${rowAfter?.status}`);
+  }
+
+  console.log('\n[safety] CCTP settle refuses an EURC invoice');
+  {
+    const { res, data } = await initPayment(keyA, { currency: 'EURC' });
+    ok('EURC row initialized', res.status === 200 && !!data.reference, `got ${res.status}`);
+    const pay = await post('/api/payments/cctp-settle', { reference: data.reference, sourceTxHash: '0x' + 'ab'.repeat(32), sourceDomain: 6 });
+    const payData = await j(pay);
+    ok('cctp-settle refuses EURC row with 400', pay.status === 400 && payData.success === false, `got ${pay.status}: ${JSON.stringify(payData).slice(0, 160)}`);
+    ok('error names EURC / Phase 2', /EURC/.test(payData.error || '') && /Phase 2/.test(payData.error || ''), payData.error);
+    const row = await paymentRow(data.reference);
+    ok('EURC row stays PENDING (no sourceTxHash claim, no minting)', row?.status === 'PENDING' && row?.cctpSourceTxHash == null, JSON.stringify({ status: row?.status, cctpSourceTxHash: row?.cctpSourceTxHash }));
+  }
+
   // ══ SUMMARY ═══════════════════════════════════════════════════════════
 
   console.log('\n──────────────────────────────────────────────────────────────');

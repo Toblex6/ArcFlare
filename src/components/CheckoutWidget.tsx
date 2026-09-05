@@ -316,6 +316,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     }
 
     const isConfirmed = payment.status === 'SUCCESS';
+    const isEurc = payment.currency?.toUpperCase() === 'EURC';
 
     const walletDisplayAddress = isConnected && address
         ? address
@@ -359,6 +360,16 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             {m.label}{!m.available && ' (soon)'}
                         </button>
                     ))}
+                </div>
+            )}
+
+            {/* EURC Phase 2 notice — shown when the invoice is denominated in EURC.
+                Disables the actionable Pay button so no USDC transfer can be
+                initiated for an EURC invoice (Phase 1 safety invariant). */}
+            {isEurc && !isConfirmed && (
+                <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
+                    <p style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>EURC support coming in Phase 2</p>
+                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This invoice is denominated in EURC. On-chain EURC settlement is not yet available. Please pay in USDC or contact the merchant.</p>
                 </div>
             )}
 
@@ -519,7 +530,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             </a>
                             <button
                                 onClick={handlePayment}
-                                disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0}
+                                disabled={isEurc || isTxPending || isVerifying || isConfirmed || secondsLeft === 0}
                                 style={{
                                     width: '100%',
                                     padding: 16,
@@ -527,12 +538,12 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                     border: 'none',
                                     fontSize: 14,
                                     fontWeight: 800,
-                                    cursor: isConfirmed || secondsLeft === 0 ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
-                                    background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
-                                    color: isConfirmed ? '#06b6d4' : '#0e0b08',
+                                    cursor: isEurc || isConfirmed || secondsLeft === 0 ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
+                                    background: isConfirmed ? 'rgba(6,182,212,0.1)' : isEurc ? '#3d332a' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
+                                    color: isConfirmed ? '#06b6d4' : isEurc ? '#6b5a45' : '#0e0b08',
                                 }}
                             >
-                                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : `Pay ${payment.amount} ${payment.currency}`}
+                                {isConfirmed ? '✓ Payment Confirmed' : isEurc ? 'EURC not yet supported' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : `Pay ${payment.amount} ${payment.currency}`}
                             </button>
                         </>
                     )}

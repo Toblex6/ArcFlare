@@ -54,6 +54,22 @@ export async function POST(request: Request) {
       // re-submitting after a slow response) — don't re-poll/re-mint.
       return NextResponse.json({ success: true, alreadySettled: true, payment });
     }
+
+    // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────────
+    // CCTP settlement only understands USDC burns/mints. An EURC payment must
+    // never be silently settled by a USDC CCTP burn of matching amount — the
+    // payer/merchant would see a currency mismatch they did not authorize.
+    // EURC CCTP support ships in Phase 2.
+    if (payment.currency && payment.currency.toUpperCase() === 'EURC') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'EURC settlement is not yet supported. This payment is denominated in EURC — CCTP settlement for EURC is coming in Phase 2.',
+        },
+        { status: 400 }
+      );
+    }
+
     if (!payment.merchantSCA) {
       return NextResponse.json(
         { success: false, error: 'This merchant has not finished payout wallet setup — cannot settle.' },
