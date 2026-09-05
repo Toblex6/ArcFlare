@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import DashboardSidebar from "@/components/DashboardSidebar";
+import AgentDiscovery from "@/components/marketplace/AgentDiscovery";
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
 
@@ -308,19 +309,10 @@ export default function MarketplacePage() {
     const [analyticsOpenSlug, setAnalyticsOpenSlug] = useState<string | null>(null);
 
     // ── Agent economy state (Build 4) ──
-    const [agents, setAgents] = useState<any[]>([]);
-    const [agentsLoading, setAgentsLoading] = useState(false);
-    const [agentsError, setAgentsError] = useState<string | null>(null);
-    const [agentSort, setAgentSort] = useState("trust");
-    const [agentSearch, setAgentSearch] = useState("");
-    const [agentDetail, setAgentDetail] = useState<any | null>(null);
-    const [agentDetailLoading, setAgentDetailLoading] = useState(false);
-    useEffect(() => {
-        if (!agentDetail) return;
-        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAgentDetail(null); };
-        window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
-    }, [agentDetail]);
+    // Agent discovery (browse → inspect → hire) now lives in
+    // <AgentDiscovery /> (src/components/marketplace/AgentDiscovery.tsx),
+    // which drives /api/agents/discover, the public agent card route and the
+    // canonical hire route through the consumerDiscovery view-model helpers.
 
     // ── Fetch discovery listings ──
     const fetchListings = useCallback(async () => {
@@ -380,21 +372,6 @@ export default function MarketplacePage() {
     useEffect(() => {
         fetchWallet();
     }, [fetchWallet]);
-
-    const fetchAgents = useCallback(async () => {
-        setAgentsLoading(true); setAgentsError(null);
-        try {
-            const params = new URLSearchParams();
-            if (agentSearch) params.set("search", agentSearch);
-            params.set("sortBy", agentSort);
-            params.set("limit", "20");
-            const res = await fetch(`/api/agents/discover?${params.toString()}`);
-            const data = await res.json();
-            if (!data.success && !Array.isArray(data.agents)) throw new Error(data.error || "failed");
-            setAgents(data.agents || []);
-        } catch (e: any) { setAgentsError(e.message); } finally { setAgentsLoading(false); }
-    }, [agentSearch, agentSort]);
-    useEffect(() => { if (tab === "agents") fetchAgents(); }, [tab, fetchAgents]);
 
     const allCategories = Array.from(new Set(listings.flatMap((l) => l.categories)));
 
@@ -681,111 +658,7 @@ export default function MarketplacePage() {
                         )}
                     </>
                 )}
-
-                {tab === "agents" && (
-                    <>
-                        {agentsError && <div style={styles.errorBox}>❌ {agentsError}</div>}
-                        <div style={styles.card}>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, alignItems: "center" }}>
-                                <input style={{ ...styles.input, flex: 1, marginBottom: 0 }} placeholder="Search agents by name..." value={agentSearch} onChange={(e) => setAgentSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && fetchAgents()} />
-                                <select value={agentSort} onChange={(e) => setAgentSort(e.target.value)} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface-secondary)", color: "var(--text)" }}>
-                                    <option value="trust">Trust ↓</option>
-                                    <option value="reputation">Reputation ↓</option>
-                                    <option value="createdAt">Newest</option>
-                                    <option value="price">Price</option>
-                                </select>
-                                <button style={btnStyle(false)} onClick={fetchAgents}>Search</button>
-                            </div>
-                        </div>
-                        {agentsLoading ? <p style={{ color: "var(--text-secondary)" }}>Loading agents...</p> : agents.length === 0 ? <div style={styles.card}><p style={{ color: "var(--text-secondary)", margin: 0 }}>No agents yet.</p></div> : (
-                            <div style={styles.grid}>
-                                {agents.map((a: any) => (
-                                    <div key={a.id} style={styles.listingCard}>
-                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{a.name}</h3>
-                                            {a.trust && <span style={{ ...badgeStyle("PUBLISHED"), background: a.trust.score >= 70 ? "rgba(16,185,129,0.12)" : a.trust.score >= 40 ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)", color: a.trust.score >= 70 ? "var(--success)" : a.trust.score >= 40 ? "var(--warning)" : "var(--danger)" }}>Trust {a.trust.score} · conf {a.trust.confidence}</span>}
-                                        </div>
-                                        {a.description && <p style={{ color: "var(--text-secondary)", fontSize: 11, margin: 0 }}>{String(a.description).slice(0, 120)}</p>}
-                                        {a.skills && Array.isArray(a.skills) && a.skills.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>{a.skills.slice(0, 4).map((s: any, i: number) => <span key={i} style={styles.tag}>{typeof s === "string" ? s : s.name || JSON.stringify(s).slice(0, 20)}</span>)}</div>}
-                                        <div style={{ fontSize: 11, color: "var(--text-secondary)", display: "flex", flexDirection: "column" as const, gap: 2 }}>
-                                            {a.trackRecord && <span>{a.trackRecord.completedJobs} completed · {a.trackRecord.validatedJobs} validated · {a.trackRecord.validationPassRate !== null ? `${Math.round(a.trackRecord.validationPassRate * 100)}% pass` : "no validated"} · {(Number(a.trackRecord.validatedVolume)/1e6).toFixed(2)} USDC vol</span>}
-                                            {!a.trackRecord && <span>Reputation {a.reputation}</span>}
-                                            <span style={{ fontFamily: "monospace", fontSize: 10 }}>{a.scaAddress?.slice(0, 10)}...</span>
-                                        </div>
-                                        <div style={{ display: "flex", gap: 8 }}>
-                                            <button style={{ ...btnStyle(false), flex: 1, padding: "8px 12px" }} disabled={agentDetailLoading} onClick={async () => {
-                                                setAgentDetailLoading(true);
-                                                try { const r = await fetch(a.cardUrl); const j = await r.json(); setAgentDetail(j.agentCard || j); } catch {} finally { setAgentDetailLoading(false); }
-                                            }}>{agentDetailLoading ? "…" : "View Card"}</button>
-                                            <a href={a.trackRecordUrl} target="_blank" rel="noopener noreferrer" style={{ ...btnStyle(false), flex: 1, padding: "8px 12px", textAlign: "center" as const, textDecoration: "none" as const, display: "block" as const }}>Track Record</a>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                        {agentDetail && (() => {
-                            const d = agentDetail;
-                            const trust = d.trust || {};
-                            const tr = d.trackRecord || {};
-                            const row = (label: string, value: React.ReactNode) => (
-                                <div key={label} style={styles.modalRow}>
-                                    <span style={styles.modalLabel}>{label}</span>
-                                    <span style={styles.modalValue}>{value}</span>
-                                </div>
-                            );
-                            return (
-                                <div style={styles.modalBackdrop} onClick={() => setAgentDetail(null)}>
-                                    <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-                                        <div style={styles.modalHeader}>
-                                            <h3 style={{ margin: 0, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                                                {d.name || `Agent ${d.agentId}`}
-                                            </h3>
-                                            <button style={styles.modalClose} aria-label="Close agent card" onClick={() => setAgentDetail(null)}>✕</button>
-                                        </div>
-                                        <div style={styles.modalBody}>
-                                            {d.description && <p style={{ margin: 0, color: "var(--text-secondary)" }}>{String(d.description).slice(0, 200)}</p>}
-                                            {d.status && <span style={badgeStyle("PUBLISHED")}>{String(d.status)}</span>}
-                                            {trust.score !== undefined && (
-                                                <div style={{ ...styles.modalRow, background: "var(--surface-secondary)", borderRadius: 10, padding: 10 }}>
-                                                    <span style={styles.modalLabel}>Trust</span>
-                                                    <span style={{ margin: 0, fontWeight: 700 }}>{trust.score}/100 <span style={{ fontWeight: 400, color: "var(--text-secondary)", fontSize: 11 }}>(conf {trust.confidence})</span></span>
-                                                </div>
-                                            )}
-                                            {Array.isArray(trust.breakdown) === false && trust.breakdown && Object.keys(trust.breakdown).length > 0 && (
-                                                <div>
-                                                    {Object.entries(trust.breakdown).map(([k, v]) => (
-                                                        <div key={k} style={{ ...styles.modalRow, fontSize: 11, color: "var(--text-secondary)" }}>
-                                                            <span>{k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}</span>
-                                                            <span>{String(v)}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {(tr.completedJobs !== undefined) && (
-                                                <div>
-                                                    {row("Track record", `${tr.completedJobs ?? 0} completed · ${tr.validatedJobs ?? 0} validated${tr.validationPassRate !== null && tr.validationPassRate !== undefined ? ` · ${Math.round(tr.validationPassRate * 100)}% pass` : ""}`)}
-                                                    {row("Volume", `${Number(tr.validatedVolumeUSDC ?? 0).toFixed(2)} USDC · ${tr.totalJobs ?? 0} total · ${tr.failedJobs ?? 0} failed`)}
-                                                </div>
-                                            )}
-                                            {d.wallet?.scaAddress && row("Wallet (SCA)", <span style={styles.mono}>{String(d.wallet.scaAddress)}</span>)}
-                                            {d.identity?.registryAddress && row("Registry", <span style={styles.mono}>{String(d.identity.registryAddress)}</span>)}
-                                            {d.identity?.tokenId && row("Token ID", d.identity.tokenId)}
-                                            {d.supportedChains && row("Chains", d.supportedChains.join(", "))}
-                                            {d.supportedTokens && row("Tokens", d.supportedTokens.join(", "))}
-                                            {d.hiring?.hireEndpoint && row("Hire", <span style={styles.mono}>{String(d.hiring.hireEndpoint)}</span>)}
-                                            {d.endpoints?.card && row("Card", <span style={styles.mono}>{String(d.endpoints.card)}</span>)}
-                                            {d.validation?.registryAddress && row("Validation", <span style={styles.mono}>{String(d.validation.registryAddress)}</span>)}
-                                            <details style={{ marginTop: 4 }}>
-                                                <summary style={{ cursor: "pointer", fontSize: 11, color: "var(--text-secondary)" }}>Raw JSON</summary>
-                                                <pre style={{ fontSize: 10, background: "var(--surface-secondary)", padding: 10, borderRadius: 8, overflow: "auto" as const, maxHeight: 200 }}>{JSON.stringify(d, null, 2)}</pre>
-                                            </details>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                    </>
-                )}
+                {tab === "agents" && <AgentDiscovery />}
 
                 {/* ══════════════════════════════════════════════════════ */}
                 {/* PUBLISH                                                 */}

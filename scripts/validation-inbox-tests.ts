@@ -89,15 +89,15 @@ mock.module("@/lib/wallet/verifyCallerControlsAddress", {
 });
 
 async function inboxFetch(): Promise<{ status: number; body: any }> {
-  const inboxRoute = await import("@/app/api/agent/validation/inbox/route");
-  (inboxRoute as any).__setInboxOnChainReaderForTests(async (hash: string) => {
+  const { setInboxOnChainReaderForTests } = await import("@/lib/validation/inboxOnChainReader");
+  setInboxOnChainReaderForTests(async (hash: string) => {
     if (hash.toLowerCase() === UNREADABLE_HASH.toLowerCase()) throw new Error("rpc-down (mock)");
     if (hash.toLowerCase() === RESOLVED_HASH.toLowerCase()) {
       return { validatorAddress: MINE.toLowerCase(), agentId: 1n, response: 100, passed: true, pending: false, tag: "done", lastUpdate: 5n };
     }
     return { validatorAddress: MINE.toLowerCase(), agentId: 1n, response: 0, passed: false, pending: true, tag: "", lastUpdate: 2n };
   });
-  const route = inboxRoute;
+  const route = await import("@/app/api/agent/validation/inbox/route");
   const res = await (route as any).GET(new Request("http://localhost/api/agent/validation/inbox"));
   return { status: res.status, body: await res.json() };
 }

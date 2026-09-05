@@ -28,16 +28,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
-import { getOnChainValidationStatus } from '@/lib/jobs/jobValidationPolicy';
 import { filterInboxForValidator } from '@/lib/validation/validatorInbox';
-
-// Test seam — hermetic scripts/*tests.ts override the real RPC-backed reader
-// so they need no testnet connection. Production callers never touch this.
-type InboxOnChainReader = typeof getOnChainValidationStatus;
-let inboxOnChainReader: InboxOnChainReader = getOnChainValidationStatus;
-export function __setInboxOnChainReaderForTests(fn: InboxOnChainReader): void {
-  inboxOnChainReader = fn;
-}
+import { inboxOnChainReader } from '@/lib/validation/inboxOnChainReader';
 
 async function inboxHandler(request: NextRequest) {
   try {
