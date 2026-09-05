@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { createPublicClient, http, decodeEventLog } from 'viem';
 import { arcTestnet } from 'viem/chains';
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
 async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
   try {
@@ -23,6 +24,14 @@ async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
     const clientAddress = wallet.data?.wallet?.address;
     if (!clientAddress) {
       return NextResponse.json({ error: 'Invalid client wallet ID' }, { status: 400 });
+    }
+
+    // Ownership invariant: caller must control the wallet they claim as client.
+    // Reuses the canonical gate used by Direct Hire (POST /api/jobs action=create)
+    // and registry hire (POST /api/agents/[id]/hire) — no new auth system.
+    // Must occur BEFORE any on-chain side effect (createContractExecutionTransaction).
+    if (!(await verifyCallerControlsAddress(req as any, clientAddress))) {
+      return NextResponse.json({ error: 'You do not control the client wallet' }, { status: 403 });
     }
 
     const expiredAt = Math.floor(Date.now() / 1000) + 3600;
