@@ -25,7 +25,9 @@ import {
   budgetIsZero,
   formatBudgetUsdc,
   getProviderNextAction,
+  getProviderStatusColor,
   normalizeMineResponse,
+  normalizeProviderStatus,
   truncateAddress,
 } from "@/lib/jobs/providerInbox";
 
@@ -81,6 +83,55 @@ function main() {
       (a) => a.manageAction === null || a.manageAction === "submit"
     ));
 
+  console.log("\n[3b] REGRESSION — real UPPERCASE DB values (production data)");
+  const dbAccept = getProviderNextAction({ status: "OPEN", budget: "0" });
+  ok("OPEN + zero budget → accept/set-budget guidance", dbAccept.kind === "accept" && dbAccept.manageAction === null, dbAccept.kind);
+  ok("OPEN accept detail cites existing route", dbAccept.detail.includes("/api/jobs/[jobId]/accept"));
+  const dbWaitFund = getProviderNextAction({ status: "OPEN", budget: "1000000" });
+  ok("OPEN + budget → wait-funding (no provider action)", dbWaitFund.kind === "wait-funding" && dbWaitFund.manageAction === null, dbWaitFund.kind);
+  const dbSubmit = getProviderNextAction({ status: "FUNDED", budget: "1000000" });
+  ok("FUNDED → submit via existing Manage action", dbSubmit.kind === "submit" && dbSubmit.manageAction === "submit", dbSubmit.kind);
+  const dbWaitReview = getProviderNextAction({ status: "SUBMITTED", budget: "1000000" });
+  ok("SUBMITTED → wait-review (submitted state)", dbWaitReview.kind === "wait-review" && /submit/i.test(dbWaitReview.title), dbWaitReview.kind);
+  const dbDone = getProviderNextAction({ status: "COMPLETED", budget: "1000000" });
+  ok("COMPLETED → done (completed state)", dbDone.kind === "done" && /complet/i.test(dbDone.title), dbDone.kind);
+  ok("REJECTED/EXPIRED (uppercase) → terminal",
+    getProviderNextAction({ status: "REJECTED", budget: "0" }).kind === "terminal" &&
+    getProviderNextAction({ status: "EXPIRED", budget: "0" }).kind === "terminal");
+  ok("uppercase matches Title Case behavior (no semantics change)",
+    getProviderNextAction({ status: "OPEN", budget: "0" }).kind === getProviderNextAction({ status: "Open", budget: "0" }).kind &&
+    getProviderNextAction({ status: "FUNDED", budget: "1000000" }).kind === getProviderNextAction({ status: "Funded", budget: "1000000" }).kind &&
+    getProviderNextAction({ status: "SUBMITTED", budget: "1000000" }).kind === getProviderNextAction({ status: "Submitted", budget: "1000000" }).kind &&
+    getProviderNextAction({ status: "COMPLETED", budget: "1000000" }).kind === getProviderNextAction({ status: "Completed", budget: "1000000" }).kind);
+  ok("mixed-case + whitespace tolerated", getProviderNextAction({ status: "  funded ", budget: "1000000" }).kind === "submit");
+  const dbUnknown = getProviderNextAction({ status: "BOGUS", budget: "0" });
+  ok("unknown status → unknown, never throws", dbUnknown.kind === "unknown");
+  ok("malformed status (null/number/empty) → unknown, never throws",
+    getProviderNextAction({ status: null, budget: "0" }).kind === "unknown" &&
+    getProviderNextAction({ status: 42 as any, budget: "0" }).kind === "unknown" &&
+    getProviderNextAction({ status: "", budget: "0" }).kind === "unknown");
+  ok("normalizeProviderStatus canonicalizes to UPPERCASE DB form",
+    normalizeProviderStatus("Open") === "OPEN" &&
+    normalizeProviderStatus("FUNDED") === "FUNDED" &&
+    normalizeProviderStatus("  submitted ") === "SUBMITTED" &&
+    normalizeProviderStatus(null) === "" && normalizeProviderStatus(7) === "");
+  ok("status colors resolve for real DB values",
+    getProviderStatusColor("OPEN") === "var(--warning)" &&
+    getProviderStatusColor("FUNDED") === "#06b6d4" &&
+    getProviderStatusColor("SUBMITTED") === "var(--primary)" &&
+    getProviderStatusColor("COMPLETED") === "var(--success)" &&
+    getProviderStatusColor("REJECTED") === "var(--danger)" &&
+    getProviderStatusColor("EXPIRED") === "var(--text-secondary)");
+  ok("status colors match Title Case inputs (badge parity)",
+    getProviderStatusColor("Open") === getProviderStatusColor("OPEN") &&
+    getProviderStatusColor("Funded") === getProviderStatusColor("FUNDED") &&
+    getProviderStatusColor("Submitted") === getProviderStatusColor("SUBMITTED") &&
+    getProviderStatusColor("Completed") === getProviderStatusColor("COMPLETED"));
+  ok("unknown/garbage status → safe fallback color, never throws",
+    getProviderStatusColor("BOGUS") === "var(--text-secondary)" &&
+    getProviderStatusColor(null) === "var(--text-secondary)" &&
+    getProviderStatusColor(undefined) === "var(--text-secondary)");
+
   console.log("\n[4] helpers — malformed/empty API response never crashes");
   ok("normalize null → []", JSON.stringify(normalizeMineResponse(null)) === "[]");
   ok("normalize undefined → []", normalizeMineResponse(undefined).length === 0);
@@ -110,7 +161,9 @@ function main() {
   ok("provider card shows job ID", page.includes("Job #{j.jobId}"));
   ok("provider card shows client privacy-safe (truncateAddress)", page.includes("truncateAddress(j.clientSCA)"));
   ok("provider card shows budget via formatBudgetUsdc", page.includes("formatBudgetUsdc(j.budget)"));
-  ok("provider card shows status + next action", page.includes("STATUS_COLORS[j.status]") && page.includes("getProviderNextAction(j)"));
+  ok("provider card shows status + next action", page.includes("getProviderStatusColor(j.status)") && page.includes("getProviderNextAction(j)"));
+  ok("provider/client inbox badges use the normalized color helper (UPPERCASE-safe)",
+    page.includes("getProviderStatusColor,") && !page.includes("STATUS_COLORS[j.status]"));
   ok("provider card surfaces submitted deliverable state", page.includes("Deliverable submitted"));
   ok("provider loading state", page.includes("Loading your provider jobs..."));
   ok("provider error state", page.includes("providerError"));

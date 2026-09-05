@@ -10,6 +10,7 @@ import Image from 'next/image';
 import {
   formatBudgetUsdc,
   getProviderNextAction,
+  getProviderStatusColor,
   normalizeMineResponse,
   truncateAddress,
 } from '@/src/lib/jobs/providerInbox';
@@ -27,6 +28,10 @@ const NAV = [
 ];
 
 const JOB_STATUSES = ['Open', 'Funded', 'Submitted', 'Completed', 'Rejected', 'Expired'];
+// Manage-lookup badge map (GET /api/jobs?jobId= returns Title Case on-chain
+// names). The /api/jobs/mine lists (provider + client inboxes) return canonical
+// UPPERCASE DB statuses, so their badges use getProviderStatusColor(j.status)
+// (case-insensitive, single normalization in lib/jobs/providerInbox) instead.
 const STATUS_COLORS: Record<string, string> = {
   Open: 'var(--warning)',
   Funded: '#06b6d4',
@@ -1568,9 +1573,9 @@ export default function JobsPage() {
                             padding: '3px 10px',
                             borderRadius: 20,
                             fontWeight: 700,
-                            background: `${STATUS_COLORS[j.status] || 'var(--text-secondary)'}15`,
-                            color: STATUS_COLORS[j.status] || 'var(--text-secondary)',
-                            border: `1px solid ${STATUS_COLORS[j.status] || 'var(--text-secondary)'}30`,
+                            background: `${getProviderStatusColor(j.status)}15`,
+                            color: getProviderStatusColor(j.status),
+                            border: `1px solid ${getProviderStatusColor(j.status)}30`,
                             whiteSpace: 'nowrap' as const,
                           }}
                         >
@@ -1689,9 +1694,9 @@ export default function JobsPage() {
                           padding: '3px 10px',
                           borderRadius: 20,
                           fontWeight: 700,
-                          background: `${STATUS_COLORS[j.status] || 'var(--text-secondary)'}15`,
-                          color: STATUS_COLORS[j.status] || 'var(--text-secondary)',
-                          border: `1px solid ${STATUS_COLORS[j.status] || 'var(--text-secondary)'}30`,
+                          background: `${getProviderStatusColor(j.status)}15`,
+                          color: getProviderStatusColor(j.status),
+                          border: `1px solid ${getProviderStatusColor(j.status)}30`,
                           whiteSpace: 'nowrap' as const,
                         }}
                       >

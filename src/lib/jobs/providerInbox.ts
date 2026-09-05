@@ -52,6 +52,46 @@ export function budgetIsZero(budget: unknown): boolean {
   }
 }
 
+/**
+ * Normalize any incoming job status to canonical UPPERCASE DB form
+ * (`Erc8183Job.status` is OPEN/FUNDED/SUBMITTED/... in production).
+ *
+ * Single normalization point: both next-action derivation and badge/color
+ * lookup go through here, so real DB values and legacy Title Case values
+ * (Open/Funded/...) behave identically. Preserves canonical DB values —
+ * no second status representation. Non-string/empty input yields ''
+ * (safely unknown). Never throws.
+ */
+export function normalizeProviderStatus(status: unknown): string {
+  try {
+    if (typeof status !== 'string') return '';
+    return status.trim().toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+/** Badge color per canonical status. Case-insensitive via normalizeProviderStatus. Never throws. */
+export function getProviderStatusColor(status: unknown): string {
+  const key = normalizeProviderStatus(status);
+  switch (key) {
+    case 'OPEN':
+      return 'var(--warning)';
+    case 'FUNDED':
+      return '#06b6d4';
+    case 'SUBMITTED':
+      return 'var(--primary)';
+    case 'COMPLETED':
+      return 'var(--success)';
+    case 'REJECTED':
+      return 'var(--danger)';
+    case 'EXPIRED':
+      return 'var(--text-secondary)';
+    default:
+      return 'var(--text-secondary)';
+  }
+}
+
 export type ProviderNextActionKind =
   | 'accept' // OPEN + no budget: provider must set budget/accept first
   | 'wait-funding' // OPEN + budget set: waiting on client to fund
@@ -77,12 +117,13 @@ export interface ProviderNextAction {
 
 /**
  * Derive the provider's next required action from canonical status + budget.
+ * Status is normalized case-insensitively (real DB values are UPPERCASE).
  * Pure + total: unknown statuses/budgets map to 'unknown', never throw.
  */
 export function getProviderNextAction(job: Pick<ProviderJob, 'status' | 'budget'>): ProviderNextAction {
-  const status = typeof job?.status === 'string' ? job.status : '';
+  const status = normalizeProviderStatus(job?.status);
   switch (status) {
-    case 'Open':
+    case 'OPEN':
       if (budgetIsZero(job?.budget)) {
         return {
           kind: 'accept',
@@ -102,7 +143,7 @@ export function getProviderNextAction(job: Pick<ProviderJob, 'status' | 'budget'
           'approves USDC and funds escrow next.',
         manageAction: null,
       };
-    case 'Funded':
+    case 'FUNDED':
       return {
         kind: 'submit',
         title: 'Funded — submit your deliverable',
@@ -111,7 +152,7 @@ export function getProviderNextAction(job: Pick<ProviderJob, 'status' | 'budget'
           '(Manage → Submit Deliverable), signed by your provider wallet.',
         manageAction: 'submit',
       };
-    case 'Submitted':
+    case 'SUBMITTED':
       return {
         kind: 'wait-review',
         title: 'Submitted — waiting on client review',
@@ -120,18 +161,18 @@ export function getProviderNextAction(job: Pick<ProviderJob, 'status' | 'budget'
           'completes the job and releases payment.',
         manageAction: null,
       };
-    case 'Completed':
+    case 'COMPLETED':
       return {
         kind: 'done',
         title: 'Completed — payment released',
         detail: 'This job is done and escrow has been released to you.',
         manageAction: null,
       };
-    case 'Rejected':
-    case 'Expired':
+    case 'REJECTED':
+    case 'EXPIRED':
       return {
         kind: 'terminal',
-        title: status === 'Expired' ? 'Expired — no further actions' : 'Rejected — no further actions',
+        title: status === 'EXPIRED' ? 'Expired — no further actions' : 'Rejected — no further actions',
         detail: 'This job reached a terminal state. No provider action is possible.',
         manageAction: null,
       };
