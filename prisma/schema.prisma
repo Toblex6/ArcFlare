@@ -50,6 +50,8 @@ model AgentRegistry {
   tokenId        String               @unique
   scaAddress     String               @unique
   circleWalletId String?
+  walletSetId    String?
+  validatorSca   String?
   ownerNode      String
   metadataURI    String?
   status         String

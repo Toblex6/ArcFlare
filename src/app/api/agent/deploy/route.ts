@@ -272,6 +272,8 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
         tokenId: tokenId,
         scaAddress: ownerWallet.address,
         circleWalletId: ownerWallet.id,
+        walletSetId: walletSetId,
+        validatorSca: validatorWallet.address,
         ownerNode: ownerNode,
         metadataURI: metadataUri,
         status: 'ACTIVE_AGENT_PROVISIONED',
