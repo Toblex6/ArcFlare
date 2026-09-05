@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { notifyValidator } from '@/lib/notifyValidator';
+import { syncJobValidationResponseByRequestHash } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 
@@ -283,6 +284,23 @@ async function validationHandler(request: NextRequest) {
       console.log(
         `✅ Validation response submitted. Passed: ${passed}. Tag: ${tag}. Tx: ${txHash}`
       );
+
+      // DB sync for JOB-backed validation requests — best-effort ONLY, and ONLY
+      // after the on-chain validationResponse tx succeeded (txHash is proof).
+      // The on-chain registry (getValidationStatus) remains the authoritative
+      // source; this just keeps Erc8183JobValidation.status in sync so the job
+      // release gate and status views agree with the chain. A hash that does not
+      // map to any job-backed request is a plain ERC-8004 agent validation and is
+      // a no-op here. A DB error must NEVER turn the already-successful on-chain
+      // response into an HTTP failure — log it server-side and continue.
+      try {
+        await syncJobValidationResponseByRequestHash(requestHash, txHash, passed, tag);
+      } catch (dbSyncError: any) {
+        console.error(
+          '[validation/respond] job-validation DB sync failed (non-fatal):',
+          dbSyncError?.message ?? dbSyncError
+        );
+      }
 
       return NextResponse.json({
         success: true,

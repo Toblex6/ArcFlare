@@ -90,9 +90,18 @@ export async function getJobValidationPolicy(jobId: bigint): Promise<JobValidati
 
 /**
  * Create a validation requirement for a job at hire time.
- * Validates validator address format, prevents self-validation where possible,
- * and ensures the validator is not the job's provider (worker) if we can determine it.
  * Idempotent: if a policy already exists for this job, return it.
+ *
+ * Central self-validation guard (defense-in-depth — callers may still
+ * pre-check for a nicer 400, but this function is the authoritative invariant):
+ * the validator MUST be a third party, distinct from BOTH the job's client
+ * (clientSCA) and its provider (providerSCA). Comparison is normalized /
+ * case-insensitive, matching the semantics already used by hire callers.
+ * Enforcement reads the persisted Erc8183Job row, so callers must persist that
+ * row (with clientSCA/providerSCA) BEFORE calling this. Throws an Error when
+ * the invariant is violated or when the job row is absent (fail-closed: without
+ * the row we cannot prove the validator is a third party). Policy-creation
+ * failures are handled by callers and must not fail an already-created hire.
  */
 export async function createJobValidationPolicy(
   jobId: bigint,
@@ -107,10 +116,25 @@ export async function createJobValidationPolicy(
     throw new Error("validatorSCA must be a valid 0x address");
   }
 
+  const normalizedValidator = validatorSCA.toLowerCase();
+  const job = await (prisma as any).erc8183Job.findUnique({
+    where: { jobId },
+    select: { clientSCA: true, providerSCA: true },
+  });
+  if (!job) {
+    throw new Error("cannot create validation policy: job not found");
+  }
+  if (normalizedValidator === job.clientSCA.toLowerCase()) {
+    throw new Error("validator cannot be the job client (self-validation)");
+  }
+  if (job.providerSCA && normalizedValidator === job.providerSCA.toLowerCase()) {
+    throw new Error("validator cannot be the job provider (self-validation)");
+  }
+
   const row = await (prisma as any).erc8183JobValidation.create({
     data: {
       jobId,
-      validatorSCA: validatorSCA.toLowerCase(),
+      validatorSCA: normalizedValidator,
       tag: tag || null,
       status: "PENDING",
       required: true,
@@ -161,6 +185,41 @@ export async function recordValidationResponse(
     },
   });
   return row as JobValidationPolicy;
+}
+
+/**
+ * Locate a job-backed validation policy by its on-chain requestHash.
+ * requestHash is stored lowercase and is unique; the lookup is therefore
+ * case-insensitive. Returns null when the hash belongs to a plain ERC-8004
+ * agent-validation request that is NOT job-backed.
+ */
+export async function getJobValidationPolicyByRequestHash(requestHash: string): Promise<JobValidationPolicy | null> {
+  const row = await (prisma as any).erc8183JobValidation.findUnique({
+    where: { requestHash: requestHash.toLowerCase() },
+  });
+  return (row as JobValidationPolicy) ?? null;
+}
+
+/**
+ * Best-effort DB mirror of an authoritative on-chain validationResponse for a
+ * job-backed request. If requestHash maps to an Erc8183JobValidation record,
+ * applies the SAME status/result semantics as the job-scoped respond route
+ * (recordValidationResponse): status -> PASSED (on-chain 100) / FAILED (on-chain 0),
+ * plus responseTxHash and response tag. Returns { synced: false, status: null }
+ * when the hash is not job-backed (no DB row to keep in sync).
+ * Throws on real DB errors — callers MUST treat this as best-effort and never
+ * fail an already-successful on-chain response because of a DB hiccup.
+ */
+export async function syncJobValidationResponseByRequestHash(
+  requestHash: string,
+  responseTxHash: string,
+  passed: boolean,
+  tag?: string
+): Promise<{ synced: boolean; status: string | null }> {
+  const policy = await getJobValidationPolicyByRequestHash(requestHash);
+  if (!policy) return { synced: false, status: null };
+  const updated = await recordValidationResponse(policy.jobId, responseTxHash, passed, tag);
+  return { synced: true, status: updated.status };
 }
 
 /**

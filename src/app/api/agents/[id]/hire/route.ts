@@ -77,7 +77,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       } catch (e: any) {
         console.error("Failed to create job validation policy:", e.message);
         // Do not fail the hire if validation policy creation fails; the job is already created.
-        // The caller can retry creating the validation requirement via the validation endpoint.
+        // There is no separate "create validation policy" API endpoint to retry through — a
+        // failure here leaves the job running ungated, and policy creation is only retried by
+        // a fresh hire that passes validation.required.
       }
     }
     const criteriaHash = hashCriteria({ jobId: jobId.toString(), description, requirements: criteria.requirements, deadlineUnix: expiredAt } as any);
