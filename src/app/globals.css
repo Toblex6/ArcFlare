@@ -293,3 +293,46 @@ html {
 }
 
 /* ── Utility: prevent text overflow anywhere ── */
+
+/* ── Homepage motion + overrides ── */
+.homepage .home-h1,
+.homepage .home-h2,
+.homepage .home-h3 {
+  letter-spacing: -0.02em;
+}
+
+@media (max-width: 480px) {
+  .homepage h1.home-h1 {
+    font-size: clamp(32px, 9vw, 40px) !important;
+  }
+  .homepage h2.home-h2 {
+    font-size: clamp(24px, 7vw, 32px) !important;
+  }
+  .homepage h3.home-h3 {
+    font-size: clamp(18px, 5vw, 22px) !important;
+  }
+}
+
+@keyframes home-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@keyframes home-feed {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+@keyframes home-float {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-22px) translateX(14px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[home-marquee_28s_linear_infinite\],
+  .animate-\[home-feed_14s_linear_infinite\],
+  .animate-\[home-float_9s_ease-in-out_infinite\],
+  .animate-\[home-float_11s_ease-in-out_infinite_reverse\] {
+    animation: none !important;
+  }
+}
