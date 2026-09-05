@@ -12,6 +12,13 @@ import {
   truncateAddress as truncateInboxAddress,
   type ClassifiedInboxItem,
 } from '@/src/lib/validation/validatorInbox';
+import {
+  deriveOwnerLifecycle,
+  deployControlView,
+  classifyDeployResult,
+  newDeployIdempotencyKey,
+  type OwnerNextAction,
+} from '@/src/lib/agents/agentLifecycle';
 
 
 const NAV = [
@@ -31,7 +38,11 @@ interface Agent {
   tokenId: string;
   scaAddress: string;
   circleWalletId: string | null;
+  // Troubleshooting/owner-management only (collapsed details, never headline).
+  walletSetId?: string | null;
+  validatorSca?: string | null;
   status: string;
+  reputation?: number | null;
   createdAt: string;
   totalPaid?: number;
   paymentCount?: number;
@@ -99,11 +110,17 @@ export default function AgentsPage() {
   };
 
 
-  // Deploy state
+  // Deploy state — this tab is the single primary deployment/setup flow.
+  // Duplicate protection stays server-side (idempotency guard + deploy-intent
+  // uniqueness); the client only sends a fresh idempotency key per attempt and
+  // disables the button while a deploy is in flight.
   const [deploying, setDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState<any>(null);
   const [deployError, setDeployError] = useState<string | null>(null);
   const [deployName, setDeployName] = useState('ArcFlare Autonomous Agent');
+  const [deployWasDuplicate, setDeployWasDuplicate] = useState(false);
+  const [deployWasPending, setDeployWasPending] = useState(false);
+  const [deployPendingTx, setDeployPendingTx] = useState<string | null>(null);
 
   // Reputation state
   const [repAgentId, setRepAgentId] = useState('');
@@ -241,9 +258,13 @@ export default function AgentsPage() {
   }, [agents, merchantWallet, repAgentId]);
 
   const deployAgent = async () => {
+    if (deploying) return; // UX double-submit guard only — the server guard is authoritative
     setDeploying(true);
     setDeployError(null);
     setDeployResult(null);
+    setDeployWasDuplicate(false);
+    setDeployWasPending(false);
+    setDeployPendingTx(null);
     try {
       const res = await fetch('/api/agent/deploy', {
         method: 'POST',
@@ -251,10 +272,19 @@ export default function AgentsPage() {
         body: JSON.stringify({
           agentName: deployName,
           metadataUri: 'ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei',
+          // Fresh key per attempt: replays dedupe server-side (409), distinct
+          // deploys provision normally — no "max 1 agent" cap client-side.
+          idempotencyKey: newDeployIdempotencyKey(),
         }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      if (!data.success) {
+        const kind = classifyDeployResult(res.status, data);
+        setDeployWasDuplicate(kind.duplicate);
+        setDeployWasPending(kind.pending);
+        if (typeof data?.txHash === 'string') setDeployPendingTx(data.txHash);
+        throw new Error(data.error);
+      }
       // Success is locked in BEFORE the list refresh — the refresh used to
       // run inside the same try block, so a failure there (the list route
       // 404ing, pre-fix) showed a JSON.parse error banner next to the
@@ -276,6 +306,55 @@ export default function AgentsPage() {
     } catch {
       // Non-fatal: the deployed agent still shows in the success panel.
     }
+  };
+
+  // Owner lifecycle navigation: one primary action per agent, routed to the
+  // EXISTING tab that fulfils it. No new flows are invented here.
+  const lifecycleInputsFor = (a: Agent) => {
+    const eco =
+      ecoData && ecoAgentId && String(ecoAgentId) === String(a.id)
+        ? {
+            entryCount: (ecoData as any).treasury?.entryCount,
+            revenue: (ecoData as any).treasury?.revenue,
+          }
+        : null;
+    const tr =
+      trustData && trustId && String(trustId) === String(a.id) ? (trustData as any) : null;
+    return {
+      economics: eco ?? (tr ? { completedJobs: tr.stats?.completedJobs } : null),
+      trust: tr ? tr.trust : null,
+    };
+  };
+
+  const runAgentNextAction = (action: OwnerNextAction, agent: Agent) => {
+    if (action.kind === 'drive-activity') {
+      setEcoAgentId(String(agent.id));
+      loadEco(String(agent.id));
+      setActiveTab('economics');
+      return;
+    }
+    if (
+      action.kind === 'recover-deployment' ||
+      action.kind === 'setup-wallet' ||
+      action.kind === 'complete-identity'
+    ) {
+      // Wallet/identity recovery runs through the single primary Deploy flow.
+      setActiveTab('deploy');
+      return;
+    }
+    // inspect-status / manage: expand the card in place.
+    setSelected(agent);
+  };
+
+  const openAgentEconomics = (agent: Agent) => {
+    setEcoAgentId(String(agent.id));
+    loadEco(String(agent.id));
+    setActiveTab('economics');
+  };
+  const openAgentTrust = (agent: Agent) => {
+    setTrustId(String(agent.id));
+    loadTrust(String(agent.id));
+    setActiveTab('trust');
   };
 
   const submitReputation = async () => {
@@ -585,7 +664,7 @@ export default function AgentsPage() {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 10 }}>
-                        <span style={S.label}>SCA Wallet</span>
+                        <span style={S.label}>Agent wallet (SCA)</span>
                         <p
                           style={{
                             color: 'var(--primary)',
@@ -612,8 +691,138 @@ export default function AgentsPage() {
                         </p>
                       </div>
                     </div>
+                    {/* ── Owner lifecycle (derived from backend facts only) ── */}
+                    {(() => {
+                      const lc = deriveOwnerLifecycle(agent, lifecycleInputsFor(agent));
+                      return (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            background: 'var(--surface)',
+                            borderRadius: 8,
+                            padding: 10,
+                          }}
+                        >
+                          <span style={S.label}>Lifecycle · {lc.statusLabel}</span>
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 4,
+                              marginTop: 6,
+                            }}
+                          >
+                            {lc.stages.map((st) => (
+                              <div
+                                key={st.key}
+                                style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}
+                              >
+                                <span
+                                  style={{
+                                    color:
+                                      st.state === 'ready'
+                                        ? 'var(--success)'
+                                        : st.state === 'attention'
+                                          ? 'var(--primary)'
+                                          : 'var(--text-secondary)',
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  {st.state === 'ready' ? '●' : st.state === 'attention' ? '◐' : '○'}
+                                </span>
+                                <p style={{ color: 'var(--text)', fontSize: 11, margin: 0 }}>
+                                  <strong>{st.label}:</strong>{' '}
+                                  <span style={{ color: 'var(--text-secondary)' }}>{st.detail}</span>
+                                  {(st.key === 'economics' && st.state === 'unknown') ||
+                                  (st.key === 'trust' && st.state === 'unknown') ? (
+                                    <span>
+                                      {' '}
+                                      <button
+                                        style={{
+                                          background: 'none',
+                                          border: 'none',
+                                          padding: 0,
+                                          color: 'var(--primary)',
+                                          fontSize: 11,
+                                          cursor: 'pointer',
+                                          textDecoration: 'underline',
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (st.key === 'economics') openAgentEconomics(agent);
+                                          else openAgentTrust(agent);
+                                        }}
+                                      >
+                                        Load {st.key === 'economics' ? 'economics' : 'trust'} →
+                                      </button>
+                                    </span>
+                                  ) : null}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Single primary next action — fully configured agents
+                              get plain management, never a redundant setup CTA. */}
+                          <div
+                            style={{
+                              marginTop: 8,
+                              display: 'flex',
+                              gap: 8,
+                              alignItems: 'center',
+                              flexWrap: 'wrap' as const,
+                            }}
+                          >
+                            <button
+                              style={S.btnGhost}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                runAgentNextAction(lc.nextAction, agent);
+                              }}
+                            >
+                              {lc.nextAction.label} →
+                            </button>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                              {lc.nextAction.hint}
+                            </span>
+                          </div>
+                          {(agent.walletSetId || agent.validatorSca) && (
+                            <details style={{ marginTop: 8 }}>
+                              <summary
+                                style={{
+                                  color: 'var(--text-secondary)',
+                                  fontSize: 11,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Troubleshooting identifiers
+                              </summary>
+                              <div
+                                style={{
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  color: 'var(--text-secondary)',
+                                  marginTop: 4,
+                                  wordBreak: 'break-all',
+                                }}
+                              >
+                                {agent.walletSetId && (
+                                  <p style={{ margin: '2px 0' }}>
+                                    Circle wallet set ID: {agent.walletSetId}
+                                  </p>
+                                )}
+                                {agent.validatorSca && (
+                                  <p style={{ margin: '2px 0' }}>
+                                    Companion validator SCA: {agent.validatorSca}
+                                  </p>
+                                )}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {selected?.id === agent.id && (
-                      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                      <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
                         <button
                           style={S.btnGhost}
                           onClick={(e) => {
@@ -634,6 +843,24 @@ export default function AgentsPage() {
                           }}
                         >
                           Request Validation
+                        </button>
+                        <button
+                          style={S.btnGhost}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openAgentEconomics(agent);
+                          }}
+                        >
+                          View Economics
+                        </button>
+                        <button
+                          style={S.btnGhost}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openAgentTrust(agent);
+                          }}
+                        >
+                          View Trust
                         </button>
                       </div>
                     )}
@@ -1328,6 +1555,8 @@ export default function AgentsPage() {
             </h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 20px' }}>
               Creates a Circle SCA wallet and registers an ERC-8004 identity on Arc Testnet.
+              This is the primary setup flow — every attempt carries a fresh idempotency
+              key and server-side duplicate protection stays authoritative.
             </p>
             <span style={S.label}>Agent Name</span>
             <input
@@ -1336,13 +1565,29 @@ export default function AgentsPage() {
               onChange={(e) => setDeployName(e.target.value)}
               placeholder="My Autonomous Agent"
             />
-            <button
-              style={{ ...S.btn, opacity: deploying ? 0.6 : 1 }}
-              disabled={deploying}
-              onClick={deployAgent}
-            >
-              {deploying ? 'Deploying to Arc Testnet...' : '⚡ Deploy Agent'}
-            </button>
+            {(() => {
+              const ctl = deployControlView({
+                deploying,
+                lastWasDuplicate: deployWasDuplicate,
+                lastWasPending: deployWasPending,
+              });
+              return (
+                <>
+                  <button
+                    style={{ ...S.btn, opacity: ctl.disabled ? 0.6 : 1 }}
+                    disabled={ctl.disabled}
+                    onClick={deployAgent}
+                  >
+                    {deploying ? 'Deploying to Arc Testnet...' : '⚡ Deploy Agent'}
+                  </button>
+                  {ctl.hint && (
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '8px 0 0' }}>
+                      {ctl.hint}
+                    </p>
+                  )}
+                </>
+              );
+            })()}
             {deployError && (
               <div
                 style={{
@@ -1354,6 +1599,12 @@ export default function AgentsPage() {
                 }}
               >
                 <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>❌ {deployError}</p>
+                {deployPendingTx && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '8px 0 0', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    Pending tx: {deployPendingTx} — recover via POST /api/agent/deploy/recover
+                    instead of redeploying.
+                  </p>
+                )}
               </div>
             )}
             {deployResult && (
@@ -1371,8 +1622,9 @@ export default function AgentsPage() {
                 </p>
                 {[
                   { label: 'Agent Name', value: deployResult.agent?.name },
-                  { label: 'Token ID', value: `#${deployResult.agent?.tokenId}` },
-                  { label: 'SCA Address', value: deployResult.agent?.scaAddress },
+                  { label: 'Registry ID', value: deployResult.agent?.id },
+                  { label: 'ERC-8004 Token ID', value: `#${deployResult.agent?.tokenId}` },
+                  { label: 'Agent wallet (SCA)', value: deployResult.agent?.scaAddress },
                   { label: 'Circle Wallet ID', value: deployResult.agent?.circleWalletId },
                   { label: 'Status', value: deployResult.agent?.status },
                 ].map((row) => (

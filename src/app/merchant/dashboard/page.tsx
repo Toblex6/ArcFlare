@@ -306,6 +306,12 @@ export default function MerchantDashboard() {
         body: JSON.stringify({
           agentName: "DeFi Arbitrage Agent v1.0",
           metadataUri: "ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei",
+          // Fresh key per attempt so the server-side deploy guard can dedupe
+          // accidental double-submits; the Agent Hub tab remains the primary flow.
+          idempotencyKey:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `deploy-${Date.now().toString(36)}`,
         }),
       });
       const data = await res.json();
@@ -745,6 +751,15 @@ export default function MerchantDashboard() {
               <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "0 0 10px 0" }}>
                 Deploy an agent identity under your account
               </p>
+              <a
+                href="/agents"
+                style={{
+                  display: "block", textAlign: "center", marginBottom: 8, fontSize: 11,
+                  color: "var(--primary)", textDecoration: "none", fontWeight: 600,
+                }}
+              >
+                Manage the full agent lifecycle in Agent Hub →
+              </a>
               <button
                 onClick={triggerAgentLifecycle}
                 disabled={isDeploying}

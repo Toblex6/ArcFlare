@@ -33,6 +33,10 @@ export async function GET(req: NextRequest) {
         tokenId: true,
         scaAddress: true,
         circleWalletId: true,
+        // Troubleshooting/owner-management only: the Hub renders walletSetId
+        // inside a collapsed details block, never as a headline identifier.
+        walletSetId: true,
+        validatorSca: true,
         status: true,
         description: true,
         skills: true,
