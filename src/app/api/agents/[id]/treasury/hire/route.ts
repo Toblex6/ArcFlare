@@ -114,6 +114,35 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     if (!/^0x[a-fA-F0-9]{40}$/.test(validatorSCA)) return NextResponse.json({ error: "validation.validatorSCA must be valid 0x address" }, { status: 400 });
     if (validatorSCA.toLowerCase() === clientAddress.toLowerCase()) return NextResponse.json({ error: "validator cannot be client" }, { status: 400 });
     if (validatorSCA.toLowerCase() === provider.scaAddress?.toLowerCase()) return NextResponse.json({ error: "validator cannot be provider" }, { status: 400 });
+    // Validator Circle-serviceability gate (griefing-vector fix): a
+    // validation-required hire stores a validatorSCA that must later sign a
+    // Circle-signed validationResponse. An external/non-Circle-managed wallet
+    // could never respond, permanently blocking provider payout. Resolve
+    // server-side with the repo's canonical case-insensitive lookups (never
+    // trusts a client-supplied merchantId/circleWalletId) and reject BEFORE
+    // any side effect when unresolvable. Non-validation hires are unaffected
+    // (this block only runs when validation.required is set).
+    const [validatorMerchant, validatorAgent, validatorConsumer] = await Promise.all([
+      (prisma as any).merchant.findFirst({
+        where: { walletAddress: { equals: validatorSCA, mode: "insensitive" } },
+        select: { walletProvider: true, circleWalletId: true, walletAddress: true },
+      }),
+      (prisma as any).agentRegistry.findFirst({
+        where: { scaAddress: { equals: validatorSCA, mode: "insensitive" } },
+        select: { circleWalletId: true },
+      }),
+      (prisma as any).consumerAccount.findFirst({
+        where: { walletAddress: { equals: validatorSCA, mode: "insensitive" } },
+        select: { circleWalletId: true, walletAddress: true },
+      }),
+    ]);
+    const validatorServiceable =
+      (validatorMerchant?.walletProvider === "CIRCLE" && !!validatorMerchant?.circleWalletId && !!validatorMerchant?.walletAddress) ||
+      !!validatorAgent?.circleWalletId ||
+      (!!validatorConsumer?.circleWalletId && !!validatorConsumer?.walletAddress);
+    if (!validatorServiceable) {
+      return NextResponse.json({ error: "validatorSCA must be a Circle-managed wallet capable of signing a validation response — external wallets cannot respond to validation requests." }, { status: 400 });
+    }
     validationPolicy = { validatorSCA: validatorSCA.toLowerCase(), tag: validation.tag || null };
   }
 
