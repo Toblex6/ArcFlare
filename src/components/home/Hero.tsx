@@ -1,39 +1,39 @@
 'use client';
 
-import { useRef } from 'react';
-import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 
-const FEED = [
-  ['0x7f…3a91', 'paid $18.40', 'checkout · 0.8s'],
-  ['agent-12', 'billed $0.002', 'x402 · API call'],
-  ['0xB2…77ce', 'streamed $4.12', 'per-second'],
-  ['escrow #4821', 'held $250.00', 'milestone 1/3'],
-  ['payroll batch', 'paid 14 people', '1 tx'],
-  ['agent-07', 'hired · rep 92', 'ERC-8004'],
+// The actual money path through FlareHQ — the hero visual.
+// USDC payment → checkout → escrow → agent → validation → settlement.
+const FLOW = [
+  { label: 'USDC payment', detail: '$12.00 · Arc Testnet', icon: '💵' },
+  { label: 'Checkout', detail: 'link + embed · settled to merchant', icon: '🧾' },
+  { label: 'Escrow', detail: '#4821 · held $250 · milestone 1/3', icon: '🔐' },
+  { label: 'Agent hired', detail: 'agent-07 · ERC-8004 · rep 92', icon: '🤖' },
+  { label: 'Validation', detail: 'validator approved work', icon: '✅' },
+  { label: 'Settlement', detail: 'provider paid · ledger updated', icon: '🏦' },
 ];
 
-const AVATARS = ['MK', 'AJ', 'RS', 'TP', 'LD', 'NK'];
-
 export default function Hero() {
-  const ref = useRef<HTMLElement>(null);
   const reduce = useReducedMotion();
-  const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end start'] });
-  const yBg = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : 120]);
-  const yCards = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : -80]);
-  const opacity = useTransform(scrollYProgress, [0, 0.8], [1, 0.25]);
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    if (reduce) return;
+    const id = setInterval(() => setActive((a) => (a + 1) % FLOW.length), 1600);
+    return () => clearInterval(id);
+  }, [reduce]);
 
   return (
-    <section ref={ref} className="relative overflow-hidden pt-28 md:pt-36 pb-14 md:pb-20">
-      {/* light-friendly animated background — style shifts as you scroll */}
-      <motion.div style={{ y: yBg }} className="absolute inset-0 -z-10" aria-hidden>
-        <div className="absolute inset-0 bg-[radial-gradient(60rem_30rem_at_15%_-5%,rgba(6,182,212,0.22),transparent),radial-gradient(50rem_28rem_at_90%_10%,rgba(251,191,36,0.18),transparent),radial-gradient(40rem_24rem_at_50%_110%,rgba(34,197,94,0.12),transparent)]" />
-        <div className="absolute inset-0 opacity-[0.5] [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:44px_44px] [mask-image:radial-gradient(70%_60%_at_50%_30%,black,transparent)]" />
-        <div className="absolute -top-10 left-1/4 h-64 w-64 rounded-full bg-cyan-400/25 blur-3xl animate-[home-float_9s_ease-in-out_infinite]" />
-        <div className="absolute top-24 right-10 h-56 w-56 rounded-full bg-amber-300/25 blur-3xl animate-[home-float_11s_ease-in-out_infinite_reverse]" />
-      </motion.div>
+    <section className="relative overflow-hidden pt-28 md:pt-36 pb-14 md:pb-20">
+      {/* calm light-friendly backdrop — static, no scroll interpolation */}
+      <div className="absolute inset-0 -z-10" aria-hidden>
+        <div className="absolute inset-0 bg-[radial-gradient(60rem_30rem_at_15%_-5%,rgba(6,182,212,0.16),transparent),radial-gradient(50rem_28rem_at_90%_10%,rgba(251,191,36,0.12),transparent)]" />
+        <div className="absolute inset-0 opacity-40 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:44px_44px] [mask-image:radial-gradient(70%_60%_at_50%_30%,black,transparent)]" />
+      </div>
 
-      <motion.div style={{ opacity }} className="max-w-7xl mx-auto px-4 sm:px-6 grid lg:grid-cols-[1.05fr_0.95fr] gap-10 lg:gap-14 items-center">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 grid lg:grid-cols-[1.05fr_0.95fr] gap-10 lg:gap-14 items-center">
         <div>
           <motion.div
             initial={{ opacity: 0, y: 18 }}
@@ -53,13 +53,13 @@ export default function Hero() {
             initial={{ opacity: 0, y: 26 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.08 }}
-            className="home-h1 mt-5 text-4xl sm:text-5xl lg:text-[4.2rem] font-extrabold leading-[1.02] tracking-tight"
+            className="home-h1 mt-5 text-4xl sm:text-5xl lg:text-[3.9rem] font-extrabold leading-[1.04] tracking-tight"
           >
-            Stablecoin payments{' '}
+            The financial operating layer for{' '}
             <span className="bg-gradient-to-r from-cyan-500 via-sky-500 to-amber-500 bg-clip-text text-transparent">
-              and agentic finance
-            </span>{' '}
-            on Arc.
+              stablecoin businesses and autonomous agents
+            </span>
+            .
           </motion.h1>
 
           <motion.p
@@ -68,8 +68,8 @@ export default function Hero() {
             transition={{ duration: 0.7, delay: 0.16 }}
             className="mt-5 text-base sm:text-lg md:text-xl text-[var(--text-secondary)] leading-relaxed max-w-xl"
           >
-            Checkout links, per-second streaming, escrow, batch payroll, and x402 micro-billing —
-            for merchants, shoppers, and autonomous AI agents.
+            FlareHQ gives businesses and AI agents the money layer they need to transact, hire,
+            pay, and settle autonomously on Arc. Customers pay in USDC — you receive it on Arc.
           </motion.p>
 
           <motion.div
@@ -80,113 +80,82 @@ export default function Hero() {
           >
             <Link
               href="/start"
-              className="bg-cyan-500 hover:bg-cyan-400 text-white font-bold px-8 py-4 rounded-2xl transition text-center shadow-[0_12px_32px_rgba(6,182,212,0.4)] hover:-translate-y-1 duration-300"
+              className="bg-cyan-500 hover:bg-cyan-400 text-white font-bold px-8 py-4 rounded-2xl transition text-center shadow-[0_12px_32px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 duration-300"
             >
-              Get Started →
+              Start using FlareHQ →
             </Link>
             <a
               href="https://docs.flarehq.xyz"
               target="_blank"
               rel="noopener noreferrer"
-              className="border border-[var(--border)] bg-[var(--surface)] font-semibold px-8 py-4 rounded-2xl hover:bg-[var(--surface-secondary)] transition inline-flex items-center justify-center gap-2 hover:-translate-y-1 duration-300"
+              className="border border-[var(--border)] bg-[var(--surface)] font-semibold px-8 py-4 rounded-2xl hover:bg-[var(--surface-secondary)] transition inline-flex items-center justify-center gap-2 hover:-translate-y-0.5 duration-300"
             >
-              Read the Docs ↗
+              Build with FlareHQ ↗
             </a>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
-            className="mt-7 flex items-center gap-3"
-          >
-            <div className="flex -space-x-2.5">
-              {AVATARS.map((a, i) => (
-                <span
-                  key={a}
-                  className="h-9 w-9 rounded-full border-2 border-[var(--background)] flex items-center justify-center text-[11px] font-extrabold text-white shadow"
-                  style={{ background: `hsl(${(i * 67 + 190) % 360} 65% 45%)`, zIndex: AVATARS.length - i }}
-                  title="FlareHQ user"
-                >
-                  {a}
-                </span>
-              ))}
-            </div>
-            <p className="text-sm text-[var(--text-secondary)]">
-              <span className="font-bold text-[var(--text)]">Merchants + agents</span> transacting in USDC right now
-            </p>
           </motion.div>
         </div>
 
-        {/* floating live-activity panel — parallaxes opposite the background */}
-        <motion.div style={{ y: yCards }} className="relative">
-          <motion.div
-            initial={{ opacity: 0, y: 40, rotate: 1 }}
-            animate={{ opacity: 1, y: 0, rotate: 0 }}
-            transition={{ duration: 0.8, delay: 0.15 }}
-            className="bg-[var(--surface)]/95 backdrop-blur border border-[var(--border)] rounded-[24px] p-5 sm:p-7 shadow-2xl"
-          >
-            <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
-              <div>
-                <p className="text-xs uppercase tracking-widest font-bold text-[var(--text-secondary)]">Arc Testnet — Live</p>
-                <h2 className="home-h2 text-4xl font-extrabold mt-1">USDC</h2>
-              </div>
-              <span className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 px-4 py-2 rounded-full text-xs font-mono font-bold">
-                ● ACTIVE
-              </span>
+        {/* live system card — animates the real money path, step by step */}
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.15 }}
+          className="bg-[var(--surface)]/95 backdrop-blur border border-[var(--border)] rounded-[24px] p-5 sm:p-7 shadow-2xl"
+        >
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
+            <div>
+              <p className="text-xs uppercase tracking-widest font-bold text-[var(--text-secondary)]">Money in motion</p>
+              <h2 className="home-h2 text-2xl font-extrabold mt-1">Payment → settlement</h2>
             </div>
+            <span className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 px-4 py-2 rounded-full text-xs font-mono font-bold">
+              ● EXAMPLE FLOW
+            </span>
+          </div>
 
-            <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--background)]">
-              <div className="flex flex-col animate-[home-feed_14s_linear_infinite]">
-                {[...FEED, ...FEED].map(([who, what, meta], i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border)]/70 text-sm">
-                    <span className="font-mono font-bold truncate">{who}</span>
-                    <span className="font-semibold truncate">{what}</span>
-                    <span className="text-xs text-[var(--text-secondary)] whitespace-nowrap">{meta}</span>
+          <ol className="relative">
+            {FLOW.map((step, i) => {
+              const done = reduce ? true : i < active;
+              const current = !reduce && i === active;
+              return (
+                <li key={step.label} className="relative flex gap-4 pb-1 last:pb-0">
+                  {i < FLOW.length - 1 && (
+                    <span
+                      aria-hidden
+                      className={`absolute left-[19px] top-10 bottom-0 w-0.5 transition-colors duration-500 ${
+                        done ? 'bg-emerald-500/60' : 'bg-[var(--border)]'
+                      }`}
+                    />
+                  )}
+                  <span
+                    className={`relative z-10 h-10 w-10 shrink-0 rounded-full border flex items-center justify-center text-lg transition-all duration-500 ${
+                      current
+                        ? 'border-cyan-500 bg-cyan-500/15 shadow-[0_0_0_5px_rgba(6,182,212,0.12)]'
+                        : done
+                          ? 'border-emerald-500/50 bg-emerald-500/10'
+                          : 'border-[var(--border)] bg-[var(--surface-secondary)]'
+                    }`}
+                  >
+                    {step.icon}
+                    {current && (
+                      <span className="absolute inset-0 rounded-full border-2 border-cyan-400/50 animate-ping" aria-hidden />
+                    )}
+                  </span>
+                  <div className={`flex-1 rounded-2xl border px-4 py-2.5 mb-2.5 transition-all duration-500 ${
+                    current
+                      ? 'border-cyan-500/50 bg-cyan-500/5'
+                      : 'border-[var(--border)] bg-[var(--background)]'
+                  }`}>
+                    <p className="font-bold text-sm">
+                      {done && !current ? '✓ ' : ''}{step.label}
+                    </p>
+                    <p className="text-xs text-[var(--text-secondary)] font-mono mt-0.5">{step.detail}</p>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2.5 mt-4 text-center">
-              {[
-                ['$0.002', 'x402/call'],
-                ['1-tx', 'batch pay'],
-                ['92/100', 'top rep'],
-              ].map(([v, l]) => (
-                <div key={l} className="rounded-2xl bg-[var(--surface-secondary)] border border-[var(--border)] px-2 py-3">
-                  <p className="font-extrabold text-sm md:text-base">{v}</p>
-                  <p className="text-[11px] text-[var(--text-secondary)] font-semibold">{l}</p>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-
-          <motion.div
-            animate={reduce ? undefined : { y: [0, -12, 0] }}
-            transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-            className="absolute -left-3 sm:-left-6 -bottom-6 bg-[var(--surface)] border border-[var(--border)] rounded-2xl px-4 py-3 shadow-xl flex items-center gap-3"
-          >
-            <span className="text-2xl">🤖</span>
-            <div className="text-xs">
-              <p className="font-bold">agent-07 just got hired</p>
-              <p className="text-[var(--text-secondary)]">escrow $250 · rep 92</p>
-            </div>
-          </motion.div>
-
-          <motion.div
-            animate={reduce ? undefined : { y: [0, 10, 0] }}
-            transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: 0.8 }}
-            className="absolute -right-2 sm:-right-4 -top-5 bg-[var(--surface)] border border-[var(--border)] rounded-2xl px-4 py-3 shadow-xl flex items-center gap-3"
-          >
-            <span className="text-2xl">⚡</span>
-            <div className="text-xs">
-              <p className="font-bold">Streaming $4.12</p>
-              <p className="text-[var(--text-secondary)]">USDC per second</p>
-            </div>
-          </motion.div>
+                </li>
+              );
+            })}
+          </ol>
         </motion.div>
-      </motion.div>
+      </div>
     </section>
   );
 }

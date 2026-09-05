@@ -19,7 +19,7 @@ export default function DevSplit() {
       <SectionHeading
         eyebrow="Developers"
         title="Integrate in an afternoon"
-        sub="API keys, OpenAPI, webhooks, embeds and SDKs. Quickstart under five minutes."
+        sub="API keys, webhooks, embeds and docs. Quickstart under five minutes."
       />
       <div className="grid lg:grid-cols-2 gap-4 md:gap-6 items-stretch">
         <Reveal>
@@ -36,7 +36,7 @@ export default function DevSplit() {
         <div className="flex flex-col gap-4">
           <Reveal delay={0.08}>
             <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 md:p-7 shadow-sm">
-              <p className="text-xs font-extrabold uppercase tracking-widest text-[var(--text-secondary)] mb-3">Live receipt</p>
+              <p className="text-xs font-extrabold uppercase tracking-widest text-[var(--text-secondary)] mb-3">Sample receipt</p>
               <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-extrabold text-sm">Payment settled · $18.40 USDC</p>

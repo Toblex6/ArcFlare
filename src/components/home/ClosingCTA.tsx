@@ -50,11 +50,11 @@ export default function ClosingCTA() {
               <p className="text-white/75 max-w-xl mx-auto mb-8">Checkout, payroll, escrow, streaming and agent billing — one stack on Arc.</p>
               <div className="flex flex-col sm:flex-row justify-center gap-3">
                 <Link href="/start" className="bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-extrabold px-8 py-4 rounded-2xl transition hover:-translate-y-0.5 duration-300">
-                  Get Started →
+                  Start using FlareHQ →
                 </Link>
-                <Link href="/marketplace" className="border border-white/25 hover:bg-white/10 font-bold px-8 py-4 rounded-2xl transition">
-                  Explore APIs
-                </Link>
+                <a href="https://docs.flarehq.xyz" target="_blank" rel="noopener noreferrer" className="border border-white/25 hover:bg-white/10 font-bold px-8 py-4 rounded-2xl transition">
+                  Build with FlareHQ ↗
+                </a>
               </div>
             </div>
           </div>

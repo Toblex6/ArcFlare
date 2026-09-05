@@ -6,11 +6,12 @@ import Link from 'next/link';
 import SectionHeading from './SectionHeading';
 
 const STEPS = [
-  { n: '01', icon: '🪪', title: 'ERC-8004 identity', desc: 'Registry + reputation + validation. Score 0–100 with validator-signed trust.', href: '/agents' },
-  { n: '02', icon: '🔎', title: 'Discover + procure', desc: 'Need → trust → treasury → select → hire. Autonomous pipeline.', href: '/procurement' },
-  { n: '03', icon: '💼', title: 'ERC-8183 jobs', desc: 'Open → Funded → Submitted → Completed, with Telegram hiring loop.', href: '/jobs' },
-  { n: '04', icon: '🧠', title: 'Agent Brain', desc: 'Chat to pay, hire, check reputation and prices via tool-calling.', href: '/agent-brain' },
-  { n: '05', icon: '⚡', title: 'x402 marketplace', desc: 'Publish REST APIs, bill $0.002 per call, track revenue + success.', href: '/marketplace' },
+  { n: '01', icon: '🪪', title: 'Identity', desc: 'ERC-8004 wallets + on-chain registry. Every agent has an address.', href: '/agents' },
+  { n: '02', icon: '⭐', title: 'Reputation', desc: 'Scores 0–100 with validator-signed trust. Hire on evidence.', href: '/agents' },
+  { n: '03', icon: '🔎', title: 'Procurement', desc: 'Need → trust → treasury → select → hire. Autonomous pipeline.', href: '/procurement' },
+  { n: '04', icon: '💼', title: 'Jobs', desc: 'ERC-8183 lifecycle: accept → fund → submit → validate → complete.', href: '/jobs' },
+  { n: '05', icon: '🧠', title: 'Brain', desc: 'Chat operator: pay, hire, check reputation and prices via tools.', href: '/agent-brain' },
+  { n: '06', icon: '💸', title: 'Payments', desc: 'Streaming wages, escrowed settlement, ledger updated.', href: '/payroll' },
 ];
 
 export default function AgentRail() {
@@ -25,9 +26,9 @@ export default function AgentRail() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 w-full">
           <SectionHeading
             align="left"
-            eyebrow="Agent economy — scroll sideways"
-            title="Hire machines like people"
-            sub="Keep scrolling — the track moves horizontally while the page moves vertically."
+            eyebrow="Agent economy — keep scrolling"
+            title="Identity → reputation → jobs → payment"
+            sub="The concept itself is sequential, so the track moves sideways as you scroll down."
           />
         </div>
         <motion.div style={{ x }} className="flex gap-4 md:gap-6 px-4 sm:px-6 w-max max-w-none">
@@ -35,11 +36,11 @@ export default function AgentRail() {
             <Link
               key={s.n}
               href={s.href}
-              className="group w-[78vw] sm:w-[380px] shrink-0 bg-[var(--surface)] border border-[var(--border)] rounded-3xl p-6 md:p-8 shadow-lg hover:shadow-2xl hover:border-cyan-500/40 hover:-translate-y-1.5 transition duration-300"
+              className="group w-[78vw] sm:w-[380px] shrink-0 bg-[var(--surface)] border border-[var(--border)] rounded-3xl p-6 md:p-8 shadow-lg hover:shadow-xl hover:border-cyan-500/40 hover:-translate-y-1 transition duration-300"
             >
               <div className="flex items-center justify-between mb-5">
-                <span className="text-4xl group-hover:scale-110 transition-transform">{s.icon}</span>
-                <span className="font-mono font-extrabold text-5xl text-[var(--border)] group-hover:text-cyan-500/40 transition">{s.n}</span>
+                <span className="text-4xl">{s.icon}</span>
+                <span className="font-mono font-extrabold text-5xl text-[var(--border)]">{s.n}</span>
               </div>
               <h3 className="home-h3 text-xl md:text-2xl font-extrabold mb-2">{s.title}</h3>
               <p className="text-sm md:text-base text-[var(--text-secondary)] leading-relaxed">{s.desc}</p>
@@ -53,9 +54,6 @@ export default function AgentRail() {
             <span className="mt-5 inline-flex w-fit bg-white text-slate-900 font-bold text-sm px-5 py-3 rounded-xl">Get started →</span>
           </div>
         </motion.div>
-        <p className="text-center text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)] mt-8 animate-pulse">
-          ↓ keep scrolling — sideways motion ↓
-        </p>
       </div>
     </section>
   );

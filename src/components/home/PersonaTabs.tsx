@@ -12,7 +12,7 @@ const TABS = [
     label: 'Merchants',
     title: 'Get paid in USDC in seconds',
     desc: 'Sign up, get an API key, share a link. Customers pay — funds land directly in your wallet. Non-custodial, always.',
-    points: ['Hosted + embedded checkout', 'Merchant analytics + webhooks', 'Invoices + external wallets'],
+    points: ['Hosted + embedded checkout', 'Payment links + webhooks', 'External wallets'],
     cta: 'Merchant signup',
     href: '/merchant/signup',
   },
@@ -41,8 +41,8 @@ const TABS = [
     icon: '⚡',
     label: 'Developers',
     title: 'One API for all money movement',
-    desc: 'Init, verify, stream, escrow, schedule. OpenAPI + SDKs + webhooks included.',
-    points: ['OpenAPI + SDKs', 'Webhooks for settlement', 'Testnet → mainnet path'],
+    desc: 'Init, verify, stream, escrow, schedule. APIs, docs and webhooks included.',
+    points: ['APIs + docs', 'Webhooks for settlement', 'Testnet → mainnet path'],
     cta: 'Read the docs',
     href: 'https://docs.flarehq.xyz',
   },
@@ -57,8 +57,8 @@ export default function PersonaTabs() {
     <section id="personas" className="max-w-7xl mx-auto px-4 sm:px-6 py-16 md:py-24 scroll-mt-24">
       <SectionHeading
         eyebrow="Who it's for"
-        title="For merchants. For people. For agents."
-        sub="One payment layer, four front doors. Pick yours."
+        title="For businesses. For people. For agents."
+        sub="One money layer, four front doors. Pick yours."
       />
       <div className="flex flex-wrap justify-center gap-2 mb-8">
         {TABS.map((t) => (
