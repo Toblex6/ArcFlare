@@ -8,8 +8,10 @@
 // client in the app, not two.
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import AgentDiscovery from "@/components/marketplace/AgentDiscovery";
+import { deriveReturnTo, loginRedirectUrl } from "@/lib/auth/returnTo";
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
 
@@ -275,7 +277,53 @@ const badgeStyle = (status?: string): React.CSSProperties => {
 };
 
 export default function MarketplacePage() {
+    const router = useRouter();
     const [tab, setTab] = useState<"discover" | "publish" | "mine" | "agents">("discover");
+
+    // ── Session gate (public-browse page) ──
+    // This page is publicly browsable; only its embedded merchant ACTIONS
+    // (pay / publish / status toggle / analytics) need a session. One probe
+    // of /api/merchant/me on mount lets those actions redirect to the login
+    // gate (with returnTo) instead of failing with an unexplained 401.
+    // merchant_token is the merchant cookie session — the same system those
+    // APIs authenticate with (do not conflate with consumer_token).
+    const [authChecked, setAuthChecked] = useState(false);
+    const [hasSession, setHasSession] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        fetch("/api/merchant/me")
+            .then((res) => {
+                if (cancelled) return;
+                if (res.status === 401) {
+                    setAuthChecked(true);
+                    setHasSession(false);
+                } else if (res.ok) {
+                    setAuthChecked(true);
+                    setHasSession(true);
+                }
+                // 5xx / unexpected status: leave authChecked false — the gate
+                // stays open and the real API call surfaces the error.
+            })
+            .catch(() => {
+                if (!cancelled) setAuthChecked(false); // network error — same
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Client-side gate for authenticated actions. Returns true when the
+    // action may proceed; redirects to the login gate otherwise. When session
+    // state is unknown (probe failed), let the action through — the
+    // server-side 401 is then the source of truth.
+    const requireAuth = (): boolean => {
+        if (authChecked && !hasSession) {
+            router.replace(loginRedirectUrl(deriveReturnTo("/marketplace")));
+            return false;
+        }
+        return true;
+    };
 
     // ── Discover state ──
     const [listings, setListings] = useState<Listing[]>([]);
@@ -377,8 +425,11 @@ export default function MarketplacePage() {
 
     // ── Pay with USDC — the caller's own wallet is resolved server-side from
     // their merchant identity, same as everywhere else in this file. Nothing
-    // typed in the UI selects which wallet pays anymore. ──
+    // typed in the UI selects which wallet pays anymore. This is an
+    // authenticated action on a public-browse page, so check session state
+    // client-side first (no session → login gate, not a bare 401). ──
     const handlePay = async (slug: string) => {
+        if (!requireAuth()) return;
         setPayingSlug(slug);
         try {
             const res = await fetch("/api/x402/pay", {
@@ -398,8 +449,9 @@ export default function MarketplacePage() {
         }
     };
 
-    // ── Publish a new listing ──
+    // ── Publish a new listing (authenticated action on a public-browse page) ──
     const handlePublish = async () => {
+        if (!requireAuth()) return;
         setPublishing(true);
         setPublishError(null);
         setPublishResult(null);
@@ -432,8 +484,9 @@ export default function MarketplacePage() {
         }
     };
 
-    // ── Toggle publish status on an existing listing ──
+    // ── Toggle publish status on an existing listing (authenticated action) ──
     const toggleStatus = async (slug: string, nextStatus: string) => {
+        if (!requireAuth()) return;
         setStatusUpdating(slug);
         try {
             const res = await fetch(`/api/x402/marketplace/${slug}`, {
@@ -453,6 +506,9 @@ export default function MarketplacePage() {
             setAnalyticsOpenSlug(null);
             return;
         }
+        // Opening analytics pulls the listing's private revenue data — same
+        // client-side session gate as the other merchant actions here.
+        if (!requireAuth()) return;
         if (!analyticsBySlug[slug]) {
             try {
                 const res = await fetch(`/api/x402/marketplace/${slug}/analytics`, {

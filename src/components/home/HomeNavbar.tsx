@@ -1,20 +1,65 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import ThemeToggle from '@/src/components/ThemeToggle';
 
+// Section anchors rendered on this page (src/app/page.tsx composition).
+// These are intentional scroll targets, not routes — the navbar smooth-scrolls
+// to them and highlights whichever section is currently in view. Converting
+// them into real routes is a bigger scope change and is deliberately NOT done
+// here (flagged for Track B instead).
+const SECTIONS: { id: string; label: string }[] = [
+  { id: 'system', label: 'System' },
+  { id: 'personas', label: "Who it's for" },
+  { id: 'products', label: 'Products' },
+  { id: 'agents', label: 'Agents' },
+  { id: 'developers', label: 'Developers' },
+];
+
 export default function HomeNavbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const [active, setActive] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 24);
+    const onScroll = () => {
+      setScrolled(window.scrollY > 24);
+
+      // Slim scroll-progress indicator (0 → 1 across the whole page).
+      const doc = document.documentElement;
+      const max = doc.scrollHeight - doc.clientHeight;
+      setProgress(max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0);
+
+      // Scroll-spy: the active section is the last one whose top has crossed
+      // the navbar line. A plain top-of-viewport sweep (rather than
+      // IntersectionObserver) stays stable with the homepage's very uneven
+      // section heights (AgentRail is a 300vh sticky rail) and is cheap
+      // enough for 5 elements.
+      const line = 120; // navbar height + breathing room
+      let current: string | null = null;
+      for (const { id } of SECTIONS) {
+        const el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top <= line) current = id;
+      }
+      setActive(current);
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Intentional scroll-to-section: keep the anchor semantics (URL hash still
+  // updates, middle-click/open-in-new-tab still work) but smooth-scroll
+  // instead of the default hard jump.
+  const scrollToSection = (id: string) => (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.history.replaceState(null, '', `#${id}`);
+    setOpen(false);
+  };
 
   return (
     <header
@@ -34,11 +79,21 @@ export default function HomeNavbar() {
         </Link>
 
         <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-[var(--text-secondary)]">
-          <a href="#system" className="hover:text-[var(--text)] transition">System</a>
-          <a href="#personas" className="hover:text-[var(--text)] transition">Who it&apos;s for</a>
-          <a href="#products" className="hover:text-[var(--text)] transition">Products</a>
-          <a href="#agents" className="hover:text-[var(--text)] transition">Agents</a>
-          <a href="#developers" className="hover:text-[var(--text)] transition">Developers</a>
+          {SECTIONS.map(({ id, label }) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              onClick={scrollToSection(id)}
+              aria-current={active === id ? 'true' : undefined}
+              className={`transition ${
+                active === id
+                  ? 'text-cyan-600 dark:text-cyan-300 font-semibold'
+                  : 'hover:text-[var(--text)]'
+              }`}
+            >
+              {label}
+            </a>
+          ))}
         </nav>
 
         <div className="hidden md:flex items-center gap-3">
@@ -84,16 +139,30 @@ export default function HomeNavbar() {
           </button>
         </div>
       </div>
+      {/* Scroll-progress indicator — hugs the navbar's bottom border and only
+          shows once the page has been scrolled (matching the nav's own
+          fade-in) so the transparent top-of-page state stays clean. */}
+      <div
+        aria-hidden
+        className={`absolute bottom-0 left-0 right-0 h-0.5 origin-left bg-gradient-to-r from-cyan-500 to-cyan-300 transition-opacity duration-300 ${
+          scrolled ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{ transform: `scaleX(${progress})` }}
+      />
       {open && (
         <div className="md:hidden border-t border-[var(--border)] bg-[var(--background)]/95 backdrop-blur-xl px-4 py-4 flex flex-col gap-1 text-base font-medium">
-          {[
-            ['System', '#system'],
-            ['Who it’s for', '#personas'],
-            ['Products', '#products'],
-            ['Agents', '#agents'],
-            ['Developers', '#developers'],
-          ].map(([label, href]) => (
-            <a key={href} href={href} onClick={() => setOpen(false)} className="p-2.5 rounded-xl hover:bg-[var(--surface-secondary)] transition">
+          {SECTIONS.map(({ id, label }) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              onClick={scrollToSection(id)}
+              aria-current={active === id ? 'true' : undefined}
+              className={`p-2.5 rounded-xl transition ${
+                active === id
+                  ? 'text-cyan-600 dark:text-cyan-300 bg-[var(--surface-secondary)] font-semibold'
+                  : 'hover:bg-[var(--surface-secondary)]'
+              }`}
+            >
               {label}
             </a>
           ))}

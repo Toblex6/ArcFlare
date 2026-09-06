@@ -4,9 +4,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { useSignMessage } from "wagmi";
+import { useAccount, useConnect, useSignMessage } from "wagmi";
 import type { Address } from "viem";
 import { friendlyWalletError } from "@/lib/wallet/walletErrors";
+import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, withTimeout } from "@/lib/wallet/walletLabels";
 import {
   buildDiscoveryParams,
   isServiceable,
@@ -83,6 +84,13 @@ interface ActivityItem {
 export default function ConsumerApp() {
   const router = useRouter();
   const { signMessageAsync } = useSignMessage();
+  // A4: "Use this wallet" needs an ACTIVE wagmi connection before it can sign
+  // the server challenge — with no extension connected, signMessageAsync used
+  // to fail immediately with an unhelpful error. These hooks let onboarding
+  // detect "nothing connected" and open the connector picker instead (same
+  // connectors configured in providers.tsx via src/lib/wagmi.ts).
+  const { isConnected } = useAccount();
+  const { connectors, connectAsync, isPending: isConnecting } = useConnect();
   const [view, setView] = useState<View>("home");
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
@@ -101,6 +109,14 @@ export default function ConsumerApp() {
   const [onboardingInput, setOnboardingInput] = useState("");
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [creatingWallet, setCreatingWallet] = useState(false);
+  // A4: onboarding connector picker — shown when "Use this wallet" is tapped
+  // while no wallet extension is connected to the page yet.
+  const [connectPickerOpen, setConnectPickerOpen] = useState(false);
+  // When true, the next successful wagmi connect resumes the pending
+  // "Use this wallet" sign-challenge flow with the already-typed address.
+  // Initialized true so a wallet that reconnects on page load (wagmi
+  // localStorage persistence) also auto-resumes an interrupted flow.
+  const resumeConnectRef = useRef(true);
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [frequency, setFrequency] = useState("7");
@@ -435,6 +451,25 @@ export default function ConsumerApp() {
       return;
     }
     setOnboardingError(null);
+
+    // A4: wagmi's signMessageAsync requires an active wallet connection —
+    // with none, it fails immediately and unhelpfully. Check isConnected
+    // first: surface the connector picker (or a get-a-wallet message when no
+    // extension exists at all) and only run the sign-challenge flow once a
+    // wallet is actually connected. Connecting via the picker resumes this
+    // flow automatically (resumeConnectRef below) with the typed address
+    // preserved.
+    if (!isConnected) {
+      setConnectPickerOpen(true);
+      resumeConnectRef.current = true;
+      setOnboardingError(
+        hasInjectedProvider()
+          ? "Connect your wallet extension first — pick it below, then this connection continues."
+          : "No wallet extension detected. Install one below or from ethereum.org/en/wallets — or use “Create your FlareHQ wallet”, which needs no extension."
+      );
+      return;
+    }
+
     setCreatingWallet(true);
     try {
       // 1. Get a challenge from the server (nonce cookie + SIWE-style
@@ -475,6 +510,20 @@ export default function ConsumerApp() {
       setCreatingWallet(false);
     }
   };
+
+  // A4: when a wallet gets connected (via the picker, or automatically on
+  // page load while a connection flow is pending), resume the sign-challenge
+  // flow with the address the user typed.
+  useEffect(() => {
+    if (!isConnected || !resumeConnectRef.current) return;
+    resumeConnectRef.current = false;
+    setConnectPickerOpen(false);
+    setOnboardingError(null);
+    connectExisting();
+    // connectExisting is stable enough for this one-shot resume; it reads
+    // the current onboardingInput at call time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]);
 
   const createNewWallet = async () => {
     setCreatingWallet(true);
@@ -781,8 +830,10 @@ export default function ConsumerApp() {
             />
             <span style={styles.appName}>FlareHQ Flow</span>
           </div>
-          <h1 style={styles.onboardingTitle}>Let's get you set up</h1>
-          <p style={styles.onboardingSub}>You'll need a wallet to send, save, and request money. Takes a few seconds.</p>
+          <h1 style={styles.onboardingTitle}>Create your FlareHQ wallet</h1>
+          <p style={styles.onboardingSub}>
+            No signup required. This creates a wallet for this browser. Before leaving this device, add a recovery method so you can access it on another device.
+          </p>
           <button style={styles.primaryButton} disabled={creatingWallet} onClick={createNewWallet}>
             {creatingWallet ? "Setting things up..." : "Create my wallet"}
           </button>
@@ -793,6 +844,79 @@ export default function ConsumerApp() {
           </div>
           <button style={styles.secondaryButton} onClick={connectExisting}>Use this wallet</button>
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
+
+          {/* A4: connector picker — appears only when "Use this wallet" is
+              tapped without an active wallet connection. Uses the same wagmi
+              connectors configured in providers.tsx (EIP-6963 injected
+              discovery on desktop, WalletConnect QR where configured). */}
+          {connectPickerOpen && (
+            <div
+              style={{
+                marginTop: 16,
+                width: "100%",
+                maxWidth: 340,
+                border: "1px solid var(--flow-border, var(--border))",
+                borderRadius: 14,
+                padding: 16,
+                background: "var(--flow-surface, var(--surface))",
+                boxSizing: "border-box",
+              }}
+            >
+              <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--text-secondary)" }}>
+                Connect a wallet
+              </p>
+              {(() => {
+                const pickers = dedupeConnectors(connectors);
+                if (pickers.length === 0) {
+                  return (
+                    <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                      No wallet found.{" "}
+                      <a href="https://ethereum.org/en/wallets/" target="_blank" rel="noopener noreferrer" style={{ color: "var(--primary)" }}>
+                        Get a wallet ↗
+                      </a>
+                    </p>
+                  );
+                }
+                return pickers.map((c) => (
+                  <button
+                    key={c.uid}
+                    disabled={isConnecting}
+                    onClick={() => {
+                      withTimeout(connectAsync({ connector: c }), 45000, "Wallet connection timed out").catch((e) =>
+                        setOnboardingError(friendlyWalletError(e))
+                      );
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      width: "100%",
+                      padding: "11px 14px",
+                      marginBottom: 8,
+                      borderRadius: 10,
+                      border: "1px solid var(--flow-border, var(--border))",
+                      background: "transparent",
+                      color: "var(--flow-text, var(--text))",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: isConnecting ? "not-allowed" : "pointer",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {friendlyConnectorLabel(c)}
+                    <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-secondary)" }}>→</span>
+                  </button>
+                ));
+              })()}
+              <button
+                onClick={() => setConnectPickerOpen(false)}
+                style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0, marginTop: 4 }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
           <p style={styles.footnote}>Built on Arc · Your money is always yours</p>
         </div>
       </main>

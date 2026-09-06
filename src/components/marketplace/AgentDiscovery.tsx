@@ -651,7 +651,7 @@ export default function AgentDiscovery() {
                 </button>
                 {action.kind === "signin" && (
                   <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--text-secondary)" }}>
-                    <a href="/merchant/login" style={{ color: "var(--primary)" }}>Business login</a> · jobs are funded from your wallet in escrow.
+                    <a href={`/login?returnTo=${encodeURIComponent("/marketplace")}`} style={{ color: "var(--primary)" }}>Business login</a> · jobs are funded from your wallet in escrow.
                   </p>
                 )}
               </>

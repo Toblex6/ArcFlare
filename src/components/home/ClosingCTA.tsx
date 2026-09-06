@@ -72,7 +72,7 @@ export default function ClosingCTA() {
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm font-semibold text-[var(--text-secondary)]">
             <a href="https://docs.flarehq.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition">Docs</a>
-            <a href="https://github.com/anomalyco/opencode" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition">GitHub</a>
+            <a href="https://github.com/Toblex6/ArcFlare" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition">GitHub</a>
             <Link href="/stats" className="hover:text-[var(--text)] transition">Stats</Link>
             <Link href="/jobs" className="hover:text-[var(--text)] transition">Jobs</Link>
           </div>

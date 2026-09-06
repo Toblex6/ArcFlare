@@ -4,10 +4,18 @@
 
 import React, { useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+// src/app/merchant/login/page.tsx
+//
+// returnTo support: the public-browse login gate (/login?returnTo=… — see
+// src/lib/auth/returnTo.ts) forwards here with the original path preserved,
+// so signing in lands the user back where the gated action happened.
 
 export default function MerchantLogin() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +33,11 @@ export default function MerchantLogin() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
-      router.push('/merchant/dashboard');
+      // Only honour same-origin relative returnTo paths — never redirect
+      // off-site.
+      const raw = searchParams.get('returnTo') || '';
+      const returnTo = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/merchant/dashboard';
+      router.push(returnTo);
     } catch (err: any) {
       setError(err.message || 'Login failed.');
     } finally {
@@ -41,12 +53,50 @@ export default function MerchantLogin() {
         color: 'var(--text)',
         fontFamily: 'Inter, system-ui, sans-serif',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         padding: 24,
       }}
     >
-      <div style={{ width: '100%', maxWidth: 420 }}>
+      {/* Shared header treatment — logo + minimal nav for visual continuity
+          with the homepage (trimmed; the form itself stays focused). */}
+      <header
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '16px 24px',
+        }}
+      >
+        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+          <Image
+            src="/arcflare-logo.png"
+            alt="FlareHQ"
+            width={32}
+            height={32}
+            style={{ borderRadius: 8 }}
+          />
+          <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em' }}>FlareHQ</span>
+        </Link>
+        <Link
+          href="/"
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--text-secondary)',
+            textDecoration: 'none',
+          }}
+        >
+          ← Back to home
+        </Link>
+      </header>
+
+      <div style={{ width: '100%', maxWidth: 420, marginTop: 48 }}>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <Image
             src="/arcflare-logo.png"
