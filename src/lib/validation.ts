@@ -49,6 +49,16 @@ export const SettleSchema = z.object({
     .optional(),
 });
 
+// ── /api/payments/quote ───────────────────────────────────────────────────────
+// Payment Routing v1: the client may name ONLY the payment reference and the
+// desired pay-in symbol. Rates, outputs, minOuts, pools, routes, and token
+// addresses are server-determined — any such keys in the body are stripped
+// (zod default) and never reach the quoter.
+export const QuoteSchema = z.object({
+  reference: z.string().min(1).max(128),
+  payToken: z.string().min(1).max(16),
+});
+
 // ── /api/escrow/create ────────────────────────────────────────────────────────
 export const EscrowCreateSchema = z.object({
   depositorSCA: scaAddress,
