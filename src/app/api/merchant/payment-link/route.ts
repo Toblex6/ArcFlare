@@ -6,6 +6,7 @@ import { jwtVerify } from 'jose';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
 import { resolveCurrency, resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
+import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preference';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { amount, currency = 'USDC', description, webhookUrl } = body;
+    const { amount, currency, description, webhookUrl } = body;
 
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       return NextResponse.json(
@@ -41,9 +42,16 @@ export async function POST(req: NextRequest) {
     // (USDC | EURC — both natively settleable via verify-onchain/settle
     // Path B). The canonical resolver is authoritative: unsupported symbols
     // are rejected, never converted, never silently substituted.
+    //
+    // Routing v1: when the merchant names no token, the invoice inherits
+    // their default settlement preference (NULL = USDC). Explicit input
+    // always wins. Per-invoice token stays frozen at creation.
     let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
     try {
-      token = resolveCurrency({ currency });
+      token =
+        currency === undefined
+          ? resolveMerchantSettlementPreference(merchant)
+          : resolveCurrency({ currency });
     } catch (tokenErr: any) {
       return NextResponse.json(
         { success: false, error: `Unsupported currency: ${tokenErr.message}` },

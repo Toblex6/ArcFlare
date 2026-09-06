@@ -4,6 +4,7 @@ import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { parseBody, InitializeSchema } from '@/src/lib/validation';
 import { resolveCurrency } from '@/src/lib/tokens/resolveCurrency';
+import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preference';
 import { resolveInitializeCaller } from '@/src/lib/middleware/withMerchantAuth';
 
 export async function POST(req: NextRequest) {
@@ -26,19 +27,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Zod Validation
-    const body = await req.json().catch(() => ({}));
-    const { data, error: validationError } = parseBody(InitializeSchema, body);
+    // 3. Zod Validation (schema default keeps legacy USDC for absent
+    // currency — preference inheritance below keys off EXPLICIT raw input).
+    const rawBody = await req.json().catch(() => ({}));
+    const { data, error: validationError } = parseBody(InitializeSchema, rawBody);
     if (validationError) return validationError as NextResponse;
+    const rawObj = (rawBody && typeof rawBody === 'object' ? rawBody : {}) as Record<string, unknown>;
+    const explicitToken = rawObj.currency !== undefined || rawObj.tokenAddress !== undefined;
 
     const { amount, currency, email, merchant, agentSCA, webhookUrl, payoutAddress, direction, tokenAddress } = data;
 
-    // Resolve the canonical settlement token for this invoice (Phase 1
-    // read-model). Rejects unsupported symbols/addresses and guards against
-    // symbol/address mismatch. Persisted below so every payment record carries
-    // exact token identity. NOTE: this does NOT enable EURC settlement — it
-    // only records/returns the resolved identity (Phase 1 scope).
-    const token = resolveCurrency({ currency, tokenAddress });
+    // Merchant record for settlement-preference inheritance (routing v1).
+    // Loaded in the merchant branch below; null for consumer/internal
+    // callers, who keep the legacy USDC default via the resolver.
+    let preferenceMerchant: any = null;
 
     // 4. If agentSCA provided, verify it exists in AgentRegistry
     let resolvedSenderEmail = email || 'autonomous-agent@arc.network';
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest) {
       merchantName = merchantRecord.businessName;
       merchantId = merchantRecord.id;
       merchantSCA = merchantRecord.walletAddress;
+      preferenceMerchant = merchantRecord;
     } else if (caller.type === 'consumer' && caller.consumerWalletAddress) {
       // Flow's "Send"/"Request" — the requesting/sending party is whichever
       // consumer is logged in, not whatever the client claims.
@@ -151,6 +154,28 @@ export async function POST(req: NextRequest) {
     // reasonable default for a one-off checkout link.
     const EXPIRY_MINUTES = 120;
     const expiresAt = new Date(Date.now() + EXPIRY_MINUTES * 60_000);
+
+    // Resolve the canonical settlement token for this invoice. Rejects
+    // unsupported symbols/addresses and guards against symbol/address
+    // mismatch. Persisted below so every payment record carries exact token
+    // identity.
+    //
+    // Routing v1: a merchant that names no explicit token inherits their
+    // default settlement preference (NULL = USDC). Explicit input always
+    // wins; every other caller resolves exactly as before (schema default
+    // USDC flows into the resolver).
+    let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+    try {
+      token =
+        !explicitToken && caller.type === 'merchant' && preferenceMerchant
+          ? resolveMerchantSettlementPreference(preferenceMerchant)
+          : resolveCurrency({ currency, tokenAddress });
+    } catch (tokenErr: any) {
+      return NextResponse.json(
+        { success: false, error: `Unsupported settlement token: ${tokenErr.message}` },
+        { status: 400 }
+      );
+    }
 
     await prisma.paymentLog.create({
       data: {

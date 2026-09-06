@@ -22,6 +22,12 @@ export const InitializeSchema = z.object({
   // can RECORD a EURC-denominated invoice, but actual EURC settlement/transfer
   // is NOT enabled. `tokenAddress`, when provided, must be a supported token
   // (resolved via resolveCurrency); otherwise the symbol alone is canonical.
+  //
+  // Routing v1 note: the schema default stays USDC (legacy callers
+  // unchanged). Merchant preference inheritance is keyed off EXPLICIT input:
+  // the initialize handler peeks at the raw body — a merchant that names no
+  // token inherits their default preference (NULL = USDC). Explicit input
+  // always wins.
   currency: z.enum(['USDC', 'EURC']).default('USDC'),
   // Canonical ERC-20 address of the settlement token. Optional for USDC (USDC
   // remains the legacy default); when present it MUST match a supported token.
@@ -57,6 +63,18 @@ export const SettleSchema = z.object({
 export const QuoteSchema = z.object({
   reference: z.string().min(1).max(128),
   payToken: z.string().min(1).max(16),
+});
+
+// ── /api/merchant/me (PATCH settlement preference) ───────────────────────────
+// Routing v1: merchants choose the default settlement token for FUTURE
+// invoices. Symbol, address, or both (both must agree). Persisted value is
+// always the resolver-canonical address; existing invoices are untouched.
+export const SettlementPreferenceSchema = z.object({
+  settlementToken: z.string().min(1).max(16).optional(),
+  settlementTokenAddress: z
+    .string()
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Must be a valid 0x Ethereum address')
+    .optional(),
 });
 
 // ── /api/escrow/create ────────────────────────────────────────────────────────

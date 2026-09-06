@@ -4,6 +4,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { jwtVerify } from 'jose';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
+import { checkRateLimit } from '@/src/lib/ratelimit';
+import { parseBody, SettlementPreferenceSchema } from '@/src/lib/validation';
+import { resolvePreferenceUpdate } from '@/src/lib/routing/preference';
+import { getTokenByAddress } from '@/src/lib/tokens/supportedTokens';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -76,4 +80,61 @@ export async function DELETE(req: NextRequest) {
   const response = NextResponse.json({ success: true, message: 'Logged out.' });
   response.cookies.delete('merchant_token');
   return response;
+}
+
+// Update default settlement preference (Payment Routing v1). Sets the token
+// FUTURE invoices settle in. Existing PaymentLog rows are frozen and are
+// never touched here — only the merchant row is updated.
+export async function PATCH(req: NextRequest) {
+  try {
+    const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
+    if (!allowed) return limitResponse as NextResponse;
+
+    const token = req.cookies.get('merchant_token')?.value;
+    if (!token || !JWT_SECRET) {
+      return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
+    }
+
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const merchantId = payload.merchantId as string;
+
+    const merchant = await (prisma as any).merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant) {
+      return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { data, error: validationError } = parseBody(SettlementPreferenceSchema, body);
+    if (validationError) return validationError as NextResponse;
+
+    // Resolver-canonical: unsupported symbols, arbitrary addresses, and
+    // symbol/address mismatches are rejected — never persisted.
+    let canonicalAddress: string;
+    try {
+      canonicalAddress = resolvePreferenceUpdate({
+        settlementToken: data.settlementToken,
+        settlementTokenAddress: data.settlementTokenAddress,
+      });
+    } catch (prefErr: any) {
+      return NextResponse.json({ success: false, error: prefErr.message }, { status: 400 });
+    }
+
+    const updated = await (prisma as any).merchant.update({
+      where: { id: merchantId },
+      data: { settlementTokenAddress: canonicalAddress },
+    });
+    const view = getTokenByAddress(canonicalAddress)!;
+
+    return NextResponse.json({
+      success: true,
+      settlementPreference: {
+        symbol: view.symbol,
+        address: view.address,
+        decimals: view.decimals,
+      },
+      merchantId: updated.id,
+    });
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid session.' }, { status: 401 });
+  }
 }
