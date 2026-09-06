@@ -15,6 +15,8 @@ import { arcTestnet } from '@/src/lib/wagmi';
 import { erc20TransferAbi } from '@/src/lib/wallet/erc20';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { transferUsdc } from '@/src/lib/circle/transfers';
+import { getRoutingConfig, readWithRetry } from '@/src/lib/routing/canonical';
+import { checkRoutedExecution, findRoutedEvent } from '@/src/lib/routing/verifier';
 
 const publicClient = createPublicClient({
     chain: arcTestnet,
@@ -91,14 +93,98 @@ export async function POST(req: NextRequest) {
 
         // Amount in the RESOLVED token's decimals (both supported tokens are 6
         // decimals today — still resolved, not hardcoded, because the resolver
-        // is the canonical abstraction). Only a Transfer log emitted by the
+        // is the canonical abstraction).
+        //
+        // ── ROUTED LEG (Payment Routing v1) ─────────────────────────────
+        // A payment carrying a live conversion quote (payTokenAddress X !=
+        // settlement Y) is satisfied ONLY by one real execution of the
+        // canonical router — never by a plain ERC-20 transfer. The receipt
+        // must contain a PaymentRouted event from the canonical router
+        // proving payer, tokenIn, exact input, settlement tokenOut,
+        // canonical pool, frozen merchant recipient, output >= minOut, and
+        // execution inside quote validity. Direct-transfer matching below is
+        // skipped entirely for these rows.
+        const payTokenAddr = ((payment as any).payTokenAddress as string | null) ?? null;
+        const wantsRoute =
+            !!payTokenAddr && payTokenAddr.toLowerCase() !== token.address.toLowerCase();
+        let routedCheck: { payer: string; actualInput: string; actualOutput: string } | null = null;
+        let routedConversion: any = null;
+
+        let matchedTransfer: { from: string; value: bigint } | null = null;
+
+        if (wantsRoute) {
+            routedConversion = await (prisma as any).paymentConversion.findUnique({
+                where: { paymentLogId: payment.id },
+            });
+            if (!routedConversion) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: 'This payment requires a conversion quote — request one via POST /api/payments/quote.',
+                    },
+                    { status: 400 }
+                );
+            }
+            const { routerAddress, poolAddress } = getRoutingConfig();
+            const event = findRoutedEvent((receipt.logs as any) ?? [], routerAddress);
+            if (!event) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: 'No routed payment execution found in this transaction. Submit the router execution that pays this invoice.',
+                    },
+                    { status: 400 }
+                );
+            }
+            // A transaction can settle at most one payment: refuse a tx that
+            // another conversion already consumed.
+            const consumedBy = await (prisma as any).paymentConversion
+                .findUnique({ where: { executionTxHash: txHash } })
+                .catch(() => null);
+            if (consumedBy && consumedBy.paymentLogId !== payment.id) {
+                return NextResponse.json(
+                    { success: false, error: 'This transaction was already consumed by another payment.' },
+                    { status: 409 }
+                );
+            }
+            const allowResume = !!consumedBy && consumedBy.paymentLogId === payment.id;
+            const block = await readWithRetry('block', () =>
+                publicClient.getBlock({ blockHash: receipt.blockHash })
+            );
+            const senderHint =
+                payment.senderEmail?.startsWith('0x') &&
+                payment.senderEmail.toLowerCase() !== 'pending@checkout'
+                    ? payment.senderEmail
+                    : payment.payerSCA?.startsWith('0x')
+                      ? payment.payerSCA
+                      : null;
+            try {
+                routedCheck = checkRoutedExecution({
+                    event,
+                    conversion: routedConversion,
+                    settlementAddress: token.address,
+                    merchantSCA: payment.merchantSCA,
+                    canonicalPool: poolAddress,
+                    canonicalRouter: routerAddress,
+                    blockTimestampSec: Number(block.timestamp),
+                    knownPayer: senderHint,
+                    allowExecutedResume: allowResume,
+                });
+            } catch (routeErr: any) {
+                const routeStatus = typeof routeErr?.status === 'number' ? routeErr.status : 400;
+                return NextResponse.json(
+                    { success: false, error: routeErr.message },
+                    { status: routeStatus }
+                );
+            }
+            matchedTransfer = { from: routedCheck.payer, value: BigInt(routedCheck.actualOutput) };
+        } else {
+        // Direct-transfer matching: only a Transfer log emitted by the
         // resolved token contract can satisfy this invoice: a USDC log never
         // satisfies an EURC invoice and vice versa. Logs from any other
         // contract are ignored (skipped, never matched).
         const expectedAmount = parseUnits(payment.amount.toString(), token.decimals);
         const merchantAddr = payment.merchantSCA.toLowerCase();
-
-        let matchedTransfer: { from: string; value: bigint } | null = null;
 
         for (const log of receipt.logs) {
             if (log.address.toLowerCase() !== token.address.toLowerCase()) continue;
@@ -122,6 +208,7 @@ export async function POST(req: NextRequest) {
                 continue; // not a Transfer log, skip
             }
         }
+        } // end direct-transfer matching
 
         if (!matchedTransfer) {
             return NextResponse.json(
@@ -137,17 +224,34 @@ export async function POST(req: NextRequest) {
         // Preserve canonical token identity (currency + tokenAddress) so an
         // EURC verification is never overwritten with USDC. Idempotency
         // unchanged: SUCCESS rows short-circuit at the top of this handler.
-        const updated = await prisma.paymentLog.update({
-            where: { reference },
-            data: {
-                status: 'SUCCESS',
-                arcTxHash: txHash,
-                payerSCA: matchedTransfer.from,
-                senderEmail: matchedTransfer.from,
-                currency: token.symbol,
-                tokenAddress: token.address,
-            },
-        });
+        //
+        // Routed settlements additionally flip the conversion to EXECUTED with
+        // measured amounts — atomically with the payment SUCCESS update, so a
+        // crash between the two is resumable (same-tx resubmission completes
+        // the payment instead of double-settling).
+        const successData = {
+            status: 'SUCCESS',
+            arcTxHash: txHash,
+            payerSCA: matchedTransfer.from,
+            senderEmail: matchedTransfer.from,
+            currency: token.symbol,
+            tokenAddress: token.address,
+        };
+        const updated =
+            routedConversion && routedCheck
+                ? await prisma.$transaction(async (db: any) => {
+                      await db.paymentConversion.update({
+                          where: { id: routedConversion.id },
+                          data: {
+                              status: 'EXECUTED',
+                              executionTxHash: txHash,
+                              actualInputAmount: routedCheck.actualInput,
+                              actualOutputAmount: routedCheck.actualOutput,
+                          },
+                      });
+                      return db.paymentLog.update({ where: { reference }, data: successData });
+                  })
+                : await prisma.paymentLog.update({ where: { reference }, data: successData });
 
         if (updated.webhookUrl) {
             fetch(updated.webhookUrl, {
@@ -360,9 +464,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, payment: updated });
     } catch (error: any) {
         console.error('On-chain verification error:', error);
+        const status = typeof error?.status === 'number' ? error.status : 500;
         return NextResponse.json(
             { success: false, error: error.message || 'Verification failed.' },
-            { status: 500 }
+            { status }
         );
     }
 }
