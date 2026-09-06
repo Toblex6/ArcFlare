@@ -28,6 +28,7 @@ export interface TrustResult {
     totalJobs: number;
     failedJobs: number;
     validatedVolume: string; // bigint string 6-dec
+    validatedVolumeByToken: Record<string, string>; // Phase 2D per-token evidence
     reputationCount: number;
     uniqueValidators: number;
     recentActivityDays: number | null;
@@ -84,7 +85,20 @@ export async function computeTrustScore(agentRegistryId: number): Promise<TrustR
   const revenueEntries = ledger.filter((e) => e.type === "REVENUE" && e.direction === "CREDIT");
   const eligibleRevenue = revenueEntries.filter((e) => !selfHireJobIds.has(String(e.jobId ?? "")));
   // Tiny transaction spam guard: cap count weight, and volume dominates not count
+  // Phase 2D: validatedVolume stays the cross-token smallest-units sum it has
+  // always been (both supported tokens are 6-dec; scoring is order-of-magnitude
+  // log scale, never an FX rate). validatedVolumeByToken lets readers
+  // distinguish per-token evidence instead of assuming 1 EURC = 1 USDC.
   const validatedVolumeBigint = eligibleRevenue.reduce((acc: bigint, e: any) => acc + BigInt(e.amount || "0"), 0n);
+  const validatedVolumeByToken: Record<string, string> = {};
+  try {
+    const { resolveRowCurrency } = await import("@/lib/tokens/resolveCurrency");
+    for (const e of eligibleRevenue) {
+      let sym = "USDC";
+      try { sym = resolveRowCurrency({ currency: e?.token ?? null, tokenAddress: e?.tokenAddress ?? null }).symbol; } catch { sym = "USDC"; }
+      validatedVolumeByToken[sym] = (BigInt(validatedVolumeByToken[sym] ?? "0") + BigInt(e.amount || "0")).toString();
+    }
+  } catch {}
   // Payment reliability from PaymentLog: exclude self-transfers (sender == receiver via PaymentLog fields not reliable; use ledger counterparty check + amount floor)
   // Use eligibleRevenue count as proxy; also fetch PaymentLog where agentSCA == sca excluding self
   let paymentLogCount = 0;
@@ -215,6 +229,7 @@ export async function computeTrustScore(agentRegistryId: number): Promise<TrustR
       totalJobs,
       failedJobs,
       validatedVolume: validatedVolumeBigint.toString(),
+      validatedVolumeByToken,
       reputationCount: validatedJobs, // proxy until on-chain count available
       uniqueValidators,
       recentActivityDays,

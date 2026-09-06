@@ -20,6 +20,7 @@ export interface TrackRecord {
     validationPassRate: number | null;
     validatedVolume: string; // 6-dec bigint string
     validatedVolumeUSDC: string; // formatted
+    validatedVolumeByToken: Record<string, string>; // Phase 2D per-token evidence
     reputationCount: number | null;
     uniqueValidators: number;
     lastActivityAt: string | null;
@@ -69,6 +70,17 @@ export async function getTrackRecord(agentRegistryId: number): Promise<TrackReco
   const selfHireIds = new Set(jobs.filter((j) => String(j.clientSCA).toLowerCase() === String(agent.scaAddress).toLowerCase()).map((j) => String(j.jobId)));
   const eligible = ledger.filter((e) => !selfHireIds.has(String(e.jobId ?? "")));
   const validatedVolume = eligible.reduce((a: bigint, e: any) => a + BigInt(e.amount || "0"), 0n).toString();
+  // Phase 2D: per-token revenue evidence (legacy NULL tokenAddress resolves as
+  // USDC; never assume 1 EURC = 1 USDC — readers consume the map, not the sum).
+  const validatedVolumeByToken: Record<string, string> = {};
+  try {
+    const { resolveRowCurrency } = await import("@/lib/tokens/resolveCurrency");
+    for (const e of eligible) {
+      let sym = "USDC";
+      try { sym = resolveRowCurrency({ currency: e?.token ?? null, tokenAddress: e?.tokenAddress ?? null }).symbol; } catch { sym = "USDC"; }
+      validatedVolumeByToken[sym] = (BigInt(validatedVolumeByToken[sym] ?? "0") + BigInt(e.amount || "0")).toString();
+    }
+  } catch {}
 
   const recentOutcomes = jobs.slice(0, 10).map((j) => {
     const v = vByJob.get(String(j.jobId));
@@ -97,6 +109,7 @@ export async function getTrackRecord(agentRegistryId: number): Promise<TrackReco
       validationPassRate: trust.signals.validationPassRate,
       validatedVolume,
       validatedVolumeUSDC: fmtUSDC(validatedVolume),
+      validatedVolumeByToken,
       reputationCount: rep.reputationCount ?? trust.signals.reputationCount,
       uniqueValidators: trust.signals.uniqueValidators,
       lastActivityAt,

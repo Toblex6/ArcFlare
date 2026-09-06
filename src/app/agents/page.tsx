@@ -1463,11 +1463,17 @@ export default function AgentsPage() {
                     <pre style={{ fontSize:11, margin:'6px 0 0', whiteSpace:'pre-wrap' }}>{JSON.stringify(ecoData.policy,null,2)}</pre>
                   </div>
                 )}
+                {ecoData.treasury?.byToken && (
+                  <div style={{ background:'var(--surface-secondary)', borderRadius:8, padding:10, marginBottom:12 }}>
+                    <span style={S.label}>Balances by token{ecoData.treasury.hasMixedTokens ? ' — mixed tokens, totals are NOT interchangeable' : ''}</span>
+                    <pre style={{ fontSize:11, margin:'6px 0 0', whiteSpace:'pre-wrap' }}>{Object.values(ecoData.treasury.byToken).map((s:any)=>`${s.symbol}: revenue ${(Number(s.revenue)/1e6).toFixed(6)} · costs ${(Number(s.costs)/1e6).toFixed(6)} · locked ${(Number(s.escrowLocked)/1e6).toFixed(6)} · balance ${(Number(s.treasuryBalance)/1e6).toFixed(6)} (${s.entryCount} entries${s.legacyEntries ? `, ${s.legacyEntries} legacy` : ''})`).join('\n') || 'No token slices yet.'}</pre>
+                  </div>
+                )}
                 <span style={S.label}>Recent entries</span>
                 <div style={{ display:'flex', flexDirection:'column' as const, gap:6, marginTop:6 }}>
                   {(ecoData.recent||[]).map((e:any)=>(
                     <div key={e.id} style={{ background:'var(--surface-secondary)', borderRadius:8, padding:8, fontSize:11, fontFamily:'monospace' }}>
-                      [{e.type}] {e.direction} {(Number(e.amount)/1e6).toFixed(6)} · {e.txHash?e.txHash.slice(0,14)+'…':e.dedupeKey} {e.jobValidationId?' · validation-linked':''}
+                      [{e.type}] {e.direction} {(Number(e.amount)/1e6).toFixed(6)} {e.token || 'USDC'}{!e.tokenAddress ? ' (legacy)' : ''} · {e.txHash?e.txHash.slice(0,14)+'…':e.dedupeKey} {e.jobValidationId?' · validation-linked':''}
                     </div>
                   ))}
                   {(!ecoData.recent||ecoData.recent.length===0) && <p style={{ fontSize:12, color:'var(--text-secondary)' }}>No ledger entries yet.</p>}

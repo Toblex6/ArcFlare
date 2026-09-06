@@ -200,11 +200,12 @@ export async function POST(
     // when the escrow fully released, the depositor's JOB_ESCROW_LOCK leaves.
     if (newStatus === 'RELEASED') {
       try {
-        const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+        const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
         const agentId = await resolveAgentIdBySca(escrow.depositorSCA).catch(() => null);
         if (agentId) {
           const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(), // Phase 2D: escrow is explicitly USDC-only
             agentRegistryId: agentId,
             type: "JOB_ESCROW_RELEASE",
             amount: amt,

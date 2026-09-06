@@ -6,6 +6,7 @@
 // deterministic source composite. Duplicate retries hit dedupeKey unique.
 
 import { prisma } from "@/lib/prisma";
+import { resolveCurrency, resolveRowCurrency, tokenAddressFor } from "@/lib/tokens/resolveCurrency";
 
 export const LEDGER_TYPES = {
   REVENUE: "REVENUE",
@@ -26,8 +27,12 @@ export type LedgerType = (typeof LEDGER_TYPES)[keyof typeof LEDGER_TYPES];
 export interface RecordLedgerParams {
   agentRegistryId: number;
   type: string;
-  amount: bigint; // 6-dec USDC integer
+  amount: bigint; // base units at the entry's token decimals (6 for USDC/EURC)
   token?: string;
+  // Canonical ERC-20 address of the accounted token (Phase 2C multicurrency).
+  // Persisted to AgentLedgerEntry.tokenAddress; omit only for legacy USDC
+  // callers (NULL reads back as USDC). Never mix tokens in one entry.
+  tokenAddress?: string | null;
   direction: "CREDIT" | "DEBIT";
   counterpartyAgentId?: number | null;
   paymentLogId?: string | null;
@@ -42,6 +47,32 @@ export interface RecordLedgerParams {
   sourceId?: string | null;
 }
 
+// Phase 2D dedupe note: the key stays txHash:agentId:type (or
+// sourceType:sourceId:agentId:type off-chain). One on-chain transfer carries
+// exactly one token, so one tx can never legitimately produce two entries
+// with the same agent+type in different tokens — no token qualifier needed.
+// Proven by the phase-2d suite (same-tx USDC+EURC entries with different
+// types coexist; same-tx same-agent same-type is one economic event).
+//
+// Reader helper: resolve a ledger row's canonical token identity.
+// Legacy NULL tokenAddress resolves from `token`, defaulting to USDC.
+export function resolveLedgerToken(row: {
+  token?: string | null;
+  tokenAddress?: string | null;
+}): { symbol: "USDC" | "EURC"; address: string; decimals: number; legacy: boolean } {
+  const resolved = resolveRowCurrency({ currency: (row?.token as string | null) ?? null, tokenAddress: row?.tokenAddress ?? null });
+  return { ...resolved, legacy: !row?.tokenAddress };
+}
+
+// Explicit USDC-only identity for writers whose underlying event is
+// genuinely single-token (agent payments, jobs escrow, escrow, payroll,
+// scheduled, nano, streams, treasury top-ups). Spread into recordLedgerEntry
+// params so the row carries the canonical symbol + address. Never use for a
+// multi-token event — pass that event's own resolved token instead.
+export function usdcLedgerIdentity(): { token: string; tokenAddress: string } {
+  return { token: "USDC", tokenAddress: tokenAddressFor("USDC") };
+}
+
 export function buildDedupeKey(p: RecordLedgerParams): string {
   const safeType = String(p.type).toUpperCase();
   if (p.txHash) {
@@ -53,10 +84,19 @@ export function buildDedupeKey(p: RecordLedgerParams): string {
   throw new Error("recordLedgerEntry requires txHash or (sourceType+sourceId) for dedupe");
 }
 
+// Phase 2D: token identity is canonical, never inferred from amount.
+// The originating event supplies the symbol/address; the resolver validates
+// the pair (mismatch/unsupported throws — never silently accounted) and
+// legacy callers with neither field default to USDC. New writes always
+// persist the canonical address so readers never see a NULL for fresh rows.
 export async function recordLedgerEntry(params: RecordLedgerParams): Promise<{ id: string; replayed: boolean }> {
   const dedupeKey = buildDedupeKey(params);
   const existing = await (prisma as any).agentLedgerEntry.findUnique({ where: { dedupeKey } }).catch(() => null);
   if (existing) return { id: existing.id, replayed: true };
+
+  // Canonical token resolution — throws on unsupported/mismatched identity.
+  // Never infer from amount; never assume 1 EURC = 1 USDC.
+  const token = resolveCurrency({ currency: params.token ?? null, tokenAddress: params.tokenAddress ?? null });
 
   try {
     const row = await (prisma as any).agentLedgerEntry.create({
@@ -64,7 +104,8 @@ export async function recordLedgerEntry(params: RecordLedgerParams): Promise<{ i
         agentRegistryId: params.agentRegistryId,
         type: params.type,
         amount: params.amount.toString(),
-        token: params.token ?? "USDC",
+        token: token.symbol,
+        tokenAddress: token.address,
         direction: params.direction,
         counterpartyAgentId: params.counterpartyAgentId ?? null,
         paymentLogId: params.paymentLogId ?? null,

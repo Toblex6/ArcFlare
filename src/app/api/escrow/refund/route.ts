@@ -94,11 +94,12 @@ async function refundHandler(request: Request, merchant: AuthedMerchant) {
         // so the treasury returns to its pre-fund economic state exactly — the
         // refund creates no money.
         try {
-          const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+          const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
           const agentId = await resolveAgentIdBySca(escrow.depositorSCA).catch(() => null);
           if (agentId) {
             const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
             await recordLedgerEntry({
+              ...usdcLedgerIdentity(), // Phase 2D: escrow is explicitly USDC-only
               agentRegistryId: agentId,
               type: "JOB_ESCROW_RELEASE",
               amount: amt,

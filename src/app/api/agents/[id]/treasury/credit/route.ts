@@ -28,7 +28,7 @@ import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMe
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { getCircleClient } from '@/lib/circle/client';
 import { transferUsdc } from '@/lib/circle/transfers';
-import { recordLedgerEntry } from '@/lib/ledger/ledgerService';
+import { recordLedgerEntry, usdcLedgerIdentity } from '@/lib/ledger/ledgerService';
 import { computeTreasuryView } from '@/lib/ledger/treasuryService';
 import { createPublicClient, http, erc20Abi } from 'viem';
 import { arcTestnet } from 'viem/chains';
@@ -154,11 +154,12 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
   }
 
   // Ledger: ADJUSTMENT CREDIT deduped by txHash (idempotent retry-safe).
+  // Phase 2D: treasury top-ups are explicitly USDC-only (transferUsdc moves USDC).
   await recordLedgerEntry({
+    ...usdcLedgerIdentity(),
     agentRegistryId: agentId,
     type: 'ADJUSTMENT',
     amount: receivedWei,
-    token: 'USDC',
     direction: 'CREDIT',
     txHash: arcTxHash,
     description: `treasury fund top-up ${amountStr} USDC from merchant wallet`,

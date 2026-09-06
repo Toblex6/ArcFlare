@@ -231,11 +231,12 @@ async function releaseHandler(request: NextRequest) {
     // not revenue for the depositor.
     if (newStatus === 'RELEASED') {
       try {
-        const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+        const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
         const agentId = await resolveAgentIdBySca(escrow.depositorSCA).catch(() => null);
         if (agentId && txHash) {
           const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(), // Phase 2D: escrow is explicitly USDC-only
             agentRegistryId: agentId,
             type: "JOB_ESCROW_RELEASE",
             amount: amt,

@@ -112,10 +112,11 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
 
   // Ledger: escrow lock for client if agent — awaited (non-fatal on failure)
   try {
-    const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+    const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
     const clientAgentId = await resolveAgentIdBySca(job.clientSCA).catch(() => null);
     if (clientAgentId) {
       await recordLedgerEntry({
+        ...usdcLedgerIdentity(), // Phase 2D: explicitly USDC-only (6-dec USDC budget)
         agentRegistryId: clientAgentId,
         type: "JOB_ESCROW_LOCK",
         amount: BigInt(job.budget),

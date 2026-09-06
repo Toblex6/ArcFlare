@@ -70,7 +70,7 @@ async function releaseHandler(req: NextRequest) {
 
     // Build 3 ledger: stream revenue/spend — awaited before response
     try {
-      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService"); // Phase 2D: streams are explicitly USDC-only (USDC_CONTRACT at open)
       const { readTrancheAmount } = await import("@/lib/contracts/streamContract");
       const trancheAmt = await readTrancheAmount(BigInt(streamRecord.streamId), requirementIndex).catch(() => 0n);
       const workerAgentId = await resolveAgentIdBySca(streamRecord.workerAddress).catch(() => null);
@@ -78,6 +78,7 @@ async function releaseHandler(req: NextRequest) {
       if (workerAgentId && trancheAmt > 0n) {
         try {
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(),
             agentRegistryId: workerAgentId,
             type: "STREAM_REVENUE",
             amount: trancheAmt,
@@ -92,6 +93,7 @@ async function releaseHandler(req: NextRequest) {
       if (posterAgentId && trancheAmt > 0n) {
         try {
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(),
             agentRegistryId: posterAgentId,
             type: "STREAM_SPEND",
             amount: trancheAmt,

@@ -165,11 +165,12 @@ async function applyEscrowRelease(request: any, txHash: string): Promise<Record<
 
   if (newStatus === "RELEASED") {
     try {
-      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
       const agentId = await resolveAgentIdBySca(escrow.depositorSCA).catch(() => null);
       if (agentId) {
         const amt = BigInt(Math.round(Number(escrow.amount) * 1_000_000));
         await recordLedgerEntry({
+          ...usdcLedgerIdentity(), // Phase 2D: escrow is explicitly USDC-only (Escrow.currency = USDC)
           agentRegistryId: agentId,
           type: "JOB_ESCROW_RELEASE",
           amount: amt,
@@ -325,13 +326,21 @@ async function applyPayrollTransfer(request: any, txHash: string): Promise<Recor
   });
 
   // Ledger — only after a real transfer exists.
+  // Phase 2D: token identity comes from the originating batch (single-token
+  // since Phase 2C: batch currency + tokenAddress via the canonical resolver,
+  // legacy NULL rows resolve as USDC). Amount scales with the token's own
+  // decimals — never inferred, never converted.
   try {
     const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+    const { resolveRowCurrency } = await import("@/lib/tokens/resolveCurrency");
     const payerAgentId = await resolveAgentIdBySca(batch.payerSCA).catch(() => null);
     if (payerAgentId) {
-      const amt = BigInt(Math.round(parseFloat(amount) * 1_000_000));
+      const batchToken = resolveRowCurrency({ currency: batch.currency ?? null, tokenAddress: batch.tokenAddress ?? null });
+      const amt = BigInt(Math.round(parseFloat(amount) * 10 ** batchToken.decimals));
       const recipientAgentId = await resolveAgentIdBySca(recipientSCA).catch(() => null);
       await recordLedgerEntry({
+        token: batchToken.symbol,
+        tokenAddress: batchToken.address,
         agentRegistryId: payerAgentId,
         type: "PAYROLL_SPEND",
         amount: amt,
@@ -342,6 +351,8 @@ async function applyPayrollTransfer(request: any, txHash: string): Promise<Recor
       }).catch(() => {});
       if (recipientAgentId) {
         await recordLedgerEntry({
+          token: batchToken.symbol,
+          tokenAddress: batchToken.address,
           agentRegistryId: recipientAgentId,
           type: "REVENUE",
           amount: amt,

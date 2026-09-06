@@ -25,7 +25,8 @@ import { prisma } from '@/lib/prisma';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
-import { ARCFLARE_USDC_CONTRACT, ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
+import { ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
+import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import { parseUnits } from 'viem';
 
 interface PayrollRecipient {
@@ -58,7 +59,24 @@ async function runPayrollHandler(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
     }
 
-    const { recipients, webhookUrl, description, idempotencyKey } = await request.json();
+    // Phase 2C: a payroll batch is always single-token. The batch-level
+    // currency/tokenAddress resolves through the canonical resolver
+    // (rejects unsupported symbols/addresses and mismatches); legacy
+    // callers omit both and pay USDC exactly as before. Every leg below —
+    // storage, transfer, fee accounting, messaging, settlement, ledger,
+    // batch state — carries this token. USDC and EURC recipients are never
+    // mixed inside one batch.
+    const { recipients, webhookUrl, description, idempotencyKey, currency, tokenAddress } = await request.json();
+
+    let token;
+    try {
+      token = resolveCurrency({ currency, tokenAddress });
+    } catch (tokenError: any) {
+      return NextResponse.json(
+        { success: false, error: tokenError.message },
+        { status: 400 }
+      );
+    }
 
     if (!Array.isArray(recipients) || recipients.length === 0) {
       return NextResponse.json(
@@ -116,12 +134,35 @@ async function runPayrollHandler(request: NextRequest) {
     if (idemRef) {
       const existing = await (prisma as any).payrollBatch.findUnique({ where: { batchRef: idemRef } });
       if (existing) {
+        // Wrong-token rejection on replay: a retried POST naming a DIFFERENT
+        // token than the original batch replays nothing — it is refused
+        // instead of paying (or appearing to pay) in the wrong asset.
+        if (currency != null || tokenAddress != null) {
+          const existingToken = (() => {
+            try {
+              return resolveCurrency({ currency: existing.currency, tokenAddress: existing.tokenAddress });
+            } catch {
+              return null;
+            }
+          })();
+          if (!existingToken || existingToken.address.toLowerCase() !== token.address.toLowerCase()) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `idempotencyKey replay token mismatch: original batch ${idemRef} is ${existingToken?.symbol ?? existing?.currency ?? 'unknown'} but this request names ${token.symbol} — refusing to replay across tokens.`,
+              },
+              { status: 400 }
+            );
+          }
+        }
         return NextResponse.json({
           success: true,
           replayed: true,
           batchRef: existing.batchRef,
           status: existing.status,
           totalAmount: existing.totalAmount,
+          currency: existing.currency,
+          tokenAddress: existing.tokenAddress,
           recipientCount: existing.recipientCount,
           successCount: existing.successCount,
           failedCount: existing.failedCount,
@@ -140,7 +181,7 @@ async function runPayrollHandler(request: NextRequest) {
     );
 
     console.log(
-      `💰 Running payroll batch: ${recipients.length} recipients, ${totalAmount} USDC total, payer wallet kind: ${walletProvider.kind}`
+      `💰 Running payroll batch: ${recipients.length} recipients, ${totalAmount} ${token.symbol} total, payer wallet kind: ${walletProvider.kind}`
     );
 
     // Create the batch record up front so it's trackable even mid-run
@@ -152,6 +193,8 @@ async function runPayrollHandler(request: NextRequest) {
           payerSCA,
           payerWalletId: walletProvider.kind, // was a Circle walletId; now the wallet kind, Circle wallet lookup happens inside the provider
           totalAmount,
+          currency: token.symbol,
+          tokenAddress: token.address,
           recipientCount: recipients.length,
           status: 'PROCESSING',
           webhookUrl: webhookUrl || null,
@@ -170,6 +213,8 @@ async function runPayrollHandler(request: NextRequest) {
             batchRef: winner.batchRef,
             status: winner.status,
             totalAmount: winner.totalAmount,
+            currency: winner.currency,
+            tokenAddress: winner.tokenAddress,
             recipientCount: winner.recipientCount,
             successCount: winner.successCount,
             failedCount: winner.failedCount,
@@ -189,10 +234,12 @@ async function runPayrollHandler(request: NextRequest) {
     for (const recipient of recipients as PayrollRecipient[]) {
       const amountStr = String(recipient.amount);
       if (isExternal) {
-        // External wallet: each recipient is a REAL USDC.transfer the wallet
-        // broadcasts. The batch stays AWAITING_SIGNATURES until each transfer
-        // is proven on-chain; nothing is marked SUCCESS before a receipt.
-        const amountWei = parseUnits(amountStr, 6).toString();
+        // External wallet: each recipient is a REAL token.transfer the wallet
+        // broadcasts — against the batch's canonical token contract, never a
+        // hardcoded USDC address. The batch stays AWAITING_SIGNATURES until
+        // each transfer is proven on-chain; nothing is marked SUCCESS before
+        // a receipt.
+        const amountWei = parseUnits(amountStr, token.decimals).toString();
         const req = await queueTransactionRequest({
           merchantId: merchant.id,
           action: TX_ACTIONS.payrollTransfer,
@@ -202,12 +249,14 @@ async function runPayrollHandler(request: NextRequest) {
             batchRef,
             recipientSCA: recipient.recipientSCA,
             amount: amountStr,
+            currency: token.symbol,
+            tokenAddress: token.address,
             label: recipient.label || null,
             payerSCA,
             transaction: {
-              description: `Payroll payment of ${amountStr} USDC to ${recipient.recipientSCA}`,
+              description: `Payroll payment of ${amountStr} ${token.symbol} to ${recipient.recipientSCA}`,
               chainId: ARC_TESTNET_CHAIN_ID,
-              to: ARCFLARE_USDC_CONTRACT,
+              to: token.address,
               from: payerSCA,
               abiFunctionSignature: 'transfer(address,uint256)',
               args: [recipient.recipientSCA, amountWei],
@@ -219,6 +268,8 @@ async function runPayrollHandler(request: NextRequest) {
         results.push({
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
+          currency: token.symbol,
+          tokenAddress: token.address,
           label: recipient.label || null,
           status: 'PENDING_SIGNATURE',
           requestId: req.id,
@@ -226,9 +277,13 @@ async function runPayrollHandler(request: NextRequest) {
         console.log(`⏳ Queued payroll transfer for ${recipient.recipientSCA}: ${req.id}`);
         continue;
       }
-      const outcome = await walletProvider.transferUSDC(
+      // Phase 2C: the batch's canonical token moves — USDC batches behave
+      // exactly as before (transferUSDC ≡ transferToken(USDC)).
+      const outcome = await walletProvider.transferToken(
         recipient.recipientSCA,
         amountStr,
+        token.address,
+        token.decimals,
         recipient.label || description || 'Payroll payment'
       );
 
@@ -236,6 +291,8 @@ async function runPayrollHandler(request: NextRequest) {
         results.push({
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
+          currency: token.symbol,
+          tokenAddress: token.address,
           label: recipient.label || null,
           status: 'SUCCESS',
           txHash: outcome.txHash,
@@ -247,6 +304,8 @@ async function runPayrollHandler(request: NextRequest) {
         results.push({
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
+          currency: token.symbol,
+          tokenAddress: token.address,
           label: recipient.label || null,
           status: 'PENDING_SIGNATURE',
           requestId: outcome.requestId,
@@ -256,6 +315,8 @@ async function runPayrollHandler(request: NextRequest) {
         results.push({
           recipientSCA: recipient.recipientSCA,
           amount: recipient.amount,
+          currency: token.symbol,
+          tokenAddress: token.address,
           label: recipient.label || null,
           status: 'FAILED',
           error: outcome.error,
@@ -288,19 +349,24 @@ async function runPayrollHandler(request: NextRequest) {
 
     // Build 5 ledger: PAYROLL_SPEND for each successful recipient (awaited, idempotent)
     // Only if payer maps to an AgentRegistry (agent treasury payroll). Merchant payroll without agent mapping is not ledger-tracked.
+    // Phase 2C: entries carry the batch's canonical token symbol + address —
+    // a USDC spend is never recorded as EURC (or vice versa). For USDC
+    // batches this is identical to the USDC-only identity.
     try {
       const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
       const payerAgentId = await resolveAgentIdBySca(payerSCA).catch(() => null);
       if (payerAgentId) {
         for (const r of results) {
           if (r.status !== "SUCCESS" || !r.txHash) continue;
-          const amt = BigInt(Math.round(parseFloat(String(r.amount)) * 1_000_000));
+          const amt = BigInt(Math.round(parseFloat(String(r.amount)) * 10 ** token.decimals));
           const recipientAgentId = await resolveAgentIdBySca(r.recipientSCA).catch(() => null);
           try {
             await recordLedgerEntry({
               agentRegistryId: payerAgentId,
               type: "PAYROLL_SPEND",
               amount: amt,
+              token: token.symbol,
+              tokenAddress: token.address,
               direction: "DEBIT",
               counterpartyAgentId: recipientAgentId ?? null,
               txHash: r.txHash,
@@ -313,6 +379,8 @@ async function runPayrollHandler(request: NextRequest) {
                 agentRegistryId: recipientAgentId,
                 type: "REVENUE",
                 amount: amt,
+                token: token.symbol,
+                tokenAddress: token.address,
                 direction: "CREDIT",
                 counterpartyAgentId: payerAgentId,
                 txHash: r.txHash,
@@ -333,6 +401,8 @@ async function runPayrollHandler(request: NextRequest) {
           batchRef,
           status: finalStatus,
           totalAmount,
+          currency: token.symbol,
+          tokenAddress: token.address,
           successCount,
           failedCount,
           results,
@@ -349,6 +419,8 @@ async function runPayrollHandler(request: NextRequest) {
       batchRef,
       status: finalStatus,
       totalAmount,
+      currency: token.symbol,
+      tokenAddress: token.address,
       recipientCount: recipients.length,
       successCount,
       failedCount,
@@ -357,7 +429,7 @@ async function runPayrollHandler(request: NextRequest) {
       message:
         finalStatus === 'AWAITING_SIGNATURES'
           ? `${pendingSignatureCount} payment(s) need your wallet's approval before this batch completes — check /api/merchant/wallet/sign-requests.`
-          : `Payroll batch ${finalStatus} — ${successCount}/${recipients.length} payments succeeded, totalling ${totalAmount} USDC.`,
+          : `Payroll batch ${finalStatus} — ${successCount}/${recipients.length} payments succeeded, totalling ${totalAmount} ${token.symbol}.`,
     });
   } catch (error: any) {
     console.error('❌ Payroll run error:', error);
@@ -394,6 +466,7 @@ async function getPayrollBatchHandler(request: NextRequest) {
           status: true,
           totalAmount: true,
           currency: true,
+          tokenAddress: true,
           recipientCount: true,
           successCount: true,
           failedCount: true,

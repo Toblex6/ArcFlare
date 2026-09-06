@@ -3,9 +3,38 @@
 // All totals are bigint (6-dec) internally, formatted as decimal strings in API.
 
 import { prisma } from "@/lib/prisma";
+import { resolveRowCurrency, tokenAddressFor } from "@/lib/tokens/resolveCurrency";
 
 function b(s: string | bigint): bigint {
   try { return BigInt(s as string); } catch { return 0n; }
+}
+
+// Phase 2D: resolve one ledger row to its canonical token symbol.
+// Legacy NULL tokenAddress resolves from `token`, defaulting to USDC;
+// an unresolvable row degrades to USDC (same read-model rule as payments)
+// so a corrupt row degrades instead of failing the whole view.
+function rowSymbol(e: any): string {
+  try {
+    return resolveRowCurrency({ currency: e?.token ?? null, tokenAddress: e?.tokenAddress ?? null }).symbol;
+  } catch {
+    return "USDC";
+  }
+}
+
+function rowIsLegacy(e: any): boolean {
+  return !e?.tokenAddress;
+}
+
+export interface TokenSlice {
+  symbol: string;
+  tokenAddress: string;
+  decimals: number;
+  revenue: string;
+  costs: string;
+  escrowLocked: string;
+  treasuryBalance: string;
+  entryCount: number;
+  legacyEntries: number; // rows with NULL tokenAddress (pre-Phase-2D USDC)
 }
 
 export interface TreasuryView {
@@ -26,6 +55,15 @@ export interface TreasuryView {
   sent: string;
   entryCount: number;
   pendingIncome: string;
+  // Phase 2D: per-token accounting. Top-level totals above are preserved
+  // byte-for-byte for backward compatibility (today USDC-only they equal the
+  // USDC slice). When hasMixedTokens is true the top-level sums smallest
+  // units across tokens and MUST NOT be read as a single-currency total
+  // (never assume 1 EURC = 1 USDC) — consume byToken instead.
+  byToken: Record<string, TokenSlice>;
+  tokens: string[];
+  hasMixedTokens: boolean;
+  legacyEntryCount: number; // NULL-tokenAddress rows (all resolved as USDC)
   raw: {
     totalCredit: string;
     totalDebit: string;
@@ -52,22 +90,34 @@ export async function computeTreasuryView(agentRegistryId: number): Promise<Trea
   let subcontractorSpend = 0n;
   let gas = 0n;
   let streamPending = 0n;
+  // Phase 2D per-token accumulators (native smallest units per token — never converted).
+  const perToken = new Map<string, { revenue: bigint; costs: bigint; locked: bigint; count: number; legacy: number }>();
+  let legacyEntryCount = 0;
+  const touch = (sym: string) => {
+    let s = perToken.get(sym);
+    if (!s) { s = { revenue: 0n, costs: 0n, locked: 0n, count: 0, legacy: 0 }; perToken.set(sym, s); }
+    return s;
+  };
 
   for (const e of entries) {
     const amt = b(e.amount);
     const typ = String(e.type);
+    const sym = rowSymbol(e);
+    const slice = touch(sym);
+    slice.count += 1;
+    if (rowIsLegacy(e)) { slice.legacy += 1; legacyEntryCount += 1; }
     byType[typ] = (byType[typ] ?? 0n) + amt;
     // Escrow lock/release are NOT costs/revenue — they are liquidity reservation.
     // Counting them in totalDebit/CREDIT AND subtracting as escrowLocked double-counts.
     // Treasury economics must count the lock exactly once via escrowLocked.
     const isEscrowLock = typ === "JOB_ESCROW_LOCK" || typ === "JOB_ESCROW_RELEASE";
     if (!isEscrowLock) {
-      if (e.direction === "CREDIT") totalCredit += amt;
-      else totalDebit += amt;
+      if (e.direction === "CREDIT") { totalCredit += amt; slice.revenue += amt; }
+      else { totalDebit += amt; slice.costs += amt; }
     }
 
-    if (typ === "JOB_ESCROW_LOCK") escrowLockedRaw += amt;
-    if (typ === "JOB_ESCROW_RELEASE") escrowLockedRaw -= amt;
+    if (typ === "JOB_ESCROW_LOCK") { escrowLockedRaw += amt; slice.locked += amt; }
+    if (typ === "JOB_ESCROW_RELEASE") { escrowLockedRaw -= amt; slice.locked -= amt; }
     if (typ === "SUBCONTRACTOR_SPEND") subcontractorSpend += amt;
     if (typ === "GAS") gas += amt;
   }
@@ -109,6 +159,38 @@ export async function computeTreasuryView(agentRegistryId: number): Promise<Trea
   const byTypeStr: Record<string, string> = {};
   for (const [k, v] of Object.entries(byType)) byTypeStr[k] = v.toString();
 
+  // Phase 2D: per-token slices with canonical identity. Slice balances are
+  // clamped the same way as the top level (locked never negative per slice
+  // only via the global clamp — per-slice locked is informational).
+  const byToken: Record<string, TokenSlice> = {};
+  for (const [sym, s] of perToken) {
+    let addr = "";
+    let dec = 6;
+    try {
+      const r = resolveRowCurrency({ currency: sym, tokenAddress: null });
+      addr = r.address;
+      dec = r.decimals;
+    } catch {
+      addr = tokenAddressFor("USDC");
+    }
+    // Prefer the canonical address actually seen on rows when available.
+    const seen = entries.find((e: any) => rowSymbol(e) === sym && e?.tokenAddress);
+    if (seen?.tokenAddress) addr = String(seen.tokenAddress);
+    const bal = s.revenue - s.costs - (s.locked < 0n ? 0n : s.locked);
+    byToken[sym] = {
+      symbol: sym,
+      tokenAddress: addr,
+      decimals: dec,
+      revenue: fmt(s.revenue),
+      costs: fmt(s.costs),
+      escrowLocked: fmt(s.locked < 0n ? 0n : s.locked),
+      treasuryBalance: fmt(bal < 0n ? 0n : bal),
+      entryCount: s.count,
+      legacyEntries: s.legacy,
+    };
+  }
+  const tokens = Object.keys(byToken).sort();
+
   return {
     agentRegistryId,
     revenue: fmt(revenue),
@@ -127,6 +209,10 @@ export async function computeTreasuryView(agentRegistryId: number): Promise<Trea
     sent: fmt(totalDebit),
     entryCount: entries.length,
     pendingIncome: fmt(escrowPendingFromJobs),
+    byToken,
+    tokens,
+    hasMixedTokens: tokens.length > 1,
+    legacyEntryCount,
     raw: {
       totalCredit: fmt(totalCredit),
       totalDebit: fmt(totalDebit),

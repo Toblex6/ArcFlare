@@ -66,7 +66,7 @@ async function completeJobHandler(req: NextRequest) {
     // Build 3 ledger: provider revenue (exactly once) + client spend + client lock clear.
     // Awaited at the authoritative point — durable before the response.
     try {
-      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService"); // Phase 2D: job settlement is explicitly USDC-only
       const { getJobValidationPolicy } = await import("@/lib/jobs/jobValidationPolicy");
       let jobValidationId: string | null = null;
       try {
@@ -79,6 +79,7 @@ async function completeJobHandler(req: NextRequest) {
       if (providerAgentId) {
         try {
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(),
             agentRegistryId: providerAgentId,
             type: "REVENUE",
             amount: BigInt(job.budget),
@@ -96,6 +97,7 @@ async function completeJobHandler(req: NextRequest) {
         // Clear the fund-time JOB_ESCROW_LOCK — smallest consistent representation.
         try {
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(),
             agentRegistryId: clientAgentId,
             type: "JOB_ESCROW_RELEASE",
             amount: BigInt(job.budget),
@@ -110,6 +112,7 @@ async function completeJobHandler(req: NextRequest) {
         if (clientAgentId !== providerAgentId) {
           try {
             await recordLedgerEntry({
+              ...usdcLedgerIdentity(),
               agentRegistryId: clientAgentId,
               type: "SUBCONTRACTOR_SPEND",
               amount: BigInt(job.budget),

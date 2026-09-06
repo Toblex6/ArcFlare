@@ -794,10 +794,11 @@ async function jobsHandler(request: Request) {
 
       // best-effort ledger: escrow lock for client if client is an agent
       try {
-        const { recordLedgerEntry, resolveAgentIdBySca } = await import('@/lib/ledger/ledgerService');
+        const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import('@/lib/ledger/ledgerService');
         const clientAgentId = await resolveAgentIdBySca(String(clientSCA)).catch(() => null);
         if (clientAgentId) {
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(), // Phase 2D: job escrow is explicitly USDC-only (USDC_CONTRACT fund)
             agentRegistryId: clientAgentId,
             type: 'JOB_ESCROW_LOCK',
             amount: budget,
@@ -986,7 +987,7 @@ async function jobsHandler(request: Request) {
       // Best-effort canonical post-completion side-effects (never fail the
       // completion) — mirrored from /api/jobs/complete.
       try {
-        const { recordLedgerEntry, resolveAgentIdBySca } = await import('@/lib/ledger/ledgerService');
+        const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import('@/lib/ledger/ledgerService');
         const { getJobValidationPolicy } = await import('@/lib/jobs/jobValidationPolicy');
         let jobValidationId: string | null = null;
         try {
@@ -998,6 +999,7 @@ async function jobsHandler(request: Request) {
         if (providerAgentId) {
           try {
             await recordLedgerEntry({
+              ...usdcLedgerIdentity(), // Phase 2D: job settlement is explicitly USDC-only (6-dec USDC budget)
               agentRegistryId: providerAgentId,
               type: 'REVENUE',
               amount: budget,
@@ -1013,6 +1015,7 @@ async function jobsHandler(request: Request) {
         if (clientAgentId) {
           try {
             await recordLedgerEntry({
+              ...usdcLedgerIdentity(),
               agentRegistryId: clientAgentId,
               type: 'JOB_ESCROW_RELEASE',
               amount: budget,
@@ -1027,6 +1030,7 @@ async function jobsHandler(request: Request) {
         if (clientAgentId && clientAgentId !== providerAgentId) {
           try {
             await recordLedgerEntry({
+              ...usdcLedgerIdentity(),
               agentRegistryId: clientAgentId,
               type: 'SUBCONTRACTOR_SPEND',
               amount: budget,

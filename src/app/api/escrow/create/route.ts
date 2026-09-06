@@ -222,10 +222,11 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
     // treasury (as escrowLocked) now, and a refund returns exactly that — never
     // counted as revenue.
     try {
-      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
       const agentId = await resolveAgentIdBySca(depositorSCA).catch(() => null);
       if (agentId) {
         await recordLedgerEntry({
+          ...usdcLedgerIdentity(), // Phase 2D: escrow deposits are explicitly USDC-only
           agentRegistryId: agentId,
           type: "JOB_ESCROW_LOCK",
           amount: amountWei,

@@ -347,10 +347,11 @@ const creditErrorRow: any = {
 
   // ── Build 3 ledger: outbound for payer, inbound for recipient if agent — awaited before response
   try {
-    const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+    const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
     const recipientAgentId = await resolveAgentIdBySca(to).catch(() => null);
     try {
       await recordLedgerEntry({
+        ...usdcLedgerIdentity(), // Phase 2D: agent payments are explicitly USDC-only (non-USDC rejected above)
         agentRegistryId: agentId,
         type: "AGENT_PAYMENT",
         amount,
@@ -364,6 +365,7 @@ const creditErrorRow: any = {
     if (recipientAgentId) {
       try {
         await recordLedgerEntry({
+          ...usdcLedgerIdentity(),
           agentRegistryId: recipientAgentId,
           type: "REVENUE",
           amount,

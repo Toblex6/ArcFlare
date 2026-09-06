@@ -61,11 +61,12 @@ async function fundJobHandler(req: NextRequest) {
 
     // Build 3 ledger: escrow lock for client if client is an agent — awaited before response
     try {
-      const { recordLedgerEntry, resolveAgentIdBySca } = await import("@/lib/ledger/ledgerService");
+      const { recordLedgerEntry, resolveAgentIdBySca, usdcLedgerIdentity } = await import("@/lib/ledger/ledgerService");
       const clientAgentId = await resolveAgentIdBySca(job.clientSCA).catch(() => null);
       if (clientAgentId) {
         try {
           await recordLedgerEntry({
+            ...usdcLedgerIdentity(), // Phase 2D: explicitly USDC-only (6-dec USDC budget)
             agentRegistryId: clientAgentId,
             type: "JOB_ESCROW_LOCK",
             amount: BigInt(job.budget),

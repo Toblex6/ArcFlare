@@ -57,14 +57,19 @@ export async function maybeAutoReputationForValidatedJob(params: {
   }
 
   // Idempotency: claim the dedupeKey via a ledger placeholder BEFORE the on-chain write (same pattern as PaymentLog idempotencyKey)
-  // We use REPUTATION_SIGNAL placeholder with amount 0 so a concurrent caller loses P2002
+  // We use REPUTATION_SIGNAL placeholder with amount 0 so a concurrent caller loses P2002.
+  // Phase 2D: non-monetary guard row — explicitly USDC with the canonical
+  // address so readers never see it as a legacy NULL, and its zero amount
+  // can never shift per-token totals.
   try {
+    const { tokenAddressFor } = await import("@/lib/tokens/resolveCurrency");
     await (prisma as any).agentLedgerEntry.create({
       data: {
         agentRegistryId: providerAgentId,
         type: "REPUTATION_SIGNAL",
         amount: "0",
         token: "USDC",
+        tokenAddress: tokenAddressFor("USDC"),
         direction: "CREDIT",
         jobId,
         jobValidationId,
