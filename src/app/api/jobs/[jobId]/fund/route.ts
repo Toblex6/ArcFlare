@@ -7,6 +7,12 @@
 // record (checkAndRecordSpend) are applied to the ACTUAL payer — the Circle
 // SCA that signs approve/fund — not to some unrelated x402 EOA. Enforcement
 // runs BEFORE any on-chain funding is attempted and never swallows errors.
+//
+// Manage funding (src/app/jobs/page.tsx) prefers this route and falls back
+// to POST /api/jobs { action: 'fund' } ONLY for non-agent-client jobs (see
+// NON_AGENT_CLIENT_FUND_ERRORS there) — never past a policy denial. Direct
+// Hire jobs whose client is a merchant/consumer wallet (no AgentRegistry
+// row) keep working through that legacy owner flow.
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";

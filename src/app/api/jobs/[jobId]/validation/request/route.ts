@@ -70,8 +70,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     // policy.validatorSCA is authoritative: it is the exact `validator`
     // argument sent to ValidationRegistry.validationRequest above.
     // Best-effort: failure must NOT invalidate the successful request.
-    // (Idempotent replays return earlier and never re-notify. Receiver gap:
-    // no validator pending inbox exists — see note in src/lib/notifyValidator.ts.)
+    // (Idempotent replays return earlier and never re-notify. This
+    // job-linked request IS durably discoverable in the validator inbox
+    // (GET /api/agent/validation/inbox + the /agents Validation tab inbox
+    // sub-tab); only plain non-job ERC-8004 validations lack a persisted
+    // inbox — see the receiver-gap note in src/lib/notifyValidator.ts.)
     let validatorNotified = { notified: false } as Awaited<ReturnType<typeof notifyValidator>>;
     try {
       validatorNotified = await notifyValidator({ validatorSCA: policy.validatorSCA, agentTokenId: agent.tokenId.toString(), agentName: (agent as any).name ?? null, requestTag, requestHash, requestURI, txHash, jobId });

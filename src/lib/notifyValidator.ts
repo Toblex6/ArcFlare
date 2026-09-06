@@ -1,10 +1,11 @@
 // src/lib/notifyValidator.ts
 //
 // SUBTASK D — Validation request notification (receiver workflow, part 1:
-// notify; inbox is docs-only, see gap note below).
+// notify; job-linked requests are ALSO durably discoverable via
+// GET /api/agent/validation/inbox — see gap note below).
 //
 // When a validation request succeeds on-chain, the selected validator gets no
-// signal and has no pending inbox. This helper closes the first half: it maps
+// signal on-chain. This helper closes the first half: it maps
 // the AUTHORITATIVE validator address (the exact `validator` argument sent to
 // ValidationRegistry.validationRequest — i.e. the agent route's `validatorSCA`
 // body field, or the job route's stored `policy.validatorSCA`) to a notifiable
@@ -28,16 +29,18 @@
 // { notified: false }. Callers additionally wrap the call in try/catch.
 //
 // ── RECEIVER / INBOX GAP (docs, not code) ────────────────────────────────────
-// There is still no validator-side pending inbox: no ValidationRequest table
-// exists (the respond path notes this too), nothing indexes
-// ValidationRegistry request events, and the /agents dashboard validation tab
-// is manual requestHash entry (request → paste hash → respond → status). A
-// real inbox needs a persisted request record (validatorSCA, requestHash,
-// agentTokenId, status) written at request time plus a query route scoped by
-// verifyCallerControlsAddress — a schema + UI change deliberately left out of
-// this subtask to avoid a broad redesign. Until then the validator discovers
-// pending work via this notification (which carries the requestHash) and
-// responds via POST /api/agent/validation { action: "respond", ... }.
+// Job-linked validation requests ARE durably discoverable: Erc8183JobValidation
+// rows (written at hire time, hash-stamped at request time) are served by
+// GET /api/agent/validation/inbox (scoped by verifyCallerControlsAddress)
+// and rendered in the /agents Validation tab inbox sub-tab. The remaining
+// gap is plain non-job ERC-8004 agent validations only: no ValidationRequest
+// table exists for those, nothing indexes their ValidationRegistry request
+// events, so they are discoverable solely via this notification (which
+// carries the requestHash) plus manual requestHash entry, and responded via
+// POST /api/agent/validation { action: "respond", ... }. Closing that gap
+// needs a persisted request record (validatorSCA, requestHash, agentTokenId,
+// status) written at request time — a schema + UI change deliberately left
+// out of this subtask to avoid a broad redesign.
 
 import { prisma } from "@/lib/prisma";
 import { resolveBeneficiary } from "@/lib/escrow/resolveBeneficiary";

@@ -10,6 +10,36 @@
 // 5. Provider submits work   → POST /api/jobs { action: "submit" }
 // 6. Client completes job    → POST /api/jobs { action: "complete" }
 // 7. Anyone reads job state  → GET  /api/jobs?jobId=xxx
+//
+// ── LEGACY JOB ROUTE INVENTORY (audit — comments only, no route deleted) ──
+// Still used in-repo:
+// - POST /api/jobs action switch + GET ?jobId= (this file): Jobs Manage tab
+//   + wizard, agent-brain submit path.
+// - GET /api/jobs/mine: My Jobs provider/client inboxes (role-scoped).
+// - POST /api/jobs/[jobId]/accept: Manage accept, Telegram /accept,
+//   brain provider_accept_job. Dual agent/human provider identities.
+// - POST /api/jobs/[jobId]/fund: canonical agent-client fund (treasury +
+//   spend-limit). Brain fund_job, procurement hire nextSteps, Manage primary.
+// - POST /api/jobs/submit (flat): Telegram /deliver (internal import).
+// - POST /api/jobs/[jobId]/validation[/request|/respond]: validation flow.
+// Referenced but no in-repo UI caller (kept — API consumers may use):
+// - POST /api/jobs/fund + POST /api/jobs/set-budget: advertised as nextSteps
+//   by POST /api/agents/[id]/hire and .../treasury/hire.
+// No in-repo caller found (kept — do NOT delete in this task):
+// - POST /api/jobs/create (flat), POST /api/jobs/complete (flat),
+//   GET /api/jobs/list, GET /api/jobs/[jobId],
+//   POST /api/jobs/[jobId]/apply + GET .../applicants (Telegram /apply and
+//   the jobs UI both go through /api/procurement/* instead).
+// Material authorization/enforcement differences vs canonical routes:
+// - Flat /api/jobs/fund: NO treasury policy / spend-limit enforcement
+//   (canonical [jobId]/fund has both). Same caller-control gate.
+// - Flat /api/jobs/create: withMerchantAuth only (no API-key session).
+// - GET /api/jobs/list: merchant session inline (resolveMerchant).
+// - GET /api/jobs/[jobId]: NO auth wrapper (public read) — the canonical
+//   read GET /api/jobs?jobId= is session-gated.
+// - GET /api/jobs/mine: no wrapper; relies on getCallerControlledAddresses
+//   fail-closed (empty set → 401, never an unscoped dump).
+// Out of scope for this inventory: /api/jobs/nanopay/* (Nano-owned).
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -698,6 +728,15 @@ async function jobsHandler(request: Request) {
     }
 
     // ── 4. FUND ESCROW ────────────────────────────────────────────────────────
+    // Legacy Direct Hire owner flow: funds from any caller-controlled
+    // clientSCA. Deliberately kept — POST /api/jobs/[jobId]/fund (canonical,
+    // treasury policy + spend-limit enforced) only serves registered agent
+    // clients, so merchant/consumer-wallet clients fund here. Manage tries
+    // the canonical route first and reaches this action only for those
+    // non-agent-client jobs. Authorization is identical in kind
+    // (verifyCallerControlsAddress on the funding wallet); the canonical
+    // route additionally enforces treasury/spend-limit — never bypassed,
+    // because policy denials are never fallen back past.
     if (action === 'fund') {
       const { jobId, clientSCA } = body;
 

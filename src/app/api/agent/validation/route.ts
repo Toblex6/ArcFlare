@@ -201,12 +201,13 @@ async function validationHandler(request: NextRequest) {
       // validatorSCA here is authoritative: it is the exact `validator`
       // argument sent to ValidationRegistry.validationRequest above.
       // Best-effort: failure must NOT invalidate the successful request.
-      // NOTE (receiver gap): there is no validator pending inbox — no
-      // ValidationRequest table, no event indexer, and the /agents dashboard
-      // validation tab is manual requestHash entry. The validator discovers
-      // the pending request via this notification (requestHash included) and
-      // responds via action "respond". A real inbox needs a persisted request
-      // record + query route — deliberately out of scope here.
+      // NOTE (receiver gap, non-job path only): this direct-agent request
+      // writes no persisted ValidationRequest row, so it is NOT listed in
+      // the validator inbox (which serves job-linked requests from
+      // Erc8183JobValidation rows). The validator discovers THIS request via
+      // this notification (requestHash included) or manual requestHash entry
+      // and responds via action "respond". Persisting non-job requests is
+      // deliberately out of scope here.
       let validatorNotified = { notified: false } as Awaited<ReturnType<typeof notifyValidator>>;
       try {
         validatorNotified = await notifyValidator({

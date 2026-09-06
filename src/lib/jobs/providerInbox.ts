@@ -92,6 +92,38 @@ export function getProviderStatusColor(status: unknown): string {
   }
 }
 
+export interface StatusBadgeStyle {
+  background: string;
+  color: string;
+  border: string;
+}
+
+/**
+ * Translucent badge treatment for an already-resolved status color.
+ *
+ * Why not color-plus-15 concatenation (appending a hex alpha suffix):
+ * that only works for 6-digit hex colors. Several statuses resolve to
+ * CSS variables (`var(--warning)`, `var(--primary)`, ...) where the
+ * suffixed form is invalid CSS — the declaration is dropped and the
+ * badge silently loses its background. `color-mix()` tints ANY valid
+ * CSS color (variables and hex alike), so both kinds render. Status
+ * semantics are unchanged: text and border keep the full-strength
+ * status color, only the fill is translucent. Never throws.
+ */
+export function statusBadgeStyle(color: unknown): StatusBadgeStyle {
+  const c = typeof color === 'string' && color.trim() !== '' ? color : 'var(--text-secondary)';
+  return {
+    background: `color-mix(in srgb, ${c} 12%, transparent)`,
+    color: c,
+    border: `1px solid color-mix(in srgb, ${c} 30%, transparent)`,
+  };
+}
+
+/** Status → full badge style (color + translucent fill + border). Never throws. */
+export function getProviderStatusBadgeStyle(status: unknown): StatusBadgeStyle {
+  return statusBadgeStyle(getProviderStatusColor(status));
+}
+
 export type ProviderNextActionKind =
   | 'accept' // OPEN + no budget: provider must set budget/accept first
   | 'wait-funding' // OPEN + budget set: waiting on client to fund

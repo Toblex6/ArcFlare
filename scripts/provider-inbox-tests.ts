@@ -25,9 +25,11 @@ import {
   budgetIsZero,
   formatBudgetUsdc,
   getProviderNextAction,
+  getProviderStatusBadgeStyle,
   getProviderStatusColor,
   normalizeMineResponse,
   normalizeProviderStatus,
+  statusBadgeStyle,
   truncateAddress,
 } from "@/lib/jobs/providerInbox";
 
@@ -161,9 +163,9 @@ function main() {
   ok("provider card shows job ID", page.includes("Job #{j.jobId}"));
   ok("provider card shows client privacy-safe (truncateAddress)", page.includes("truncateAddress(j.clientSCA)"));
   ok("provider card shows budget via formatBudgetUsdc", page.includes("formatBudgetUsdc(j.budget)"));
-  ok("provider card shows status + next action", page.includes("getProviderStatusColor(j.status)") && page.includes("getProviderNextAction(j)"));
-  ok("provider/client inbox badges use the normalized color helper (UPPERCASE-safe)",
-    page.includes("getProviderStatusColor,") && !page.includes("STATUS_COLORS[j.status]"));
+  ok("provider card shows status + next action", page.includes("getProviderStatusBadgeStyle(j.status)") && page.includes("getProviderNextAction(j)"));
+  ok("provider/client inbox badges use the normalized badge helper (UPPERCASE-safe)",
+    page.includes("getProviderStatusBadgeStyle,") && !page.includes("STATUS_COLORS[j.status]"));
   ok("provider card surfaces submitted deliverable state", page.includes("Deliverable submitted"));
   ok("provider loading state", page.includes("Loading your provider jobs..."));
   ok("provider error state", page.includes("providerError"));
@@ -195,6 +197,30 @@ function main() {
   ok("Manage keeps Fund Escrow", manageBlock.includes("Fund Escrow"));
   ok("Manage keeps Submit Deliverable", manageBlock.includes("Submit Deliverable"));
   ok("Manage keeps Complete & Pay", manageBlock.includes("Complete & Pay"));
+
+  console.log("\n[11] REGRESSION — status badges never concatenate `${color}15` (breaks CSS vars)");
+  const inbox = read("src/lib/jobs/providerInbox.ts");
+  // Explanatory // comments name the old pattern — strip them so only real
+  // style code is checked.
+  const pageCode = page.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  ok("no hex-alpha concatenation in badge code", !/\}15`/.test(pageCode));
+  ok("badge helper uses color-mix (valid for variables and hex)", inbox.includes("color-mix(in srgb,"));
+  const openBadge = getProviderStatusBadgeStyle("OPEN");
+  ok("OPEN badge keeps warning semantics (text color unchanged)",
+    openBadge.color === getProviderStatusColor("OPEN") && openBadge.color === "var(--warning)");
+  ok("OPEN badge background is valid for a CSS variable (no var(--warning)15)",
+    !openBadge.background.includes("var(--warning)15") && openBadge.background.includes("var(--warning)"));
+  const fundedBadge = getProviderStatusBadgeStyle("FUNDED");
+  ok("FUNDED hex badge keeps color semantics", fundedBadge.color === "#06b6d4" && fundedBadge.background.includes("#06b6d4"));
+  ok("badge parity: every canonical status yields a color-mix background + border",
+    ["OPEN", "FUNDED", "SUBMITTED", "COMPLETED", "REJECTED", "EXPIRED", "BOGUS", null].every((s) => {
+      const b = getProviderStatusBadgeStyle(s);
+      return b.background.includes("color-mix") && b.border.includes("color-mix") && b.color === getProviderStatusColor(s);
+    }));
+  ok("statusBadgeStyle falls back safely on garbage, never throws",
+    (() => { try { const b = statusBadgeStyle(null); return b.color === "var(--text-secondary)" && b.background.includes("color-mix"); } catch { return false; } })());
+  ok("Manage lookup badge uses the shared wrapper (Title Case map intact)",
+    page.includes("statusBadgeStyle(STATUS_COLORS[lookupResult.status]"));
 
   console.log(`\nPASS: ${passed}  FAIL: ${failed}`);
   for (const f of failures) console.log(`  ❌ ${f}`);

@@ -10,8 +10,9 @@ import Image from 'next/image';
 import {
   formatBudgetUsdc,
   getProviderNextAction,
-  getProviderStatusColor,
+  getProviderStatusBadgeStyle,
   normalizeMineResponse,
+  statusBadgeStyle,
   truncateAddress,
 } from '@/src/lib/jobs/providerInbox';
 
@@ -30,7 +31,7 @@ const NAV = [
 const JOB_STATUSES = ['Open', 'Funded', 'Submitted', 'Completed', 'Rejected', 'Expired'];
 // Manage-lookup badge map (GET /api/jobs?jobId= returns Title Case on-chain
 // names). The /api/jobs/mine lists (provider + client inboxes) return canonical
-// UPPERCASE DB statuses, so their badges use getProviderStatusColor(j.status)
+// UPPERCASE DB statuses, so their badges use getProviderStatusBadgeStyle(j.status)
 // (case-insensitive, single normalization in lib/jobs/providerInbox) instead.
 const STATUS_COLORS: Record<string, string> = {
   Open: 'var(--warning)',
@@ -40,6 +41,32 @@ const STATUS_COLORS: Record<string, string> = {
   Rejected: 'var(--danger)',
   Expired: 'var(--text-secondary)',
 };
+
+// Fund-routing allowlist — the ONLY canonical-fund failures that fall back
+// to the legacy POST /api/jobs { action: 'fund' } owner flow. Every entry
+// means "this job's client is not a registered agent wallet", i.e. the
+// canonical POST /api/jobs/[jobId]/fund route cannot serve it BY DESIGN
+// (it resolves the payer from AgentRegistry.circleWalletId and 404s/400s
+// before any enforcement or money movement — Direct Hire jobs whose client
+// is a merchant/consumer wallet always land here).
+//
+// DELIBERATELY ABSENT: treasury-policy denials, spend-limit denials, state
+// conflicts (409), and caller-control 403s. Falling past those would weaken
+// enforcement — they surface directly and never reach the legacy path.
+const NON_AGENT_CLIENT_FUND_ERRORS = [
+  'client agent not found',
+  'client agent has no Circle wallet for funding',
+  'client Circle wallet not resolvable',
+  'client Circle wallet does not match job clientSCA',
+  // Canonical reads the DB row only; legacy backfills pre-change orphans
+  // from on-chain truth — a rowless-but-real job still funds via legacy.
+  'Job not found',
+];
+
+function isNonAgentClientFundError(message: unknown): boolean {
+  const msg = String(message ?? '');
+  return NON_AGENT_CLIENT_FUND_ERRORS.some((s) => msg.includes(s));
+}
 
 interface JobResult {
   jobId: string;
@@ -277,7 +304,33 @@ export default function JobsPage() {
       if (manageAction === 'submit')
         body = { ...body, providerSCA: manageProviderSCA, deliverable };
       if (manageAction === 'complete') body = { ...body, clientSCA: manageClientSCA };
-      if (manageAction === 'fund') body = { ...body, clientSCA: manageClientSCA };
+      if (manageAction === 'fund') {
+        // Canonical-first funding: POST /api/jobs/[jobId]/fund enforces
+        // treasury policy + spend limits server-side (the legacy action
+        // below does not) and needs no body — it resolves the client from
+        // the DB and the session. Same pattern as the agent-brain fund_job
+        // tool. Falls back to the legacy caller-controlled-clientSCA flow
+        // ONLY for non-agent-client jobs (see NON_AGENT_CLIENT_FUND_ERRORS);
+        // policy/state/auth denials surface directly, never fallen past.
+        const canonicalRes = await fetch(`/api/jobs/${lookupJobId}/fund`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const canonicalData = await canonicalRes.json().catch(() => null);
+        if (canonicalRes.ok && canonicalData?.success) {
+          setManageResult(canonicalData);
+          await lookupJob(); // refresh job state
+          return;
+        }
+        const canonicalError = String(canonicalData?.error ?? '');
+        if (!isNonAgentClientFundError(canonicalError)) {
+          throw new Error(canonicalError || `Fund failed (${canonicalRes.status})`);
+        }
+        // Non-agent-client job: continue into the legacy owner flow, which
+        // funds from the caller-controlled clientSCA entered in Manage.
+        body = { ...body, clientSCA: manageClientSCA };
+      }
       if (manageAction === 'approve') body = { ...body, clientSCA: manageClientSCA, amountUSDC };
       const data = await callJobsAPI(body);
       setManageResult(data);
@@ -1573,9 +1626,10 @@ export default function JobsPage() {
                             padding: '3px 10px',
                             borderRadius: 20,
                             fontWeight: 700,
-                            background: `${getProviderStatusColor(j.status)}15`,
-                            color: getProviderStatusColor(j.status),
-                            border: `1px solid ${getProviderStatusColor(j.status)}30`,
+                            // color-mix badge (see getProviderStatusBadgeStyle):
+                            // works for CSS variables (var(--warning), ...) and
+                            // hex alike — never hex-alpha-suffix concatenation.
+                            ...getProviderStatusBadgeStyle(j.status),
                             whiteSpace: 'nowrap' as const,
                           }}
                         >
@@ -1694,9 +1748,8 @@ export default function JobsPage() {
                           padding: '3px 10px',
                           borderRadius: 20,
                           fontWeight: 700,
-                          background: `${getProviderStatusColor(j.status)}15`,
-                          color: getProviderStatusColor(j.status),
-                          border: `1px solid ${getProviderStatusColor(j.status)}30`,
+                          // Same color-mix badge as the provider inbox above.
+                          ...getProviderStatusBadgeStyle(j.status),
                           whiteSpace: 'nowrap' as const,
                         }}
                       >
@@ -1783,9 +1836,10 @@ export default function JobsPage() {
                         padding: '4px 12px',
                         borderRadius: 20,
                         fontWeight: 700,
-                        background: `${STATUS_COLORS[lookupResult.status] || 'var(--text-secondary)'}15`,
-                        color: STATUS_COLORS[lookupResult.status] || 'var(--text-secondary)',
-                        border: `1px solid ${STATUS_COLORS[lookupResult.status] || 'var(--text-secondary)'}30`,
+                        // Manage lookup uses Title Case on-chain names via
+                        // STATUS_COLORS; the color-mix wrapper handles both
+                        // CSS variables and hex — never hex-alpha suffixing.
+                        ...statusBadgeStyle(STATUS_COLORS[lookupResult.status] || 'var(--text-secondary)'),
                       }}
                     >
                       {lookupResult.status}
