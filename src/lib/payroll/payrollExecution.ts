@@ -111,7 +111,8 @@ async function ensurePayrollAllowance(payer: string, tokenAddress: string, amoun
   if (current >= total) return;
   const approveTx = await token.approve(PAYROLL_CONTRACT_ADDRESS, total);
   await approveTx.wait();
-  console.log(`[payroll/fund] approved ${Number(total) / 1e6} USDC for payroll (payer ${payer.slice(0, 8)}…)`);
+  const allowanceSymbol = getTokenByAddress(tokenAddress)?.symbol ?? 'tokens';
+  console.log(`[payroll/fund] approved ${Number(total) / 1e6} ${allowanceSymbol} for payroll (payer ${payer.slice(0, 8)}…)`);
 }
 
 export interface PayrollRecipient {
@@ -210,13 +211,14 @@ export async function fundPayrollViaX402(
     return NextResponse.json({ error: `unsupported payroll token ${tokenAddress} — see supportedTokens.ts` }, { status: 400 });
   }
 
-  // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────────
-  // x402 settlement is USDC-only. The on-chain payroll contract funding path
-  // (fundBatchFor) receives funds swept from an x402 USDC settlement. Passing
-  // a non-USDC token would cause fundBatchFor to revert (the relayer holds
-  // USDC, not EURC), but we reject early with a clear message rather than
-  // letting it hit the contract and produce a confusing revert. EURC payroll
-  // support ships in Phase 2.
+  // ── EURC SAFETY GATE (Phase 1, retained in Phase 2C) ───────────────────────
+  // x402/Gateway settlement is USDC-only. The on-chain payroll contract
+  // funding path (fundBatchFor) receives funds swept from an x402 USDC
+  // settlement. Passing a non-USDC token would cause fundBatchFor to revert
+  // (the relayer holds USDC, not EURC), but we reject early with a clear
+  // message rather than letting it hit the contract and produce a confusing
+  // revert. EURC payroll on the DIRECT path (/api/payroll/run, wallet
+  // transfers) ships in Phase 2C; THIS x402 gateway path stays USDC-only.
   const resolvedToken = token ? getTokenByAddress(tokenAddress) : null;
   if (resolvedToken?.symbol === 'EURC') {
     return NextResponse.json(
@@ -396,13 +398,20 @@ export async function fundPayrollViaX402(
   );
 
   // DB bookkeeping (never gates the response).
+  // Phase 2C: this x402/Gateway funding path is genuinely USDC-only (the
+  // EURC gate above rejects anything else), so both rows persist the
+  // explicit USDC identity — currency AND canonical tokenAddress — rather
+  // than relying on the NULL-means-USDC legacy convention.
   const batchRef = `payroll-x402-${batchId}`;
+  const usdcAddress = getUsdcAddress();
   prisma.payrollBatch.create({
     data: {
       batchRef,
       payerSCA: payer,
       payerWalletId: null,
       totalAmount: Number(totalAmount) / 1e6,
+      currency: "USDC",
+      tokenAddress: usdcAddress,
       recipientCount: addresses.length,
       successCount: addresses.length,
       failedCount: 0,
@@ -415,6 +424,8 @@ export async function fundPayrollViaX402(
         sweepBalanceAfter,
         feeMeasured: feeMeasured.toString(), // 6-dec units, measured on-chain
         relayerDebit: actualDebit.toString(),
+        currency: "USDC",
+        tokenAddress: usdcAddress,
       },
     },
   }).catch((e: any) => console.error("[payroll/fund] batch row failed:", e.message));
@@ -424,6 +435,7 @@ export async function fundPayrollViaX402(
       reference: `payroll_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       amount: Number(totalAmount) / 1e6,
       currency: "USDC",
+      tokenAddress: usdcAddress,
       chain: "Arc Testnet x402",
       senderEmail: payer,
       merchant: ENDPOINT,

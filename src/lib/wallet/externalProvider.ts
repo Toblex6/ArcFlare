@@ -39,6 +39,16 @@ export class ExternalWalletProvider implements WalletProvider {
     );
   }
 
+  async transferToken(_to: string, _amount: string, _tokenAddress: string, _decimals: number, _memo?: string): Promise<WalletExecutionResult> {
+    // Same fail-closed contract as transferUSDC: no private key on the
+    // server, so no synchronous transfer for ANY token. Callers route
+    // external-wallet writes through the transaction-request flow, which
+    // carries the resolved token address per batch (see payroll/run).
+    throw new Error(
+      "External-wallet transfers must be broadcast by the connected wallet and verified on-chain. Retry the action so FlareHQ creates a real transaction request."
+    );
+  }
+
   async executeContract(_params: ContractCallParams): Promise<WalletExecutionResult> {
     throw new Error(
       "External-wallet contract calls must be broadcast by the connected wallet and verified on-chain. Retry the action so FlareHQ creates a real transaction request."

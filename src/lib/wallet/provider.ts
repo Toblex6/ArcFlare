@@ -37,6 +37,15 @@ export interface WalletProvider {
 
   transferUSDC(to: string, amount: string, memo?: string): Promise<WalletExecutionResult>;
 
+  /**
+   * Phase 2C multicurrency: move the caller's canonical token (USDC or EURC)
+   * instead of hardcoded USDC. `tokenAddress` MUST be a supported token
+   * (resolve via resolveCurrency before calling); `decimals` MUST come from
+   * the same resolution. Implementations must never convert — USDC means
+   * USDC, EURC means EURC. transferUSDC remains as the USDC-default wrapper.
+   */
+  transferToken(to: string, amount: string, tokenAddress: string, decimals: number, memo?: string): Promise<WalletExecutionResult>;
+
   executeContract(params: ContractCallParams): Promise<WalletExecutionResult>;
 
   signTypedData(payload: Eip712TypedDataPayload): Promise<WalletExecutionResult>;

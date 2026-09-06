@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
-
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
+import { resolveRowCurrency } from '@/lib/tokens/resolveCurrency';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -43,8 +42,23 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
       `Scheduled payment ${scheduled.reference} has no resolved payer wallet (payerWalletId is null) — refusing to execute against a shared default.`
     );
   }
+  // Phase 2C: resolve THIS row's canonical token — the transfer moves exactly
+  // this token. Historical rows with NULL tokenAddress resolve to USDC, so
+  // legacy schedules execute byte-identically. No hardcoded USDC remains
+  // where the schedule is explicitly EURC. A row whose token cannot be
+  // resolved (unsupported/mismatched) fails closed and is retried, never
+  // paid in the wrong asset.
+  let token;
+  try {
+    token = resolveRowCurrency(scheduled);
+  } catch (tokenError: any) {
+    throw new Error(
+      `Scheduled payment ${scheduled.reference} has an unresolvable token (currency=${scheduled.currency ?? 'null'} tokenAddress=${scheduled.tokenAddress ?? 'null'}): ${tokenError.message} — refusing to execute.`
+    );
+  }
   const walletId = scheduled.payerWalletId;
-  const amountStr = scheduled.amount.toFixed(6);
+  // Decimals come from the canonical resolver — never assumed.
+  const amountStr = scheduled.amount.toFixed(token.decimals);
 
   let txHash: string;
 
@@ -52,7 +66,7 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
     const transferTx = await circleClient.createTransaction({
       walletId,
       blockchain: 'ARC-TESTNET' as any,
-      tokenAddress: USDC_ARC,
+      tokenAddress: token.address,
       destinationAddress: scheduled.receiverSCA,
       amounts: [amountStr],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -62,12 +76,12 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
     txHash = await waitForCircleTx(circleClient, transferTx.data.id);
   } catch (err: any) {
     const { parseUnits } = await import('viem');
-    const amountWei = parseUnits(amountStr, 6);
+    const amountWei = parseUnits(amountStr, token.decimals);
 
     const erc20Tx = await circleClient.createContractExecutionTransaction({
       walletAddress: scheduled.payerSCA,
       blockchain: 'ARC-TESTNET' as any,
-      contractAddress: USDC_ARC,
+      contractAddress: token.address,
       abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [scheduled.receiverSCA, amountWei.toString()],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -77,7 +91,7 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
     txHash = await waitForCircleTx(circleClient, erc20Tx.data.id);
   }
 
-  return txHash;
+  return { txHash, currency: token.symbol, tokenAddress: token.address };
 }
 
 // ── POST /api/payments/scheduled/run ──────────────────────────────────────────
@@ -150,7 +164,8 @@ async function runScheduledHandler(request: Request) {
       }
 
       try {
-        const txHash = await executeOnePayment(scheduled, circleClient);
+        const execution = await executeOnePayment(scheduled, circleClient);
+        const { txHash } = execution;
 
         const newRunCount = scheduled.runCount + 1;
         const isComplete = scheduled.maxRuns && newRunCount >= scheduled.maxRuns;
@@ -173,6 +188,8 @@ async function runScheduledHandler(request: Request) {
               event: 'scheduled_payment.executed',
               reference: scheduled.reference,
               amount: scheduled.amount,
+              currency: execution.currency,
+              tokenAddress: execution.tokenAddress,
               txHash,
               explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
               runCount: newRunCount,
@@ -188,9 +205,11 @@ async function runScheduledHandler(request: Request) {
           success: true,
           txHash,
           explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          currency: execution.currency,
+          tokenAddress: execution.tokenAddress,
         });
         executedCount++;
-        console.log(`✅ Executed scheduled payment ${scheduled.reference}: ${txHash}`);
+        console.log(`✅ Executed scheduled payment ${scheduled.reference} (${execution.currency}): ${txHash}`);
       } catch (err: any) {
         // Release the claim back to ACTIVE so the failure is retried on the
         // next tick (prior behavior for failures), never double-success.

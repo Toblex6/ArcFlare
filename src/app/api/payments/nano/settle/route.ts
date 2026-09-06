@@ -1,6 +1,13 @@
 // src/app/api/payments/nano/settle/route_C.ts
 // 📦 MERGED NANO SETTLEMENT ROUTE
-// Combines On-chain USDC movement with robust validation and rate limiting.
+// Combines On-chain token movement with robust validation and rate limiting.
+//
+// PHASE 2C MULTICURRENCY: settlement batches by agent + merchant + TOKEN, never
+// by payer/merchant alone. Each transfer moves exactly the token its rows are
+// denominated in (resolved through the canonical resolver; historical NULL
+// tokenAddress rows resolve to USDC). USDC rows can never be combined into an
+// EURC transfer. No SwapPool is involved — the row's token IS the transfer's
+// token. PaymentLog rows persist currency + tokenAddress.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
@@ -13,11 +20,13 @@ import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-
 import {
   getUnsettledPairs,
   getBatchSummary,
+  resolveNanoToken,
   NANO_BATCH_THRESHOLD_USDC,
 } from '@/src/lib/nanopayment';
+import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
+import type { CurrencyRef } from '@/lib/tokens/resolveCurrency';
 
 // ── Constants & Types ────────────────────────────────────────────────────────
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
 const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
 const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
 
@@ -63,9 +72,21 @@ async function fireWebhook(url: string, payload: object) {
   }
 }
 
+/** True when a PaymentLog/nano row resolves to the settlement token (NULL → USDC). */
+function logMatchesToken(log: { currency?: string | null; tokenAddress?: string | null }, token: CurrencyRef): boolean {
+  try {
+    return resolveNanoToken(log).address.toLowerCase() === token.address.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 // ── Core On-chain Logic ──────────────────────────────────────────────────────
 
-async function recoverStaleLocks(agentSCA: string, merchantSCA: string) {
+async function recoverStaleLocks(agentSCA: string, merchantSCA: string, token: CurrencyRef) {
+  // Token-scoped: only PENDING lock rows for THIS token are reaped, and only
+  // rows resolving to this token are released — an EURC settlement never
+  // touches USDC locks (or vice versa).
   const staleLogs = await prisma.paymentLog.findMany({
     where: {
       status: 'PENDING',
@@ -77,11 +98,19 @@ async function recoverStaleLocks(agentSCA: string, merchantSCA: string) {
   });
 
   for (const stale of staleLogs) {
+    if (!logMatchesToken(stale as any, token)) continue;
+    const locked = await prisma.nanoPayment.findMany({
+      where: { batchRef: stale.reference, agentSCA, merchantSCA, settled: false },
+      select: { id: true, currency: true, tokenAddress: true },
+    });
+    const ids = locked.filter((n) => logMatchesToken(n as any, token)).map((n) => n.id);
     await prisma.$transaction(async (tx) => {
-      await tx.nanoPayment.updateMany({
-        where: { batchRef: stale.reference, agentSCA, merchantSCA, settled: false },
-        data: { batchRef: null },
-      });
+      if (ids.length > 0) {
+        await tx.nanoPayment.updateMany({
+          where: { id: { in: ids } },
+          data: { batchRef: null },
+        });
+      }
       await tx.paymentLog.update({
         where: { id: stale.id },
         data: { status: 'EXPIRED' },
@@ -90,8 +119,8 @@ async function recoverStaleLocks(agentSCA: string, merchantSCA: string) {
   }
 }
 
-async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) {
-  const existingLog = await prisma.paymentLog.findFirst({
+async function resumeExistingTransaction(agentSCA: string, merchantSCA: string, token: CurrencyRef) {
+  const candidates = await prisma.paymentLog.findMany({
     where: {
       agentSCA,
       merchant: merchantSCA,
@@ -102,22 +131,31 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
       timestamp: 'asc',
     },
   });
+  const existingLog = candidates.find((l) => logMatchesToken(l as any, token));
 
   if (existingLog?.circleTxId) {
     const circleClient = getCircleClient();
     try {
       const txHash = await waitForCircleTx(circleClient, existingLog.circleTxId);
 
+      const locked = await prisma.nanoPayment.findMany({
+        where: {
+          batchRef: existingLog.reference,
+          agentSCA,
+          merchantSCA,
+          settled: false,
+        },
+        select: { id: true, currency: true, tokenAddress: true },
+      });
+      const ids = locked.filter((n) => logMatchesToken(n as any, token)).map((n) => n.id);
+
       await prisma.$transaction(async (tx) => {
-        await tx.nanoPayment.updateMany({
-          where: {
-            batchRef: existingLog.reference,
-            agentSCA,
-            merchantSCA,
-            settled: false,
-          },
-          data: { settled: true },
-        });
+        if (ids.length > 0) {
+          await tx.nanoPayment.updateMany({
+            where: { id: { in: ids } },
+            data: { settled: true },
+          });
+        }
 
         await tx.paymentLog.updateMany({
           where: { id: existingLog.id, status: 'SUBMITTED' },
@@ -132,14 +170,23 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
         resumed: true,
         total: existingLog.amount,
         count: 0,
+        currency: token.symbol,
+        tokenAddress: token.address,
       };
     } catch (error: any) {
       if (error.name === 'CircleTxFailedError') {
+        const locked = await prisma.nanoPayment.findMany({
+          where: { batchRef: existingLog.reference, agentSCA, merchantSCA, settled: false },
+          select: { id: true, currency: true, tokenAddress: true },
+        });
+        const ids = locked.filter((n) => logMatchesToken(n as any, token)).map((n) => n.id);
         await prisma.$transaction(async (tx) => {
-          await tx.nanoPayment.updateMany({
-            where: { batchRef: existingLog.reference, agentSCA, merchantSCA, settled: false },
-            data: { batchRef: null },
-          });
+          if (ids.length > 0) {
+            await tx.nanoPayment.updateMany({
+              where: { id: { in: ids } },
+              data: { batchRef: null },
+            });
+          }
           await tx.paymentLog.update({
             where: { id: existingLog.id },
             data: { status: 'FAILED' },
@@ -155,12 +202,13 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string) 
 async function settleOnchain(
   agentSCA: string,
   merchantSCA: string,
+  token: CurrencyRef,
   webhookUrl?: string,
   isInternalServiceCall = false
 ) {
-  await recoverStaleLocks(agentSCA, merchantSCA);
+  await recoverStaleLocks(agentSCA, merchantSCA, token);
 
-  const resumedTx = await resumeExistingTransaction(agentSCA, merchantSCA);
+  const resumedTx = await resumeExistingTransaction(agentSCA, merchantSCA, token);
   if (resumedTx) return resumedTx;
 
   const circleClient = getCircleClient();
@@ -202,15 +250,38 @@ async function settleOnchain(
 
   const batchRef = `nano_${randomUUID()}`;
 
-  const { total, count } = await prisma.$transaction(async (tx) => {
-    await tx.nanoPayment.updateMany({
+  // Token-scoped atomic claim: only unsettled rows resolving to THIS token
+  // are locked under the batchRef. USDC and EURC rows for the same pair are
+  // never claimed together, so one transfer can never carry both.
+  const { total, count, lockedIds } = await prisma.$transaction(async (tx) => {
+    const candidates = await tx.nanoPayment.findMany({
       where: { agentSCA, merchantSCA, settled: false, batchRef: null },
-      data: { batchRef },
+      select: { id: true, amount: true, currency: true, tokenAddress: true },
     });
+    const scoped = candidates.filter((n) => logMatchesToken(n as any, token));
+    const ids = scoped.map((n) => n.id);
+    if (ids.length > 0) {
+      await tx.nanoPayment.updateMany({
+        where: { id: { in: ids } },
+        data: { batchRef },
+      });
+    }
 
-    const lockedRows = await tx.nanoPayment.findMany({
-      where: { batchRef, agentSCA, merchantSCA, settled: false },
-    });
+    const lockedRows = ids.length > 0
+      ? await tx.nanoPayment.findMany({
+          where: { id: { in: ids } },
+        })
+      : [];
+
+    // Wrong-token rejection (defense in depth): every locked row MUST resolve
+    // to the settlement token. Anything else aborts the batch before any
+    // PaymentLog or transfer exists.
+    const alien = lockedRows.filter((n) => !logMatchesToken(n as any, token));
+    if (alien.length > 0) {
+      throw new Error(
+        `refusing to settle: ${alien.length} locked row(s) are not ${token.symbol} — release and retry per token`
+      );
+    }
 
     const lockedTotal = lockedRows.reduce((sum, n) => sum + n.amount, 0);
 
@@ -219,7 +290,8 @@ async function settleOnchain(
         data: {
           reference: batchRef,
           amount: lockedTotal,
-          currency: 'USDC',
+          currency: token.symbol,
+          tokenAddress: token.address,
           chain: 'ARC-TESTNET',
           senderEmail: 'nano-batch-system',
           merchant: merchantSCA,
@@ -229,22 +301,24 @@ async function settleOnchain(
       });
     }
 
-    return { total: lockedTotal, count: lockedRows.length };
+    return { total: lockedTotal, count: lockedRows.length, lockedIds: ids };
   });
 
   if (count === 0 || total <= 0) {
-    throw new Error('No pending payments found or already settling.');
+    throw new Error(`No pending ${token.symbol} payments found or already settling.`);
   }
 
-  const amountStr = total.toFixed(6);
-  const amountScaled = Math.floor(total * 1e6).toString();
+  // Decimals come from the canonical resolver — never assumed. Both
+  // supported tokens use 6 today, but the math must follow the token.
+  const amountStr = total.toFixed(token.decimals);
+  const amountScaled = Math.floor(total * 10 ** token.decimals).toString();
   let transferTx;
 
   try {
     transferTx = await circleClient.createTransaction({
       walletId: payerWalletId,
       blockchain: 'ARC-TESTNET',
-      tokenAddress: USDC_ARC,
+      tokenAddress: token.address,
       destinationAddress: merchantSCA,
       amounts: [amountStr],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -253,7 +327,7 @@ async function settleOnchain(
     transferTx = await circleClient.createContractExecutionTransaction({
       walletId: payerWalletId,
       blockchain: 'ARC-TESTNET',
-      contractAddress: USDC_ARC,
+      contractAddress: token.address,
       abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [merchantSCA, amountScaled],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -263,7 +337,7 @@ async function settleOnchain(
   if (!transferTx?.data?.id) {
     await prisma.$transaction(async (tx) => {
       await tx.nanoPayment.updateMany({
-        where: { batchRef, agentSCA, merchantSCA, settled: false },
+        where: { id: { in: lockedIds } },
         data: { batchRef: null },
       });
       await tx.paymentLog.updateMany({
@@ -288,7 +362,7 @@ async function settleOnchain(
 
     await prisma.$transaction(async (tx) => {
       await tx.nanoPayment.updateMany({
-        where: { batchRef, agentSCA, merchantSCA, settled: false },
+        where: { id: { in: lockedIds } },
         data: { settled: true },
       });
       await tx.paymentLog.updateMany({
@@ -303,6 +377,8 @@ async function settleOnchain(
         batchRef,
         agentSCA,
         merchantSCA,
+        currency: token.symbol,
+        tokenAddress: token.address,
         totalSettled: total,
         paymentsCount: count,
         txHash,
@@ -311,12 +387,12 @@ async function settleOnchain(
       });
     }
 
-    return { batchRef, txHash, explorerUrl, total, count, resumed: false };
+    return { batchRef, txHash, explorerUrl, total, count, resumed: false, currency: token.symbol, tokenAddress: token.address };
   } catch (error: any) {
     if (error.name === 'CircleTxFailedError') {
       await prisma.$transaction(async (tx) => {
         await tx.nanoPayment.updateMany({
-          where: { batchRef, agentSCA, merchantSCA, settled: false },
+          where: { id: { in: lockedIds } },
           data: { batchRef: null },
         });
         await tx.paymentLog.updateMany({
@@ -336,8 +412,22 @@ async function mergedNanoSettleHandler(request: NextRequest) {
     const { allowed, response: limitResponse } = await checkRateLimit(request, 'nano');
     if (!allowed) return limitResponse;
 
-    const body = await request.json().catch(() => ({}));
-    const { data, error: validationError } = parseBody(NanoSettleSchema, body);
+    // NOTE: NanoSettleSchema (src/lib/validation.ts) is intentionally NOT
+    // extended — validation files are frozen. The token identity rides as
+    // optional raw-body fields (currency/tokenAddress) resolved through the
+    // canonical resolver below; zod strips them from `data`, so they are
+    // read from the raw body BEFORE parseBody.
+    const rawBody = await request.json().catch(() => ({}));
+    let requestedToken: CurrencyRef | null = null;
+    if (rawBody?.currency != null || rawBody?.tokenAddress != null) {
+      try {
+        requestedToken = resolveCurrency({ currency: rawBody.currency, tokenAddress: rawBody.tokenAddress });
+      } catch (tokenError: any) {
+        return NextResponse.json({ success: false, error: tokenError.message }, { status: 400 });
+      }
+    }
+
+    const { data, error: validationError } = parseBody(NanoSettleSchema, rawBody);
     if (validationError) return validationError;
 
     const { agentSCA, merchantSCA, webhookUrl, forceSettle, autoSettle } = data;
@@ -361,15 +451,24 @@ async function mergedNanoSettleHandler(request: NextRequest) {
           { status: 403 }
         );
       }
+      // Token-aware pairs: one entry per agent + merchant + TOKEN, so each
+      // on-chain transfer carries exactly one token.
       const pairs = await getUnsettledPairs();
+      const scopedPairs = requestedToken
+        ? pairs.filter((p) => p.tokenAddress.toLowerCase() === requestedToken!.address.toLowerCase())
+        : pairs;
       const results = [];
 
-      for (const pair of pairs) {
-        const summary = await getBatchSummary(pair.agentSCA, pair.merchantSCA);
+      for (const pair of scopedPairs) {
+        const pairToken = resolveCurrency({ currency: pair.currency, tokenAddress: pair.tokenAddress });
+        const summary = await getBatchSummary(pair.agentSCA, pair.merchantSCA, {
+          currency: pair.currency,
+          tokenAddress: pair.tokenAddress,
+        });
         if (!summary.shouldSettle) continue;
 
         try {
-          const res = await settleOnchain(pair.agentSCA, pair.merchantSCA, webhookUrl, true);
+          const res = await settleOnchain(pair.agentSCA, pair.merchantSCA, pairToken, webhookUrl, true);
           results.push({ ...pair, ...res, success: true });
         } catch (err: any) {
           results.push({ ...pair, success: false, error: err.message });
@@ -412,31 +511,99 @@ async function mergedNanoSettleHandler(request: NextRequest) {
       }
     }
 
-    const preCheck = await prisma.nanoPayment.aggregate({
-      _sum: { amount: true },
-      where: { agentSCA, merchantSCA, settled: false, batchRef: null },
-    });
+    // Per-token threshold pre-check. When the caller names a token, only
+    // that token's rows count; otherwise each token group is evaluated on
+    // its own — one token's dust never blocks (or rides along with) another.
+    const summary = await getBatchSummary(
+      agentSCA,
+      merchantSCA,
+      requestedToken ? { currency: requestedToken.symbol, tokenAddress: requestedToken.address } : null
+    );
 
-    const looseTotal = preCheck._sum.amount || 0;
+    if (requestedToken) {
+      if (summary.total > 0 && !forceSettle && summary.total < NANO_BATCH_THRESHOLD_USDC) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Threshold not reached. ${summary.total.toFixed(6)}/${NANO_BATCH_THRESHOLD_USDC} ${requestedToken.symbol}.`,
+            unsettledBalance: summary.total,
+            currency: requestedToken.symbol,
+            tokenAddress: requestedToken.address,
+          },
+          { status: 400 }
+        );
+      }
 
-    if (looseTotal > 0 && !forceSettle && looseTotal < NANO_BATCH_THRESHOLD_USDC) {
+      const settlement = await settleOnchain(agentSCA, merchantSCA, requestedToken, webhookUrl, isInternalServiceCall);
+
+      return NextResponse.json({
+        success: true,
+        ...settlement,
+        totalSettled: parseFloat(settlement.total.toFixed(6)),
+        paymentsCount: settlement.count,
+      });
+    }
+
+    // No token named: settle each token group as its own transfer (never
+    // merged). A single-token pair keeps the legacy single-settlement shape.
+    const groups = summary.tokenGroups;
+    if (groups.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'No pending payments found or already settling.' },
+        { status: 500 }
+      );
+    }
+    const dueGroups = forceSettle ? groups : groups.filter((g) => g.total >= NANO_BATCH_THRESHOLD_USDC);
+    if (dueGroups.length === 0) {
+      const first = groups[0];
       return NextResponse.json(
         {
           success: false,
-          error: `Threshold not reached. ${looseTotal.toFixed(6)}/${NANO_BATCH_THRESHOLD_USDC} USDC.`,
-          unsettledBalance: looseTotal,
+          error: `Threshold not reached. ${first.total.toFixed(6)}/${NANO_BATCH_THRESHOLD_USDC} ${first.currency}.`,
+          unsettledBalance: first.total,
+          currency: first.currency,
+          tokenAddress: first.tokenAddress,
         },
         { status: 400 }
       );
     }
+    if (dueGroups.length === 1 && groups.length === 1) {
+      const token = resolveCurrency({ currency: dueGroups[0].currency, tokenAddress: dueGroups[0].tokenAddress });
+      const settlement = await settleOnchain(agentSCA, merchantSCA, token, webhookUrl, isInternalServiceCall);
+      return NextResponse.json({
+        success: true,
+        ...settlement,
+        totalSettled: parseFloat(settlement.total.toFixed(6)),
+        paymentsCount: settlement.count,
+      });
+    }
 
-    const settlement = await settleOnchain(agentSCA, merchantSCA, webhookUrl, isInternalServiceCall);
-
+    // Mixed-token pair: one transfer per token, reported separately.
+    const settlements = [];
+    for (const group of dueGroups) {
+      const token = resolveCurrency({ currency: group.currency, tokenAddress: group.tokenAddress });
+      try {
+        const settlement = await settleOnchain(agentSCA, merchantSCA, token, webhookUrl, isInternalServiceCall);
+        settlements.push({
+          success: true,
+          ...settlement,
+          totalSettled: parseFloat(settlement.total.toFixed(6)),
+          paymentsCount: settlement.count,
+        });
+      } catch (err: any) {
+        settlements.push({
+          success: false,
+          currency: token.symbol,
+          tokenAddress: token.address,
+          error: err.message,
+        });
+      }
+    }
     return NextResponse.json({
       success: true,
-      ...settlement,
-      totalSettled: parseFloat(settlement.total.toFixed(6)),
-      paymentsCount: settlement.count,
+      mixedTokens: true,
+      settlements,
+      message: `Settled ${settlements.filter((s) => s.success).length}/${dueGroups.length} token batches separately — USDC and EURC never share a transfer.`,
     });
   } catch (error: any) {
     console.error('Nano Settlement Error:', error);

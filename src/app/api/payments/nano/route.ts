@@ -1,6 +1,7 @@
 // src/app/api/payments/nano/route.ts
-// Record a nanopayment — micro USDC charge recorded instantly in Postgres.
-// Does NOT settle immediately — batched and settled later via /nano/settle.
+// Record a nanopayment — micro charge (USDC or EURC, Phase 2C) recorded
+// instantly in Postgres. Does NOT settle immediately — batched per
+// agent + merchant + TOKEN and settled later via /nano/settle.
 // Used by agents paying per API call, per token, per second of compute etc.
 
 import { NextResponse } from 'next/server';
@@ -13,6 +14,7 @@ import {
   getBatchSummary,
   NANO_BATCH_THRESHOLD_USDC,
 } from '@/src/lib/nanopayment';
+import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 
 // The platform's shared default payer (same identity as settle/route.ts) —
 // reachable ONLY from the internal service key; a merchant may never name
@@ -24,8 +26,10 @@ async function nanoHandler(request: Request) {
     const {
       agentSCA, // Agent paying (consumer of service)
       merchantSCA, // Merchant receiving (provider of service)
-      amount, // Micro amount e.g. 0.0001 USDC
+      amount, // Micro amount e.g. 0.0001 (in the charge's token units)
       description, // What was this charge for e.g. "1 API call", "100 tokens"
+      currency, // Phase 2C: charge denomination ("USDC" | "EURC", default USDC)
+      tokenAddress, // Phase 2C: canonical token address (must match currency)
     } = await request.json();
 
     if (!agentSCA || !merchantSCA || !amount) {
@@ -70,16 +74,36 @@ async function nanoHandler(request: Request) {
       );
     }
 
+    // Phase 2C: resolve the charge's canonical token through the resolver
+    // (rejects unsupported symbols/addresses and symbol/address mismatches —
+    // a caller can never record a USDC-denominated row that settles as EURC).
+    // Legacy callers omit both fields and record USDC exactly as before.
+    let token;
+    try {
+      token = resolveCurrency({ currency, tokenAddress });
+    } catch (tokenError: any) {
+      return NextResponse.json(
+        { success: false, error: tokenError.message },
+        { status: 400 }
+      );
+    }
+
     // Record the nanopayment
     const nano = await recordNanoPayment({
       agentSCA,
       merchantSCA,
       amount: parseFloat(amount),
       description,
+      currency: token.symbol,
+      tokenAddress: token.address,
     });
 
-    // Check current unsettled balance
-    const { total, count } = await getUnsettledBalance(agentSCA, merchantSCA);
+    // Check current unsettled balance — scoped to THIS token so a USDC
+    // charge never nudges an EURC batch over threshold (or vice versa).
+    const { total, count } = await getUnsettledBalance(agentSCA, merchantSCA, {
+      currency: token.symbol,
+      tokenAddress: token.address,
+    });
     const readyToSettle = total >= NANO_BATCH_THRESHOLD_USDC;
 
     return NextResponse.json({
@@ -87,10 +111,12 @@ async function nanoHandler(request: Request) {
       nano,
       unsettledBalance: total,
       unsettledCount: count,
+      currency: token.symbol,
+      tokenAddress: token.address,
       readyToSettle,
       message: readyToSettle
-        ? `Nanopayment recorded. Batch threshold reached (${total} USDC) — call POST /api/payments/nano/settle to settle.`
-        : `Nanopayment recorded. ${total.toFixed(6)} USDC pending (threshold: ${NANO_BATCH_THRESHOLD_USDC} USDC).`,
+        ? `Nanopayment recorded. Batch threshold reached (${total} ${token.symbol}) — call POST /api/payments/nano/settle to settle.`
+        : `Nanopayment recorded. ${total.toFixed(6)} ${token.symbol} pending (threshold: ${NANO_BATCH_THRESHOLD_USDC} ${token.symbol}).`,
     });
   } catch (error: any) {
     console.error('Nano record error:', error);
@@ -108,6 +134,10 @@ async function getNanoHandler(request: Request) {
     const { searchParams } = new URL(request.url);
     const agentSCA = searchParams.get('agentSCA');
     const merchantSCA = searchParams.get('merchantSCA');
+    // Phase 2C: optional token scope (?currency=EURC or ?tokenAddress=0x…).
+    // Omit both for the whole-pair view (which now flags mixedTokens).
+    const currency = searchParams.get('currency');
+    const tokenAddress = searchParams.get('tokenAddress');
 
     if (!agentSCA || !merchantSCA) {
       return NextResponse.json(
@@ -116,7 +146,11 @@ async function getNanoHandler(request: Request) {
       );
     }
 
-    const summary = await getBatchSummary(agentSCA, merchantSCA);
+    const summary = await getBatchSummary(
+      agentSCA,
+      merchantSCA,
+      currency || tokenAddress ? { currency, tokenAddress } : null
+    );
 
     return NextResponse.json({
       success: true,

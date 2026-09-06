@@ -21,14 +21,26 @@ export class CircleWalletProvider implements WalletProvider {
   }
 
   async transferUSDC(to: string, amount: string, memo?: string): Promise<WalletExecutionResult> {
+    // USDC-default wrapper over the token-aware path — same amount math and
+    // contract call as before, so existing USDC callers are byte-identical.
+    return this.transferToken(to, amount, USDC_CONTRACT, 6, memo);
+  }
+
+  async transferToken(to: string, amount: string, tokenAddress: string, decimals: number, memo?: string): Promise<WalletExecutionResult> {
     try {
-      const amountUnits = Math.round(parseFloat(amount) * 1_000_000).toString(); // USDC has 6 decimals
+      const { getTokenByAddress } = await import("@/lib/tokens/supportedTokens");
+      const known = getTokenByAddress(tokenAddress);
+      if (!known) {
+        return { status: "failed", error: `unsupported transfer token ${tokenAddress} — refusing to move an unvetted asset` };
+      }
+      const scale = 10 ** decimals;
+      const amountUnits = Math.round(parseFloat(amount) * scale).toString(); // resolver decimals, never assumed
       const txHash = await createContractTransaction(
         this.walletAddress,
-        USDC_CONTRACT,
+        known.address, // canonical address — the row's token, never a substitute
         "transfer(address,uint256)",
         [to, amountUnits],
-        memo || "USDC transfer"
+        memo || `${known.symbol} transfer`
       );
       return { status: "completed", txHash };
     } catch (err: any) {

@@ -1,12 +1,14 @@
 // src/app/api/payments/scheduled/route.ts
-// Recurring/scheduled USDC payments — "settle this payment every N days."
-// Pairs with a cron job (Render Cron Job or external scheduler) that calls
-// POST /api/payments/scheduled/run on an interval (e.g. every hour).
+// Recurring/scheduled payments (USDC or EURC, Phase 2C) — "settle this
+// payment every N days." Pairs with a cron job (Render Cron Job or external
+// scheduler) that calls POST /api/payments/scheduled/run on an interval
+// (e.g. every hour). The runner transfers each schedule's own resolved token.
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
+import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 
 // The platform agent's signing wallet — same explicit resolution as settle
 // Path B. Never used as a blanket fallback for arbitrary payers: it is only
@@ -25,6 +27,8 @@ async function createScheduledHandler(request: Request) {
       description,
       webhookUrl,
       startImmediately = true,
+      currency, // Phase 2C: schedule denomination ("USDC" | "EURC", default USDC)
+      tokenAddress, // Phase 2C: canonical token address (must match currency)
     } = await request.json();
 
     if (!payerSCA || !receiverSCA || !amount || !intervalDays) {
@@ -33,6 +37,21 @@ async function createScheduledHandler(request: Request) {
           success: false,
           error: 'payerSCA, receiverSCA, amount and intervalDays are required.',
         },
+        { status: 400 }
+      );
+    }
+
+    // Phase 2C: resolve the schedule's canonical token through the resolver
+    // (rejects unsupported symbols/addresses and symbol/address mismatches).
+    // Legacy callers omit both fields and schedule USDC exactly as before.
+    // The runner transfers exactly this token — no hardcoded USDC remains
+    // where the schedule is explicitly EURC.
+    let token;
+    try {
+      token = resolveCurrency({ currency, tokenAddress });
+    } catch (tokenError: any) {
+      return NextResponse.json(
+        { success: false, error: tokenError.message },
         { status: 400 }
       );
     }
@@ -136,6 +155,8 @@ async function createScheduledHandler(request: Request) {
         payerWalletId: resolvedPayerWalletId,
         receiverSCA,
         amount: parseFloat(amount),
+        currency: token.symbol,
+        tokenAddress: token.address,
         intervalDays: parseInt(intervalDays),
         nextRunAt,
         maxRuns: maxRuns ? parseInt(maxRuns) : null,
@@ -148,7 +169,7 @@ async function createScheduledHandler(request: Request) {
     return NextResponse.json({
       success: true,
       scheduledPayment: scheduled,
-      message: `Recurring payment created — ${amount} USDC every ${intervalDays} day(s). First run: ${nextRunAt.toISOString()}.`,
+      message: `Recurring payment created — ${amount} ${token.symbol} every ${intervalDays} day(s). First run: ${nextRunAt.toISOString()}.`,
       nextStep: `This will run automatically via the scheduler. To run it manually now, call POST /api/payments/scheduled/run.`,
     });
   } catch (error: any) {

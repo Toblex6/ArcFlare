@@ -204,6 +204,11 @@ model NanoPayment {
   merchantSCA    String
   amount         Float
   currency       String    @default("USDC")
+  // Canonical ERC-20 address of the settlement token (Phase 2C multicurrency).
+  // NULL = legacy USDC row (resolve via resolveRowCurrency before use).
+  // Batching groups by agent + merchant + token — USDC rows never combine
+  // into an EURC transfer. Additive only.
+  tokenAddress   String?
   description    String?
   settled        Boolean   @default(false)
   batchRef       String?
@@ -436,6 +441,10 @@ model ScheduledPayment {
   receiverSCA    String
   amount         Float
   currency       String    @default("USDC")
+  // Canonical ERC-20 address of the settlement token (Phase 2C multicurrency).
+  // NULL = legacy USDC row (the runner resolves via resolveRowCurrency).
+  // The runner transfers exactly this token — never a hardcoded USDC.
+  tokenAddress   String?
   intervalDays   Int
   nextRunAt      DateTime
   lastRunAt      DateTime?
@@ -454,6 +463,10 @@ model PayrollBatch {
   payerWalletId  String?
   totalAmount    Float
   currency       String    @default("USDC")
+  // Canonical ERC-20 address of the settlement token (Phase 2C multicurrency).
+  // NULL = legacy USDC batch. A batch is always single-token — USDC and EURC
+  // recipients are never mixed inside one batch. Additive only.
+  tokenAddress   String?
   recipientCount Int
   successCount   Int       @default(0)
   failedCount    Int       @default(0)
