@@ -3,6 +3,7 @@ import { createWalletClient, http, publicActions } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
+import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 
 // Official Circle Iris Testnet API Endpoint Sandbox
 const CIRCLE_IRIS_API = 'https://iris-api-sandbox.circle.com/v1/attestations';
@@ -70,6 +71,39 @@ export async function POST(request: Request) {
         {
           success: false,
           error: 'Missing parameters: reference, messageHash, and rawMessage are all required.',
+        },
+        { status: 400 }
+      );
+    }
+
+    // 1b. EURC SAFETY GATE (Phase 1). Resolve the referenced payment row's
+    // token identity FROM THE DB — never from a client-supplied override (the
+    // request body carries no currency field and we never read one). This CCTP
+    // redemption mints USDC only, so an EURC-labelled row must be rejected
+    // BEFORE any settlement/mint work.
+    const paymentRow = await prisma.paymentLog.findUnique({ where: { reference } });
+    if (!paymentRow) {
+      return NextResponse.json({ success: false, error: 'Payment reference not found.' }, { status: 404 });
+    }
+    let rowToken: { symbol: 'USDC' | 'EURC' };
+    try {
+      rowToken = resolveRowCurrency(paymentRow);
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Unsupported or mismatched token identity on this payment row. This cross-chain settle route is USDC-only; EURC is coming in Phase 2.',
+        },
+        { status: 400 }
+      );
+    }
+    if (rowToken.symbol !== 'USDC') {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'EURC settlement is not yet supported. This cross-chain settle route is USDC-only; EURC is coming in Phase 2.',
         },
         { status: 400 }
       );

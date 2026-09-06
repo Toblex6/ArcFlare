@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { pollForAttestation, mintOnArc, getChainName } from '@/src/lib/cctp';
 import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { resolveCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 
 async function detectHandler(request: Request) {
   try {
@@ -23,6 +24,34 @@ async function detectHandler(request: Request) {
       );
     }
 
+    // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────────
+    // This route's CCTP V2 mint is USDC-only. An EURC-labelled burn must never
+    // be minted/credited as USDC — reject any non-USDC currency BEFORE any
+    // ledger write or mint. Null/empty legacy input defaults to USDC.
+    let detectCurrency: { symbol: 'USDC' | 'EURC' };
+    try {
+      detectCurrency = resolveCurrency({ currency: currency ?? 'USDC' });
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Unsupported currency. This CCTP detect route is USDC-only; EURC settlement is coming in Phase 2.',
+        },
+        { status: 400 }
+      );
+    }
+    if (detectCurrency.symbol !== 'USDC') {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'EURC settlement is not yet supported. This CCTP detect route is USDC-only; EURC is coming in Phase 2.',
+        },
+        { status: 400 }
+      );
+    }
+
     const reference = `arc_detect_${Date.now().toString(36)}_${Math.random()
       .toString(36)
       .slice(2, 8)}`;
@@ -33,7 +62,8 @@ async function detectHandler(request: Request) {
       data: {
         reference,
         amount: parseFloat(amount) || 0,
-        currency: currency || 'USDC',
+        currency: detectCurrency.symbol,
+        tokenAddress: tokenAddressFor('USDC'),
         chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
         senderEmail: 'cross-chain-detect@arc.network',
         merchant: 'FlareHQ CCTP V2 Router',

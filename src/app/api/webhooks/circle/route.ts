@@ -10,6 +10,11 @@ import {
   verifyCircleWebhookSignature,
   getChainName,
 } from '@/src/lib/cctp';
+import {
+  resolveCurrency,
+  resolveRowCurrency,
+  tokenAddressFor,
+} from '@/src/lib/tokens/resolveCurrency';
 
 export async function POST(req: NextRequest) {
   try {
@@ -60,7 +65,18 @@ export async function POST(req: NextRequest) {
         `💰 CCTP V2 transfer detected — ${amount} ${currency} from ${getChainName(sourceDomain)}`
       );
 
-      if (messageHash) {
+      // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────────
+      // This webhook's auto-settle path mints USDC only. A non-USDC (e.g. EURC)
+      // transfer event must never create a row a USDC CCTP flow could then credit
+      // — ignore unsupported currencies BEFORE any ledger write or mint.
+      let isUsdc = false;
+      try {
+        isUsdc = resolveCurrency({ currency }).symbol === 'USDC';
+      } catch {
+        isUsdc = false;
+      }
+
+      if (messageHash && isUsdc) {
         const reference = `arc_auto_${Date.now().toString(36)}_${Math.random()
           .toString(36)
           .slice(2, 8)}`;
@@ -71,7 +87,8 @@ export async function POST(req: NextRequest) {
             data: {
               reference,
               amount: parseFloat(amount) || 0,
-              currency,
+              currency: 'USDC',
+              tokenAddress: tokenAddressFor('USDC'),
               chain: `${getChainName(sourceDomain)} → Arc Testnet (via CCTP V2)`,
               senderEmail: transfer?.walletId || 'auto-detected@arc.network',
               merchant: 'FlareHQ Auto-Router',
@@ -85,6 +102,10 @@ export async function POST(req: NextRequest) {
         // Auto-settle in background — returns fast to Circle
         autoSettleV2(reference, messageHash).catch((err) =>
           console.error('CCTP V2 auto-settle failed:', err.message)
+        );
+      } else if (messageHash && !isUsdc) {
+        console.log(
+          `🚫 Ignoring non-USDC CCTP transfer (${currency}) — this circle webhook is USDC-only; EURC auto-settle is Phase 2.`
         );
       }
     }
@@ -146,6 +167,24 @@ export async function POST(req: NextRequest) {
 async function autoSettleV2(reference: string, messageHash: string) {
   try {
     console.log(`⚡ CCTP V2 auto-settling ${reference}...`);
+
+    // EURC safety gate (Phase 1) — belt-and-suspenders on the transfer-handler
+    // gate. Confirm the row really is USDC before any mint; a non-USDC (EURC)
+    // row must never enter the USDC mint flow.
+    const autoSettleRow = await prisma.paymentLog.findUnique({ where: { reference } });
+    if (!autoSettleRow) return;
+    let rowIsUsdc = false;
+    try {
+      rowIsUsdc = resolveRowCurrency(autoSettleRow).symbol === 'USDC';
+    } catch {
+      rowIsUsdc = false;
+    }
+    if (!rowIsUsdc) {
+      console.log(
+        `🚫 Skipping CCTP V2 auto-settle for ${reference}: row is not USDC (this webhook path is USDC-only; EURC is Phase 2).`
+      );
+      return;
+    }
 
     const { message, attestation } = await pollForAttestation(messageHash);
     const arcTxHash = await mintOnArc(message, attestation);
