@@ -69,6 +69,8 @@ interface ActivityItem {
   direction: "in" | "out";
   counterparty?: string;
   amount: number;
+  currency?: string;
+  token?: { symbol: string; address: string; decimals: number } | null;
   status: string; // displayStatus — derived (EXPIRED when past expiresAt)
   rawStatus?: string;
   displayStatus?: string;
@@ -116,7 +118,15 @@ export default function ConsumerApp() {
   const [crossLoading, setCrossLoading] = useState(false);
   const [crossResult, setCrossResult] = useState<ActionResult | null>(null);
   const [balance, setBalance] = useState<string | null>(null);
+  const [balanceCurrency, setBalanceCurrency] = useState<"USDC" | "EURC">("USDC");
   const [balanceLoading, setBalanceLoading] = useState(false);
+  // Phase 2B: the send form names its own token (USDC | EURC — both settle
+  // natively via settle Path B). Request likewise. Save (scheduled) and
+  // Bridge (CCTP, USDC-only) intentionally stay untouched.
+  const [sendCurrency, setSendCurrency] = useState<"USDC" | "EURC">("USDC");
+  const [requestCurrency, setRequestCurrency] = useState<"USDC" | "EURC">("USDC");
+  const [sendBalance, setSendBalance] = useState<string | null>(null);
+  const [sendBalanceLoading, setSendBalanceLoading] = useState(false);
   const [chainBalance, setChainBalance] = useState<string | null>(null);
   const [chainBalanceLoading, setChainBalanceLoading] = useState(false);
   const [chainBalanceError, setChainBalanceError] = useState<string | null>(null);
@@ -186,13 +196,16 @@ export default function ConsumerApp() {
   }, [view, walletAddress]);
 
 
-  const refreshBalance = () => {
+  const refreshBalance = (currency: "USDC" | "EURC" = balanceCurrency) => {
     if (!walletAddress) return;
     setBalanceLoading(true);
-    fetch("/api/consumer/balance")
+    fetch(`/api/consumer/balance?currency=${currency}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.success) setBalance(data.balance);
+        if (data.success) {
+          setBalance(data.balance);
+          if (data.currency === "USDC" || data.currency === "EURC") setBalanceCurrency(data.currency);
+        }
       })
       .catch(console.error)
       .finally(() => setBalanceLoading(false));
@@ -247,6 +260,27 @@ export default function ConsumerApp() {
       cancelled = true;
     };
   }, [view, fromChain, walletAddress, chainBalanceTick]);
+
+  // ── Send-form balance in the SELECTED token (never a wrong-token balance) ──
+  useEffect(() => {
+    if (view !== "send" || !walletAddress) return;
+    let cancelled = false;
+    setSendBalanceLoading(true);
+    fetch(`/api/consumer/balance?currency=${sendCurrency}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled && data.success) setSendBalance(data.balance);
+      })
+      .catch(() => {
+        if (!cancelled) setSendBalance(null);
+      })
+      .finally(() => {
+        if (!cancelled) setSendBalanceLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, sendCurrency, walletAddress]);
 
   // ── Check for existing session ──
   useEffect(() => {
@@ -505,6 +539,9 @@ export default function ConsumerApp() {
     setRecipient("");
     setAmount("");
     setResult(null);
+    setSendCurrency("USDC");
+    setRequestCurrency("USDC");
+    setSendBalance(null);
     setCrossAmount("");
     setCrossResult(null);
   };
@@ -526,7 +563,7 @@ export default function ConsumerApp() {
       const initRes = await fetch(`/api/payments/initialize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, currency: "USDC", payoutAddress: recipient, merchant: recipient, direction: "send" }),
+        body: JSON.stringify({ amount, currency: sendCurrency, payoutAddress: recipient, merchant: recipient, direction: "send" }),
       });
       const initData = await initRes.json();
       if (!initData.success) throw new Error(initData.error || "Could not start payment.");
@@ -539,7 +576,7 @@ export default function ConsumerApp() {
       const settleData = await settleRes.json();
       if (!settleData.success) throw new Error(settleData.error || "Could not complete payment.");
 
-      setResult({ success: true, message: `Sent ${amount} USDC to ${recipient}.`, txHash: settleData.arcTxHash, explorerUrl: settleData.explorerUrl });
+      setResult({ success: true, message: `Sent ${amount} ${sendCurrency} to ${recipient}.`, txHash: settleData.arcTxHash, explorerUrl: settleData.explorerUrl });
     } catch (e: any) {
       setResult({ success: false, error: e.message });
     } finally {
@@ -624,11 +661,11 @@ export default function ConsumerApp() {
       const res = await fetch(`/api/payments/initialize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, currency: "USDC", merchant: "Payment request", direction: "request" }),
+        body: JSON.stringify({ amount, currency: requestCurrency, merchant: "Payment request", direction: "request" }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not create request.");
-      setResult({ success: true, message: "Your payment link is ready to share.", reference: data.checkoutUrl });
+      setResult({ success: true, message: `Your ${amount} ${requestCurrency} payment link is ready to share.`, reference: data.checkoutUrl });
     } catch (e: any) {
       setResult({ success: false, error: e.message });
     } finally {
@@ -870,14 +907,38 @@ export default function ConsumerApp() {
             )}
 
             <section style={styles.balanceCard}>
-              <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--flow-text-faint)", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                Balance
-              </p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--flow-text-faint)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Balance
+                </p>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {(["USDC", "EURC"] as const).map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => {
+                        setBalanceCurrency(c);
+                        setBalance(null);
+                        refreshBalance(c);
+                      }}
+                      disabled={balanceLoading}
+                      aria-label={`Show ${c} balance`}
+                      style={{
+                        padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        border: balanceCurrency === c ? "1px solid var(--flow-text)" : "1px solid var(--flow-border)",
+                        background: balanceCurrency === c ? "var(--flow-text)" : "transparent",
+                        color: balanceCurrency === c ? "var(--flow-surface)" : "var(--flow-text-muted)",
+                      }}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <p style={{ margin: 0, fontSize: "clamp(28px, 5vw, 36px)", fontWeight: 700, fontFamily: "'Fraunces', serif" }}>
-                {balanceLoading ? "..." : balance !== null ? `$${parseFloat(balance).toFixed(2)}` : "—"}
-                <span style={{ fontSize: 16, fontWeight: 500, color: "var(--flow-text-faint)", marginLeft: 6 }}>USDC</span>
+                {balanceLoading ? "..." : balance !== null ? `${parseFloat(balance).toFixed(2)}` : "—"}
+                <span style={{ fontSize: 16, fontWeight: 500, color: "var(--flow-text-faint)", marginLeft: 6 }}>{balanceCurrency}</span>
               </p>
-              <button style={styles.refreshBalanceButton} onClick={refreshBalance} disabled={balanceLoading}>
+              <button style={styles.refreshBalanceButton} onClick={() => refreshBalance()} disabled={balanceLoading}>
                 {balanceLoading ? "Refreshing..." : "↻ Refresh"}
               </button>
             </section>
@@ -947,7 +1008,7 @@ export default function ConsumerApp() {
                         )}
                       </div>
                       <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: a.direction === "out" ? "#C0563A" : "#3F7A57" }}>
-                        {a.direction === "out" ? "-" : "+"}${a.amount.toFixed(2)}
+                        {a.direction === "out" ? "-" : "+"}{a.amount.toFixed(2)} {a.currency || a.token?.symbol || "USDC"}
                       </p>
                     </div>
                   ))}
@@ -955,7 +1016,7 @@ export default function ConsumerApp() {
               )}
             </section>
 
-            <p style={styles.footnote}>Built on Arc · Settled in USDC · Every transfer is real and onchain</p>
+            <p style={styles.footnote}>Built on Arc · Settled in USDC or EURC · Every transfer is real and onchain</p>
           </>
         )}
 
@@ -1079,9 +1140,46 @@ export default function ConsumerApp() {
                   </div>
                 )}
                 <div style={styles.field}>
-                  <label style={styles.label}>Amount (USDC)</label>
+                  <label style={styles.label}>
+                    Amount ({view === "send" ? sendCurrency : view === "request" ? requestCurrency : "USDC"})
+                  </label>
                   <input style={styles.input} type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
                 </div>
+                {(view === "send" || view === "request") && (
+                  <div style={styles.field}>
+                    <label style={styles.label}>Currency</label>
+                    <select
+                      value={view === "send" ? sendCurrency : requestCurrency}
+                      onChange={(e) => {
+                        const c = e.target.value as "USDC" | "EURC";
+                        if (view === "send") {
+                          setSendCurrency(c);
+                          setSendBalance(null);
+                        } else {
+                          setRequestCurrency(c);
+                        }
+                      }}
+                      aria-label="Select token currency"
+                      style={styles.input as React.CSSProperties}
+                    >
+                      <option value="USDC">USDC — settles natively on Arc</option>
+                      <option value="EURC">EURC — settles natively on Arc</option>
+                    </select>
+                    {view === "send" && (
+                      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--flow-text-faint)" }}>
+                        Available:{" "}
+                        <strong>
+                          {sendBalanceLoading ? "…" : sendBalance !== null ? `${parseFloat(sendBalance).toFixed(2)} ${sendCurrency}` : "—"}
+                        </strong>
+                      </p>
+                    )}
+                    {view === "request" && (
+                      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--flow-text-faint)" }}>
+                        They will pay you {amount || "…"} {requestCurrency} on Arc Testnet.
+                      </p>
+                    )}
+                  </div>
+                )}
                 {view === "save" && (
                   <div style={styles.field}>
                     <label style={styles.label}>How often?</label>
@@ -1271,11 +1369,19 @@ export default function ConsumerApp() {
         )}
 
         {/* ── Discover view ── */}
+        {/* Architectural note (no behavior change): Marketplace → Agents is
+            the canonical discovery surface (same /api/agents/discover
+            backend, richer inspect → trust → hire journey). This in-app
+            Discover tab is kept as-is for the consumer persona — it calls
+            the same backend, no second discovery system exists. */}
         {view === "discover" && (
           <section>
             <h2 style={styles.flowTitle}>Discover agents</h2>
             <p style={{ color: "var(--flow-text-faint)", fontSize: 13, margin: "0 0 14px", lineHeight: 1.5 }}>
               Browse discoverable agents → inspect what they do, trust & serviceability → hire via the existing hiring route. Data is live from the Agent Registry; one bad record never hides the rest.
+            </p>
+            <p style={{ color: "var(--flow-text-faint)", fontSize: 12, margin: "0 0 14px", lineHeight: 1.5 }}>
+              Canonical discovery lives under <a href="/marketplace" style={styles.resultLink}>Marketplace → Agents</a> — same registry, fuller journey. This tab stays for quick in-app hiring.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
               <input

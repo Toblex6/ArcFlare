@@ -185,6 +185,7 @@ export default function CheckoutPage() {
       explorerUrl: payment.arcTxHash
         ? `${arcTestnet.blockExplorers.default.url}/tx/${payment.arcTxHash}`
         : arcTestnet.blockExplorers.default.url,
+      token: payment.token ?? null,
     }
     : null;
 

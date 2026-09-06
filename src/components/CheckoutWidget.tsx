@@ -27,9 +27,19 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, useSwitchChain } from 'wagmi';
-import { parseUnits } from 'viem';
-import { USDC_CONTRACT, USDC_DECIMALS, erc20TransferAbi } from '@/src/lib/wallet/erc20';
+import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, useSwitchChain, useReadContract } from 'wagmi';
+import { parseUnits, formatUnits } from 'viem';
+import { erc20TransferAbi } from '@/src/lib/wallet/erc20';
+// Phase 2B: token metadata comes ONLY from the client-safe layer (which
+// re-exports the canonical server registry) — never a duplicated table.
+import {
+    USDC_CONTRACT,
+    USDC_DECIMALS,
+    isCctpSupported,
+    normalizeClientSymbol,
+    resolveClientToken,
+    shortTokenAddress,
+} from '@/src/lib/tokens/clientTokens';
 import { arcTestnet } from '@/src/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
@@ -100,6 +110,18 @@ const CCTP_SOURCE_DOMAINS = [
 
 const CONNECT_TIMEOUT_MS = 45000;
 
+// Minimal balanceOf fragment for the payer-balance display. Read-only, no
+// signing — the transfer itself still uses erc20TransferAbi above.
+const erc20BalanceAbi = [
+    {
+        name: 'balanceOf',
+        type: 'function',
+        stateMutability: 'view',
+        inputs: [{ name: 'account', type: 'address' }],
+        outputs: [{ name: '', type: 'uint256' }],
+    },
+] as const;
+
 function friendlyConnectError(err: unknown): string {
     return friendlyWalletError(err);
 }
@@ -137,6 +159,55 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const [showTechnical, setShowTechnical] = useState(false);
     const [connecting, setConnecting] = useState(false);
     const [switching, setSwitching] = useState(false);
+
+    // ── Phase 2B: invoice token identity (authoritative, never converted) ──
+    // The invoice's token drives EVERYTHING below: the displayed symbol, the
+    // balance read, and CCTP availability. Legacy rows without token identity
+    // resolve to USDC. `normalizeClientSymbol` never guesses — unknown input
+    // falls back to USDC for display only; the actual transfer still uses the
+    // server-resolved `payment.token` with the same USDC fallback.
+    const invoiceSymbol = normalizeClientSymbol(payment?.currency ?? payment?.token?.symbol ?? null) ?? 'USDC';
+    const invoiceToken = resolveClientToken({ currency: payment?.currency, token: payment?.token });
+    const isEurc = invoiceSymbol === 'EURC';
+    // CCTP is intentionally USDC-only: no EURC CCTP mechanism exists in this
+    // repo, so the cross-chain tab is unavailable for EURC invoices (they
+    // settle via the wallet tab's same-chain transfer instead).
+    const cctpAvailable = isCctpSupported(invoiceSymbol);
+
+    // Display/balance read against the invoice token contract (same address
+    // the transfer below signs; USDC fallback for legacy rows). handlePayment
+    // keeps its own Phase 2A locals — identical expression, non-null payment.
+    const invoiceTransferAddress = (payment?.token?.address || USDC_CONTRACT) as `0x${string}`;
+    const invoiceTransferDecimals = payment?.token?.decimals ?? USDC_DECIMALS;
+
+    // Payer balance in the INVOICE token (not whatever token happens to be
+    // highest) — read-only balanceOf against the same contract the transfer
+    // will sign. Never blocks payment when unreadable (RPC hiccup); it only
+    // powers the display + the insufficient-balance warning below.
+    const { data: tokenBalanceRaw, isLoading: isBalanceLoading } = useReadContract({
+        address: invoiceTransferAddress,
+        abi: erc20BalanceAbi,
+        functionName: 'balanceOf',
+        args: [(address ?? '0x0000000000000000000000000000000000000000') as `0x${string}`],
+        query: { enabled: isConnected && !!address && !!payment && payment.status !== 'SUCCESS' },
+    });
+    let payerTokenBalance: number | null = null;
+    try {
+        if (typeof tokenBalanceRaw === 'bigint') {
+            payerTokenBalance = Number(formatUnits(tokenBalanceRaw, invoiceTransferDecimals));
+        }
+    } catch { /* unparseable balance — display nothing, block nothing */ }
+    const hasInsufficientBalance =
+        payerTokenBalance !== null &&
+        !!payment &&
+        payment.status !== 'SUCCESS' &&
+        payerTokenBalance < Number(payment.amount);
+
+    // CCTP is unavailable for EURC: never leave the widget sitting on the
+    // cross-chain tab for an invoice it cannot settle.
+    useEffect(() => {
+        if (payment && !cctpAvailable && method === 'cctp') setMethod('wallet');
+    }, [payment, cctpAvailable, method]);
 
     const fetchLedgerStatus = useCallback(async () => {
         if (!reference) return;
@@ -220,6 +291,15 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             setSettleError(null);
             setNetworkMismatch(false);
             setShowTechnical(false);
+            // Pre-flight: the payer sees the shortfall BEFORE signing.
+            // Names the invoice token explicitly — never a generic "funds" error.
+            if (hasInsufficientBalance) {
+                setIsTxPending(false);
+                const msg = `Insufficient ${invoiceSymbol} balance for this payment. You need ${payment.amount} ${invoiceSymbol} but your wallet holds ${payerTokenBalance} ${invoiceSymbol}.`;
+                setSettleError(msg);
+                onEvent?.({ type: 'payment_error', error: msg });
+                return;
+            }
             setIsTxPending(true);
             onEvent?.({ type: 'payment_pending' });
 
@@ -271,11 +351,13 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             setIsTxPending(false);
             setIsVerifying(false);
             const msg = friendlyWalletError(err);
-            // Map common tx rejections to the same friendly copy without leaking viem internals
+            // Map common tx rejections to friendly copy that names the invoice
+            // token — the user must know WHICH balance is short, never a bare
+            // "insufficient funds".
             const lower = String((err as any)?.shortMessage ?? (err as any)?.message ?? '').toLowerCase();
             const friendly = lower.includes('user rejected') || lower.includes('user denied')
                 ? 'Payment cancelled. No funds were moved.'
-                : lower.includes('insufficient') || lower.includes('out of funds') || lower.includes('outoffunds') || lower.includes('gas required exceeds allowance') ? 'Insufficient funds for this transaction.'
+                : lower.includes('insufficient') || lower.includes('out of funds') || lower.includes('outoffunds') || lower.includes('gas required exceeds allowance') ? `Insufficient ${invoiceSymbol} for this transaction. You need ${payment?.amount} ${invoiceSymbol}.`
                 : msg;
             setSettleError(friendly);
             onEvent?.({ type: 'payment_error', error: friendly });
@@ -284,6 +366,14 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
     const handleCctpVerify = async () => {
         if (!reference || !cctpTxHash.trim()) return;
+        // Defensive: the tab is unavailable for EURC, but a stale method state
+        // must never smuggle a cross-chain settlement onto a non-USDC invoice.
+        if (!cctpAvailable) {
+            const msg = `Cross-chain (CCTP) settlement is USDC-only and cannot settle this ${invoiceSymbol} invoice — please use the wallet tab to pay in ${invoiceSymbol}.`;
+            setCctpError(msg);
+            onEvent?.({ type: 'payment_error', error: msg });
+            return;
+        }
         setCctpSubmitting(true);
         setCctpError(null);
         onEvent?.({ type: 'payment_pending' });
@@ -325,7 +415,9 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     }
 
     const isConfirmed = payment.status === 'SUCCESS';
-    const isEurc = payment.currency?.toUpperCase() === 'EURC';
+    // NOTE: `isEurc` is derived from the invoice token near the top of this
+    // component (currency OR server-resolved token symbol) — no second
+    // definition here.
 
     const walletDisplayAddress = isConnected && address
         ? address
@@ -346,39 +438,48 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 </>
             )}
 
-            {/* Payment method tabs — only "wallet" is wired; others render disabled until built */}
+            {/* Payment method tabs — "wallet" settles natively in the invoice
+                token; CCTP is USDC-only so its tab is unavailable for EURC
+                invoices (disabled, auto-switched to wallet above). */}
             {PAYMENT_METHODS.length > 1 && (
                 <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1px solid #2d2015', paddingBottom: 12 }}>
-                    {PAYMENT_METHODS.map((m) => (
-                        <button
-                            key={m.key}
-                            onClick={() => m.available && setMethod(m.key)}
-                            disabled={!m.available}
-                            title={!m.available ? 'Coming soon' : undefined}
-                            style={{
-                                padding: '6px 12px',
-                                borderRadius: 8,
-                                border: 'none',
-                                fontSize: 11,
-                                fontWeight: 700,
-                                cursor: m.available ? 'pointer' : 'not-allowed',
-                                background: method === m.key ? 'rgba(200,151,90,0.15)' : 'transparent',
-                                color: method === m.key ? '#c8975a' : m.available ? '#6b5a45' : '#3d332a',
-                            }}
-                        >
-                            {m.label}{!m.available && ' (soon)'}
-                        </button>
-                    ))}
+                    {PAYMENT_METHODS.map((m) => {
+                        const tabAvailable = m.available && (m.key !== 'cctp' || cctpAvailable);
+                        return (
+                            <button
+                                key={m.key}
+                                onClick={() => tabAvailable && setMethod(m.key)}
+                                disabled={!tabAvailable}
+                                title={!tabAvailable ? (m.key === 'cctp' ? 'Cross-chain (CCTP) is USDC-only' : 'Coming soon') : undefined}
+                                style={{
+                                    padding: '6px 12px',
+                                    borderRadius: 8,
+                                    border: 'none',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    cursor: tabAvailable ? 'pointer' : 'not-allowed',
+                                    background: method === m.key ? 'rgba(200,151,90,0.15)' : 'transparent',
+                                    color: method === m.key ? '#c8975a' : tabAvailable ? '#6b5a45' : '#3d332a',
+                                }}
+                            >
+                                {m.label}{m.key === 'cctp' && !cctpAvailable ? ' (USDC-only)' : (!tabAvailable && ' (soon)')}
+                            </button>
+                        );
+                    })}
                 </div>
             )}
 
-            {/* Phase 2A: EURC invoices settle natively (token-address transfer +
-                on-chain verification in the invoice's token). CCTP remains
-                USDC-only — the cross-chain tab notes that below. */}
-            {isEurc && !isConfirmed && (
-                <div style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
-                    <p style={{ color: '#06b6d4', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Paying in EURC</p>
-                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This invoice settles in EURC on Arc Testnet. Your wallet will submit an EURC transfer, verified on-chain before confirmation.</p>
+            {/* Phase 2B: token identity is always explicit — the user sees
+                exactly which token they are about to sign BEFORE signing.
+                USDC and EURC both settle natively on Arc Testnet; the transfer
+                below signs the invoice token and verify-onchain enforces it. */}
+            {!isConfirmed && (
+                <div style={{ background: isEurc ? 'rgba(6,182,212,0.06)' : 'rgba(200,151,90,0.06)', border: `1px solid ${isEurc ? 'rgba(6,182,212,0.2)' : 'rgba(200,151,90,0.25)'}`, borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
+                    <p style={{ color: isEurc ? '#06b6d4' : '#c8975a', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Paying in {invoiceSymbol}</p>
+                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
+                        This invoice settles in {invoiceSymbol} on Arc Testnet ({shortTokenAddress(invoiceToken.address)}).
+                        Your wallet will submit {isEurc ? 'an' : 'a'} {invoiceSymbol} transfer of {payment.amount} {invoiceSymbol}, verified on-chain before confirmation.
+                    </p>
                 </div>
             )}
 
@@ -393,13 +494,18 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 {[
                     { label: 'Merchant', value: payment.merchant_username ? `@${payment.merchant_username}` : (payment.merchant || 'FlareHQ Merchant') },
                     { label: 'Reference', value: payment.reference, mono: true, truncate: true },
+                    // Amount display ALWAYS carries its symbol — the UI must
+                    // never say EURC while the transfer signs USDC (or vice
+                    // versa). The symbol here is the invoice token, identical
+                    // to the transfer contract above.
                     { label: 'Amount Due', value: payment.amount.toString(), highlight: true },
+                    { label: 'Token', value: `${invoiceSymbol} · ${shortTokenAddress(invoiceToken.address)}` },
                 ].map((row, i) => (
                     <div key={i} style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 14, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                         <span style={{ color: '#6b5a45', fontSize: 12 }}>{row.label}</span>
                         <span style={{ fontSize: row.highlight ? 18 : 12, fontWeight: row.highlight ? 800 : 500, color: '#f0ece6', fontFamily: row.mono ? 'monospace' : 'inherit' }}>
                             {row.truncate && row.value.length > 20 ? `${row.value.slice(0, 20)}...` : row.value}
-                            {row.highlight && <span style={{ color: '#c8975a', fontSize: 12, marginLeft: 6 }}>{payment.currency}</span>}
+                            {row.highlight && <span style={{ color: '#c8975a', fontSize: 12, marginLeft: 6 }}>{invoiceSymbol}</span>}
                         </span>
                     </div>
                 ))}
@@ -535,11 +641,28 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 </button>
                             </div>
                             <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: 10, fontSize: 11, color: '#6b5a45', textDecoration: 'underline' }}>
-                                No test {payment.currency || 'USDC'}? Get some free ↗
+                                No test {invoiceSymbol}? Get some free ↗
                             </a>
+                            {/* Correct-token balance: the payer sees THEIR balance
+                                in the invoice token before signing — never a
+                                different token's balance. */}
+                            <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 12, padding: '10px 14px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ color: '#6b5a45', fontSize: 11 }}>Your {invoiceSymbol} balance</span>
+                                <span style={{ color: '#f0ece6', fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>
+                                    {isBalanceLoading ? '…' : payerTokenBalance !== null ? `${payerTokenBalance} ${invoiceSymbol}` : 'unavailable'}
+                                </span>
+                            </div>
+                            {hasInsufficientBalance && (
+                                <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
+                                    <p style={{ color: '#f87171', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Insufficient {invoiceSymbol} balance</p>
+                                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
+                                        You need {payment.amount} {invoiceSymbol} but your wallet holds {payerTokenBalance} {invoiceSymbol}. Top up {invoiceSymbol} before paying — a {invoiceSymbol === 'EURC' ? 'USDC' : 'EURC'} balance cannot pay this invoice.
+                                    </p>
+                                </div>
+                            )}
                             <button
                                 onClick={handlePayment}
-                                disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0}
+                                disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0 || hasInsufficientBalance}
                                 style={{
                                     width: '100%',
                                     padding: 16,
@@ -547,31 +670,28 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                     border: 'none',
                                     fontSize: 14,
                                     fontWeight: 800,
-                                    cursor: isConfirmed || secondsLeft === 0 ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
-                                    background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
+                                    cursor: isConfirmed || secondsLeft === 0 || hasInsufficientBalance ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
+                                    background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying || hasInsufficientBalance ? '#6b5a45' : '#c8975a',
                                     color: isConfirmed ? '#06b6d4' : '#0e0b08',
                                 }}
                             >
-                                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : `Pay ${payment.amount} ${payment.currency}`}
+                                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : hasInsufficientBalance ? `Insufficient ${invoiceSymbol} balance` : `Pay ${payment.amount} ${invoiceSymbol}`}
                             </button>
                         </>
                     )}
                 </>
             )}
 
-            {method === 'cctp' && (
+            {method === 'cctp' && cctpAvailable && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <p style={{ fontSize: 11, color: '#6b5a45', margin: 0 }}>
-                        Send {payment.amount} {payment.currency} from another chain using your own wallet, then paste the transaction hash below to verify and settle.
+                        Send {payment.amount} {invoiceSymbol} from another chain using your own wallet, then paste the transaction hash below to verify and settle.
                     </p>
                     {/* CCTP is intentionally USDC-only (Phase 2A): no EURC CCTP
                         mechanism exists in this repo. EURC invoices use the
-                        wallet tab's same-chain EURC transfer instead. */}
-                    {isEurc && (
-                        <p style={{ fontSize: 11, color: '#f59e0b', margin: 0 }}>
-                            Cross-chain (CCTP) settlement is USDC-only and cannot settle this EURC invoice — please use the wallet tab to pay in EURC.
-                        </p>
-                    )}
+                        wallet tab's same-chain EURC transfer instead. The tab
+                        above is unavailable for EURC and auto-switches to the
+                        wallet method, so this panel only ever renders for USDC. */}
                     <div>
                         <p style={{ fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px' }}>Source Chain</p>
                         <select
@@ -621,6 +741,13 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 </div>
             )}
 
+            {method === 'cctp' && !cctpAvailable && !isConfirmed && (
+                <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
+                    <p style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Cross-chain unavailable for {invoiceSymbol}</p>
+                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>Cross-chain (CCTP) settlement is USDC-only and cannot settle this {invoiceSymbol} invoice.</p>
+                </div>
+            )}
+
             {settleError && (
                 <div style={{ marginTop: 12, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: 14, textAlign: 'center' }}>
                     <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>❌ {settleError}</p>
@@ -662,8 +789,8 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
             {isConfirmed && (
                 <div style={{ marginTop: 16, background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: 14, padding: 16, textAlign: 'center' }}>
-                    <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>✓ Payment settled on Arc Testnet</p>
-                    <p style={{ color: '#4b4035', fontSize: 10, margin: 0 }}>Ledger updated · Dashboard synced</p>
+                    <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>✓ Payment settled on Arc Testnet in {invoiceSymbol}</p>
+                    <p style={{ color: '#4b4035', fontSize: 10, margin: 0 }}>Ledger updated · {payment.amount} {invoiceSymbol} confirmed on-chain · Dashboard synced</p>
                 </div>
             )}
         </div>

@@ -92,6 +92,7 @@ export default function MerchantDashboard() {
 
   // Payment link creation state
   const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState<'USDC' | 'EURC'>('USDC');
   const [description, setDescription] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [creating, setCreating] = useState(false);
@@ -240,7 +241,7 @@ export default function MerchantDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          currency: 'USDC',
+          currency,
           description,
           webhookUrl: webhookUrl || undefined,
         }),
@@ -249,6 +250,7 @@ export default function MerchantDashboard() {
       if (!data.success) throw new Error(data.error);
       setNewLink(data);
       setAmount('');
+      setCurrency('USDC');
       setDescription('');
       setWebhookUrl('');
     } catch (err: any) {
@@ -541,16 +543,29 @@ export default function MerchantDashboard() {
           <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 4px 0" }}>Create Payment Link</h3>
           <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 20px 0" }}>Generate a checkout link customers can pay directly from their own wallet.</p>
 
-          <form onSubmit={handleCreateLink} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 14, alignItems: "end" }}>
+          <form onSubmit={handleCreateLink} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)", gap: 14, alignItems: "end" }}>
             <div>
               <label style={{ display: "block", color: "var(--text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
-                Amount (USDC)
+                Amount
               </label>
               <input
                 type="number" step="0.01" min="0.01" placeholder="e.g. 10.00"
                 value={amount} onChange={(e) => setAmount(e.target.value)} required
                 style={{ width: "100%", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", color: "var(--text)", fontSize: 14, outline: "none", boxSizing: "border-box" }}
               />
+            </div>
+            <div>
+              <label style={{ display: "block", color: "var(--text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                Currency
+              </label>
+              <select
+                value={currency} onChange={(e) => setCurrency(e.target.value as 'USDC' | 'EURC')}
+                aria-label="Payment link currency"
+                style={{ width: "100%", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", color: "var(--text)", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+              >
+                <option value="USDC">USDC</option>
+                <option value="EURC">EURC</option>
+              </select>
             </div>
             <div>
               <label style={{ display: "block", color: "var(--text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
@@ -621,7 +636,7 @@ export default function MerchantDashboard() {
               </div>
 
               <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: "0 0 12px 0" }}>
-                Amount: <span style={{ fontWeight: 600 }}>{newLink.amount} USDC</span> • Ref: <span style={{ fontFamily: "monospace" }}>{newLink.reference}</span>
+                Amount: <span style={{ fontWeight: 600 }}>{newLink.amount} {newLink.currency || 'USDC'}</span> • Ref: <span style={{ fontFamily: "monospace" }}>{newLink.reference}</span>
               </p>
 
               {showQr && (

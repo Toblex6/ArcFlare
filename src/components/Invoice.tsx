@@ -35,6 +35,10 @@ export interface InvoiceData {
     settledAt: string | null;
     expiresAt: string | null;
     explorerUrl: string; // caller builds this (page already has arcTestnet's block explorer base) — keeps this component chain-agnostic
+    /** Canonical settlement-token identity when the caller has it (verify API
+        returns it; legacy rows read as USDC). Display-only: amount + currency
+        remain the record of what moved. */
+    token?: { symbol: string; address: string; decimals: number } | null;
 }
 
 interface InvoiceProps {
@@ -85,6 +89,7 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
             `Merchant:       ${payment.merchant || 'FlareHQ Merchant'}`,
             `Status:         ${isPaid ? 'PAID' : payment.status}`,
             `Amount:         ${payment.amount} ${payment.currency}`,
+            `Token:          ${payment.token?.symbol || payment.currency}${payment.token?.address ? ` (${payment.token.address})` : ''}`,
             `Network:        ${payment.chain}`,
             payment.issuedAt ? `Issued:         ${formatDate(payment.issuedAt)}` : null,
             isPaid && payment.settledAt ? `Settled:        ${formatDate(payment.settledAt)}` : null,
@@ -230,7 +235,7 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
                 {payment.arcTxHash && (
                     <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 12, padding: '12px 14px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                         <div style={{ minWidth: 0 }}>
-                            <p style={{ fontSize: 9, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 3px' }}>Transaction Hash</p>
+                            <p style={{ fontSize: 9, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 3px' }}>Transaction Hash ({payment.token?.symbol || payment.currency} transfer)</p>
                             <p style={{ fontSize: 11, fontFamily: 'monospace', color: '#a89684', margin: 0, wordBreak: 'break-all' }}>{payment.arcTxHash}</p>
                         </div>
                         <div className="no-print" style={{ display: 'flex', gap: 8, flexShrink: 0 }}>

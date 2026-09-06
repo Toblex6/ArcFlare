@@ -5,6 +5,7 @@ import { prisma } from '@/src/lib/prisma';
 import { jwtVerify } from 'jose';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
+import { resolveCurrency, resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -13,12 +14,12 @@ export async function POST(req: NextRequest) {
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse;
 
-    const token = req.cookies.get('merchant_token')?.value;
-    if (!token || !JWT_SECRET) {
+    const sessionToken = req.cookies.get('merchant_token')?.value;
+    if (!sessionToken || !JWT_SECRET) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(sessionToken, JWT_SECRET);
     const merchantId = payload.merchantId as string;
 
     const merchant = await (prisma as any).merchant.findUnique({ where: { id: merchantId } });
@@ -32,6 +33,20 @@ export async function POST(req: NextRequest) {
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       return NextResponse.json(
         { success: false, error: 'Valid amount is required.' },
+        { status: 400 }
+      );
+    }
+
+    // Multicurrency Phase 2B: the merchant names the invoice token
+    // (USDC | EURC — both natively settleable via verify-onchain/settle
+    // Path B). The canonical resolver is authoritative: unsupported symbols
+    // are rejected, never converted, never silently substituted.
+    let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+    try {
+      token = resolveCurrency({ currency });
+    } catch (tokenErr: any) {
+      return NextResponse.json(
+        { success: false, error: `Unsupported currency: ${tokenErr.message}` },
         { status: 400 }
       );
     }
@@ -59,7 +74,8 @@ export async function POST(req: NextRequest) {
       data: {
         reference,
         amount: parseFloat(amount),
-        currency,
+        currency: token.symbol,
+        tokenAddress: token.address,
         chain: 'Arc Testnet v1.0',
         senderEmail: 'pending@checkout',
         merchant: merchant.businessName,
@@ -78,7 +94,12 @@ export async function POST(req: NextRequest) {
       reference,
       checkoutUrl,
       amount: parseFloat(amount),
-      currency,
+      currency: token.symbol,
+      token: {
+        symbol: token.symbol,
+        address: token.address,
+        decimals: token.decimals,
+      },
       description: description || null,
       merchant: merchant.businessName,
       expiresIn: '24 hours',
@@ -117,10 +138,19 @@ export async function GET(req: NextRequest) {
         const isExpired =
           p.status === "PENDING" && (p as any).expiresAt != null && now > new Date((p as any).expiresAt).getTime();
         const displayStatus = isExpired ? "EXPIRED" : p.status;
+        // Canonical settlement-token identity (additive); legacy rows
+        // without tokenAddress read as USDC.
+        let rowToken: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+        try {
+          rowToken = resolveRowCurrency({ currency: p.currency, tokenAddress: (p as any).tokenAddress });
+        } catch {
+          rowToken = { symbol: 'USDC', address: tokenAddressFor('USDC'), decimals: 6 };
+        }
         return {
           reference: p.reference,
           amount: p.amount,
           currency: p.currency,
+          token: rowToken,
           status: displayStatus,
           rawStatus: p.status,
           displayStatus,
