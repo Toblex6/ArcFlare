@@ -151,6 +151,36 @@ export default function ConsumerApp() {
   const [creatingFlareWallet, setCreatingFlareWallet] = useState(false);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
 
+  // ── Wallet security (Stage 2: recovery email + payment-PIN step-up) ──
+  // security holds BOOLEANS only (hasRecoveryEmail/maskedEmail/hasPin) —
+  // no secrets ever live in component state except the in-memory PIN cache
+  // below, which is deliberately never persisted (no localStorage) and is
+  // dropped on wrong-PIN responses.
+  const [security, setSecurity] = useState<{
+    hasRecoveryEmail: boolean;
+    maskedEmail: string | null;
+    hasPin: boolean;
+  } | null>(null);
+  const pinRef = useRef<string | null>(null);
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
+  const [emailOtp, setEmailOtp] = useState("");
+  const [emailStep, setEmailStep] = useState<"enter" | "code">("enter");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  const [showPinForm, setShowPinForm] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinMsg, setPinMsg] = useState<string | null>(null);
+  // Onboarding recovery (second device): email → code → session.
+  const [showRecover, setShowRecover] = useState(false);
+  const [recoverEmail, setRecoverEmail] = useState("");
+  const [recoverCode, setRecoverCode] = useState("");
+  const [recoverStep, setRecoverStep] = useState<"enter" | "code">("enter");
+  const [recoverBusy, setRecoverBusy] = useState(false);
+  const [recoverMsg, setRecoverMsg] = useState<string | null>(null);
+
   // ── Savings plans (scheduled self-transfers) ──
   const [savingsPlans, setSavingsPlans] = useState<SavingsPlan[]>([]);
   const [savingsLoading, setSavingsLoading] = useState(false);
@@ -230,6 +260,18 @@ export default function ConsumerApp() {
   useEffect(() => {
     if (!walletAddress) return;
     refreshBalance();
+    fetch("/api/consumer/security")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setSecurity({
+            hasRecoveryEmail: !!data.hasRecoveryEmail,
+            maskedEmail: data.maskedEmail ?? null,
+            hasPin: !!data.hasPin,
+          });
+        }
+      })
+      .catch(console.error);
     fetch("/api/consumer/activity")
       .then((r) => r.json())
       .then((data) => {
@@ -423,18 +465,12 @@ export default function ConsumerApp() {
     setHireBusy(true);
     setHireResult(null);
     try {
-      const res = await fetch(`/api/agents/${selectedAgent.id}/hire`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientWalletId: consumerWalletId,
-          description: hireDescription || `Hire ${cardData.name}`,
-          criteria: { requirements: [hireDescription || "Deliver as described"] },
-          budget: Number(hireBudget) || 1,
-        }),
+      const data = await protectedFetch(`/api/agents/${selectedAgent.id}/hire`, { method: "POST" }, {
+        clientWalletId: consumerWalletId,
+        description: hireDescription || `Hire ${cardData.name}`,
+        criteria: { requirements: [hireDescription || "Deliver as described"] },
+        budget: Number(hireBudget) || 1,
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) throw new Error(data?.error || `Hire failed (${res.status})`);
       setHireResult({ success: true, message: `Hire started — job ${data.jobId} created`, reference: data.jobId, txHash: data.txHash, explorerUrl: `https://testnet.arcscan.app/tx/${data.txHash}` });
     } catch (e: any) {
       setHireResult({ success: false, error: e.message });
@@ -604,26 +640,43 @@ export default function ConsumerApp() {
     setView(v);
   };
 
+  // ── Step-up-aware fetch for value-moving actions (Stage 2) ──
+  // Injects the in-memory payment PIN (prompting once per session when a PIN
+  // is enrolled) into the x-consumer-pin header. Drops the cached PIN when
+  // the server reports a step-up failure so the next attempt re-prompts.
+  // Read routes keep using plain fetch — they are intentionally un-gated.
+  const protectedFetch = async (url: string, init: RequestInit, body: unknown) => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (security?.hasPin) {
+      if (!pinRef.current) {
+        const entered = window.prompt("Enter your payment PIN to authorize this action.");
+        if (!entered) throw new Error("Payment PIN required.");
+        pinRef.current = entered;
+      }
+      headers["x-consumer-pin"] = pinRef.current;
+    }
+    const res = await fetch(url, { ...init, headers, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      if (data?.code === "STEP_UP_FAILED" || data?.code === "STEP_UP_REQUIRED") {
+        pinRef.current = null;
+      }
+      // Wallet-upgrade signal (bridge needs a FlareHQ wallet) is caller
+      // UX, not a failure — return it for the caller to handle.
+      if (data?.code === "EXTERNAL_WALLET") return data;
+      throw new Error(data?.error || `Request failed (${res.status})`);
+    }
+    return data;
+  };
+
   // ── Action Handlers ──
   const handleSend = async () => {
     setLoading(true);
     setResult(null);
     try {
-      const initRes = await fetch(`/api/payments/initialize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, currency: sendCurrency, payoutAddress: recipient, merchant: recipient, direction: "send" }),
-      });
-      const initData = await initRes.json();
-      if (!initData.success) throw new Error(initData.error || "Could not start payment.");
+      const initData = await protectedFetch(`/api/payments/initialize`, { method: "POST" }, { amount, currency: sendCurrency, payoutAddress: recipient, merchant: recipient, direction: "send" });
 
-      const settleRes = await fetch(`/api/payments/settle`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reference: initData.reference }),
-      });
-      const settleData = await settleRes.json();
-      if (!settleData.success) throw new Error(settleData.error || "Could not complete payment.");
+      const settleData = await protectedFetch(`/api/payments/settle`, { method: "POST" }, { reference: initData.reference });
 
       setResult({ success: true, message: `Sent ${amount} ${sendCurrency} to ${recipient}.`, txHash: settleData.arcTxHash, explorerUrl: settleData.explorerUrl });
     } catch (e: any) {
@@ -637,13 +690,7 @@ export default function ConsumerApp() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch(`/api/payments/scheduled`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payerSCA: walletAddress, receiverSCA: walletAddress, amount, intervalDays: parseInt(frequency), description: "Automatic savings" }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not set up savings.");
+      const data = await protectedFetch(`/api/payments/scheduled`, { method: "POST" }, { payerSCA: walletAddress, receiverSCA: walletAddress, amount, intervalDays: parseInt(frequency), description: "Automatic savings" });
       setResult({ success: true, message: `Saving ${amount} USDC every ${frequency} day(s).`, reference: data.scheduledPayment?.reference });
       refreshSavings();
     } catch (e: any) {
@@ -664,17 +711,11 @@ export default function ConsumerApp() {
     if (!editingRef) return;
     setSavingsBusyRef(editingRef);
     try {
-      const res = await fetch(`/api/payments/scheduled`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reference: editingRef,
-          amount: parseFloat(editAmount),
-          intervalDays: parseInt(editFrequency),
-        }),
+      await protectedFetch(`/api/payments/scheduled`, { method: "PATCH" }, {
+        reference: editingRef,
+        amount: parseFloat(editAmount),
+        intervalDays: parseInt(editFrequency),
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not update this plan.");
       setEditingRef(null);
       refreshSavings();
     } catch (e: any) {
@@ -687,13 +728,7 @@ export default function ConsumerApp() {
   const handleCancelSavings = async (reference: string) => {
     setSavingsBusyRef(reference);
     try {
-      const res = await fetch(`/api/payments/scheduled`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reference }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not cancel this plan.");
+      await protectedFetch(`/api/payments/scheduled`, { method: "DELETE" }, { reference });
       if (editingRef === reference) setEditingRef(null);
       refreshSavings();
     } catch (e: any) {
@@ -707,13 +742,7 @@ export default function ConsumerApp() {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch(`/api/payments/initialize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, currency: requestCurrency, merchant: "Payment request", direction: "request" }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not create request.");
+      const data = await protectedFetch(`/api/payments/initialize`, { method: "POST" }, { amount, currency: requestCurrency, merchant: "Payment request", direction: "request" });
       setResult({ success: true, message: `Your ${amount} ${requestCurrency} payment link is ready to share.`, reference: data.checkoutUrl });
     } catch (e: any) {
       setResult({ success: false, error: e.message });
@@ -731,19 +760,14 @@ export default function ConsumerApp() {
     setCrossLoading(true);
     setCrossResult(null);
     try {
-      const res = await fetch("/api/cctp/transfer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fromChain,
-          toChain,
-          amount: crossAmount,
-          recipient: walletAddress,
-        }),
+      const data = await protectedFetch("/api/cctp/transfer", { method: "POST" }, {
+        fromChain,
+        toChain,
+        amount: crossAmount,
+        recipient: walletAddress,
       });
-      const data = await res.json();
-      if (!data.success) {
-        if (data.code === "EXTERNAL_WALLET") setBridgeNeedsFlareWallet(true);
+      if (data.code === "EXTERNAL_WALLET") {
+        setBridgeNeedsFlareWallet(true);
         throw new Error(data.error || "Transfer failed.");
       }
 
@@ -803,6 +827,159 @@ export default function ConsumerApp() {
 
   const submitHandlers: Record<string, () => void> = { send: handleSend, save: handleSave, request: handleRequest };
 
+  // ── Wallet security actions (Stage 2 / B4) ──
+  const refreshSecurityState = async () => {
+    try {
+      const r = await fetch("/api/consumer/security");
+      const data = await r.json();
+      if (data.success) {
+        setSecurity({
+          hasRecoveryEmail: !!data.hasRecoveryEmail,
+          maskedEmail: data.maskedEmail ?? null,
+          hasPin: !!data.hasPin,
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const requestEmailCode = async () => {
+    const email = emailInput.trim();
+    if (!email) {
+      setEmailMsg("Enter an email address first.");
+      return;
+    }
+    setEmailBusy(true);
+    setEmailMsg(null);
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (security?.hasPin) {
+        const entered = window.prompt("Enter your payment PIN to change the recovery email.");
+        if (!entered) throw new Error("Payment PIN required.");
+        headers["x-consumer-pin"] = entered;
+      }
+      const res = await fetch("/api/consumer/email", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not send a code.");
+      setEmailStep("code");
+      setEmailMsg("Code sent — check your inbox (10 minutes, one use).");
+    } catch (e: any) {
+      setEmailMsg(e.message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const confirmEmailCode = async () => {
+    setEmailBusy(true);
+    setEmailMsg(null);
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (security?.hasPin) {
+        const entered = window.prompt("Enter your payment PIN to confirm the new recovery email.");
+        if (!entered) throw new Error("Payment PIN required.");
+        headers["x-consumer-pin"] = entered;
+      }
+      const res = await fetch("/api/consumer/email", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ email: emailInput.trim(), code: emailOtp.trim() }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not verify the code.");
+      setEmailMsg("Recovery email attached.");
+      setShowEmailForm(false);
+      setEmailInput("");
+      setEmailOtp("");
+      setEmailStep("enter");
+      await refreshSecurityState();
+    } catch (e: any) {
+      setEmailMsg(e.message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const savePin = async () => {
+    if (!/^\d{4,6}$/.test(pinInput)) {
+      setPinMsg("PIN must be 4–6 digits.");
+      return;
+    }
+    if (pinInput !== pinConfirm) {
+      setPinMsg("PINs do not match.");
+      return;
+    }
+    setPinBusy(true);
+    setPinMsg(null);
+    try {
+      const res = await fetch("/api/consumer/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pinInput }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not set PIN.");
+      setPinMsg("Payment PIN set.");
+      setShowPinForm(false);
+      setPinInput("");
+      setPinConfirm("");
+      await refreshSecurityState();
+    } catch (e: any) {
+      setPinMsg(e.message);
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  const requestRecoverCode = async () => {
+    if (!recoverEmail.trim()) {
+      setRecoverMsg("Enter your recovery email first.");
+      return;
+    }
+    setRecoverBusy(true);
+    setRecoverMsg(null);
+    try {
+      const res = await fetch("/api/consumer/recover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: recoverEmail.trim() }),
+      });
+      await res.json();
+      // Always generic — the response never reveals registration state.
+      setRecoverStep("code");
+      setRecoverMsg("If this email is attached to a wallet, a code is on its way (10 minutes, one use).");
+    } catch {
+      setRecoverMsg("Could not request a code. Try again.");
+    } finally {
+      setRecoverBusy(false);
+    }
+  };
+
+  const confirmRecoverCode = async () => {
+    setRecoverBusy(true);
+    setRecoverMsg(null);
+    try {
+      const res = await fetch("/api/consumer/recover", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: recoverEmail.trim(), code: recoverCode.trim() }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Could not verify the code.");
+      // Session cookie is now set — reload into the wallet.
+      window.location.reload();
+    } catch (e: any) {
+      setRecoverMsg(e.message);
+    } finally {
+      setRecoverBusy(false);
+    }
+  };
+
   // ── Onboarding view ──
   if (checkingSession) {
     return (
@@ -844,6 +1021,50 @@ export default function ConsumerApp() {
           </div>
           <button style={styles.secondaryButton} onClick={connectExisting}>Use this wallet</button>
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
+
+          {/* Second-device recovery (Stage 2 / B1): email + OTP → the same
+              consumer_token session the login flow sets. Zero-email creation
+              above is unchanged. */}
+          <div style={styles.orDivider}><span>or</span></div>
+          <button
+            style={styles.secondaryButton}
+            onClick={() => { setShowRecover((s) => !s); setRecoverMsg(null); setRecoverStep("enter"); }}
+          >
+            Recover with email
+          </button>
+          {showRecover && (
+            <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+              {recoverStep === "enter" ? (
+                <>
+                  <input
+                    style={styles.input}
+                    value={recoverEmail}
+                    onChange={(e) => setRecoverEmail(e.target.value)}
+                    placeholder="Recovery email"
+                    inputMode="email"
+                    autoComplete="email"
+                  />
+                  <button style={styles.secondaryButton} onClick={requestRecoverCode} disabled={recoverBusy}>
+                    {recoverBusy ? "Sending..." : "Send code"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <input
+                    style={styles.input}
+                    value={recoverCode}
+                    onChange={(e) => setRecoverCode(e.target.value)}
+                    placeholder="6-digit code"
+                    inputMode="numeric"
+                  />
+                  <button style={styles.secondaryButton} onClick={confirmRecoverCode} disabled={recoverBusy}>
+                    {recoverBusy ? "Verifying..." : "Verify & sign in"}
+                  </button>
+                </>
+              )}
+              {recoverMsg && <p style={styles.onboardingSub}>{recoverMsg}</p>}
+            </div>
+          )}
 
           {/* A4: connector picker — appears only when "Use this wallet" is
               tapped without an active wallet connection. Uses the same wagmi
@@ -1065,6 +1286,109 @@ export default function ConsumerApp() {
               <button style={styles.refreshBalanceButton} onClick={() => refreshBalance()} disabled={balanceLoading}>
                 {balanceLoading ? "Refreshing..." : "↻ Refresh"}
               </button>
+            </section>
+
+            {/* ── Wallet security panel (Stage 2 / B4) — a security panel, not
+                a marketing settings page. Shows the three states explicitly
+                and flips each ⚠ to ✓ once configured. */}
+            <section style={styles.securityCard} aria-label="Wallet security">
+              <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "var(--flow-text-muted)" }}>Wallet security</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={styles.securityRow}>
+                  <span style={styles.securityOk}>✓</span>
+                  <span style={styles.securityLabel}>Wallet created</span>
+                  <span style={styles.securityAddr}>{walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : ""}</span>
+                </div>
+                <div style={styles.securityRow}>
+                  <span style={security?.hasRecoveryEmail ? styles.securityOk : styles.securityWarn}>
+                    {security?.hasRecoveryEmail ? "✓" : "⚠"}
+                  </span>
+                  <span style={styles.securityLabel}>
+                    {security?.hasRecoveryEmail ? `Recovery email (${security.maskedEmail})` : "No recovery method"}
+                  </span>
+                  <button
+                    style={styles.securityButton}
+                    onClick={() => { setShowEmailForm((s) => !s); setEmailMsg(null); setEmailStep("enter"); }}
+                  >
+                    {security?.hasRecoveryEmail ? "Change" : "Add email recovery"}
+                  </button>
+                </div>
+                {showEmailForm && (
+                  <div style={styles.securityForm}>
+                    {emailStep === "enter" ? (
+                      <>
+                        <input
+                          style={styles.input}
+                          value={emailInput}
+                          onChange={(e) => setEmailInput(e.target.value)}
+                          placeholder="you@example.com"
+                          inputMode="email"
+                          autoComplete="email"
+                        />
+                        <button style={styles.secondaryButton} onClick={requestEmailCode} disabled={emailBusy}>
+                          {emailBusy ? "Sending..." : "Send code"}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          style={styles.input}
+                          value={emailOtp}
+                          onChange={(e) => setEmailOtp(e.target.value)}
+                          placeholder="6-digit code"
+                          inputMode="numeric"
+                        />
+                        <button style={styles.secondaryButton} onClick={confirmEmailCode} disabled={emailBusy}>
+                          {emailBusy ? "Verifying..." : "Verify & attach"}
+                        </button>
+                      </>
+                    )}
+                    {emailMsg && <p style={styles.securityMsg}>{emailMsg}</p>}
+                  </div>
+                )}
+                <div style={styles.securityRow}>
+                  <span style={security?.hasPin ? styles.securityOk : styles.securityWarn}>
+                    {security?.hasPin ? "✓" : "⚠"}
+                  </span>
+                  <span style={styles.securityLabel}>
+                    {security?.hasPin ? "Payment PIN set" : "Step-up not set"}
+                  </span>
+                  {!security?.hasPin && (
+                    <button
+                      style={styles.securityButton}
+                      onClick={() => { setShowPinForm((s) => !s); setPinMsg(null); }}
+                    >
+                      Set payment PIN
+                    </button>
+                  )}
+                </div>
+                {showPinForm && !security?.hasPin && (
+                  <div style={styles.securityForm}>
+                    <input
+                      style={styles.input}
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value)}
+                      placeholder="4–6 digit PIN"
+                      inputMode="numeric"
+                      type="password"
+                      maxLength={6}
+                    />
+                    <input
+                      style={styles.input}
+                      value={pinConfirm}
+                      onChange={(e) => setPinConfirm(e.target.value)}
+                      placeholder="Confirm PIN"
+                      inputMode="numeric"
+                      type="password"
+                      maxLength={6}
+                    />
+                    <button style={styles.secondaryButton} onClick={savePin} disabled={pinBusy}>
+                      {pinBusy ? "Saving..." : "Save PIN"}
+                    </button>
+                    {pinMsg && <p style={styles.securityMsg}>{pinMsg}</p>}
+                  </div>
+                )}
+              </div>
             </section>
 
             <section style={styles.actionsGrid} className="flow-actions-grid">
@@ -1920,6 +2244,23 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
     background: "var(--flow-surface-2)", borderRadius: 14, padding: "14px 16px", margin: "0 0 20px",
   },
+  // ── Wallet security panel (Stage 2 / B4) ──
+  securityCard: {
+    background: "var(--flow-surface-2)", border: "1px solid var(--flow-border)",
+    borderRadius: 14, padding: "14px 16px", margin: "0 0 20px",
+  },
+  securityRow: { display: "flex", alignItems: "center", gap: 10 },
+  securityOk: { color: "#3F7A57", fontWeight: 800, fontSize: 14 },
+  securityWarn: { color: "#B07A2A", fontWeight: 800, fontSize: 14 },
+  securityLabel: { fontSize: 13, fontWeight: 600, flex: 1 },
+  securityAddr: { fontSize: 11, color: "var(--flow-text-faint)" },
+  securityButton: {
+    fontSize: 12, fontWeight: 700, cursor: "pointer", borderRadius: 10,
+    padding: "6px 12px", border: "1px solid var(--flow-border)",
+    background: "transparent", color: "var(--flow-text)",
+  },
+  securityForm: { display: "flex", flexDirection: "column", gap: 8, paddingLeft: 24 },
+  securityMsg: { margin: 0, fontSize: 12, color: "var(--flow-text-muted)" },
   faucetCardLink: {
     fontSize: 13, fontWeight: 700, color: "var(--flow-text)", textDecoration: "none", whiteSpace: "nowrap",
   },

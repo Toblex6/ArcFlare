@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getJobValidationPolicy, recordValidationResponse } from "@/lib/jobs/jobValidationPolicy";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { keccak256, toHex } from "viem";
@@ -42,6 +43,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     const validatorSCA = policy.validatorSCA;
     const actor = await verifyCallerControlsAddress(innerReq, validatorSCA);
     if (!actor) return NextResponse.json({ error: "You do not control the designated validator wallet for this job" }, { status: 403 });
+    // Consumer step-up (Stage 2) for consumer validators.
+    const respondStepUp = await requireConsumerStepUpForActor(innerReq, actor, "consumer.job-fund");
+    if (respondStepUp) return respondStepUp;
     const circleClient = getCircleClient();
     // Use validationResponse(requestHash, response, responseURI, responseHash, tag) — matches deployed contract at 0x8004Cb1B...
     const responseCode = passed ? 100 : 0;

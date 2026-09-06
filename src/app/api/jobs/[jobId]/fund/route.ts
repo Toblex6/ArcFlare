@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
 import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT } from "@/lib/contracts/erc8183";
 import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
@@ -39,6 +40,10 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   // Caller must control client
   const actor = await verifyCallerControlsAddress(req, job.clientSCA);
   if (!actor) return NextResponse.json({ error: "You do not control this job's client wallet." }, { status: 403 });
+
+  // Consumer step-up (Stage 2) for consumer clients.
+  const stepUp = await requireConsumerStepUpForActor(req, actor, "consumer.job-fund");
+  if (stepUp) return stepUp;
 
   // Resolve client agent and authoritative Circle wallet
   const clientAgent = await (prisma as any).agentRegistry.findFirst({ where: { scaAddress: { equals: job.clientSCA, mode: "insensitive" } } });

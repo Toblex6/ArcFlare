@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { computeTreasuryView } from "@/lib/ledger/treasuryService";
 import { getOrCreatePolicy, upsertPolicy } from "@/lib/ledger/treasuryPolicy";
@@ -32,6 +33,10 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
   const wallet = await getOrCreateAgentWallet(agentId);
   const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? wallet.address);
   if (!actor) return NextResponse.json({ error: "You do not control this agent." }, { status: 403 });
+  // Consumer step-up (Stage 2): treasury policy caps gate spending — a
+  // consumer actor changing them needs the step-up credential.
+  const treasuryStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.treasury");
+  if (treasuryStepUp) return treasuryStepUp;
   const body = await req.json().catch(() => ({}));
   // allow both 6-dec integer strings and decimal USDC strings for convenience
   function toUnits(v: any): string | undefined {

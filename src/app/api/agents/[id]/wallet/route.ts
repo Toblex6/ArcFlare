@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { prisma } from "@/lib/prisma";
 
 async function walletHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -28,6 +29,11 @@ async function walletHandler(req: NextRequest, ctx: { params: Promise<{ id: stri
   if (!actor) {
     return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
   }
+
+  // Consumer step-up (Stage 2): provisioning an agent payment wallet is
+  // wallet/account-control — a consumer actor needs the credential.
+  const walletStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.wallet-bind");
+  if (walletStepUp) return walletStepUp;
 
   return NextResponse.json({
     agentId,

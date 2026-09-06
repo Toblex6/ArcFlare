@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getJobValidationPolicy, recordValidationRequest } from "@/lib/jobs/jobValidationPolicy";
 import { notifyValidator } from "@/lib/notifyValidator";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
@@ -55,6 +56,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     if (!signerIsProviderOwner) {
       return NextResponse.json({ error: "You must control the provider agent's wallet to request validation for its work" }, { status: 403 });
     }
+    // Consumer step-up (Stage 2): validation gates escrow release, so a
+    // consumer signer needs the step-up credential once enrolled.
+    const validationStepUp = await requireConsumerStepUpForActor(innerReq, signerIsProviderOwner, "consumer.job-fund");
+    if (validationStepUp) return validationStepUp;
     const tx = await circleClient.createContractExecutionTransaction({
       walletAddress: signingWalletForRequest,
       blockchain: "ARC-TESTNET" as any,

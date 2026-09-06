@@ -17,6 +17,7 @@ import { prisma } from '@/lib/prisma';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
 import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID, escrowAbi } from '@/lib/wallet/flarehqContracts';
 import { readContractReliable } from '@/lib/wallet/chainClient';
@@ -104,6 +105,11 @@ async function releaseHandler(request: NextRequest) {
         { status: 403 }
       );
     }
+
+    // Consumer step-up (Stage 2): confirming delivery releases escrowed
+    // funds, so a consumer party needs the step-up credential once enrolled.
+    const releaseStepUp = await requireConsumerStepUpForActor(request, actor, 'consumer.escrow-act');
+    if (releaseStepUp) return releaseStepUp;
 
     // ── Execute confirmDelivery(bytes32) ────────────────────────────────────
     let txHash: string;

@@ -66,6 +66,8 @@ export default function FlareHQAssistantPage() {
   const [listening, setListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [copiedLinkIndex, setCopiedLinkIndex] = useState<number | null>(null);
+  // Stage 2 step-up: whether a payment PIN is enrolled (booleans only).
+  const [hasPin, setHasPin] = useState(false);
 
   // --- NEW: Multilingual states ---
   // Default to the user's browser/OS language, fallback to English
@@ -91,6 +93,14 @@ export default function FlareHQAssistantPage() {
         if (!data.success) router.replace('/consumer');
       })
       .catch(() => router.replace('/consumer'));
+    // Step-up enrollment (Stage 2): prompt for the payment PIN only when one
+    // is enrolled — read once, keep in memory, never persist.
+    fetch('/api/consumer/security')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setHasPin(!!data.hasPin);
+      })
+      .catch(() => {});
   }, [router]);
 
   // --- Text-to-Speech: speak assistant replies ---
@@ -200,9 +210,18 @@ export default function FlareHQAssistantPage() {
   const handleConfirm = async (action: any) => {
     setSending(true);
     try {
+      // Step-up (Stage 2): value-moving confirmations carry the payment PIN
+      // when one is enrolled. The server's canonical gate enforces it; the
+      // client only forwards what the user typed (never stored).
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (hasPin && (action?.action === 'send' || action?.action === 'request' || action?.action === 'save')) {
+        const entered = window.prompt('Enter your payment PIN to authorize this action.');
+        if (!entered) throw new Error('Payment PIN required.');
+        headers['x-consumer-pin'] = entered;
+      }
       const res = await fetch('/api/consumer/assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ confirmedAction: action }),
       });
       const data = await res.json();

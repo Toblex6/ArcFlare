@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
 import { arcTestnet } from "viem/chains";
@@ -26,6 +27,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!clientAddress) return NextResponse.json({ error: "Invalid clientWalletId" }, { status: 400 });
     const actor = await verifyCallerControlsAddress(innerReq, clientAddress);
     if (!actor) return NextResponse.json({ error: "You do not control the payer wallet" }, { status: 403 });
+    // Consumer step-up (Stage 2) for consumer clients.
+    const stepUp = await requireConsumerStepUpForActor(innerReq, actor, "consumer.job-fund");
+    if (stepUp) return stepUp;
     const providerAddress = agent.scaAddress;
     // Self-hire guard: client === provider is rejected outright (mirrors self-validation guard below).
     // Rationale: hiring yourself via escrow is a no-op (funds round-trip minus gas/fees) and would

@@ -12,6 +12,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
 import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
@@ -93,6 +94,11 @@ async function disputeHandler(request: NextRequest) {
         { status: 403 }
       );
     }
+
+    // Consumer step-up (Stage 2): freezing escrow into DISPUTED is an
+    // account-control action over funds.
+    const disputeStepUp = await requireConsumerStepUpForActor(request, actor, 'consumer.escrow-act');
+    if (disputeStepUp) return disputeStepUp;
 
     const disputeReason = reason || 'No reason provided';
 

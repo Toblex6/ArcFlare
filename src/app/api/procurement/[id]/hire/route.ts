@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
@@ -47,6 +48,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (merchant && posting.merchantId === merchant.id) merchantCtx = merchant;
     else return NextResponse.json({ error: "Only the posting owner can hire." }, { status: 403 });
   }
+  // Consumer step-up (Stage 2) when the hiring client is consumer-controlled.
+  const hireStepUp = await requireConsumerStepUpForActor(req, actorCheck, "consumer.job-fund");
+  if (hireStepUp) return hireStepUp;
   if (!posting.selectedProviderSCA) return NextResponse.json({ error: "posting has no selected provider" }, { status: 400 });
 
   // ── Conditional claim: SELECTED → HIRING (only one winner) ───────────────────

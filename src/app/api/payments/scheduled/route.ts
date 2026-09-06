@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
+import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 
 // The platform agent's signing wallet — same explicit resolution as settle
@@ -70,6 +71,11 @@ async function createScheduledHandler(request: Request) {
         { status: 403 }
       );
     }
+
+    // Consumer step-up (Stage 2): authorizing future debits needs the
+    // step-up credential once a payment PIN is enrolled.
+    const createStepUp = await requireConsumerStepUpForActor(request as any, controlsPayer, 'consumer.save');
+    if (createStepUp) return createStepUp;
 
     // Resolve the Circle wallet that ACTUALLY signs for payerSCA, from the
     // bound records only — the body's payerWalletId is deliberately ignored.
@@ -272,6 +278,10 @@ async function cancelScheduledHandler(request: Request) {
       );
     }
 
+    // Consumer step-up (Stage 2) for consumer payers.
+    const cancelStepUp = await requireConsumerStepUpForActor(request as any, controlsPayer, 'consumer.save');
+    if (cancelStepUp) return cancelStepUp;
+
     const updated = await (prisma as any).scheduledPayment.update({
       where: { reference },
       data: { status: 'CANCELLED' },
@@ -339,6 +349,10 @@ async function editScheduledHandler(request: Request) {
         { status: 403 }
       );
     }
+
+    // Consumer step-up (Stage 2) for consumer payers.
+    const editStepUp = await requireConsumerStepUpForActor(request as any, controlsPayer, 'consumer.save');
+    if (editStepUp) return editStepUp;
 
     if (existing.status !== 'ACTIVE') {
       return NextResponse.json(

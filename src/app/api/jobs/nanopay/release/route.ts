@@ -4,6 +4,7 @@ import { ARC_FLARE_STREAM_CONTRACT_ADDRESS } from "@/lib/contracts/streamContrac
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { recordNanopaymentTrancheReleased } from "@/lib/jobs/nanopaymentSplit";
 
 async function releaseHandler(req: NextRequest) {
@@ -38,6 +39,12 @@ async function releaseHandler(req: NextRequest) {
     if (!controlsClient && !controlsEvaluator) {
       return NextResponse.json({ error: "You do not control this job's client or evaluator wallet." }, { status: 403 });
     }
+
+    // Consumer step-up (Stage 2) when the authorizing party is a consumer.
+    const releaseStepUp =
+      (await requireConsumerStepUpForActor(req, controlsClient, "consumer.job-fund")) ??
+      (await requireConsumerStepUpForActor(req, controlsEvaluator, "consumer.job-fund"));
+    if (releaseStepUp) return releaseStepUp;
 
     // Check idempotency — if already released, return existing txHash
     const existing = await prisma.jobNanopaymentTranche.findUnique({

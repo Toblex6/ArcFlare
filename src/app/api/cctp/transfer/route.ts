@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { startBridge, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
+import { requireConsumerStepUp } from "@/lib/auth/consumerStepUp";
 import { ensureWalletOnChain } from "@/src/lib/circle/client";
 import { prisma } from "@/src/lib/prisma";
 
@@ -59,6 +60,11 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Consumer step-up (Stage 2): bridging moves funds off the consumer's
+    // own wallet — a session alone is not sufficient once enrolled.
+    const bridgeStepUp = await requireConsumerStepUp(req, account, 'consumer.bridge');
+    if (bridgeStepUp) return bridgeStepUp;
 
     // The consumer's wallet is only provisioned on Arc at signup. Add it to
     // the requested source chain the first time they bridge from there —

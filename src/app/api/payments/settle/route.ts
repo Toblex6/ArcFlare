@@ -9,6 +9,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet } from 'viem/chains';
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveConsumerSession } from '@/lib/middleware/withConsumerAuth';
+import { requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
@@ -218,6 +219,18 @@ async function mergedSettleHandler(request: NextRequest) {
         },
         { status: 403 }
       );
+    }
+
+    // Consumer step-up (Stage 2): when the payer is the calling consumer,
+    // settling (same-chain debit) needs the step-up credential once a
+    // payment PIN is enrolled. Merchant and internal-service paths pass
+    // through untouched — their own auth already governed them.
+    if (consumerOwnsIt && callerConsumerWallet) {
+      const settleAccount = await (prisma as any).consumerAccount.findUnique({
+        where: { walletAddress: callerConsumerWallet },
+      });
+      const settleStepUp = await requireConsumerStepUp(request, settleAccount, 'consumer.send');
+      if (settleStepUp) return settleStepUp;
     }
 
     // ── PHASE 2A CANONICAL TOKEN RESOLUTION ─────────────────────────────────

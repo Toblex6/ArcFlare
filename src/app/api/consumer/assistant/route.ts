@@ -11,6 +11,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
+import { CONSUMER_PIN_HEADER, requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
+import { prisma } from '@/src/lib/prisma';
 import { internalUrl } from '@/src/lib/internalUrl';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
@@ -116,13 +118,40 @@ export async function POST(req: NextRequest) {
     if (confirmedAction) {
       const { action, amount, currency, recipientAddress, frequencyDays } = confirmedAction;
 
+      // Consumer step-up (Stage 2): this fan-out reaches initialize/settle/
+      // scheduled with the caller's cookie, so the gate lives here AND in
+      // each inner route (defense in depth — neither path can be skipped).
+      const assistantAccount = await (prisma as any).consumerAccount.findUnique({
+        where: { walletAddress },
+      });
+      const assistantAction =
+        action === 'send' ? 'consumer.send' as const
+        : action === 'request' ? 'consumer.request' as const
+        : action === 'save' ? 'consumer.save' as const
+        : null;
+      if (!assistantAction) {
+        return NextResponse.json({ success: false, error: 'Unknown confirmed action.' }, { status: 400 });
+      }
+      const assistantStepUp = await requireConsumerStepUp(req, assistantAccount, assistantAction);
+      if (assistantStepUp) return assistantStepUp;
+
+      // Forward the step-up credential to the inner routes so their own
+      // canonical gates see the same proof (the PIN itself is never logged
+      // or persisted — it travels in the header only).
+      const pinHeader = req.headers.get(CONSUMER_PIN_HEADER);
+      const forwardHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        cookie: req.headers.get('cookie') || '',
+      };
+      if (pinHeader) forwardHeaders[CONSUMER_PIN_HEADER] = pinHeader;
+
       if (action === 'send') {
         if (!recipientAddress || !amount) {
           return NextResponse.json({ success: false, error: 'Missing amount or address.' }, { status: 400 });
         }
         const initRes = await fetch(internalUrl('/api/payments/initialize'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
+          headers: forwardHeaders,
           body: JSON.stringify({
             amount,
             currency: currency || 'USDC',
@@ -136,7 +165,7 @@ export async function POST(req: NextRequest) {
 
         const settleRes = await fetch(internalUrl('/api/payments/settle'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
+          headers: forwardHeaders,
           body: JSON.stringify({ reference: initData.reference }),
         });
         const settleData = await settleRes.json();
@@ -152,7 +181,7 @@ export async function POST(req: NextRequest) {
       if (action === 'request') {
         const res = await fetch(internalUrl('/api/payments/initialize'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
+          headers: forwardHeaders,
           body: JSON.stringify({ amount, currency: currency || 'USDC', merchant: 'Payment request', direction: 'request' }),
         });
         const data = await res.json();
@@ -166,7 +195,7 @@ export async function POST(req: NextRequest) {
       if (action === 'save') {
         const res = await fetch(internalUrl('/api/payments/scheduled'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') || '' },
+          headers: forwardHeaders,
           body: JSON.stringify({
             payerSCA: walletAddress,
             receiverSCA: walletAddress,

@@ -274,10 +274,33 @@ model ConsumerAccount {
   circleWalletId   String?
   walletSetId      String? // needed to provision this same SCA address on additional chains (e.g. for bridging)
   email            String?  @unique // optional — recovery/notifications only, never required
+  emailVerifiedAt  DateTime? // set when the address is proven via OTP (attach/change/recover); recovery requires non-null
+  pinHash          String? // bcrypt hash of the 4–6 digit step-up PIN; null = step-up not enrolled (bootstrap grace)
+  pinFailedAttempts Int     @default(0) // consecutive wrong-PIN attempts; reset on success
+  pinLockedUntil   DateTime? // step-up lockout expiry after repeated failures; null = not locked
   telegramUserId   String?  @unique // Telegram bot identity (Telegram users are consumer_token accounts)
   onboardingSource String? // "telegram" | "web" | etc — how this account was created
   createdAt        DateTime @default(now())
   lastSeenAt       DateTime @default(now())
+}
+
+// Short-lived single-use email OTPs for consumer recovery flows
+// (attach / change / recover). The raw code is NEVER persisted — only its
+// SHA-256 hash — and is never returned in any API response or log line.
+model ConsumerEmailOtp {
+  id        String    @id @default(cuid())
+  accountId String? // null for RECOVERY requests for unknown emails (anti-enumeration: same response either way)
+  email     String // normalized lowercase recipient
+  codeHash  String // SHA-256 hex of the 6-digit code
+  purpose   String // "EMAIL_ATTACH" | "EMAIL_CHANGE" | "RECOVERY"
+  attempts  Int       @default(0) // wrong-code attempts; row is invalidated after max
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("consumer_email_otps")
 }
 
 model TelegramWithdrawalIntent {

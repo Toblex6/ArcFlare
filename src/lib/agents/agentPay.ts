@@ -44,6 +44,7 @@ import { Contract, JsonRpcProvider, Wallet, parseUnits, parseEther } from "ether
 import { prisma } from "@/lib/prisma";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimitEnforcer";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 import { enqueueForReview } from "@/lib/jobs/settlementRecovery";
@@ -175,6 +176,13 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   if (!actor) {
     return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
   }
+
+  // 2b. Consumer step-up (Stage 2): the value-moving decision point for
+  // POST /api/agents/[id]/pay lives here (this lib IS the route's execution
+  // core — the route file only validates shape and delegates). Consumer
+  // actors need the step-up credential once a payment PIN is enrolled.
+  const a2aStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.agent-pay");
+  if (a2aStepUp) return a2aStepUp;
 
   const provider = getProvider();
   const usdc = new Contract(getUsdcAddress(), USDC_ERC20_ABI, provider);
@@ -451,6 +459,11 @@ export async function setAgentPolicy(req: NextRequest, agentId: number, body: an
   if (!actor) {
     return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
   }
+
+  // Consumer step-up (Stage 2): changing an agent's on-chain spend limit is
+  // an account-control action — consumer actors need the credential.
+  const policyStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.treasury");
+  if (policyStepUp) return policyStepUp;
 
   // H3 — bootstrap front-run guard: the contract's setLimit is first-caller-
   // becomes-owner. The limit owner must be the platform relayer (which signs

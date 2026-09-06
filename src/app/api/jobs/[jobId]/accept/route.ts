@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { evaluateProviderAcceptance } from "@/lib/procurement/procurementService";
@@ -45,6 +46,10 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   // Caller must control the job's provider SCA
   const actor = await verifyCallerControlsAddress(req, job.providerSCA);
   if (!actor) return NextResponse.json({ error: "You do not control this job's provider wallet." }, { status: 403 });
+
+  // Consumer step-up (Stage 2) for human providers (incl. Telegram /accept).
+  const stepUp = await requireConsumerStepUpForActor(req, actor, "consumer.job-fund");
+  if (stepUp) return stepUp;
 
   // ── Resolve the provider's authoritative Circle wallet ───────────────────────
   // Two legitimate provider identities:

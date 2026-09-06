@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
@@ -44,6 +45,10 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
   const hirerWallet = await getOrCreateAgentWallet(hirerId);
   const actor = await verifyCallerControlsAddress(req, hirer.scaAddress ?? hirerWallet.address);
   if (!actor) return NextResponse.json({ error: "You do not control the hiring agent." }, { status: 403 });
+
+  // Consumer step-up (Stage 2) when the hiring party is consumer-controlled.
+  const stepUp = await requireConsumerStepUpForActor(req, actor, "consumer.job-fund");
+  if (stepUp) return stepUp;
 
   // Trust check FIRST (cheapest, no side effects) — if policy has minTrustScore, enforce before money checks
   const hirerPolicy: any = await (prisma as any).agentTreasuryPolicy.findUnique({ where: { agentRegistryId: hirerId } }).catch(() => null);

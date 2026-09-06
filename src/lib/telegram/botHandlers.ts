@@ -37,6 +37,7 @@ import { prisma } from '@/lib/prisma';
 import { getUsdcBalance } from '@/lib/wallet/usdcBalance';
 import { transferUsdc } from '@/lib/circle/transfers';
 import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
+import { CONSUMER_PIN_HEADER, verifyConsumerPinForBot } from '@/lib/auth/consumerStepUp';
 import { NextRequest } from 'next/server';
 import { formatUnits } from 'viem';
 
@@ -47,6 +48,27 @@ export interface BotReply {
 
 const AMOUNT_RE = /^\d+(\.\d{1,6})?$/;
 const WITHDRAWAL_TTL_MS = 15 * 60 * 1000;
+
+// Step-up PIN plumbing for bot commands that reach value-moving or
+// account-control routes. The PIN is used immediately for one verification
+// and never stored, logged, or echoed. Commands accept it as an explicit
+// `pin=XXXX` token (unambiguous — never position-guessed, so a wrong guess
+// can never burn a lockout attempt on a misparsed amount).
+export function extractTrailingPinToken(parts: string[]): { rest: string[]; pin?: string } {
+  const rest = [...parts];
+  let pin: string | undefined;
+  const idx = rest.findIndex((p) => /^pin=\d{4,6}$/.test(p));
+  if (idx >= 0) pin = rest.splice(idx, 1)[0].slice(4);
+  return { rest, pin };
+}
+
+function stepUpReply(code: unknown): string | null {
+  const c = String(code ?? "");
+  if (c === "STEP_UP_REQUIRED") return `This action needs your payment PIN. Resend with pin=XXXX appended (e.g. pin=1234). Set one in Flow: Wallet security → Set payment PIN.`;
+  if (c === "STEP_UP_FAILED") return `Wrong payment PIN. Check it in Flow and try again.`;
+  if (c === "STEP_UP_LOCKED") return `Too many wrong attempts — step-up is locked for a while. Try again later.`;
+  return null;
+}
 
 /**
  * /start — first contact. Creates the account + wallet if new, greets
@@ -222,7 +244,8 @@ export async function handleListJobs(): Promise<BotReply> {
 export async function handleAccept(
   telegramUserId: string,
   jobId: string,
-  amount?: string
+  amount?: string,
+  pin?: string
 ): Promise<BotReply> {
   const session = await getTelegramConsumerSession(telegramUserId);
   if (!session) {
@@ -247,9 +270,13 @@ export async function handleAccept(
   try {
     const { POST } = await import('@/app/api/jobs/[jobId]/accept/route');
     const token = await issueConsumerSessionToken(account.id, account.walletAddress);
+    const headers: Record<string, string> = { cookie: `consumer_token=${token}`, 'content-type': 'application/json' };
+    // Forward the step-up credential (if supplied) so the route's canonical
+    // gate sees the same proof — the PIN travels in the header only.
+    if (pin) headers[CONSUMER_PIN_HEADER] = pin;
     const request = new NextRequest(`http://internal/api/jobs/${jobId}/accept`, {
       method: 'POST',
-      headers: { cookie: `consumer_token=${token}`, 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify(amount !== undefined && amount !== '' ? { budget: amount } : {}),
     });
 
@@ -260,6 +287,8 @@ export async function handleAccept(
       if (data?.replayed) {
         return { text: `Job #${jobId} already has its budget set (${data.budget ?? '?'} USDC) — nothing more to do.` };
       }
+      const stepUpMessage = stepUpReply(data?.code);
+      if (stepUpMessage) return { text: stepUpMessage };
       const message = String(data?.error ?? `error ${res.status}`);
       if (res.status === 403) {
         return { text: `You can only accept jobs assigned to your wallet.` };
@@ -293,7 +322,8 @@ export async function handleAccept(
 export async function handleDeliver(
   telegramUserId: string,
   jobId: string,
-  submissionText: string
+  submissionText: string,
+  pin?: string
 ): Promise<BotReply> {
   const session = await getTelegramConsumerSession(telegramUserId);
   if (!session) {
@@ -308,9 +338,12 @@ export async function handleDeliver(
 
     const { POST } = await import('@/app/api/jobs/submit/route');
     const token = await issueConsumerSessionToken(account.id, account.walletAddress);
+    const headers: Record<string, string> = { cookie: `consumer_token=${token}`, 'content-type': 'application/json' };
+    // Forward the step-up credential (if supplied) — header only.
+    if (pin) headers[CONSUMER_PIN_HEADER] = pin;
     const request = new NextRequest('http://internal/api/jobs/submit', {
       method: 'POST',
-      headers: { cookie: `consumer_token=${token}`, 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({
         jobId,
         providerWalletId: account.circleWalletId,
@@ -321,6 +354,8 @@ export async function handleDeliver(
     const res = await POST(request);
     const data = await res.json();
     if (!res.ok || !data.success) {
+      const stepUpMessage = stepUpReply((data as any)?.code);
+      if (stepUpMessage) return { text: stepUpMessage };
       return { text: `Couldn't submit deliverable: ${data.error ?? res.status}` };
     }
     return {
@@ -414,7 +449,7 @@ export async function handleWithdraw(
  * of a second transfer; a failed transfer rolls the intent back to
  * PENDING so the user can retry.
  */
-export async function handleConfirmWithdraw(telegramUserId: string): Promise<BotReply> {
+export async function handleConfirmWithdraw(telegramUserId: string, pin?: string): Promise<BotReply> {
   const intent = await prisma.telegramWithdrawalIntent.findUnique({ where: { telegramUserId } });
   if (!intent) {
     return { text: `No pending withdrawal. Start one with /withdraw <address> [amount].` };
@@ -423,6 +458,23 @@ export async function handleConfirmWithdraw(telegramUserId: string): Promise<Bot
   if (Date.now() - intent.createdAt.getTime() > WITHDRAWAL_TTL_MS) {
     await prisma.telegramWithdrawalIntent.delete({ where: { telegramUserId } });
     return { text: `That withdrawal request expired. Send /withdraw <address> [amount] to start a new one.` };
+  }
+
+  // Consumer step-up (Stage 2): executing a withdrawal moves funds. When a
+  // payment PIN is enrolled, /confirm requires it (/confirm <PIN>) — checked
+  // through the same canonical credential implementation as the HTTP helper
+  // (same hash, same counters, same lockout). The PIN is used for this one
+  // verification only and is never stored, logged, or echoed.
+  const confirmAccount = await prisma.consumerAccount.findFirst({ where: { telegramUserId } });
+  if (confirmAccount?.pinHash) {
+    const pinCheck = await verifyConsumerPinForBot(confirmAccount.id, pin);
+    if (!pinCheck.ok) {
+      return {
+        text: pinCheck.locked
+          ? `Too many wrong attempts — step-up is locked for a while. Try again later.`
+          : `This withdrawal needs your payment PIN. Send /confirm <PIN> within 15 minutes.`,
+      };
+    }
   }
 
   // Atomic claim: exactly one /confirm (or webhook retry) may execute the
@@ -493,11 +545,11 @@ export async function handleHelp(): Promise<BotReply> {
       `Commands:\n` +
       `/jobs — see open jobs\n` +
       `/apply <jobId> "<your pitch>" — apply to a job (put your pitch in quotes, e.g. /apply job112 "I can build this")\n` +
-      `/accept <jobId> [amount] — accept a job you were hired for and set its budget\n` +
-      `/deliver <jobId> <link/text> — submit completed work\n` +
+      `/accept <jobId> [amount] [pin=XXXX] — accept a job you were hired for and set its budget\n` +
+      `/deliver <jobId> <link/text> [pin=XXXX] — submit completed work\n` +
       `/balance — check your balance\n` +
       `/withdraw <address> [amount] — withdraw funds to your own wallet\n` +
-      `/confirm — execute a pending withdrawal\n` +
+      `/confirm [PIN] — execute a pending withdrawal (PIN required when set)\n` +
       `/cancel — cancel a pending withdrawal\n` +
       `/history — recent completed jobs and lifetime earnings\n` +
       `/retrygas — retry a stuck gas sponsorship`,

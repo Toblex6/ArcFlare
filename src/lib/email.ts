@@ -37,6 +37,41 @@ export async function sendVerificationEmail(email: string, businessName: string,
   }
 }
 
+export async function sendConsumerOtpEmail(email: string, code: string, purpose: "attach" | "change" | "recover") {
+  const title =
+    purpose === "recover"
+      ? "Recover your FlareHQ wallet"
+      : purpose === "change"
+        ? "Confirm your new FlareHQ recovery email"
+        : "Confirm your FlareHQ recovery email";
+  const intro =
+    purpose === "recover"
+      ? "Use the code below to sign back in to your FlareHQ consumer wallet on this device."
+      : "Use the code below to attach this email as the recovery method for your FlareHQ wallet.";
+  // NOTE: the raw code exists ONLY in this email body — it is never
+  // persisted (only its hash), never returned by any API, never logged.
+  const { error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: email,
+    subject: `${code} is your FlareHQ code`,
+    html: `
+      <div style="font-family: Inter, system-ui, sans-serif; background:#0e0b08; color:#f0ece6; padding:32px; border-radius:16px; max-width:480px; margin:0 auto;">
+        <h2 style="margin:0 0 8px;">${title}</h2>
+        <p style="color:#8a7560; font-size:14px;">${intro}</p>
+        <div style="background:#1a1410; border:1px solid #c8975a; border-radius:12px; padding:20px; text-align:center; margin:20px 0;">
+          <span style="font-size:32px; font-weight:800; letter-spacing:8px; color:#c8975a;">${code}</span>
+        </div>
+        <p style="color:#6b5a45; font-size:12px;">This code expires in 10 minutes and can be used once. If you didn't request this, you can ignore this email.</p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    console.error("[email] Resend error:", error);
+    throw new Error("Failed to send verification email.");
+  }
+}
+
 export async function sendPasswordResetEmail(email: string, businessName: string, code: string) {
   const { error } = await resend.emails.send({
     from: FROM_EMAIL,

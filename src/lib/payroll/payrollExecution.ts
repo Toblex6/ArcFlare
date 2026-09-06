@@ -43,6 +43,7 @@ import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { prisma } from "@/lib/prisma";
 import { paymentRequiredResponse, verifyPayment, settlePayment } from "@/lib/x402";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { checkSpendAllowed, getSpendLimitContract, recordSpend } from "@/lib/agents/spendLimitEnforcer";
 import { recoverFromSpendLimitRaceFailure, enqueueForReview } from "@/lib/jobs/settlementRecovery";
 import { getTokenBySymbol, isSupportedToken, getUsdcAddress, getTokenByAddress } from "@/lib/tokens/supportedTokens";
@@ -262,6 +263,12 @@ export async function fundPayrollViaX402(
       { status: 403 }
     );
   }
+
+  // 3b. Consumer step-up (Stage 2): the value-moving decision point for
+  // POST /api/payroll/fund lives here (this lib IS the route's execution
+  // core). Consumer-controlled payers need the step-up credential.
+  const payrollStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.agent-pay");
+  if (payrollStepUp) return payrollStepUp;
 
   // 4. spend-limit PRE-FLIGHT — before settle, before any funds move.
   const spendCheck = await checkSpendAllowed({ agentAddress: payer, amount: totalAmount });

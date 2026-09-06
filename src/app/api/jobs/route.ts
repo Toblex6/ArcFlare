@@ -45,6 +45,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
+import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
@@ -470,12 +471,17 @@ async function jobsHandler(request: Request) {
       }
 
       // The job's client wallet pays the escrow — the caller must control it.
-      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+      const createActor = await verifyCallerControlsAddress(request as any, clientSCA);
+      if (!createActor) {
         return NextResponse.json(
           { success: false, error: 'You do not control the clientSCA wallet.' },
           { status: 403 }
         );
       }
+      // Consumer step-up (Stage 2): a consumer session alone is not
+      // sufficient to create a funded job once a payment PIN is enrolled.
+      const createStepUp = await requireConsumerStepUpForActor(request as any, createActor, 'consumer.job-fund');
+      if (createStepUp) return createStepUp;
 
       const now = await publicClient.getBlock();
       const expiredAt = now.timestamp + BigInt(deadlineHours * 3600);
@@ -593,12 +599,16 @@ async function jobsHandler(request: Request) {
       }
 
       // setBudget is signed by the provider — the caller must control it.
-      if (!(await verifyCallerControlsAddress(request as any, providerSCA))) {
+      const budgetActor = await verifyCallerControlsAddress(request as any, providerSCA);
+      if (!budgetActor) {
         return NextResponse.json(
           { success: false, error: 'You do not control the providerSCA wallet.' },
           { status: 403 }
         );
       }
+      // Consumer step-up (Stage 2) for consumer providers.
+      const budgetStepUp = await requireConsumerStepUpForActor(request as any, budgetActor, 'consumer.job-fund');
+      if (budgetStepUp) return budgetStepUp;
 
       // ── PREFLIGHT: catch revert causes before spending gas.
       const jobForBudget = await requireJob(jobId);
@@ -671,12 +681,16 @@ async function jobsHandler(request: Request) {
       }
 
       // approve spends the client's USDC allowance — caller must control it.
-      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+      const approveActor = await verifyCallerControlsAddress(request as any, clientSCA);
+      if (!approveActor) {
         return NextResponse.json(
           { success: false, error: 'You do not control the clientSCA wallet.' },
           { status: 403 }
         );
       }
+      // Consumer step-up (Stage 2) for consumer clients.
+      const approveStepUp = await requireConsumerStepUpForActor(request as any, approveActor, 'consumer.job-fund');
+      if (approveStepUp) return approveStepUp;
 
       const amountWei = BigInt(Math.round(parseFloat(amountUSDC) * 1_000_000));
 
@@ -748,12 +762,16 @@ async function jobsHandler(request: Request) {
       }
 
       // fund moves the client's escrowed USDC — caller must control it.
-      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+      const fundActor = await verifyCallerControlsAddress(request as any, clientSCA);
+      if (!fundActor) {
         return NextResponse.json(
           { success: false, error: 'You do not control the clientSCA wallet.' },
           { status: 403 }
         );
       }
+      // Consumer step-up (Stage 2) for consumer clients.
+      const fundStepUp = await requireConsumerStepUpForActor(request as any, fundActor, 'consumer.job-fund');
+      if (fundStepUp) return fundStepUp;
 
       // ── PREFLIGHT: the escrow's fund() pulls the on-chain budget via
       // transferFrom, so every failure below used to revert on-chain after
@@ -873,12 +891,16 @@ async function jobsHandler(request: Request) {
       }
 
       // submit is signed by the provider — caller must control it.
-      if (!(await verifyCallerControlsAddress(request as any, providerSCA))) {
+      const submitActor = await verifyCallerControlsAddress(request as any, providerSCA);
+      if (!submitActor) {
         return NextResponse.json(
           { success: false, error: 'You do not control the providerSCA wallet.' },
           { status: 403 }
         );
       }
+      // Consumer step-up (Stage 2) for consumer providers (incl. Telegram /deliver).
+      const submitStepUp = await requireConsumerStepUpForActor(request as any, submitActor, 'consumer.job-fund');
+      if (submitStepUp) return submitStepUp;
 
       // ── PREFLIGHT
       const jobToSubmit = await requireJob(jobId);
@@ -948,12 +970,16 @@ async function jobsHandler(request: Request) {
 
       // complete releases the client's escrowed payment — caller must
       // control the client wallet that posted the job.
-      if (!(await verifyCallerControlsAddress(request as any, clientSCA))) {
+      const completeActor = await verifyCallerControlsAddress(request as any, clientSCA);
+      if (!completeActor) {
         return NextResponse.json(
           { success: false, error: 'You do not control the clientSCA wallet.' },
           { status: 403 }
         );
       }
+      // Consumer step-up (Stage 2) for consumer evaluators.
+      const completeStepUp = await requireConsumerStepUpForActor(request as any, completeActor, 'consumer.job-fund');
+      if (completeStepUp) return completeStepUp;
 
       // ── PREFLIGHT
       const jobToComplete = await requireJob(jobId);

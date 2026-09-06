@@ -4,6 +4,7 @@ import { ARC_FLARE_STREAM_CONTRACT_ADDRESS } from "@/lib/contracts/streamContrac
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { recordNanopaymentStreamClosed } from "@/lib/jobs/nanopaymentSplit";
 
 async function closeHandler(req: NextRequest) {
@@ -32,6 +33,12 @@ async function closeHandler(req: NextRequest) {
     if (!controlsClient && !controlsEvaluator) {
       return NextResponse.json({ error: "You do not control this job's client or evaluator wallet." }, { status: 403 });
     }
+
+    // Consumer step-up (Stage 2) when the authorizing party is a consumer.
+    const closeStepUp =
+      (await requireConsumerStepUpForActor(req, controlsClient, "consumer.job-fund")) ??
+      (await requireConsumerStepUpForActor(req, controlsEvaluator, "consumer.job-fund"));
+    if (closeStepUp) return closeStepUp;
 
     // Execute close on-chain (always signed by the poster's wallet)
     const txHash = await createContractTransaction(

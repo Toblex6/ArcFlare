@@ -4,6 +4,7 @@ import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT } from '@/lib/contracts/erc818
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 
 // SECURITY: fully closed now. Previously resolved clientWalletId to any
 // address in our Circle entity and executed as it, without checking it
@@ -35,6 +36,11 @@ async function fundJobHandler(req: NextRequest) {
     if (!actor) {
       return NextResponse.json({ error: 'You do not control this job\'s client wallet.' }, { status: 403 });
     }
+
+    // Consumer step-up (Stage 2): a consumer session alone is not sufficient
+    // to fund escrow once a payment PIN is enrolled.
+    const stepUp = await requireConsumerStepUpForActor(req, actor, 'consumer.job-fund');
+    if (stepUp) return stepUp;
 
     // Approve USDC
     const approveTx = await createContractTransaction(

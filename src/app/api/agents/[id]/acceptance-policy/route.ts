@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 
 function toUnits(v: any): string | null {
@@ -46,6 +47,10 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!controlAddress) return NextResponse.json({ error: "agent has no address" }, { status: 400 });
   const actor = await verifyCallerControlsAddress(req, controlAddress);
   if (!actor) return NextResponse.json({ error: "You do not control this agent." }, { status: 403 });
+
+  // Consumer step-up (Stage 2): provider-policy writes are account-control.
+  const acceptanceStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.treasury");
+  if (acceptanceStepUp) return acceptanceStepUp;
 
   const body = await req.json().catch(() => ({}));
   const data: any = {};

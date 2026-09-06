@@ -4,6 +4,7 @@ import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { keccak256, toHex, formatUnits } from 'viem';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 
@@ -35,6 +36,11 @@ async function completeJobHandler(req: NextRequest) {
     if (!actor) {
       return NextResponse.json({ error: 'You do not control this job\'s evaluator wallet.' }, { status: 403 });
     }
+
+    // Consumer step-up (Stage 2): releasing escrow needs the step-up
+    // credential once a payment PIN is enrolled.
+    const stepUp = await requireConsumerStepUpForActor(req, actor, 'consumer.job-fund');
+    if (stepUp) return stepUp;
 
     // Build 2: validation-gated release — if this job has a validation policy, require PASS
     const validationCheck = await isValidationSatisfiedForJob(BigInt(jobId));

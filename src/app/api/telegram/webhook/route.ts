@@ -30,6 +30,7 @@ import {
   handleHelp,
   handleGasRetry,
   handleHistory,
+  extractTrailingPinToken,
   type BotReply,
 } from '@/lib/telegram/botHandlers';
 import { trackUpdate } from '@/lib/telegram/webhookDedupe';
@@ -145,16 +146,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         if (!jobId || submissionParts.length === 0) {
           reply = { text: `Usage: /deliver <jobId> <link or description>` };
         } else {
-          reply = await handleDeliver(telegramUserId, jobId, submissionParts.join(' '));
+          // Optional step-up credential as an explicit pin=XXXX token (never
+          // position-guessed). Stripped before the text reaches the route.
+          const { rest, pin } = extractTrailingPinToken(submissionParts);
+          if (rest.length === 0) {
+            reply = { text: `Usage: /deliver <jobId> <link or description>` };
+          } else {
+            reply = await handleDeliver(telegramUserId, jobId, rest.join(' '), pin);
+          }
         }
         break;
       }
       case '/accept': {
-        const [jobId, amount] = parsed.args;
+        const [jobId, ...restArgs] = parsed.args;
         if (!jobId) {
           reply = { text: `Usage: /accept <jobId> [amount]` };
         } else {
-          reply = await handleAccept(telegramUserId, jobId, amount);
+          // Optional amount plus optional explicit pin=XXXX token.
+          const { rest, pin } = extractTrailingPinToken(restArgs);
+          const [amount] = rest;
+          reply = await handleAccept(telegramUserId, jobId, amount, pin);
         }
         break;
       }
@@ -170,9 +181,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
         break;
       }
-      case '/confirm':
-        reply = await handleConfirmWithdraw(telegramUserId);
+      case '/confirm': {
+        // Optional step-up PIN: /confirm <PIN> (required when enrolled).
+        const [confirmPin] = parsed.args;
+        reply = await handleConfirmWithdraw(telegramUserId, confirmPin);
         break;
+      }
       case '/cancel':
         reply = await handleCancelWithdraw(telegramUserId);
         break;

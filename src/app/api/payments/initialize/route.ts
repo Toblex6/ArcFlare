@@ -6,6 +6,7 @@ import { parseBody, InitializeSchema } from '@/src/lib/validation';
 import { resolveCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preference';
 import { resolveInitializeCaller } from '@/src/lib/middleware/withMerchantAuth';
+import { requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
 
 export async function POST(req: NextRequest) {
   try {
@@ -121,6 +122,18 @@ export async function POST(req: NextRequest) {
       merchantSCA = merchantRecord.walletAddress;
       preferenceMerchant = merchantRecord;
     } else if (caller.type === 'consumer' && caller.consumerWalletAddress) {
+      // Consumer step-up (Stage 2): initiating a payment needs the step-up
+      // credential once a payment PIN is enrolled. A session alone is not
+      // sufficient — the helper enforces this in front of the session check.
+      const initAccount = await (prisma as any).consumerAccount.findUnique({
+        where: { walletAddress: caller.consumerWalletAddress },
+      });
+      const initStepUp = await requireConsumerStepUp(
+        req,
+        initAccount,
+        direction === 'request' ? 'consumer.request' : 'consumer.send'
+      );
+      if (initStepUp) return initStepUp as NextResponse;
       // Flow's "Send"/"Request" — the requesting/sending party is whichever
       // consumer is logged in, not whatever the client claims.
       //
