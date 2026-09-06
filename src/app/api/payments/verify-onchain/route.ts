@@ -12,10 +12,9 @@ import { createPublicClient, http, parseUnits, decodeEventLog, erc20Abi } from '
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { arcTestnet } from '@/src/lib/wagmi';
-import { USDC_CONTRACT, USDC_DECIMALS, erc20TransferAbi } from '@/src/lib/wallet/erc20';
+import { erc20TransferAbi } from '@/src/lib/wallet/erc20';
+import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { transferUsdc } from '@/src/lib/circle/transfers';
-
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
 
 const publicClient = createPublicClient({
     chain: arcTestnet,
@@ -45,16 +44,24 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: true, alreadySettled: true });
         }
 
-        // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────
-        // verify-onchain only understands USDC transfers (ERC-20 Transfer logs
-        // from the USDC contract). An EURC payment must never be silently settled
-        // by a USDC transfer of matching amount — that would be a false positive.
-        // EURC settlement support ships in Phase 2.
-        if (payment.currency && payment.currency.toUpperCase() === 'EURC') {
+        // ── PHASE 2A CANONICAL TOKEN RESOLUTION ───────────────────────────────
+        // The invoice/payment token is authoritative: resolve currency +
+        // tokenAddress through the canonical resolver (legacy NULL
+        // tokenAddress → USDC). Unsupported symbols/addresses and
+        // symbol/address mismatches are rejected here — never guessed, never
+        // converted. The resolved token drives Transfer-log matching,
+        // decimals, and the fee leg below.
+        let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+        try {
+            token = resolveRowCurrency({
+                currency: (payment as any).currency ?? null,
+                tokenAddress: (payment as any).tokenAddress ?? null,
+            });
+        } catch (tokenErr: any) {
             return NextResponse.json(
                 {
                     success: false,
-                    error: 'EURC settlement is not yet supported. This payment is denominated in EURC — on-chain verification for EURC is coming in Phase 2.',
+                    error: `Unsupported settlement token for this payment: ${tokenErr.message}`,
                 },
                 { status: 400 }
             );
@@ -82,13 +89,19 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const expectedAmount = parseUnits(payment.amount.toString(), USDC_DECIMALS);
+        // Amount in the RESOLVED token's decimals (both supported tokens are 6
+        // decimals today — still resolved, not hardcoded, because the resolver
+        // is the canonical abstraction). Only a Transfer log emitted by the
+        // resolved token contract can satisfy this invoice: a USDC log never
+        // satisfies an EURC invoice and vice versa. Logs from any other
+        // contract are ignored (skipped, never matched).
+        const expectedAmount = parseUnits(payment.amount.toString(), token.decimals);
         const merchantAddr = payment.merchantSCA.toLowerCase();
 
         let matchedTransfer: { from: string; value: bigint } | null = null;
 
         for (const log of receipt.logs) {
-            if (log.address.toLowerCase() !== USDC_CONTRACT.toLowerCase()) continue;
+            if (log.address.toLowerCase() !== token.address.toLowerCase()) continue;
             try {
                 const decoded = decodeEventLog({
                     abi: erc20TransferAbi,
@@ -115,12 +128,15 @@ export async function POST(req: NextRequest) {
                 {
                     success: false,
                     error:
-                        'No matching USDC transfer to the merchant wallet found in this transaction. Payment not confirmed.',
+                        `No matching ${token.symbol} transfer to the merchant wallet found in this transaction. Payment not confirmed.`,
                 },
                 { status: 400 }
             );
         }
 
+        // Preserve canonical token identity (currency + tokenAddress) so an
+        // EURC verification is never overwritten with USDC. Idempotency
+        // unchanged: SUCCESS rows short-circuit at the top of this handler.
         const updated = await prisma.paymentLog.update({
             where: { reference },
             data: {
@@ -128,6 +144,8 @@ export async function POST(req: NextRequest) {
                 arcTxHash: txHash,
                 payerSCA: matchedTransfer.from,
                 senderEmail: matchedTransfer.from,
+                currency: token.symbol,
+                tokenAddress: token.address,
             },
         });
 
@@ -148,20 +166,27 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Platform fee debit (post-SUCCESS, never touches customer->merchant verification) ──
+        // FEE SEMANTICS (Phase 2A): the existing protocol charges FEE_BPS of the
+        // invoice amount in TOKEN UNITS — that math is token-unit based, so it
+        // applies identically in USDC or EURC with no cross-currency assumption
+        // (1 EURC is never treated as 1 USDC; the fee is denominated in the
+        // invoice's own token). Balance reads and the debit transfer therefore
+        // use the resolved token contract, not a hardcoded USDC address.
         try {
             const FEE_BPS = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
+            const unitsPerToken = 10 ** token.decimals;
             const rawFee = payment.amount * FEE_BPS / 10000;
-            const feeAmount = Math.round(rawFee * 1_000_000) / 1_000_000;
-            const feeRounded = Math.round(feeAmount * 1e6) / 1e6;
+            const feeAmount = Math.round(rawFee * unitsPerToken) / unitsPerToken;
+            const feeRounded = Math.round(feeAmount * unitsPerToken) / unitsPerToken;
             const SELLER_ADDRESS = process.env.SELLER_ADDRESS as string | undefined;
 
-            async function readUsdcBalance(owner: string): Promise<bigint> {
+            async function readTokenBalance(owner: string): Promise<bigint> {
                 const pc = createPublicClient({
                     chain: arcTestnet,
                     transport: http(process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network'),
                 });
                 return (await pc.readContract({
-                    address: USDC_ARC as `0x${string}`,
+                    address: token.address as `0x${string}`,
                     abi: erc20Abi,
                     functionName: 'balanceOf',
                     args: [owner as `0x${string}`],
@@ -224,11 +249,11 @@ export async function POST(req: NextRequest) {
                 // Check merchant Circle wallet balance before attempting debit
                 let merchantBalance: bigint | null = null;
                 try {
-                    merchantBalance = await readUsdcBalance(merchantRow.walletAddress as string);
+                    merchantBalance = await readTokenBalance(merchantRow.walletAddress as string);
                 } catch (e: any) {
                     console.error('fee balance read failed:', e.message);
                 }
-                const feeWei = BigInt(Math.round(feeRounded * 1_000_000));
+                const feeWei = BigInt(Math.round(feeRounded * unitsPerToken));
                 if (merchantBalance !== null && merchantBalance < feeWei) {
                     console.log('fee skipped — insufficient balance');
                     try {
@@ -245,11 +270,12 @@ export async function POST(req: NextRequest) {
                         console.error('PlatformFee DEFERRED create failed (insufficient balance):', e.message);
                     }
                 } else {
-                    // Attempt fee debit via Circle SDK, measure SELLER delta
-                    const amountStr = feeRounded.toFixed(6).replace(/\.?0+$/, '');
+                    // Attempt fee debit via Circle SDK in the invoice's token,
+                    // measure SELLER delta
+                    const amountStr = feeRounded.toFixed(token.decimals).replace(/\.?0+$/, '');
                     let sellerBefore = 0n;
                     try {
-                        sellerBefore = await readUsdcBalance(SELLER_ADDRESS);
+                        sellerBefore = await readTokenBalance(SELLER_ADDRESS);
                     } catch {}
                     let arcTxHashFee: string | undefined;
                     let feeTransferFailed = false;
@@ -259,6 +285,8 @@ export async function POST(req: NextRequest) {
                             walletAddress: merchantRow.walletAddress as string,
                             destinationAddress: SELLER_ADDRESS,
                             amount: amountStr,
+                            tokenAddress: token.address,
+                            decimals: token.decimals,
                         });
                         arcTxHashFee = result.arcTxHash;
                     } catch (e: any) {
@@ -283,11 +311,11 @@ export async function POST(req: NextRequest) {
                         let receivedWei = feeWei;
                         let amountReceived: number = feeRounded;
                         try {
-                            const sellerAfter = await readUsdcBalance(SELLER_ADDRESS);
+                            const sellerAfter = await readTokenBalance(SELLER_ADDRESS);
                             const delta = sellerAfter - sellerBefore;
                             if (delta > 0n) {
                                 receivedWei = delta;
-                                amountReceived = Number(delta) / 1e6;
+                                amountReceived = Number(delta) / unitsPerToken;
                             }
                         } catch {
                             // RPC hiccup — fall back to requested amount
@@ -313,7 +341,8 @@ export async function POST(req: NextRequest) {
             console.error('Platform fee debit error:', e.message);
             try {
                 const FEE_BPS_FALLBACK = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
-                const feeFallback = Math.round((payment.amount * FEE_BPS_FALLBACK / 10000) * 1e6) / 1e6;
+                const fallbackUnits = 10 ** token.decimals;
+                const feeFallback = Math.round((payment.amount * FEE_BPS_FALLBACK / 10000) * fallbackUnits) / fallbackUnits;
                 await (prisma as any).platformFee.create({
                     data: {
                         paymentLogId: payment.id,

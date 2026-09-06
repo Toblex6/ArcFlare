@@ -50,13 +50,14 @@ export interface PaymentLogData {
     arcTxHash: string | null;
     /**
      * Canonical settlement-token identity resolved from the payment record
-     * (Phase 1 multicurrency READ-MODEL only). Legacy rows resolve to USDC.
+     * (multicurrency Phase 1 read-model + Phase 2A settlement). Legacy rows
+     * resolve to USDC.
      *
-     * This is intentionally CARRIED but NOT USED for the transfer yet: the
-     * writeContract below still signs USDC via USDC_CONTRACT so current USDC
-     * settlement is byte-for-byte unchanged. Phase 2 will switch the transfer
-     * token to `token.address` when EURC settlement actually goes live. Do not
-     * use this to fabricate an EURC payment path.
+     * Phase 2A: handlePayment below transfers via `token.address` /
+     * `token.decimals` (falling back to USDC_CONTRACT/USDC_DECIMALS for
+     * legacy rows without token identity), and verify-onchain matches the
+     * Transfer log against the same resolved token — so an EURC invoice
+     * moves and verifies EURC, never USDC.
      */
     token?: { symbol: string; address: string; decimals: number } | null;
 }
@@ -236,11 +237,19 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 }
             }
 
+            // Phase 2A token-native transfer: the ERC-20 contract and decimals
+            // come from the server-resolved invoice token (USDC invoices move
+            // USDC, EURC invoices move EURC), falling back to the USDC
+            // constants only for legacy rows without token identity. The
+            // server re-resolves and enforces the same token in
+            // verify-onchain, so a mismatched transfer can never settle.
+            const transferAddress = (payment.token?.address || USDC_CONTRACT) as `0x${string}`;
+            const transferDecimals = payment.token?.decimals ?? USDC_DECIMALS;
             const txHash = await writeContractAsync({
-                address: USDC_CONTRACT as `0x${string}`,
+                address: transferAddress,
                 abi: erc20TransferAbi,
                 functionName: 'transfer',
-                args: [payment.merchantSCA as `0x${string}`, parseUnits(payment.amount.toString(), USDC_DECIMALS)],
+                args: [payment.merchantSCA as `0x${string}`, parseUnits(payment.amount.toString(), transferDecimals)],
             });
 
             setIsTxPending(false);
@@ -363,13 +372,13 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 </div>
             )}
 
-            {/* EURC Phase 2 notice — shown when the invoice is denominated in EURC.
-                Disables the actionable Pay button so no USDC transfer can be
-                initiated for an EURC invoice (Phase 1 safety invariant). */}
+            {/* Phase 2A: EURC invoices settle natively (token-address transfer +
+                on-chain verification in the invoice's token). CCTP remains
+                USDC-only — the cross-chain tab notes that below. */}
             {isEurc && !isConfirmed && (
-                <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
-                    <p style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>EURC support coming in Phase 2</p>
-                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This invoice is denominated in EURC. On-chain EURC settlement is not yet available. Please pay in USDC or contact the merchant.</p>
+                <div style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
+                    <p style={{ color: '#06b6d4', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Paying in EURC</p>
+                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This invoice settles in EURC on Arc Testnet. Your wallet will submit an EURC transfer, verified on-chain before confirmation.</p>
                 </div>
             )}
 
@@ -526,11 +535,11 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 </button>
                             </div>
                             <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: 10, fontSize: 11, color: '#6b5a45', textDecoration: 'underline' }}>
-                                No test USDC? Get some free ↗
+                                No test {payment.currency || 'USDC'}? Get some free ↗
                             </a>
                             <button
                                 onClick={handlePayment}
-                                disabled={isEurc || isTxPending || isVerifying || isConfirmed || secondsLeft === 0}
+                                disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0}
                                 style={{
                                     width: '100%',
                                     padding: 16,
@@ -538,12 +547,12 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                     border: 'none',
                                     fontSize: 14,
                                     fontWeight: 800,
-                                    cursor: isEurc || isConfirmed || secondsLeft === 0 ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
-                                    background: isConfirmed ? 'rgba(6,182,212,0.1)' : isEurc ? '#3d332a' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
-                                    color: isConfirmed ? '#06b6d4' : isEurc ? '#6b5a45' : '#0e0b08',
+                                    cursor: isConfirmed || secondsLeft === 0 ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
+                                    background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying ? '#6b5a45' : '#c8975a',
+                                    color: isConfirmed ? '#06b6d4' : '#0e0b08',
                                 }}
                             >
-                                {isConfirmed ? '✓ Payment Confirmed' : isEurc ? 'EURC not yet supported' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : `Pay ${payment.amount} ${payment.currency}`}
+                                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : `Pay ${payment.amount} ${payment.currency}`}
                             </button>
                         </>
                     )}
@@ -553,8 +562,16 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             {method === 'cctp' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <p style={{ fontSize: 11, color: '#6b5a45', margin: 0 }}>
-                        Send {payment.amount} USDC from another chain using your own wallet, then paste the transaction hash below to verify and settle.
+                        Send {payment.amount} {payment.currency} from another chain using your own wallet, then paste the transaction hash below to verify and settle.
                     </p>
+                    {/* CCTP is intentionally USDC-only (Phase 2A): no EURC CCTP
+                        mechanism exists in this repo. EURC invoices use the
+                        wallet tab's same-chain EURC transfer instead. */}
+                    {isEurc && (
+                        <p style={{ fontSize: 11, color: '#f59e0b', margin: 0 }}>
+                            Cross-chain (CCTP) settlement is USDC-only and cannot settle this EURC invoice — please use the wallet tab to pay in EURC.
+                        </p>
+                    )}
                     <div>
                         <p style={{ fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px' }}>Source Chain</p>
                         <select
@@ -580,7 +597,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                     </div>
                     <button
                         onClick={handleCctpVerify}
-                        disabled={cctpSubmitting || isConfirmed || !cctpTxHash.trim()}
+                        disabled={cctpSubmitting || isConfirmed || isEurc || !cctpTxHash.trim()}
                         style={{
                             width: '100%',
                             padding: 16,
@@ -588,7 +605,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             border: 'none',
                             fontSize: 14,
                             fontWeight: 800,
-                            cursor: cctpSubmitting || isConfirmed || !cctpTxHash.trim() ? 'not-allowed' : 'pointer',
+                            cursor: cctpSubmitting || isConfirmed || isEurc || !cctpTxHash.trim() ? 'not-allowed' : 'pointer',
                             background: isConfirmed ? 'rgba(6,182,212,0.1)' : cctpSubmitting ? '#6b5a45' : '#c8975a',
                             color: isConfirmed ? '#06b6d4' : '#0e0b08',
                         }}

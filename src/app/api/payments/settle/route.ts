@@ -11,11 +11,18 @@ import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMe
 import { resolveConsumerSession } from '@/lib/middleware/withConsumerAuth';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
+import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 
 // ── Constants & Config ───────────────────────────────────────────────────────
 const MESSAGE_TRANSMITTER_V2 = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
 const IRIS_API = 'https://iris-api-sandbox.circle.com/v2';
+// NOTE (Phase 2A): USDC_ARC is intentionally kept as the documented USDC-only
+// constant for the CCTP bridge path (Path A below), which has no proven EURC
+// mechanism in this repository. The same-chain settlement path (Path B) does
+// NOT use this constant — it uses the invoice's canonical resolved token
+// (resolveRowCurrency) so USDC invoices settle USDC and EURC invoices settle
+// EURC. Do not "simplify" Path B back onto USDC_ARC.
 const USDC_ARC = '0x3600000000000000000000000000000000000000';
 
 // SCA Defaults
@@ -213,16 +220,24 @@ async function mergedSettleHandler(request: NextRequest) {
       );
     }
 
-    // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────────
-    // settle only understands USDC transfers (Circle SCA native/ERC-20 transfer
-    // to USDC_ARC). An EURC payment must never be silently settled by a USDC
-    // transfer of matching amount — the merchant/ payer would see a currency
-    // mismatch they did not authorize. EURC settlement support ships in Phase 2.
-    if (preflight.currency && preflight.currency.toUpperCase() === 'EURC') {
+    // ── PHASE 2A CANONICAL TOKEN RESOLUTION ─────────────────────────────────
+    // The invoice/payment token is authoritative. Resolve currency +
+    // tokenAddress through the canonical resolver (legacy NULL tokenAddress
+    // → USDC; unsupported symbols/addresses and symbol/address mismatches
+    // throw and are rejected below — never guessed, never converted, never
+    // routed through SwapPool). The resolved token drives Path B's transfer;
+    // Path A (CCTP) stays explicitly USDC-only (see below).
+    let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+    try {
+      token = resolveRowCurrency({
+        currency: (preflight as any).currency ?? null,
+        tokenAddress: (preflight as any).tokenAddress ?? null,
+      });
+    } catch (tokenErr: any) {
       return NextResponse.json(
         {
           success: false,
-          error: 'EURC settlement is not yet supported. This payment is denominated in EURC — settlement for EURC is coming in Phase 2.',
+          error: `Unsupported settlement token for this payment: ${tokenErr.message}`,
         },
         { status: 400 }
       );
@@ -286,7 +301,20 @@ async function mergedSettleHandler(request: NextRequest) {
     if (!payment) throw new Error('Payment not found after lock');
 
     // ── PATH A: CROSS-CHAIN CCTP SETTLEMENT ─────────────────────────────────
+    // INTENTIONALLY USDC-ONLY (Phase 2A): Circle CCTP message-transmitter
+    // redemption on Arc mints USDC. No EURC CCTP mechanism has been proven in
+    // this repository, so a non-USDC invoice must never be routed through this
+    // branch — it settles via the same-chain token-native Path B instead.
     if (messageHash) {
+      if (token.symbol !== 'USDC') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `CCTP settlement is USDC-only. This payment is denominated in ${token.symbol} — settle it via the same-chain ${token.symbol} transfer path instead.`,
+          },
+          { status: 400 }
+        );
+      }
       console.log(`🌉 Initiating CCTP Bridge Settlement for ${reference}`);
       await prisma.paymentLog.update({
         where: { reference },
@@ -351,8 +379,12 @@ async function mergedSettleHandler(request: NextRequest) {
       });
     }
 
-    // ── PATH B: ON-CHAIN USDC TRANSFER (M2M / SCA) ──────────────────────────
-    console.log(`💸 Processing On-chain SCA Settlement for ${reference}`);
+    // ── PATH B: ON-CHAIN TOKEN-NATIVE TRANSFER (M2M / SCA) ─────────────────
+    // Phase 2A: the transfer asset is the invoice's canonical resolved token —
+    // a USDC invoice moves USDC, an EURC invoice moves EURC. Contract address
+    // and decimals come from the resolver, never from the client and never
+    // from a hardcoded constant. No conversion, no SwapPool.
+    console.log(`💸 Processing On-chain SCA Settlement for ${reference} in ${token.symbol}`);
 
     // The payer-control guard above guarantees this is a real 0x address the
     // caller is authorized to debit — never 'pending@checkout', never a
@@ -450,15 +482,18 @@ async function mergedSettleHandler(request: NextRequest) {
     }
 
     // Creation Logic: Only fires if circleTxId is undefined (new or discarded)
+    // Token-native amounts: formatted in the RESOLVED token's decimals (both
+    // supported tokens are 6 decimals today — still resolved, not hardcoded,
+    // because the resolver is the canonical abstraction).
     if (!circleTxId) {
       // STEP 1: Attempt native Circle transfer initialization
       try {
         const transferTx = await circleClient.createTransaction({
           walletId: payerWalletId,
           blockchain: 'ARC-TESTNET' as any,
-          tokenAddress: USDC_ARC,
+          tokenAddress: token.address,
           destinationAddress: merchantSCA,
-          amounts: [payment.amount.toFixed(6)],
+          amounts: [payment.amount.toFixed(token.decimals)],
           fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
         } as any);
         circleTxId = transferTx.data?.id;
@@ -472,13 +507,13 @@ async function mergedSettleHandler(request: NextRequest) {
       // STEP 2: Fallback to ERC‑20 contract execution ONLY if no transaction ID was generated
       if (!circleTxId) {
         try {
-          console.log('Executing fallback ERC-20 transfer via contract execution...');
+          console.log(`Executing fallback ERC-20 ${token.symbol} transfer via contract execution...`);
           const contractTx = await circleClient.createContractExecutionTransaction({
             walletAddress: payerSCA,
             blockchain: 'ARC-TESTNET',
-            contractAddress: USDC_ARC,
+            contractAddress: token.address,
             abiFunctionSignature: 'transfer(address,uint256)',
-            abiParameters: [merchantSCA, parseUnits(payment.amount.toFixed(6), 6).toString()],
+            abiParameters: [merchantSCA, parseUnits(payment.amount.toFixed(token.decimals), token.decimals).toString()],
             fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
           });
           circleTxId = contractTx.data?.id;
@@ -512,7 +547,10 @@ async function mergedSettleHandler(request: NextRequest) {
       );
     }
 
-    // Final success update
+    // Final success update — preserve canonical token identity (currency +
+    // tokenAddress) so an EURC settlement is never overwritten with USDC.
+    // Idempotency/expiry semantics unchanged: this update only runs after the
+    // atomic PROCESSING_ONCHAIN lock was claimed above.
     const settled = await prisma.paymentLog.update({
       where: { reference },
       data: {
@@ -520,6 +558,8 @@ async function mergedSettleHandler(request: NextRequest) {
         arcTxHash,
         chain: 'Arc Testnet (On-chain Transfer)',
         circleTxId: circleTxId,
+        currency: token.symbol,
+        tokenAddress: token.address,
       },
     });
 
@@ -528,6 +568,8 @@ async function mergedSettleHandler(request: NextRequest) {
         event: 'payment.settled',
         reference,
         amount: settled.amount,
+        currency: token.symbol,
+        tokenAddress: token.address,
         status: 'SUCCESS',
         settlementType: 'ONCHAIN_SCA_TRANSFER',
         arcTxHash,

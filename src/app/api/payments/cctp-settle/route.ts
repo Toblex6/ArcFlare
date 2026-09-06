@@ -30,6 +30,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { pollForAttestationByTxHash, mintOnArc, getChainName, decodeBurnMessage } from '@/src/lib/cctp';
+import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { parseUnits } from 'viem';
 
 const USDC_DECIMALS = 6;
@@ -55,16 +56,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, alreadySettled: true, payment });
     }
 
-    // ── EURC SAFETY GATE (Phase 1) ────────────────────────────────────────────
-    // CCTP settlement only understands USDC burns/mints. An EURC payment must
-    // never be silently settled by a USDC CCTP burn of matching amount — the
-    // payer/merchant would see a currency mismatch they did not authorize.
-    // EURC CCTP support ships in Phase 2.
-    if (payment.currency && payment.currency.toUpperCase() === 'EURC') {
+    // ── CCTP IS INTENTIONALLY USDC-ONLY (Phase 2A) ───────────────────────────
+    // The CCTP message-transmitter redemption on Arc mints USDC; no EURC CCTP
+    // mechanism has been proven in this repository, so this route must never
+    // settle a non-USDC invoice. A USDC CCTP burn must never silently settle
+    // an EURC invoice (currency mismatch the parties did not authorize), and
+    // an EURC-denominated burn must never satisfy a USDC invoice. Resolve the
+    // invoice's canonical token first (legacy NULL tokenAddress → USDC,
+    // unsupported/mismatched identity rejected), then refuse anything that is
+    // not USDC. EURC invoices settle via the same-chain token-native paths
+    // (settle Path B / verify-onchain), never through CCTP.
+    let cctpToken: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
+    try {
+      cctpToken = resolveRowCurrency({
+        currency: (payment as any).currency ?? null,
+        tokenAddress: (payment as any).tokenAddress ?? null,
+      });
+    } catch (tokenErr: any) {
+      return NextResponse.json(
+        { success: false, error: `Unsupported settlement token for this payment: ${tokenErr.message}` },
+        { status: 400 }
+      );
+    }
+    if (cctpToken.symbol !== 'USDC') {
       return NextResponse.json(
         {
           success: false,
-          error: 'EURC settlement is not yet supported. This payment is denominated in EURC — CCTP settlement for EURC is coming in Phase 2.',
+          error: `CCTP settlement is USDC-only. This payment is denominated in ${cctpToken.symbol} — CCTP settlement for ${cctpToken.symbol} is not supported.`,
         },
         { status: 400 }
       );
@@ -124,6 +142,8 @@ export async function POST(request: Request) {
 
     // ── Validate the message actually pays what this reference expects,
     // BEFORE minting. This is the check that was missing entirely before.
+    // USDC_DECIMALS is correct here (not resolver decimals): the gate above
+    // guarantees this invoice is USDC, and CCTP burns/mints are USDC.
     const { mintRecipient, amount: burnedAmount } = decodeBurnMessage(message);
     const expectedRecipient = payment.merchantSCA.toLowerCase();
     const expectedAmount = parseUnits(payment.amount.toString(), USDC_DECIMALS);

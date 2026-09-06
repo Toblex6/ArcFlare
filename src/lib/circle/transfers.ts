@@ -34,7 +34,14 @@ export interface TransferUsdcParams {
   walletId: string; // Circle wallet id that signs (source)
   walletAddress: string; // on-chain address of that wallet (fallback path signs by address)
   destinationAddress: string;
-  amount: string; // decimal USDC string, e.g. "0.01"
+  amount: string; // decimal token string, e.g. "0.01"
+  // Phase 2A multicurrency: optional canonical token identity. Defaults to
+  // USDC so every existing caller (Telegram /withdraw, USDC fee debits) is
+  // byte-for-byte unchanged. Pass the invoice's resolved token
+  // (address + decimals from resolveRowCurrency) to move EURC instead — the
+  // caller, never SwapPool, decides the asset, and no conversion happens.
+  tokenAddress?: string;
+  decimals?: number;
   idempotencyKey?: string; // accepted for callers' accounting; NOT forwarded —
   // Circle's ARC-TESTNET endpoint rejects the idempotencyKey parameter
   // ("API parameter invalid", verified 2026-08-19). Double-withdrawal
@@ -48,6 +55,8 @@ export async function transferUsdc({
   walletAddress,
   destinationAddress,
   amount,
+  tokenAddress = USDC_ARC,
+  decimals = 6,
 }: TransferUsdcParams): Promise<{ arcTxHash: string; circleTxId: string }> {
   const client = getCircleClient();
   let circleTxId: string | undefined;
@@ -56,7 +65,7 @@ export async function transferUsdc({
     const transferTx = await client.createTransaction({
       walletId,
       blockchain: 'ARC-TESTNET' as any,
-      tokenAddress: USDC_ARC,
+      tokenAddress,
       destinationAddress,
       amounts: [amount],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -71,9 +80,9 @@ export async function transferUsdc({
       const contractTx = await client.createContractExecutionTransaction({
         walletAddress,
         blockchain: 'ARC-TESTNET',
-        contractAddress: USDC_ARC,
+        contractAddress: tokenAddress,
         abiFunctionSignature: 'transfer(address,uint256)',
-        abiParameters: [destinationAddress, parseUnits(amount, 6).toString()],
+        abiParameters: [destinationAddress, parseUnits(amount, decimals).toString()],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
       circleTxId = contractTx.data?.id;
