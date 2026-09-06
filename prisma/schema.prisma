@@ -17,6 +17,12 @@ model PaymentLog {
   // NULL = legacy USDC row (resolve via supportedTokens before use). Additive
   // only — the existing `currency` field is unchanged.
   tokenAddress     String?
+  // Pay-in token the customer actually pays (routing v1). NULL =
+  // same-token/legacy payment — `amount` + `currency` + `tokenAddress`
+  // continue to represent the merchant's settlement obligation in Y.
+  // Additive only.
+  payTokenAddress  String?
+  conversion       PaymentConversion?
   chain            String
   senderEmail      String // 'pending@checkout' until a real payer settles (matches merchant links' convention)
   direction        String             @default("send") // "send" | "request" — explicit, not inferred
@@ -239,6 +245,11 @@ model Merchant {
   walletAddress  String? // SCA address (Circle) or connected EOA (external)
   circleWalletId String? // Circle wallet ID, only set when walletProvider = CIRCLE
   sessionVersion Int     @default(0) // M18 — bumped on password reset; invalidates all outstanding session tokens
+  // Default settlement token for FUTURE invoices (routing v1). Canonical
+  // ERC-20 address understood by resolveCurrency; NULL = USDC default.
+  // Changing this never mutates existing PaymentLog rows (frozen at creation).
+  // Additive only.
+  settlementTokenAddress String?
 }
 
 model WalletSignatureRequest {
@@ -607,6 +618,38 @@ model StuckSettlement {
 
   @@index([agentAddress, status])
   @@index([status])
+}
+
+// ── Payment Routing v1: conversion leg ─────────────────────────────────────
+// 1:1 optional child of PaymentLog, created ONLY when pay-in token X differs
+// from the settlement token Y. All amounts are exact integer/base-unit
+// strings (never float) — v1 only routes canonical 6-decimal USDC/EURC.
+// Lifecycle: QUOTED → EXECUTED (or lazily EXPIRED past quoteExpiresAt).
+// SUCCESS still means the merchant received Y; this row only records how X→Y
+// was quoted and executed (one atomic router tx — no custodial states).
+model PaymentConversion {
+  id                 String      @id @default(uuid())
+  paymentLogId       String      @unique
+  paymentLog         PaymentLog  @relation(fields: [paymentLogId], references: [id], onDelete: Cascade)
+  status             String      @default("QUOTED") // QUOTED | EXECUTED | EXPIRED
+  inputTokenAddress  String // canonical X the customer pays
+  inputAmount        String // required X base units for the fixed Y obligation (quote-computed)
+  outputTokenAddress String // canonical Y = invoice settlement token
+  quotedOutputAmount String // expected Y base units at quote time
+  minOutputAmount    String // floor credited to merchantSCA (router + verifier enforce)
+  quoteExpiresAt     DateTime // short-lived; expired quotes are never executable
+  quoteHash          String      @unique // deterministic hash binding ref+X+Y+amounts+expiry
+  poolAddress        String // canonical pool quoted against (server-resolved, never client input)
+  idempotencyKey     String      @unique // one conversion per payment (paymentLogId-scoped)
+  executionTxHash    String?     @unique // router execution tx (set on EXECUTED)
+  actualInputAmount  String? // measured X debit (set on EXECUTED)
+  actualOutputAmount String? // measured Y credit to merchantSCA (set on EXECUTED)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([status])
+  @@index([quoteExpiresAt])
+  @@map("payment_conversions")
 }
 
 // ── Build 3: Economic Ledger + Treasury ────────────────────────────────────
