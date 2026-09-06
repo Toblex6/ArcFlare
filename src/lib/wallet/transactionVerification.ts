@@ -32,13 +32,13 @@ import {
 } from "@/lib/wallet/chainClient";
 import {
   ARCFLARE_ESCROW_CONTRACT_ADDRESS,
-  ARCFLARE_USDC_CONTRACT,
   ARCFLARE_USDC_DECIMALS,
   escrowAbi,
   escrowEventTopics,
   usdcTransferAbi,
   type EscrowOnChain,
 } from "@/lib/wallet/flarehqContracts";
+import { resolveCurrency } from "@/lib/tokens/resolveCurrency";
 
 const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -102,12 +102,15 @@ async function readEscrowOnChain(escrowId: string): Promise<EscrowOnChain | null
   }
 }
 
-function decodeTransferLogs(logs: any[]) {
+function decodeTransferLogs(logs: any[], tokenAddress: string) {
   const transfers: { from: string; to: string; value: bigint }[] = [];
   const transferEvent = usdcTransferAbi.find((e) => e.type === "event");
   if (!transferEvent || transferEvent.type !== "event") return transfers;
   for (const log of logs) {
-    if (!eq(log.address, ARCFLARE_USDC_CONTRACT)) continue;
+    // Token-scoped: only Transfer events emitted by the EXPECTED token
+    // contract count. A Transfer from any other token (including the other
+    // supported stablecoin) is ignored so it can never satisfy this intent.
+    if (!eq(log.address, tokenAddress)) continue;
     try {
       const decoded = decodeEventLog({
         abi: [transferEvent],
@@ -118,7 +121,7 @@ function decodeTransferLogs(logs: any[]) {
       const { from, to, value } = decoded.args as { from: string; to: string; value: bigint };
       transfers.push({ from, to, value });
     } catch {
-      // not a decodable USDC Transfer log
+      // not a decodable Transfer log for the expected token
     }
   }
   return transfers;
@@ -192,16 +195,44 @@ async function verifyEscrowDispute(payload: any, receipt: any): Promise<void> {
   }
 }
 
-async function verifyPayrollTransfer(payload: any, receipt: any): Promise<void> {
+async function verifyPayrollTransfer(payload: any, receipt: any, intent: any): Promise<void> {
   const recipient = String(payload.recipientSCA || "").toLowerCase();
   const payer = String(payload.payerSCA || "").toLowerCase();
   const amount = String(payload.amount ?? "");
   if (!recipient || !amount) {
     throw new VerificationError("payroll.transfer intent missing recipient or amount.");
   }
-  const expectedAmount = parseUnits(amount, ARCFLARE_USDC_DECIMALS);
+  // Token-aware: the expected token comes from the SERVER-side queued
+  // payroll context (currency + tokenAddress stamped by POST /api/payroll/run
+  // via the canonical resolver — never a client-supplied address). Legacy
+  // queued rows carry neither field and resolve to USDC exactly as before.
+  // Unsupported symbols/addresses and symbol/address mismatches throw inside
+  // the resolver and fail closed here — never guessed, never defaulted.
+  let token;
+  try {
+    token = resolveCurrency({
+      currency: payload.currency ?? null,
+      tokenAddress: payload.tokenAddress ?? null,
+    });
+  } catch (e: any) {
+    throw new VerificationError(
+      `unsupported payroll token (currency=${String(payload.currency ?? "")} tokenAddress=${String(payload.tokenAddress ?? "")}): ${e?.message ?? e}`
+    );
+  }
+  // The queued intent must itself target the canonical token contract. The
+  // generic gate above already proved receipt.to == intent.to and
+  // receipt.from == intent.from; this binds intent.to to the resolved token
+  // so a tampered/mismatched queue entry fails closed instead of verifying
+  // against the wrong asset.
+  const intentTo = String(intent?.to ?? "");
+  if (!intentTo || !eq(intentTo, token.address)) {
+    throw new VerificationError(
+      `${token.symbol} payroll intent targets ${intentTo || "(missing)"} instead of the canonical ${token.symbol} contract ${token.address}.`
+    );
+  }
+  const expectedAmount = parseUnits(amount, token.decimals);
 
-  const transfers = decodeTransferLogs(receipt.logs || []);
+  const transfers = decodeTransferLogs(receipt.logs || [], token.address);
   const match = transfers.find(
     (t) =>
       eq(t.from, payer) &&
@@ -210,7 +241,7 @@ async function verifyPayrollTransfer(payload: any, receipt: any): Promise<void> 
   );
   if (!match) {
     throw new VerificationError(
-      "No USDC Transfer from the intended payer to the intended recipient for the exact intended amount was found in this transaction."
+      `No ${token.symbol} Transfer from the intended payer to the intended recipient for the exact intended amount was found in this transaction.`
     );
   }
 }
@@ -289,7 +320,7 @@ export async function verifyExternalTransaction(
       await verifyEscrowDispute(payload, receipt);
       break;
     case "tx.payroll.transfer":
-      await verifyPayrollTransfer(payload, receipt);
+      await verifyPayrollTransfer(payload, receipt, intent);
       break;
     default:
       throw new VerificationError(
