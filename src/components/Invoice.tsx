@@ -39,6 +39,19 @@ export interface InvoiceData {
         returns it; legacy rows read as USDC). Display-only: amount + currency
         remain the record of what moved. */
     token?: { symbol: string; address: string; decimals: number } | null;
+    /** Pay-in token X the customer actually paid (routing v1, backend-
+        authoritative). Direct/legacy payments read as the settlement token
+        itself. When it differs from the settlement token, the receipt
+        renders "Paid with X / Merchant received Y" as separate rows. */
+    payToken?: { symbol: string; address: string; decimals: number } | null;
+    /** Conversion read-model (backend-provided display amounts: measured
+        actuals once executed, quoted values before). Null for direct. */
+    conversion?: {
+        inputAmountDisplay: string | null;
+        quotedOutputDisplay: string | null;
+        actualInputDisplay: string | null;
+        actualOutputDisplay: string | null;
+    } | null;
 }
 
 interface InvoiceProps {
@@ -74,6 +87,24 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
     const [copied, setCopied] = useState(false);
     const isPaid = payment.status === 'SUCCESS';
 
+    // ── Phase 6: routed vs direct receipt split ──────────────────────────
+    // Backend-authoritative X vs Y: the settlement token is token?.symbol
+    // (currency fallback for legacy rows); the pay token is payToken. When
+    // they differ, "Paid with" and "Merchant received" render as separate
+    // rows — never one ambiguous "currency" label. Measured actuals win
+    // over quoted values once the conversion has executed.
+    const settlementSymbol = payment.token?.symbol || payment.currency;
+    const paySymbol = payment.payToken?.symbol || settlementSymbol;
+    const isConverted =
+        !!payment.payToken &&
+        (!!payment.payToken.address && !!payment.token?.address
+            ? payment.payToken.address.toLowerCase() !== payment.token.address.toLowerCase()
+            : paySymbol !== settlementSymbol);
+    const paidWithDisplay =
+        payment.conversion?.actualInputDisplay ?? payment.conversion?.inputAmountDisplay ?? null;
+    const receivedDisplay =
+        payment.conversion?.actualOutputDisplay ?? payment.conversion?.quotedOutputDisplay ?? null;
+
     const copyTxHash = () => {
         if (!payment.arcTxHash) return;
         navigator.clipboard.writeText(payment.arcTxHash);
@@ -90,6 +121,8 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
             `Status:         ${isPaid ? 'PAID' : payment.status}`,
             `Amount:         ${payment.amount} ${payment.currency}`,
             `Token:          ${payment.token?.symbol || payment.currency}${payment.token?.address ? ` (${payment.token.address})` : ''}`,
+            isConverted ? `Paid with:      ${paidWithDisplay ?? '?'} ${paySymbol}` : null,
+            isConverted ? `Merchant received: ${receivedDisplay ?? payment.amount} ${settlementSymbol}` : null,
             `Network:        ${payment.chain}`,
             payment.issuedAt ? `Issued:         ${formatDate(payment.issuedAt)}` : null,
             isPaid && payment.settledAt ? `Settled:        ${formatDate(payment.settledAt)}` : null,
@@ -126,6 +159,13 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
           #invoice-printable, #invoice-printable * { visibility: visible; }
           #invoice-printable { position: absolute; top: 0; left: 0; width: 100%; padding: 24px; }
           #invoice-printable .no-print { display: none !important; }
+        }
+        /* Mobile: stack the 4-column line-item grid and the action buttons
+           instead of squeezing them into a 320px viewport. */
+        @media (max-width: 460px) {
+          #invoice-printable .invoice-lines { grid-template-columns: 1fr auto !important; row-gap: 6px; }
+          #invoice-printable .invoice-lines .invoice-hide-mobile { display: none !important; }
+          #invoice-printable .invoice-actions { grid-template-columns: 1fr !important; }
         }
       `}</style>
 
@@ -205,16 +245,16 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
 
                 {/* Line items — single real line, no fabricated breakdown */}
                 <div style={{ marginBottom: 20 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 12, padding: '0 0 10px', borderBottom: '1px solid #2d2015', fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <div className="invoice-lines" style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 12, padding: '0 0 10px', borderBottom: '1px solid #2d2015', fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                         <span>Description</span>
-                        <span>Qty</span>
-                        <span>Unit Price</span>
+                        <span className="invoice-hide-mobile">Qty</span>
+                        <span className="invoice-hide-mobile">Unit Price</span>
                         <span>Amount</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 12, padding: '12px 0', alignItems: 'center' }}>
+                    <div className="invoice-lines" style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 12, padding: '12px 0', alignItems: 'center' }}>
                         <span style={{ fontSize: 12.5, color: '#f0ece6' }}>Payment</span>
-                        <span style={{ fontSize: 12.5, color: '#a89684' }}>1</span>
-                        <span style={{ fontSize: 12.5, color: '#a89684' }}>{payment.amount} {payment.currency}</span>
+                        <span className="invoice-hide-mobile" style={{ fontSize: 12.5, color: '#a89684' }}>1</span>
+                        <span className="invoice-hide-mobile" style={{ fontSize: 12.5, color: '#a89684' }}>{payment.amount} {payment.currency}</span>
                         <span style={{ fontSize: 12.5, color: '#f0ece6', fontWeight: 700 }}>{payment.amount} {payment.currency}</span>
                     </div>
                 </div>
@@ -230,6 +270,26 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
                         <span style={{ fontSize: 16, fontWeight: 800, color: '#c8975a' }}>{payment.amount} {payment.currency}</span>
                     </div>
                 </div>
+
+                {/* Routed settlement split: "Paid with X" vs "Merchant
+                    received Y" as separate rows (direct payments render the
+                    single-token confirmation without this block). */}
+                {isConverted && (
+                    <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 12, padding: '12px 14px', marginBottom: 20 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                            <span style={{ fontSize: 11, color: '#6b5a45' }}>Paid with</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#f0ece6', minWidth: 0, overflowWrap: 'anywhere' }}>
+                                {paidWithDisplay ?? '—'} {paySymbol}
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: '#6b5a45' }}>Merchant received</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#06b6d4', minWidth: 0, overflowWrap: 'anywhere' }}>
+                                {receivedDisplay ?? payment.amount} {settlementSymbol}
+                            </span>
+                        </div>
+                    </div>
+                )}
 
                 {/* Transaction details */}
                 {payment.arcTxHash && (
@@ -276,7 +336,7 @@ export default function Invoice({ payment, returnUrl }: InvoiceProps) {
                 )}
 
                 {/* Actions */}
-                <div className="no-print" style={{ display: 'grid', gridTemplateColumns: returnUrl ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10 }}>
+                <div className="no-print invoice-actions" style={{ display: 'grid', gridTemplateColumns: returnUrl ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10 }}>
                     <button
                         onClick={downloadPdf}
                         title="Opens your browser's print dialog — choose 'Save as PDF'"

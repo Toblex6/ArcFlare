@@ -27,6 +27,17 @@ interface PaymentItem {
   paid_at: string;
   arc_tx_hash: string | null;
   explorer_url: string | null;
+  // Phase 6 (additive, from /api/payments/all): backend-authoritative
+  // pay-in token X + conversion read-model. Direct payments return
+  // payToken == settlement token and conversion == null.
+  payToken?: { symbol: string; address: string; decimals: number } | null;
+  conversion?: {
+    status: string;
+    inputAmountDisplay: string | null;
+    quotedOutputDisplay: string | null;
+    actualInputDisplay: string | null;
+    actualOutputDisplay: string | null;
+  } | null;
 }
 
 interface DashboardMetrics {
@@ -93,6 +104,10 @@ export default function MerchantDashboard() {
   // Payment link creation state
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState<'USDC' | 'EURC'>('USDC');
+  // Default settlement currency for NEW links (Settings → Wallet &
+  // Payouts). The selector stays explicit per invoice — the backend lets
+  // explicit input win; this default only pre-selects it.
+  const [settlementDefault, setSettlementDefault] = useState<'USDC' | 'EURC'>('USDC');
   const [description, setDescription] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [creating, setCreating] = useState(false);
@@ -139,6 +154,12 @@ export default function MerchantDashboard() {
           walletProvider: data.merchant.walletProvider,
           walletAddress: data.merchant.walletAddress,
         });
+        // Pre-select the merchant's default settlement currency for new
+        // links (Phase 6). Unknown shapes fall back to USDC — never guess.
+        const pref = data.settlementPreference?.symbol;
+        const nextDefault = pref === 'EURC' ? 'EURC' : 'USDC';
+        setSettlementDefault(nextDefault);
+        setCurrency(nextDefault);
       })
       .catch(() => router.replace("/merchant/login"))
       .finally(() => setCheckingAuth(false));
@@ -250,7 +271,9 @@ export default function MerchantDashboard() {
       if (!data.success) throw new Error(data.error);
       setNewLink(data);
       setAmount('');
-      setCurrency('USDC');
+      // Reset to the settlement default (not hardcoded USDC) so the next
+      // link keeps settling in the merchant's chosen currency.
+      setCurrency(settlementDefault);
       setDescription('');
       setWebhookUrl('');
     } catch (err: any) {
@@ -566,6 +589,9 @@ export default function MerchantDashboard() {
                 <option value="USDC">USDC</option>
                 <option value="EURC">EURC</option>
               </select>
+              <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "6px 0 0 0", lineHeight: 1.5 }}>
+                New links settle in {settlementDefault} by default. Existing links are unchanged — change the default in Settings → Wallet &amp; Payouts.
+              </p>
             </div>
             <div>
               <label style={{ display: "block", color: "var(--text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
@@ -834,7 +860,17 @@ export default function MerchantDashboard() {
                     </td>
                   </tr>
                 ) : (
-                  payments.map((payment) => (
+                  payments.map((payment) => {
+                    // Phase 6: routed rows name the pay token X separately
+                    // from the settlement amount Y (backend-authoritative).
+                    // Direct rows keep the single amount + currency exactly
+                    // as before.
+                    const rowConverted = !!payment.payToken && !!payment.currency &&
+                      payment.payToken.symbol.toUpperCase() !== payment.currency.toUpperCase();
+                    const rowPaidWith = rowConverted
+                      ? (payment.conversion?.actualInputDisplay ?? payment.conversion?.inputAmountDisplay ?? null)
+                      : null;
+                    return (
                     <tr key={payment.id} className="hover:bg-[#120b08]/40 transition-colors">
                       <td className="py-3 pr-3">
                         {payment.explorer_url ? (
@@ -862,6 +898,11 @@ export default function MerchantDashboard() {
                       <td className="py-3 pr-3">
                         <div className="text-white font-bold text-xs">{payment.amount.toFixed(2)}</div>
                         <div className="text-amber-400 text-[9px]">{payment.currency}</div>
+                        {rowConverted && (
+                          <div className="text-cyan-400 text-[9px] mt-0.5">
+                            Paid with{rowPaidWith ? ` ${rowPaidWith}` : ''} {payment.payToken?.symbol}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3">
                         <span className={`px-2 py-1 rounded text-[9px] font-bold border ${payment.status === "SUCCESS"
@@ -874,7 +915,8 @@ export default function MerchantDashboard() {
                         </span>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>

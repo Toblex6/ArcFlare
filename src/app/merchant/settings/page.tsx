@@ -77,6 +77,102 @@ function GeneralTab({ merchant }: { merchant: MerchantInfo | null }) {
   );
 }
 
+// ── Settlement currency (Payment Routing v1) ───────────────────────────
+// Default settlement token for FUTURE payment links/invoices. Self-
+// contained card inside the existing Wallet & Payouts tab — no new
+// settings architecture. Reads/writes the canonical preference via
+// GET/PATCH /api/merchant/me (symbol only; the server persists the
+// canonical address and rejects anything non-canonical).
+function SettlementPreferenceCard() {
+  const [preference, setPreference] = useState<'USDC' | 'EURC' | null>(null);
+  const [saving, setSaving] = useState<'USDC' | 'EURC' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/merchant/me')
+      .then((r) => r.json())
+      .then((data) => {
+        const sym = data?.settlementPreference?.symbol;
+        setPreference(sym === 'EURC' ? 'EURC' : 'USDC');
+      })
+      .catch(() => setPreference('USDC'));
+  }, []);
+
+  const save = async (symbol: 'USDC' | 'EURC') => {
+    if (symbol === preference || saving) return;
+    setSaving(symbol);
+    setError(null);
+    setSaved(false);
+    try {
+      const res = await fetch('/api/merchant/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settlementToken: symbol }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Could not save settlement currency.');
+      setPreference(data.settlementPreference?.symbol === 'EURC' ? 'EURC' : 'USDC');
+      setSaved(true);
+    } catch (err: any) {
+      setError(err.message || 'Could not save settlement currency.');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div style={cardStyle}>
+      <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', margin: '0 0 4px' }}>Settlement currency</h3>
+      <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 16px' }}>
+        New payment links and invoices settle in this currency. Existing invoices are unchanged.
+      </p>
+      {preference === null && !error ? (
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Loading settlement currency...</p>
+      ) : (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }} role="radiogroup" aria-label="Settlement currency">
+          {(['USDC', 'EURC'] as const).map((symbol) => {
+            const selected = preference === symbol;
+            const busy = saving === symbol;
+            return (
+              <button
+                key={symbol}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => save(symbol)}
+                disabled={saving !== null}
+                style={{
+                  flex: '1 1 140px',
+                  minHeight: 48,
+                  padding: '10px 16px',
+                  borderRadius: 10,
+                  border: selected ? '2px solid var(--primary)' : '1px solid var(--border)',
+                  background: selected ? 'rgba(200,151,90,0.1)' : 'var(--surface-secondary)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                  fontWeight: 800,
+                  cursor: saving !== null ? 'not-allowed' : 'pointer',
+                  opacity: saving !== null && !busy ? 0.6 : 1,
+                  boxSizing: 'border-box',
+                }}
+              >
+                {busy ? 'Saving...' : symbol}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {error && <p style={{ color: 'var(--danger)', fontSize: 12, margin: '12px 0 0 0', wordBreak: 'break-word' }}>❌ {error}</p>}
+      {saved && !error && (
+        <p style={{ color: 'var(--success)', fontSize: 12, margin: '12px 0 0 0' }}>
+          ✓ Saved — new payment links will settle in {preference}. Existing invoices are unchanged.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Wallet & Payouts tab ───────────────────────────────────────────────
 function WalletTab() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
@@ -154,6 +250,9 @@ function WalletTab() {
           </p>
         )}
       </div>
+
+      {/* Default settlement currency for new payment links/invoices */}
+      <SettlementPreferenceCard />
 
       {/* Connect / switch external wallet — real SIWE flow, not a raw address field */}
       <div style={cardStyle}>

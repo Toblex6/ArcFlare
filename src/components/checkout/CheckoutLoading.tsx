@@ -10,6 +10,15 @@ export interface CheckoutPaymentInfo {
   merchantName?: string | null;
   expiresAt?: string | Date | null;
   transactionHash?: string | null;
+  /**
+   * Phase 6 (additive, optional): pay-in token for routed settlements.
+   * When present and different from `currency`, the card renders a
+   * "Paid with X" row so routed confirmations never collapse X and Y
+   * into one ambiguous amount. `payAmount` is the measured debit when
+   * settled; omit it and only the token is named.
+   */
+  payTokenSymbol?: string | null;
+  payAmount?: number | string | null;
 }
 
 export function CheckoutLoading({ reference }: CheckoutPaymentInfo) {

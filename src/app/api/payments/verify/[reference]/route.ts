@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
+import { conversionView, payTokenView } from '@/src/lib/routing/receiptView';
 
 export async function GET(
   request: Request,
@@ -91,6 +92,27 @@ async function formatResponse(payment: any) {
     merchantUsername = (m as any)?.businessName || null;
   }
 
+  // ── Phase 6 (additive): pay-in token X + conversion read-model ──────────
+  // Lets checkout/history/receipt UI distinguish "Paid with X" from
+  // "Merchant received Y" from backend-authoritative rows. NULL
+  // payTokenAddress (direct/legacy payment) reads as the settlement token
+  // itself, so direct payments render X == Y. No semantics change — these
+  // fields are derived from the frozen invoice row + its conversion row.
+  const payToken = payTokenView({
+    payTokenAddress: (payment as any).payTokenAddress ?? null,
+    currency: payment.currency,
+    tokenAddress: payment.tokenAddress,
+  });
+  let conversionRow: any = null;
+  try {
+    conversionRow = await (prisma as any).paymentConversion.findUnique({
+      where: { paymentLogId: payment.id },
+    });
+  } catch {
+    conversionRow = null;
+  }
+  const conversion = conversionView(conversionRow);
+
   return {
     id: payment.id,
     reference: payment.reference,
@@ -127,5 +149,9 @@ async function formatResponse(payment: any) {
     // Canonical settlement-token identity (additive). EURC is a read-model-only
     // token in Phase 1 — see currency.ts / CheckoutWidget notes.
     token,
+    // Pay-in token X + conversion read-model (Phase 6, additive). Direct
+    // payments return payToken == token and conversion == null.
+    payToken,
+    conversion,
   };
 }

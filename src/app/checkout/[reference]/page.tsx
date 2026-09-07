@@ -186,6 +186,16 @@ export default function CheckoutPage() {
         ? `${arcTestnet.blockExplorers.default.url}/tx/${payment.arcTxHash}`
         : arcTestnet.blockExplorers.default.url,
       token: payment.token ?? null,
+      // Phase 6: routed-vs-direct receipt split (backend-authoritative X).
+      payToken: payment.payToken ?? null,
+      conversion: payment.conversion
+        ? {
+          inputAmountDisplay: payment.conversion.inputAmountDisplay ?? null,
+          quotedOutputDisplay: payment.conversion.quotedOutputDisplay ?? null,
+          actualInputDisplay: payment.conversion.actualInputDisplay ?? null,
+          actualOutputDisplay: payment.conversion.actualOutputDisplay ?? null,
+        }
+        : null,
     }
     : null;
 
@@ -350,6 +360,15 @@ export default function CheckoutPage() {
                   <span style={{ color: '#6b5a45', fontSize: 12 }}>Reference</span>
                   <span style={{ color: '#f0ece6', fontSize: 11, fontFamily: 'monospace' }}>{payment.reference}</span>
                 </div>
+                {/* Phase 6: when the customer pays in a different token than
+                    the settlement token, say so before they sign — the quote
+                    panel carries the exact amounts. */}
+                {payment.payToken && payment.token && payment.payToken.address.toLowerCase() !== payment.token.address.toLowerCase() && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#6b5a45', fontSize: 12 }}>Paid with</span>
+                    <span style={{ color: '#f0ece6', fontSize: 12 }}>{payment.payToken.symbol} → {payment.token.symbol}</span>
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid #2d2015' }}>
                   <span style={{ color: '#6b5a45', fontSize: 12 }}>Amount Due</span>
                   <span style={{ color: '#f0ece6', fontSize: 15, fontWeight: 800 }}>

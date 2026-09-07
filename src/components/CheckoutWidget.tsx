@@ -35,12 +35,23 @@ import { erc20TransferAbi } from '@/src/lib/wallet/erc20';
 import {
     USDC_CONTRACT,
     USDC_DECIMALS,
+    getClientToken,
     isCctpSupported,
     normalizeClientSymbol,
     resolveClientToken,
     shortTokenAddress,
+    type SupportedCurrency,
 } from '@/src/lib/tokens/clientTokens';
 import { arcTestnet } from '@/src/lib/wagmi';
+// Phase 6 (routing presentation): pay-in selector, live conversion quote,
+// and routed approve→route execution. The router/pool/token ADDRESSES the
+// widget signs all arrive in the server-issued quote — the UI only ever
+// offers the USDC/EURC symbols and canonical metadata from clientTokens.
+import { PayTokenSelector } from '@/src/components/checkout/routing/PayTokenSelector';
+import { QuotePanel, type QuotePanelState } from '@/src/components/checkout/routing/QuotePanel';
+import { RoutedReceipt } from '@/src/components/checkout/routing/RoutedReceipt';
+import { useRoutingQuote } from '@/src/components/checkout/routing/useRoutingQuote';
+import { erc20ApproveAbi, paymentRouterRouteAbi } from '@/src/components/checkout/routing/routerAbi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
@@ -70,6 +81,28 @@ export interface PaymentLogData {
      * moves and verifies EURC, never USDC.
      */
     token?: { symbol: string; address: string; decimals: number } | null;
+    /**
+     * Pay-in token X the customer actually paid / is paying (routing v1).
+     * Backend-authoritative (verify/[reference] derives it from the frozen
+     * payTokenAddress). Direct/legacy payments read as the settlement token
+     * itself (X == Y); null only when the stored address is non-canonical.
+     */
+    payToken?: { symbol: string; address: string; decimals: number } | null;
+    /**
+     * Conversion read-model for quoted/routed payments (backend-provided
+     * display amounts: measured actuals once executed, quoted values
+     * before). Null for direct payments.
+     */
+    conversion?: {
+        status: string;
+        inputAmountDisplay: string | null;
+        quotedOutputDisplay: string | null;
+        minOutputDisplay: string | null;
+        actualInputDisplay: string | null;
+        actualOutputDisplay: string | null;
+        quoteExpiresAt: string;
+        executionTxHash: string | null;
+    } | null;
 }
 
 interface AgentData {
@@ -202,6 +235,58 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         !!payment &&
         payment.status !== 'SUCCESS' &&
         payerTokenBalance < Number(payment.amount);
+
+    // ── Phase 6: pay-in token selection + conversion quote ───────────────
+    // The customer chooses USDC or EURC ("Pay with"). Same-as-settlement
+    // keeps the direct flow above; the other token fetches a live
+    // conversion quote ("You pay X → merchant receives Y"). Selection
+    // resets to the settlement token whenever a new invoice loads.
+    const [paySymbol, setPaySymbol] = useState<SupportedCurrency>('USDC');
+    const [routeStep, setRouteStep] = useState<'idle' | 'approve' | 'route' | 'verifying'>('idle');
+    const [routeError, setRouteError] = useState<string | null>(null);
+    useEffect(() => {
+        if (payment) {
+            setPaySymbol(invoiceSymbol);
+            setRouteStep('idle');
+            setRouteError(null);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [payment?.reference]);
+    const isRoutedSelection = !!payment && paySymbol !== invoiceSymbol;
+    const routing = useRoutingQuote(
+        reference,
+        // Quotes are a wallet-tab concern for unpaid invoices only — never
+        // fetched for settled rows or while the cross-chain tab is active.
+        method === 'wallet' && payment?.status !== 'SUCCESS' ? paySymbol : null,
+        invoiceSymbol,
+        !!payment && payment.status !== 'SUCCESS' && method === 'wallet'
+    );
+    const selectedPayToken = getClientToken(paySymbol);
+
+    // Token-aware balance for the ROUTED path: balanceOf the selected
+    // pay-in token (the contract the approve signs), compared against the
+    // quoted exact input — never against the invoice amount in Y.
+    const { data: payTokenBalanceRaw, isLoading: isPayBalanceLoading } = useReadContract({
+        address: selectedPayToken.address as `0x${string}`,
+        abi: erc20BalanceAbi,
+        functionName: 'balanceOf',
+        args: [(address ?? '0x0000000000000000000000000000000000000000') as `0x${string}`],
+        query: { enabled: isConnected && !!address && !!payment && payment.status !== 'SUCCESS' && isRoutedSelection && method === 'wallet' },
+    });
+    let payerPayTokenBalance: number | null = null;
+    try {
+        if (typeof payTokenBalanceRaw === 'bigint') {
+            payerPayTokenBalance = Number(formatUnits(payTokenBalanceRaw, selectedPayToken.decimals));
+        }
+    } catch { /* unparseable balance — display nothing, block nothing */ }
+    const routedNeed = routing.quote ? Number(routing.quote.payAmountDisplay) : null;
+    const hasRoutedInsufficientBalance =
+        payerPayTokenBalance !== null &&
+        routedNeed !== null &&
+        Number.isFinite(routedNeed) &&
+        !!payment &&
+        payment.status !== 'SUCCESS' &&
+        payerPayTokenBalance < routedNeed;
 
     // CCTP is unavailable for EURC: never leave the widget sitting on the
     // cross-chain tab for an invoice it cannot settle.
@@ -364,6 +449,122 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         }
     };
 
+    // ── Phase 6: routed pay path (X != Y) ─────────────────────────────────
+    // Two wallet signatures, both against server-issued values from the live
+    // quote: approve(router, exactInput) on the pay-token contract, then
+    // route(tokenIn, amountIn, minAmountOut, deadline, recipient) on the
+    // server-provided router. verify-onchain re-checks the whole execution
+    // (canonical router event, exact input, settlement token, minOut floor,
+    // expiry) before the payment can settle — a stale or tampered quote can
+    // never confirm.
+    const handleRoutedPayment = async () => {
+        if (!reference || !payment) return;
+        if (!payment.merchantSCA) {
+            setRouteError('This merchant has not finished payout wallet setup yet. Cannot accept payment.');
+            return;
+        }
+        if (!isConnected || !address) {
+            setRouteError('Connect a wallet first.');
+            return;
+        }
+        const live = routing.status === 'ready' ? routing : null;
+        if (!live || !live.quote || !live.raw) {
+            const msg = routing.status === 'error'
+                ? (routing.headline || 'Could not get a conversion quote. Please try again.')
+                : 'Get a fresh conversion quote before paying.';
+            setRouteError(msg);
+            onEvent?.({ type: 'payment_error', error: msg });
+            return;
+        }
+        if (live.secondsLeft <= 0) {
+            const msg = 'Quote expired — get a fresh quote to continue.';
+            setRouteError(msg);
+            onEvent?.({ type: 'payment_error', error: msg });
+            return;
+        }
+        // Pre-flight: the payer sees the shortfall in the PAY token BEFORE
+        // signing — names X and the quoted exact input, never the invoice Y.
+        if (hasRoutedInsufficientBalance) {
+            const msg = `Insufficient ${live.quote.paySymbol} balance for this payment. You need ${live.quote.payAmountDisplay} ${live.quote.paySymbol} but your wallet holds ${payerPayTokenBalance} ${live.quote.paySymbol}.`;
+            setRouteError(msg);
+            onEvent?.({ type: 'payment_error', error: msg });
+            return;
+        }
+
+        try {
+            setRouteError(null);
+            setNetworkMismatch(false);
+            setShowTechnical(false);
+            setRouteStep('approve');
+            onEvent?.({ type: 'payment_pending' });
+
+            if (chainId !== arcTestnet.id) {
+                const providerGetter = async () => {
+                    try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; }
+                };
+                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter });
+                if (!net.ok) {
+                    setRouteStep('idle');
+                    setNetworkMismatch(true);
+                    setRouteError(net.message);
+                    onEvent?.({ type: 'payment_error', error: net.message });
+                    return;
+                }
+            }
+
+            const tokenIn = live.quote.payAddress as `0x${string}`;
+            const amountIn = BigInt(live.raw.inputAmount as string);
+            const router = live.raw.router as `0x${string}`;
+            // Step 1: let the quoted router pull exactly the quoted input.
+            await writeContractAsync({
+                address: tokenIn,
+                abi: erc20ApproveAbi,
+                functionName: 'approve',
+                args: [router, amountIn],
+            });
+            // Step 2: conversion + direct merchant credit in one transaction.
+            setRouteStep('route');
+            const txHash = await writeContractAsync({
+                address: router,
+                abi: paymentRouterRouteAbi,
+                functionName: 'route',
+                args: [
+                    tokenIn,
+                    amountIn,
+                    BigInt(live.raw.minOutputAmount as string),
+                    BigInt(live.raw.deadline as number),
+                    live.raw.recipient as `0x${string}`,
+                ],
+            });
+
+            setRouteStep('verifying');
+            const verifyRes = await fetch('/api/payments/verify-onchain', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reference, txHash }),
+            });
+            const verifyData = await verifyRes.json();
+            if (!verifyRes.ok || !verifyData.success) {
+                throw new Error(verifyData.error || 'Could not verify the transaction on-chain.');
+            }
+
+            await fetchLedgerStatus();
+            setRouteStep('idle');
+        } catch (err: any) {
+            setRouteStep('idle');
+            const lower = String((err as any)?.shortMessage ?? (err as any)?.message ?? '').toLowerCase();
+            const msg = lower.includes('user rejected') || lower.includes('user denied')
+                ? 'Payment cancelled. No funds were moved.'
+                : lower.includes('quote expired')
+                    ? 'Quote expired before the payment confirmed — get a fresh quote and try again.'
+                    : lower.includes('below the quoted minimum') || lower.includes('slippage')
+                        ? 'The rate moved past the guaranteed minimum — no payment was made. Get a fresh quote and try again.'
+                        : friendlyWalletError(err);
+            setRouteError(msg);
+            onEvent?.({ type: 'payment_error', error: msg });
+        }
+    };
+
     const handleCctpVerify = async () => {
         if (!reference || !cctpTxHash.trim()) return;
         // Defensive: the tab is unavailable for EURC, but a stale method state
@@ -429,6 +630,32 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
     const displayName = agent?.name || 'Autonomous Agent';
 
+    // ── Phase 6 render helpers ───────────────────────────────────────────
+    // Map the quote hook state onto the presentational panel states. While
+    // the selection is direct, no panel renders at all.
+    const panelState: QuotePanelState =
+        routing.status === 'loading'
+            ? { status: 'loading' }
+            : routing.status === 'refreshing'
+                ? { status: 'refreshing' }
+                : routing.status === 'error'
+                    ? { status: 'error', headline: routing.headline ?? 'Could not get a conversion quote. Please try again.', raw: routing.rawError }
+                    : routing.status === 'ready' && routing.quote
+                        ? { status: 'ready', quote: routing.quote, secondsLeft: routing.secondsLeft }
+                        : { status: 'loading' };
+    const routeBusy = routeStep !== 'idle';
+    // Settled-payment receipt split: backend-authoritative X vs Y. Direct
+    // payments (payToken == settlement token, or legacy rows without pay
+    // identity) keep the existing single-token confirmation below.
+    const successPayToken = payment.payToken ?? null;
+    const successConversion = payment.conversion ?? null;
+    const isConvertedSuccess =
+        isConfirmed &&
+        !!successPayToken &&
+        !!payment.token &&
+        successPayToken.address.toLowerCase() !== payment.token.address.toLowerCase();
+    const explorerBase = arcTestnet.blockExplorers.default.url;
+
     return (
         <div style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: compact ? 20 : 'clamp(20px, 3vw, 32px)', maxWidth: compact ? 440 : undefined, width: '100%', boxSizing: 'border-box', fontFamily: 'Inter, system-ui, sans-serif' }}>
             {!compact && (
@@ -442,7 +669,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 token; CCTP is USDC-only so its tab is unavailable for EURC
                 invoices (disabled, auto-switched to wallet above). */}
             {PAYMENT_METHODS.length > 1 && (
-                <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1px solid #2d2015', paddingBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 18, borderBottom: '1px solid #2d2015', paddingBottom: 12 }}>
                     {PAYMENT_METHODS.map((m) => {
                         const tabAvailable = m.available && (m.key !== 'cctp' || cctpAvailable);
                         return (
@@ -472,13 +699,20 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             {/* Phase 2B: token identity is always explicit — the user sees
                 exactly which token they are about to sign BEFORE signing.
                 USDC and EURC both settle natively on Arc Testnet; the transfer
-                below signs the invoice token and verify-onchain enforces it. */}
-            {!isConfirmed && (
+                below signs the invoice token and verify-onchain enforces it.
+                Phase 6: this direct-pay banner renders only when the selected
+                pay token IS the settlement token. A routed selection (X != Y)
+                is explained by the conversion quote panel instead — the wallet
+                then submits a conversion, never a plain Y transfer. */}
+            {!isConfirmed && !isRoutedSelection && (
                 <div style={{ background: isEurc ? 'rgba(6,182,212,0.06)' : 'rgba(200,151,90,0.06)', border: `1px solid ${isEurc ? 'rgba(6,182,212,0.2)' : 'rgba(200,151,90,0.25)'}`, borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
                     <p style={{ color: isEurc ? '#06b6d4' : '#c8975a', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Paying in {invoiceSymbol}</p>
                     <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
                         This invoice settles in {invoiceSymbol} on Arc Testnet ({shortTokenAddress(invoiceToken.address)}).
                         Your wallet will submit {isEurc ? 'an' : 'a'} {invoiceSymbol} transfer of {payment.amount} {invoiceSymbol}, verified on-chain before confirmation.
+                    </p>
+                    <p style={{ color: '#a89684', fontSize: 11, margin: '6px 0 0' }}>
+                        No conversion — you pay {payment.amount} {invoiceSymbol} and the merchant receives {payment.amount} {invoiceSymbol}.
                     </p>
                 </div>
             )}
@@ -522,6 +756,21 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
             {method === 'wallet' && (
                 <>
+                    {/* Phase 6: pay-in token choice. Visible before connect —
+                        quotes need no wallet — for unpaid invoices only. */}
+                    {!isConfirmed && (
+                        <PayTokenSelector
+                            settlementSymbol={invoiceSymbol}
+                            selected={paySymbol}
+                            onSelect={(s) => { setPaySymbol(s); setRouteError(null); }}
+                            disabled={isTxPending || routeBusy || isVerifying}
+                        />
+                    )}
+                    {/* Routed selection: live conversion quote with expiry +
+                        automatic recoverable re-quote (see useRoutingQuote). */}
+                    {!isConfirmed && isRoutedSelection && (
+                        <QuotePanel state={panelState} onRefresh={routing.refresh} compact={compact} />
+                    )}
                     {!isConnected ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {(() => {
@@ -641,42 +890,101 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 </button>
                             </div>
                             <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: 10, fontSize: 11, color: '#6b5a45', textDecoration: 'underline' }}>
-                                No test {invoiceSymbol}? Get some free ↗
+                                No test {isRoutedSelection ? paySymbol : invoiceSymbol}? Get some free ↗
                             </a>
-                            {/* Correct-token balance: the payer sees THEIR balance
-                                in the invoice token before signing — never a
-                                different token's balance. */}
-                            <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 12, padding: '10px 14px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ color: '#6b5a45', fontSize: 11 }}>Your {invoiceSymbol} balance</span>
-                                <span style={{ color: '#f0ece6', fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>
-                                    {isBalanceLoading ? '…' : payerTokenBalance !== null ? `${payerTokenBalance} ${invoiceSymbol}` : 'unavailable'}
-                                </span>
-                            </div>
-                            {hasInsufficientBalance && (
-                                <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
-                                    <p style={{ color: '#f87171', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Insufficient {invoiceSymbol} balance</p>
-                                    <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
-                                        You need {payment.amount} {invoiceSymbol} but your wallet holds {payerTokenBalance} {invoiceSymbol}. Top up {invoiceSymbol} before paying — a {invoiceSymbol === 'EURC' ? 'USDC' : 'EURC'} balance cannot pay this invoice.
-                                    </p>
-                                </div>
+                            {!isRoutedSelection ? (
+                                <>
+                                    {/* Correct-token balance: the payer sees THEIR balance
+                                        in the invoice token before signing — never a
+                                        different token's balance. */}
+                                    <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 12, padding: '10px 14px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                                        <span style={{ color: '#6b5a45', fontSize: 11 }}>Your {invoiceSymbol} balance</span>
+                                        <span style={{ color: '#f0ece6', fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>
+                                            {isBalanceLoading ? '…' : payerTokenBalance !== null ? `${payerTokenBalance} ${invoiceSymbol}` : 'unavailable'}
+                                        </span>
+                                    </div>
+                                    {hasInsufficientBalance && (
+                                        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
+                                            <p style={{ color: '#f87171', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Insufficient {invoiceSymbol} balance</p>
+                                            <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
+                                                You need {payment.amount} {invoiceSymbol} but your wallet holds {payerTokenBalance} {invoiceSymbol}. Top up {invoiceSymbol} before paying — a {invoiceSymbol === 'EURC' ? 'USDC' : 'EURC'} balance cannot pay this invoice.
+                                            </p>
+                                        </div>
+                                    )}
+                                    <button
+                                        onClick={handlePayment}
+                                        disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0 || hasInsufficientBalance}
+                                        style={{
+                                            width: '100%',
+                                            padding: 16,
+                                            borderRadius: 14,
+                                            border: 'none',
+                                            fontSize: 14,
+                                            fontWeight: 800,
+                                            cursor: isConfirmed || secondsLeft === 0 || hasInsufficientBalance ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
+                                            background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying || hasInsufficientBalance ? '#6b5a45' : '#c8975a',
+                                            color: isConfirmed ? '#06b6d4' : '#0e0b08',
+                                        }}
+                                    >
+                                        {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : hasInsufficientBalance ? `Insufficient ${invoiceSymbol} balance` : `Pay ${payment.amount} ${invoiceSymbol}`}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    {/* Routed balance: THEIR balance in the PAY token
+                                        against the quoted exact input — never Y. */}
+                                    <div style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 12, padding: '10px 14px', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                                        <span style={{ color: '#6b5a45', fontSize: 11 }}>Your {paySymbol} balance</span>
+                                        <span style={{ color: '#f0ece6', fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>
+                                            {isPayBalanceLoading ? '…' : payerPayTokenBalance !== null ? `${payerPayTokenBalance} ${paySymbol}` : 'unavailable'}
+                                        </span>
+                                    </div>
+                                    {hasRoutedInsufficientBalance && routing.quote && (
+                                        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
+                                            <p style={{ color: '#f87171', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Insufficient {paySymbol} balance</p>
+                                            <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
+                                                You need {routing.quote.payAmountDisplay} {paySymbol} but your wallet holds {payerPayTokenBalance} {paySymbol}. Top up {paySymbol} before paying — the conversion needs the full quoted amount.
+                                            </p>
+                                        </div>
+                                    )}
+                                    <button
+                                        onClick={handleRoutedPayment}
+                                        disabled={routeBusy || isConfirmed || secondsLeft === 0 || routing.status !== 'ready' || hasRoutedInsufficientBalance}
+                                        style={{
+                                            width: '100%',
+                                            padding: 16,
+                                            borderRadius: 14,
+                                            border: 'none',
+                                            fontSize: 14,
+                                            fontWeight: 800,
+                                            cursor: isConfirmed || secondsLeft === 0 || hasRoutedInsufficientBalance || routing.status !== 'ready' ? 'default' : routeBusy ? 'not-allowed' : 'pointer',
+                                            background: isConfirmed ? 'rgba(6,182,212,0.1)' : routeBusy || routing.status !== 'ready' || hasRoutedInsufficientBalance ? '#6b5a45' : '#c8975a',
+                                            color: isConfirmed ? '#06b6d4' : '#0e0b08',
+                                        }}
+                                    >
+                                        {isConfirmed
+                                            ? '✓ Payment Confirmed'
+                                            : routeStep === 'approve'
+                                                ? `⏳ Approve ${paySymbol} spending in your wallet...`
+                                                : routeStep === 'route'
+                                                    ? '⏳ Confirm payment in your wallet...'
+                                                    : routeStep === 'verifying'
+                                                        ? '🔍 Verifying on-chain...'
+                                                        : secondsLeft === 0
+                                                            ? 'Link Expired'
+                                                            : hasRoutedInsufficientBalance
+                                                                ? `Insufficient ${paySymbol} balance`
+                                                                : routing.status === 'ready' && routing.quote
+                                                                    ? `Pay ${routing.quote.payAmountDisplay} ${routing.quote.paySymbol}`
+                                                                    : 'Getting conversion rate...'}
+                                    </button>
+                                    {routeError && (
+                                        <div style={{ marginTop: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 12, padding: 14, textAlign: 'center' }}>
+                                            <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>❌ {routeError}</p>
+                                        </div>
+                                    )}
+                                </>
                             )}
-                            <button
-                                onClick={handlePayment}
-                                disabled={isTxPending || isVerifying || isConfirmed || secondsLeft === 0 || hasInsufficientBalance}
-                                style={{
-                                    width: '100%',
-                                    padding: 16,
-                                    borderRadius: 14,
-                                    border: 'none',
-                                    fontSize: 14,
-                                    fontWeight: 800,
-                                    cursor: isConfirmed || secondsLeft === 0 || hasInsufficientBalance ? 'default' : isTxPending || isVerifying ? 'not-allowed' : 'pointer',
-                                    background: isConfirmed ? 'rgba(6,182,212,0.1)' : isTxPending || isVerifying || hasInsufficientBalance ? '#6b5a45' : '#c8975a',
-                                    color: isConfirmed ? '#06b6d4' : '#0e0b08',
-                                }}
-                            >
-                                {isConfirmed ? '✓ Payment Confirmed' : isTxPending ? '⏳ Confirm in your wallet...' : isVerifying ? '🔍 Verifying on-chain...' : secondsLeft === 0 ? 'Link Expired' : hasInsufficientBalance ? `Insufficient ${invoiceSymbol} balance` : `Pay ${payment.amount} ${invoiceSymbol}`}
-                            </button>
                         </>
                     )}
                 </>
@@ -789,6 +1097,22 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
             {isConfirmed && (
                 <div style={{ marginTop: 16, background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: 14, padding: 16, textAlign: 'center' }}>
+                    {/* Routed settlement: backend-authoritative X vs Y —
+                        never collapsed into one ambiguous "currency" label.
+                        Measured actuals once executed, quoted values before. */}
+                    {isConvertedSuccess && successPayToken && (
+                        <div style={{ textAlign: 'left', marginBottom: 12 }}>
+                            <RoutedReceipt
+                                converted
+                                paySymbol={successPayToken.symbol}
+                                payAmountDisplay={successConversion?.actualInputDisplay ?? successConversion?.inputAmountDisplay ?? `${payment.amount}`}
+                                settlementSymbol={invoiceSymbol}
+                                settlementAmountDisplay={successConversion?.actualOutputDisplay ?? successConversion?.quotedOutputDisplay ?? `${payment.amount}`}
+                                txHash={payment.arcTxHash}
+                                explorerUrl={payment.arcTxHash ? `${explorerBase}/tx/${payment.arcTxHash}` : null}
+                            />
+                        </div>
+                    )}
                     <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>✓ Payment settled on Arc Testnet in {invoiceSymbol}</p>
                     <p style={{ color: '#4b4035', fontSize: 10, margin: 0 }}>Ledger updated · {payment.amount} {invoiceSymbol} confirmed on-chain · Dashboard synced</p>
                 </div>

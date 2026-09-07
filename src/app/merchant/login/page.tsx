@@ -2,7 +2,7 @@
 
 //src/app/merchant/login/page.tsx
 
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -12,8 +12,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 // returnTo support: the public-browse login gate (/login?returnTo=… — see
 // src/lib/auth/returnTo.ts) forwards here with the original path preserved,
 // so signing in lands the user back where the gated action happened.
+//
+// Build note: useSearchParams() forces client-side rendering of the tree
+// below the nearest Suspense boundary during prerender, so the form lives
+// in MerchantLoginForm and this page's default export is a thin Suspense
+// wrapper (per the useSearchParams docs). The fallback reuses the same
+// page chrome so there is no visual flash — only the form card is pending.
 
-export default function MerchantLogin() {
+function MerchantLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [form, setForm] = useState({ email: '', password: '' });
@@ -245,5 +251,40 @@ export default function MerchantLogin() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function MerchantLogin() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: '100vh',
+            background: 'var(--background)',
+            color: 'var(--text)',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <Image
+            src="/arcflare-logo.png"
+            alt="FlareHQ"
+            width={52}
+            height={52}
+            style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }}
+          />
+          <p style={{ color: 'var(--primary)', fontFamily: 'monospace', fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', margin: 0 }}>
+            Loading sign-in...
+          </p>
+        </main>
+      }
+    >
+      <MerchantLoginForm />
+    </Suspense>
   );
 }

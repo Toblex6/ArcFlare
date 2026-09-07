@@ -6,8 +6,8 @@ import { jwtVerify } from 'jose';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { parseBody, SettlementPreferenceSchema } from '@/src/lib/validation';
-import { resolvePreferenceUpdate } from '@/src/lib/routing/preference';
-import { getTokenByAddress } from '@/src/lib/tokens/supportedTokens';
+import { resolveMerchantSettlementPreference, resolvePreferenceUpdate } from '@/src/lib/routing/preference';
+import { getTokenByAddress, getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -42,6 +42,19 @@ export async function GET(req: NextRequest) {
 
     const successCount = payments.filter((p) => p.status === 'SUCCESS').length;
 
+    // Phase 6 (additive): current default settlement token for FUTURE
+    // invoices, for the settings UI + payment-creation default. NULL =
+    // USDC default. Fail-soft to USDC on a corrupt stored value so a bad
+    // row can never 500 the dashboard — the PATCH path above still
+    // validates strictly and refuses to persist non-canonical values.
+    let preference: { symbol: string; address: string; decimals: number };
+    try {
+      preference = resolveMerchantSettlementPreference(merchant);
+    } catch {
+      const fallback = getTokenBySymbol('USDC');
+      preference = { symbol: fallback.symbol, address: fallback.address, decimals: fallback.decimals };
+    }
+
     return NextResponse.json({
       success: true,
       merchant: {
@@ -53,6 +66,11 @@ export async function GET(req: NextRequest) {
         walletAddress: merchant.walletAddress,
         // Show masked key — full key was shown only at signup
         apiKeyHint: `${merchant.apiKey.slice(0, 16)}...`,
+      },
+      settlementPreference: {
+        symbol: preference.symbol,
+        address: preference.address,
+        decimals: preference.decimals,
       },
       stats: {
         totalPayments: payments.length,

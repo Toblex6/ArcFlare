@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
+import { conversionView, payTokenView } from '@/src/lib/routing/receiptView';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,19 @@ export async function GET(req: NextRequest) {
 
     const successRate =
       paymentLogs.length > 0 ? (successfulLogs.length / paymentLogs.length) * 100 : 100;
+
+    // Phase 6 (additive): one conversion lookup for the whole page so each
+    // row can distinguish "Paid with X" from "settled in Y". Single query,
+    // mapped by paymentLogId — no per-row round trips.
+    let conversionByPaymentId = new Map<string, any>();
+    try {
+      const conversions = await (prisma as any).paymentConversion.findMany({
+        where: { paymentLogId: { in: paymentLogs.map((l) => l.id) } },
+      });
+      conversionByPaymentId = new Map(conversions.map((c: any) => [c.paymentLogId, c]));
+    } catch {
+      conversionByPaymentId = new Map<string, any>();
+    }
 
     const formattedPayments = paymentLogs.map((log) => {
       // The stored `status` never updates itself over time — a PENDING
@@ -73,6 +87,15 @@ export async function GET(req: NextRequest) {
         gateway_reference: (log as any).gatewayReference || null,
         // Canonical settlement-token identity (additive).
         token,
+        // Pay-in token X + conversion read-model (Phase 6, additive). Direct
+        // payments return payToken == token and conversion == null, so the
+        // dashboard can render "Paid with X / Received Y" honestly.
+        payToken: payTokenView({
+          payTokenAddress: (log as any).payTokenAddress ?? null,
+          currency: log.currency,
+          tokenAddress: (log as any).tokenAddress ?? null,
+        }),
+        conversion: conversionView(conversionByPaymentId.get(log.id) ?? null),
         // No real CCTP telemetry (nonce, attestation status) is tracked anywhere
         // in the schema today — the block that used to be here was fabricated
         // (Math.random() nonce, hardcoded source/target domains) and has been

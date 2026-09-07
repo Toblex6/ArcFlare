@@ -35,7 +35,16 @@ export function CheckoutAlreadyPaid({
   currency,
   merchantName,
   transactionHash,
+  payTokenSymbol,
+  payAmount,
 }: CheckoutPaymentInfo) {
+  // Routed settlement (backend-provided): name the pay token separately
+  // from the settlement currency. Direct payments keep the single Amount
+  // row exactly as before.
+  const routed =
+    !!payTokenSymbol &&
+    !!currency &&
+    payTokenSymbol.trim().toUpperCase() !== currency.trim().toUpperCase();
   return (
     <div className="mx-auto w-full max-w-md">
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-8 py-10 backdrop-blur">
@@ -67,7 +76,15 @@ export function CheckoutAlreadyPaid({
         </div>
 
         <div className="mt-7 divide-y divide-zinc-800 border-t border-b border-zinc-800">
-          <InfoRow label="Amount" value={formatAmount(amount, currency)} />
+          {/* Routed: the Amount row IS what the merchant received (Y) —
+              labelled as such; the pay token (X) gets its own row. */}
+          <InfoRow label={routed ? 'Merchant received' : 'Amount'} value={formatAmount(amount, currency)} />
+          {routed ? (
+            <InfoRow
+              label="Paid with"
+              value={payAmount != null ? formatAmount(payAmount, payTokenSymbol) : (payTokenSymbol as string).toUpperCase()}
+            />
+          ) : null}
           {merchantName ? <InfoRow label="Merchant" value={merchantName} /> : null}
           {reference ? <InfoRow label="Reference" value={reference} mono /> : null}
           {transactionHash ? (

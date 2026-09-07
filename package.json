@@ -58,6 +58,7 @@
     "@nomicfoundation/hardhat-ethers": "^4.0.15",
     "@types/bcryptjs": "^2.4.6",
     "@types/pdf-parse": "^1.1.5",
+    "@types/react-dom": "^19.2.7",
     "hardhat": "^3.13.0",
     "prettier": "^3.8.4"
   }

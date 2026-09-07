@@ -195,6 +195,8 @@ export default function EmbedCheckoutPage() {
           currency={payment.currency}
           merchantName={payment.merchant_username ? `@${payment.merchant_username}` : payment.merchant}
           transactionHash={payment.arcTxHash}
+          payTokenSymbol={payment.payToken?.symbol ?? null}
+          payAmount={payment.conversion?.actualInputDisplay ?? payment.conversion?.inputAmountDisplay ?? null}
         />
       )}
 
