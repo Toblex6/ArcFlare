@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
-import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
+import { getAgentWalletAddress, getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { prisma } from "@/lib/prisma";
@@ -24,8 +24,21 @@ async function walletHandler(req: NextRequest, ctx: { params: Promise<{ id: stri
     return NextResponse.json({ error: `agent ${agentId} not found` }, { status: 404 });
   }
 
-  const wallet = await getOrCreateAgentWallet(agentId);
-  const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? wallet.address);
+  // F4: authorization + step-up BEFORE provisioning. The SCA is the stable
+  // caller-control handle, so authentication can (and must) run without
+  // creating key material first. Only when a legacy row has no SCA do we
+  // fall back to a READ-ONLY address lookup (never get-or-create) for the
+  // control check — an unauthorized caller therefore never causes a wallet
+  // row/key to be created and never learns wallet material (403 first).
+  let claimAddress: string | null =
+    typeof agent.scaAddress === "string" && agent.scaAddress ? agent.scaAddress : null;
+  if (!claimAddress) {
+    claimAddress = await getAgentWalletAddress(agentId).catch(() => null);
+  }
+  if (!claimAddress) {
+    return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
+  }
+  const actor = await verifyCallerControlsAddress(req, claimAddress);
   if (!actor) {
     return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
   }
@@ -34,6 +47,11 @@ async function walletHandler(req: NextRequest, ctx: { params: Promise<{ id: stri
   // wallet/account-control — a consumer actor needs the credential.
   const walletStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.wallet-bind");
   if (walletStepUp) return walletStepUp;
+
+  // Authorized only from here: read (or idempotently create) the EOA.
+  // The route stays read-only from the caller's perspective — the address
+  // only is returned, the key never leaves the server.
+  const wallet = await getOrCreateAgentWallet(agentId);
 
   return NextResponse.json({
     agentId,

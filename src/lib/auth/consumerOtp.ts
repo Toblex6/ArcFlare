@@ -85,18 +85,53 @@ export async function verifyConsumerOtp(args: {
     return { ok: false };
   }
   if (!hashEqual(row.codeHash, hashOtpCode(args.code))) {
-    const attempts = (row.attempts ?? 0) + 1;
+    // Atomic wrong-guess accounting: `increment: 1` is a single UPDATE so
+    // concurrent guesses cannot collapse the five-strike counter. The row
+    // is invalidated (deleted) once the POST-increment count reaches the
+    // threshold — the same threshold as before, just race-safe.
+    let updated: any = null;
+    try {
+      updated = await (prisma as any).consumerEmailOtp.update({
+        where: { id: row.id },
+        data: { attempts: { increment: 1 } },
+        select: { attempts: true },
+      });
+    } catch {
+      // Row already gone (consumed/invalidated by a racer) — invalid.
+      return { ok: false };
+    }
+    const attempts = updated?.attempts ?? ((row.attempts ?? 0) + 1);
     if (attempts >= MAX_CONSUMER_OTP_ATTEMPTS) {
       await (prisma as any).consumerEmailOtp.delete({ where: { id: row.id } }).catch(() => {});
-    } else {
-      await (prisma as any).consumerEmailOtp.update({
-        where: { id: row.id },
-        data: { attempts },
-      }).catch(() => {});
     }
     return { ok: false };
   }
-  // Single-use: consume (delete) before returning success.
-  await (prisma as any).consumerEmailOtp.delete({ where: { id: row.id } }).catch(() => {});
+  // Single-use atomic claim (F2): exactly one concurrent verifier may delete
+  // this row. The delete is conditional on the expected code hash, a live
+  // (unconsumed, unexpired) row — the loser's deleteMany matches 0 rows and
+  // is treated as already-consumed/invalid. Same hash/storage model, same
+  // 10-minute expiry, same account binding (row id scoped to this
+  // email+purpose read), same generic anti-enumeration `{ ok: false }`.
+  const expectedHash = hashOtpCode(args.code);
+  const now = new Date();
+  if (new Date(row.expiresAt).getTime() <= now.getTime()) {
+    await (prisma as any).consumerEmailOtp.delete({ where: { id: row.id } }).catch(() => {});
+    return { ok: false };
+  }
+  let claimed = 0;
+  try {
+    const res = await (prisma as any).consumerEmailOtp.deleteMany({
+      where: {
+        id: row.id,
+        codeHash: expectedHash,
+        consumedAt: null,
+        expiresAt: { gt: now },
+      },
+    });
+    claimed = res?.count ?? 0;
+  } catch {
+    return { ok: false };
+  }
+  if (claimed !== 1) return { ok: false };
   return { ok: true, accountId: row.accountId ?? null };
 }

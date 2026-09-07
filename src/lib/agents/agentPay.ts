@@ -106,8 +106,11 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   // ── M9 idempotency: a retried POST with the same idempotencyKey must
   // replay the ORIGINAL outcome — never spend again (and never burn the
   // spend-limit window twice). The unique PaymentLog.idempotencyKey claim
-  // is taken BEFORE the spend record; a concurrent duplicate hits P2002
-  // and replays the winner's row.
+  // is taken AFTER authentication + consumer step-up (F3): an unauthorized
+  // or insufficiently stepped-up consumer must never be able to
+  // create/squat the idempotency record. A concurrent duplicate hits P2002
+  // and replays the winner's row. Non-consumer (merchant/service-key)
+  // callers pass the step-up through untouched, so their path is unchanged.
   const idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim().slice(0, 120) : "";
   let claimedLogId: string | null = null;
 
@@ -139,6 +142,29 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
     );
   };
 
+  // 1. the payer agent's payment EOA (auto-provisioned, key encrypted at rest).
+  const wallet = await getOrCreateAgentWallet(agentId);
+  const agentEoa = wallet.address;
+
+  // 2. the caller must control the agent (its SCA, or its payment EOA).
+  // Authentication stays FIRST — before any idempotency record exists.
+  const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? agentEoa);
+  if (!actor) {
+    return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
+  }
+
+  // 2b. Consumer step-up (Stage 2): the value-moving decision point for
+  // POST /api/agents/[id]/pay lives here (this lib IS the route's execution
+  // core — the route file only validates shape and delegates). Consumer
+  // actors need the step-up credential once a payment PIN is enrolled.
+  // Step-up stays BEFORE the idempotency claim (F3) so an insufficiently
+  // stepped-up consumer can never reserve/squat the key. Non-consumer
+  // actors pass through untouched (no new PIN requirement on them).
+  const a2aStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.agent-pay");
+  if (a2aStepUp) return a2aStepUp;
+
+  // 2c. idempotency claim — only reachable once authentication + step-up
+  // passed. Atomicity preserved: unique-claim + P2002 → replay winner.
   if (idempotencyKey) {
     const existing = await (prisma as any).paymentLog.findUnique({ where: { idempotencyKey } }).catch(() => null);
     if (existing) return replay(existing);
@@ -166,23 +192,6 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
       throw claimError;
     }
   }
-
-  // 1. the payer agent's payment EOA (auto-provisioned, key encrypted at rest).
-  const wallet = await getOrCreateAgentWallet(agentId);
-  const agentEoa = wallet.address;
-
-  // 2. the caller must control the agent (its SCA, or its payment EOA).
-  const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? agentEoa);
-  if (!actor) {
-    return NextResponse.json({ error: "This merchant account does not control this agent." }, { status: 403 });
-  }
-
-  // 2b. Consumer step-up (Stage 2): the value-moving decision point for
-  // POST /api/agents/[id]/pay lives here (this lib IS the route's execution
-  // core — the route file only validates shape and delegates). Consumer
-  // actors need the step-up credential once a payment PIN is enrolled.
-  const a2aStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.agent-pay");
-  if (a2aStepUp) return a2aStepUp;
 
   const provider = getProvider();
   const usdc = new Contract(getUsdcAddress(), USDC_ERC20_ABI, provider);

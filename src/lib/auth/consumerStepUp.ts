@@ -86,22 +86,56 @@ export async function checkConsumerPin(
   }
   const match = await bcrypt.compare(candidate, record.pinHash).catch(() => false);
   if (match) {
+    // Re-read the canonical lockout state AFTER the (slow) bcrypt check: a
+    // concurrent wrong-PIN burst may have locked the account while we were
+    // verifying. A correct PIN must NOT clear a lock it raced with, and must
+    // NOT succeed once the account is locked (423 semantics preserved).
+    const current = await (prisma as any).consumerAccount.findUnique({
+      where: { id: accountId },
+      select: { pinLockedUntil: true },
+    }).catch(() => null);
+    if (current?.pinLockedUntil && new Date(current.pinLockedUntil).getTime() > Date.now()) {
+      return { ok: false, locked: true, remaining: 0 };
+    }
     await (prisma as any).consumerAccount.update({
       where: { id: accountId },
       data: { pinFailedAttempts: 0, pinLockedUntil: null },
     }).catch(() => {});
     return { ok: true };
   }
-  const attempts = (record.pinFailedAttempts ?? 0) + 1;
-  const locked = attempts >= MAX_CONSUMER_PIN_ATTEMPTS;
-  await (prisma as any).consumerAccount.update({
-    where: { id: accountId },
-    data: {
-      pinFailedAttempts: attempts,
-      pinLockedUntil: locked ? new Date(Date.now() + CONSUMER_PIN_LOCK_MS) : undefined,
-    },
-  }).catch(() => {});
-  return { ok: false, locked, remaining: Math.max(0, MAX_CONSUMER_PIN_ATTEMPTS - attempts) };
+  // Atomic failure increment at the database layer (F1): concurrent wrong-PIN
+  // requests must each count. The read→increment→write sequence used to let
+  // N simultaneous failures collapse to ~1 recorded attempt; `increment: 1`
+  // is a single atomic UPDATE so every attempt is recorded.
+  let updated: any = null;
+  try {
+    updated = await (prisma as any).consumerAccount.update({
+      where: { id: accountId },
+      data: { pinFailedAttempts: { increment: 1 } },
+      select: { pinFailedAttempts: true, pinLockedUntil: true },
+    });
+  } catch {
+    // Row vanished mid-flight — fail closed with the pre-read count.
+    const attempts = (record.pinFailedAttempts ?? 0) + 1;
+    const locked = attempts >= MAX_CONSUMER_PIN_ATTEMPTS;
+    return { ok: false, locked, remaining: Math.max(0, MAX_CONSUMER_PIN_ATTEMPTS - attempts) };
+  }
+  const attempts = updated?.pinFailedAttempts ?? ((record.pinFailedAttempts ?? 0) + 1);
+  // Re-read canonical state after the atomic increment: another racing
+  // request may already have locked the account, and the threshold decision
+  // must be made on the POST-increment count, never the stale pre-read.
+  const alreadyLocked =
+    !!updated?.pinLockedUntil && new Date(updated.pinLockedUntil).getTime() > Date.now();
+  const locked = alreadyLocked || attempts >= MAX_CONSUMER_PIN_ATTEMPTS;
+  if (locked && !alreadyLocked) {
+    // Idempotent lock write — racing lockers all converge on locked; the
+    // counter itself was already fixed atomically above.
+    await (prisma as any).consumerAccount.update({
+      where: { id: accountId },
+      data: { pinLockedUntil: new Date(Date.now() + CONSUMER_PIN_LOCK_MS) },
+    }).catch(() => {});
+  }
+  return { ok: false, locked, remaining: locked ? 0 : Math.max(0, MAX_CONSUMER_PIN_ATTEMPTS - attempts) };
 }
 
 // Non-HTTP adapter for the Telegram bot (the only non-HTTP consumer entry
