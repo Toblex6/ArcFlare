@@ -25,8 +25,28 @@ export async function GET() {
     // 3. Compute live aggregate ecosystem metrics using our inferred type
     const totalTransactions = logs.length;
 
+    // Explicit per-currency buckets — USDC and EURC are never summed as
+    // fungible units. `totalVolume` is a DEPRECATED mixed-unit sum kept
+    // for back-compat — prefer `volumeByCurrency`.
+    const volumeByCurrency = { USDC: 0, EURC: 0 };
+    for (const log of logs) {
+      let symbol = 'USDC';
+      try {
+        symbol = resolveRowCurrency({
+          currency: log.currency,
+          tokenAddress: (log as any).tokenAddress,
+        }).symbol;
+      } catch {
+        symbol = 'USDC';
+      }
+      if (symbol === 'EURC') volumeByCurrency.EURC += (log as any).amount || 0;
+      else volumeByCurrency.USDC += (log as any).amount || 0;
+    }
+    volumeByCurrency.USDC = parseFloat(volumeByCurrency.USDC.toFixed(4));
+    volumeByCurrency.EURC = parseFloat(volumeByCurrency.EURC.toFixed(4));
+
     // Explicitly defining parameters via our dynamic model shape to clear strict-any flags
-    const totalVolume = logs.reduce((sum: number, log: LogRowType) => sum + log.amount, 0);
+    const totalVolume = volumeByCurrency.USDC + volumeByCurrency.EURC;
 
     // Calculate simulated gas savings ($0.05 saved per signature micro-settlement challenge)
     const estimatedGasSavedUSD = totalTransactions * 0.05;
@@ -37,9 +57,16 @@ export async function GET() {
         success: true,
         metrics: {
           totalTransactions,
+          // DEPRECATED mixed-unit sum — kept for back-compat. Use `volumeByCurrency`.
           totalVolumeProcessed: parseFloat(totalVolume.toFixed(4)),
+          volumeByCurrency,
           estimatedGasSavedUSD: parseFloat(estimatedGasSavedUSD.toFixed(2)),
+          // DEPRECATED single-currency label — the feed is multi-currency.
+          // Use `currencies` for the tokens actually present.
           settlementCurrency: 'USDC',
+          currencies: Object.keys(volumeByCurrency).filter(
+            (k) => (volumeByCurrency as Record<string, number>)[k] > 0
+          ),
           primaryChain: 'Arc-L1',
         },
         transactions: logs.map((log: LogRowType) => {

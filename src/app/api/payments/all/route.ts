@@ -26,8 +26,29 @@ export async function GET(req: NextRequest) {
 
     const successfulLogs = paymentLogs.filter((log) => log.status === 'SUCCESS');
 
+    // Explicit per-currency buckets — USDC and EURC are never summed as
+    // fungible units. Legacy/unknown rows degrade to USDC (the
+    // pre-multicurrency convention). `totalVolume` is a DEPRECATED
+    // mixed-unit sum kept for back-compat — prefer `volumeByCurrency`.
+    const volumeByCurrency = { USDC: 0, EURC: 0 };
+    for (const log of successfulLogs) {
+      let symbol = 'USDC';
+      try {
+        symbol = resolveRowCurrency({
+          currency: log.currency,
+          tokenAddress: (log as any).tokenAddress,
+        }).symbol;
+      } catch {
+        symbol = 'USDC';
+      }
+      if (symbol === 'EURC') volumeByCurrency.EURC += log.amount || 0;
+      else volumeByCurrency.USDC += log.amount || 0;
+    }
+    volumeByCurrency.USDC = Number(volumeByCurrency.USDC.toFixed(4));
+    volumeByCurrency.EURC = Number(volumeByCurrency.EURC.toFixed(4));
+
     const totalVolume = Number(
-      successfulLogs.reduce((acc, log) => acc + (log.amount || 0), 0).toFixed(4)
+      (volumeByCurrency.USDC + volumeByCurrency.EURC).toFixed(4)
     );
 
     const successRate =
@@ -107,7 +128,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       status: true,
       metrics: {
+        // DEPRECATED mixed-unit sum — kept for back-compat. Use `volumeByCurrency`.
         totalVolume,
+        volumeByCurrency,
         successRate,
         totalTransactions: paymentLogs.length,
       },

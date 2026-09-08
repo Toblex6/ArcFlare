@@ -41,9 +41,22 @@ interface PaymentItem {
 }
 
 interface DashboardMetrics {
+  // DEPRECATED mixed-unit sum (USDC + EURC added as raw numbers) — kept
+  // for back-compat. This UI renders `volumeByCurrency` instead.
   totalVolume: number;
+  // Explicit per-currency buckets from /api/payments/all (absent on stale
+  // cached responses — every render below falls back to USDC-only).
+  volumeByCurrency?: { USDC: number; EURC: number };
   successRate: number;
   totalTransactions: number;
+}
+
+// "12.50 USDC · 3.00 EURC" — never a mixed-unit scalar. Falls back to the
+// legacy scalar as USDC-only when buckets are absent (stale cache).
+function formatVolume(m: DashboardMetrics): { value: string; unit: string } {
+  const b = m.volumeByCurrency;
+  if (!b) return { value: m.totalVolume.toFixed(2), unit: 'USDC' };
+  return { value: `${b.USDC.toFixed(2)} USDC · ${b.EURC.toFixed(2)} EURC`, unit: '' };
 }
 
 interface MerchantInfo {
@@ -178,14 +191,17 @@ export default function MerchantDashboard() {
         setMetrics(json.metrics);
         setError(null);
 
-        const grouped: Record<string, { volume: number; count: number }> = {};
+        // Per-currency daily volumes — USDC and EURC are never summed.
+        // `currency` falls back to USDC for legacy rows (pre-multicurrency).
+        const grouped: Record<string, { volumeUSDC: number; volumeEURC: number; count: number }> = {};
         json.data.forEach((p: PaymentItem) => {
           const day = new Date(p.paid_at).toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
           });
-          if (!grouped[day]) grouped[day] = { volume: 0, count: 0 };
-          grouped[day].volume += p.amount;
+          if (!grouped[day]) grouped[day] = { volumeUSDC: 0, volumeEURC: 0, count: 0 };
+          if (String((p as PaymentItem).currency ?? 'USDC').trim().toUpperCase() === 'EURC') grouped[day].volumeEURC += p.amount;
+          else grouped[day].volumeUSDC += p.amount;
           grouped[day].count += 1;
         });
 
@@ -193,7 +209,8 @@ export default function MerchantDashboard() {
           .slice(-7)
           .map(([date, d]) => ({
             date,
-            volume: parseFloat(d.volume.toFixed(2)),
+            volumeUSDC: parseFloat(d.volumeUSDC.toFixed(2)),
+            volumeEURC: parseFloat(d.volumeEURC.toFixed(2)),
             count: d.count,
           }));
 
@@ -205,7 +222,8 @@ export default function MerchantDashboard() {
               d.setDate(d.getDate() - (6 - i));
               return {
                 date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-                volume: 0,
+                volumeUSDC: 0,
+                volumeEURC: 0,
                 count: 0,
               };
             })
@@ -368,7 +386,16 @@ export default function MerchantDashboard() {
   const pendingCount = payments.filter(
     (p) => !TERMINAL_FAILURES.has(p.status) && p.status !== "SUCCESS"
   ).length;
-  const avgTxValue = payments.length > 0 ? metrics.totalVolume / payments.length : 0;
+  // Per-currency average over successful payments — never a mixed-unit mean.
+  const successfulPayments = payments.filter((p) => p.status === "SUCCESS");
+  const avgByCurrency = (sym: 'USDC' | 'EURC'): number => {
+    const rows = successfulPayments.filter(
+      (p) => String(p.currency ?? 'USDC').trim().toUpperCase() === sym
+    );
+    return rows.length > 0 ? rows.reduce((s, p) => s + (p.amount || 0), 0) / rows.length : 0;
+  };
+  const avgTxDisplay = `${avgByCurrency('USDC').toFixed(2)} USDC · ${avgByCurrency('EURC').toFixed(2)} EURC`;
+  const totalVolumeDisplay = formatVolume(metrics);
 
   if (checkingAuth || loading) {
     return (
@@ -439,10 +466,10 @@ export default function MerchantDashboard() {
 
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
           {[
-            { label: "Total Volume", value: metrics.totalVolume.toFixed(2), unit: "USDC", iconBg: "#dcfce7", iconColor: "#16a34a", icon: "$", stroke: "var(--primary)" },
+            { label: "Total Volume", value: totalVolumeDisplay.value, unit: totalVolumeDisplay.unit, iconBg: "#dcfce7", iconColor: "#16a34a", icon: "$", stroke: "var(--primary)" },
             { label: "Transactions", value: metrics.totalTransactions.toString(), unit: "", iconBg: "#ede9fe", iconColor: "#7c3aed", icon: "↔", stroke: "#8b5cf6" },
             { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, unit: "", iconBg: "#fef9c3", iconColor: "#ca8a04", icon: "✓", stroke: "#f59e0b" },
-            { label: "Avg Tx Value", value: `$${avgTxValue.toFixed(2)}`, unit: "USDC", iconBg: "#dbeafe", iconColor: "#2563eb", icon: "↗", stroke: "#3b82f6" },
+            { label: "Avg Tx Value", value: avgTxDisplay, unit: "", iconBg: "#dbeafe", iconColor: "#2563eb", icon: "↗", stroke: "#3b82f6" },
           ].map((card, i) => (
             <div key={i} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "20px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
               <div style={{ width: 36, height: 36, background: card.iconBg, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: card.iconColor, marginBottom: 12 }}>
@@ -752,9 +779,10 @@ export default function MerchantDashboard() {
                     contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
                     labelStyle={{ color: "var(--text-secondary)" }}
                     itemStyle={{ color: "var(--primary)" }}
-                    formatter={(val: any) => [`${val} USDC`, "Volume"]}
+                    formatter={(val: any, name: any) => [`${val} ${name === 'volumeEURC' ? 'EURC' : 'USDC'}`, name === 'volumeEURC' ? 'Volume (EURC)' : 'Volume (USDC)']}
                   />
-                  <Area type="monotone" dataKey="volume" stroke="var(--primary)" strokeWidth={2.5} fill="url(#mainGrad)" dot={{ fill: "var(--primary)", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "var(--primary)" }} />
+                  <Area type="monotone" dataKey="volumeUSDC" name="volumeUSDC" stroke="var(--primary)" strokeWidth={2.5} fill="url(#mainGrad)" dot={{ fill: "var(--primary)", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "var(--primary)" }} />
+                  <Area type="monotone" dataKey="volumeEURC" name="volumeEURC" stroke="#7c3aed" strokeWidth={2} fill="transparent" dot={false} activeDot={{ r: 5, fill: "#7c3aed" }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -765,7 +793,7 @@ export default function MerchantDashboard() {
                 { label: "Pending", value: pendingCount, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "◔" },
                 { label: "Failed", value: failedCount, color: "var(--danger)", bg: "#fef2f2", border: "#fecaca", icon: "✗" },
                 { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", icon: "◎" },
-                { label: "Avg Txn Value", value: `$${avgTxValue.toFixed(2)}`, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "↗" },
+                { label: "Avg Txn Value", value: avgTxDisplay, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "↗" },
               ].map((m, i) => (
                 <div key={i} style={{ background: m.bg, border: `1px solid ${m.border}`, borderRadius: 10, padding: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 5 }}>

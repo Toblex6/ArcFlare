@@ -36,9 +36,19 @@ export async function GET(req: NextRequest) {
       take: 50,
     });
 
-    const totalVolume = payments
-      .filter((p) => p.status === 'SUCCESS')
-      .reduce((sum, p) => sum + p.amount, 0);
+    // Explicit per-currency buckets — USDC and EURC are never summed as
+    // fungible units. `totalVolume` is a DEPRECATED mixed-unit sum kept
+    // for back-compat — prefer `volumeByCurrency`.
+    const volumeByCurrency = { USDC: 0, EURC: 0 };
+    for (const p of payments.filter((p) => p.status === 'SUCCESS')) {
+      const symbol = String((p as any).currency ?? 'USDC').trim().toUpperCase();
+      if (symbol === 'EURC') volumeByCurrency.EURC += (p as any).amount || 0;
+      else volumeByCurrency.USDC += (p as any).amount || 0;
+    }
+    volumeByCurrency.USDC = parseFloat(volumeByCurrency.USDC.toFixed(4));
+    volumeByCurrency.EURC = parseFloat(volumeByCurrency.EURC.toFixed(4));
+
+    const totalVolume = volumeByCurrency.USDC + volumeByCurrency.EURC;
 
     const successCount = payments.filter((p) => p.status === 'SUCCESS').length;
 
@@ -75,7 +85,9 @@ export async function GET(req: NextRequest) {
       stats: {
         totalPayments: payments.length,
         successfulPayments: successCount,
+        // DEPRECATED mixed-unit sum — kept for back-compat. Use `volumeByCurrency`.
         totalVolume: parseFloat(totalVolume.toFixed(4)),
+        volumeByCurrency,
         successRate:
           payments.length > 0 ? parseFloat(((successCount / payments.length) * 100).toFixed(1)) : 0,
       },

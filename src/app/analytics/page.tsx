@@ -13,9 +13,23 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
     return API_KEY ? { ...extra, "x-api-key": API_KEY } : extra;
 }
 
+interface CurrencyBuckets {
+    USDC: number;
+    EURC: number;
+}
+
+// Explicit per-currency buckets — USDC and EURC are never summed as
+// fungible units. `formatBuckets` renders them; legacy `*USDC` scalars
+// are ignored by this UI (deprecated mixed-unit sums, back-compat only).
+function formatBuckets(b: CurrencyBuckets | undefined): string {
+    if (!b) return "0 USDC · 0 EURC";
+    return `${b.USDC ?? 0} USDC · ${b.EURC ?? 0} EURC`;
+}
+
 interface AnalyticsData {
     revenue: {
         totalRevenueUSDC: number;
+        byCurrency?: CurrencyBuckets;
         successfulPayments: number;
         failedPayments: number;
         pendingPayments: number;
@@ -30,6 +44,7 @@ interface AnalyticsData {
     escrow: {
         totalEscrows: number;
         totalValueUSDC: number;
+        valueByCurrency?: CurrencyBuckets;
         byStatus: Record<string, number>;
     };
     x402Marketplace: {
@@ -37,10 +52,12 @@ interface AnalyticsData {
         publishedListings: number;
         totalRequests: number;
         revenueUSDC: number;
+        revenueByCurrency?: CurrencyBuckets;
     };
     aiAgents: {
         totalAgentPayments: number;
         agentSpendUSDC: number;
+        spendByCurrency?: CurrencyBuckets;
     };
     notTracked: Record<string, string>;
 }
@@ -111,7 +128,7 @@ export default function AnalyticsPage() {
                         <div style={styles.sectionCard}>
                             <h3 style={styles.sectionTitle}>Revenue</h3>
                             <div style={styles.grid}>
-                                <StatCard label="Total Revenue" value={`${data.revenue.totalRevenueUSDC} USDC`} />
+                                <StatCard label="Total Revenue" value={formatBuckets(data.revenue.byCurrency)} />
                                 <StatCard label="Success Rate" value={`${data.revenue.successRate}%`} sub={`${data.revenue.successfulPayments} of ${data.revenue.totalPayments} payments`} />
                                 <StatCard label="Failed Payments" value={String(data.revenue.failedPayments)} />
                                 <StatCard label="Pending Payments" value={String(data.revenue.pendingPayments)} />
@@ -133,7 +150,7 @@ export default function AnalyticsPage() {
                             <h3 style={styles.sectionTitle}>Escrow</h3>
                             <div style={styles.grid}>
                                 <StatCard label="Total Escrows" value={String(data.escrow.totalEscrows)} />
-                                <StatCard label="Total Value Held" value={`${data.escrow.totalValueUSDC} USDC`} />
+                                <StatCard label="Total Value Held" value={formatBuckets(data.escrow.valueByCurrency)} />
                                 {Object.entries(data.escrow.byStatus).map(([status, count]) => (
                                     <StatCard key={status} label={status} value={String(count)} />
                                 ))}
@@ -146,7 +163,7 @@ export default function AnalyticsPage() {
                             <div style={styles.grid}>
                                 <StatCard label="Listings" value={String(data.x402Marketplace.totalListings)} sub={`${data.x402Marketplace.publishedListings} published`} />
                                 <StatCard label="Total Requests" value={String(data.x402Marketplace.totalRequests)} />
-                                <StatCard label="Marketplace Revenue" value={`${data.x402Marketplace.revenueUSDC} USDC`} />
+                                <StatCard label="Marketplace Revenue" value={formatBuckets(data.x402Marketplace.revenueByCurrency)} />
                             </div>
                         </div>
 
@@ -155,7 +172,7 @@ export default function AnalyticsPage() {
                             <h3 style={styles.sectionTitle}>AI Agent Activity</h3>
                             <div style={styles.grid}>
                                 <StatCard label="Agent Payments" value={String(data.aiAgents.totalAgentPayments)} />
-                                <StatCard label="Agent Spend" value={`${data.aiAgents.agentSpendUSDC} USDC`} />
+                                <StatCard label="Agent Spend" value={formatBuckets(data.aiAgents.spendByCurrency)} />
                             </div>
                         </div>
 
