@@ -120,12 +120,15 @@ export default function HomeNavbar() {
           </Link>
         </div>
 
-        <div className="flex md:hidden items-center gap-2">
+        <div className="flex lg:hidden items-center gap-2">
           <ThemeToggle />
           <button
+            id="home-menu-toggle"
             onClick={() => setOpen(!open)}
             aria-label="Toggle navigation menu"
-            className="p-2 text-[var(--text-secondary)] hover:text-[var(--text)] transition"
+            aria-expanded={open}
+            aria-controls="home-menu"
+            className="p-2.5 text-[var(--text-secondary)] hover:text-[var(--text)] transition"
           >
             {open ? (
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -150,7 +153,7 @@ export default function HomeNavbar() {
         style={{ transform: `scaleX(${progress})` }}
       />
       {open && (
-        <div className="md:hidden border-t border-[var(--border)] bg-[var(--background)]/95 backdrop-blur-xl px-4 py-4 flex flex-col gap-1 text-base font-medium">
+        <div id="home-menu" className="lg:hidden border-t border-[var(--border)] bg-[var(--background)]/95 backdrop-blur-xl px-4 py-4 flex flex-col gap-1 text-base font-medium">
           {SECTIONS.map(({ id, label }) => (
             <a
               key={id}

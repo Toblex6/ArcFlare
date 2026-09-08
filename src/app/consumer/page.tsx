@@ -89,7 +89,7 @@ export default function ConsumerApp() {
   // to fail immediately with an unhelpful error. These hooks let onboarding
   // detect "nothing connected" and open the connector picker instead (same
   // connectors configured in providers.tsx via src/lib/wagmi.ts).
-  const { isConnected } = useAccount();
+  const { address: connectedAddress, isConnected } = useAccount();
   const { connectors, connectAsync, isPending: isConnecting } = useConnect();
   const [view, setView] = useState<View>("home");
   const [checkingSession, setCheckingSession] = useState(true);
@@ -106,17 +106,17 @@ export default function ConsumerApp() {
   useEffect(() => {
     localStorage.setItem("flow-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
-  const [onboardingInput, setOnboardingInput] = useState("");
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [creatingWallet, setCreatingWallet] = useState(false);
   // A4: onboarding connector picker — shown when "Use this wallet" is tapped
   // while no wallet extension is connected to the page yet.
   const [connectPickerOpen, setConnectPickerOpen] = useState(false);
   // When true, the next successful wagmi connect resumes the pending
-  // "Use this wallet" sign-challenge flow with the already-typed address.
-  // Initialized true so a wallet that reconnects on page load (wagmi
-  // localStorage persistence) also auto-resumes an interrupted flow.
-  const resumeConnectRef = useRef(true);
+  // "Connect a wallet" sign-challenge flow with the connected wallet. It is
+  // set true ONLY when the user explicitly starts a connect flow — never on
+  // page load — so a wallet extension that reconnects on load cannot silently
+  // sign the user in without their intent.
+  const resumeConnectRef = useRef(false);
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [frequency, setFrequency] = useState("7");
@@ -481,21 +481,12 @@ export default function ConsumerApp() {
 
   // ── Wallet / session functions ──
   const connectExisting = async () => {
-    const trimmed = onboardingInput.trim();
-    if (!trimmed.startsWith("0x") || trimmed.length < 10) {
-      setOnboardingError("That doesn't look like a wallet address. It should start with 0x.");
-      return;
-    }
-    setOnboardingError(null);
-
-    // A4: wagmi's signMessageAsync requires an active wallet connection —
-    // with none, it fails immediately and unhelpfully. Check isConnected
-    // first: surface the connector picker (or a get-a-wallet message when no
-    // extension exists at all) and only run the sign-challenge flow once a
-    // wallet is actually connected. Connecting via the picker resumes this
-    // flow automatically (resumeConnectRef below) with the typed address
-    // preserved.
-    if (!isConnected) {
+    // Wallet-connect path: the ONLY way to connect an existing wallet is a
+    // real wallet integration (wagmi EIP-6963 injected providers on desktop,
+    // WalletConnect where configured) — never a typed/pasted address. If
+    // nothing is connected yet, open the connector picker and resume this
+    // flow once a wallet actually connects (resumeConnectRef).
+    if (!isConnected || !connectedAddress) {
       setConnectPickerOpen(true);
       resumeConnectRef.current = true;
       setOnboardingError(
@@ -506,30 +497,32 @@ export default function ConsumerApp() {
       return;
     }
 
+    setOnboardingError(null);
     setCreatingWallet(true);
     try {
+      const address = connectedAddress;
       // 1. Get a challenge from the server (nonce cookie + SIWE-style
       // message). The challenge is bound to the address being claimed, so
       // a signature for one address can't be replayed against another.
-      const challengeRes = await fetch(`/api/consumer/session?nonce=1&address=${trimmed}`);
+      const challengeRes = await fetch(`/api/consumer/session?nonce=1&address=${address}`);
       const challengeData = await challengeRes.json();
       if (!challengeData.success || !challengeData.message) {
         throw new Error(challengeData.error || "Could not start wallet connection.");
       }
 
-      // 2. Ask the user's wallet (MetaMask etc.) to sign the challenge
-      // message from the address they typed. If they don't control that
-      // address, the wallet refuses — nothing is sent to the server.
+      // 2. Ask the user's connected wallet to sign the challenge from the
+      // connected address. If they don't control that address, the wallet
+      // refuses — nothing is sent to the server.
       const signature = await signMessageAsync({
         message: challengeData.message,
-        account: trimmed as Address,
+        account: address as Address,
       });
 
       // 3. Exchange signature → session cookie.
       const res = await fetch("/api/consumer/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: trimmed, message: challengeData.message, signature }),
+        body: JSON.stringify({ walletAddress: address, message: challengeData.message, signature }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
@@ -556,8 +549,9 @@ export default function ConsumerApp() {
     setConnectPickerOpen(false);
     setOnboardingError(null);
     connectExisting();
-    // connectExisting is stable enough for this one-shot resume; it reads
-    // the current onboardingInput at call time.
+    // connectExisting reads connectedAddress at call time — after the
+    // picker's connectAsync resolves, useAccount() already exposes the fresh
+    // connected address.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
 
@@ -1007,19 +1001,17 @@ export default function ConsumerApp() {
             />
             <span style={styles.appName}>FlareHQ Flow</span>
           </div>
-          <h1 style={styles.onboardingTitle}>Create your FlareHQ wallet</h1>
+          <h1 style={styles.onboardingTitle}>Welcome to FlareHQ</h1>
           <p style={styles.onboardingSub}>
-            No signup required. This creates a wallet for this browser. Before leaving this device, add a recovery method so you can access it on another device.
+            Connect an existing wallet, or create a free FlareHQ wallet for this browser. No signup required.
           </p>
-          <button style={styles.primaryButton} disabled={creatingWallet} onClick={createNewWallet}>
-            {creatingWallet ? "Setting things up..." : "Create my wallet"}
+          <button style={styles.primaryButton} disabled={creatingWallet || isConnecting} onClick={connectExisting}>
+            {isConnecting ? "Connecting..." : "Connect a wallet"}
           </button>
           <div style={styles.orDivider}><span>or</span></div>
-          <div style={styles.field}>
-            <label style={styles.label}>I already have a wallet address</label>
-            <input style={styles.input} value={onboardingInput} onChange={(e) => setOnboardingInput(e.target.value)} placeholder="0x..." />
-          </div>
-          <button style={styles.secondaryButton} onClick={connectExisting}>Use this wallet</button>
+          <button style={styles.secondaryButton} disabled={creatingWallet} onClick={createNewWallet}>
+            {creatingWallet ? "Setting things up..." : "Create a FlareHQ wallet"}
+          </button>
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
 
           {/* Second-device recovery (Stage 2 / B1): email + OTP → the same
