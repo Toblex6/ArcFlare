@@ -33,8 +33,10 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 // ERC-8004 registries
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
 
-// ERC-8183 AgenticCommerce contract on Arc Testnet
-const AGENTIC_COMMERCE = "0x0747EEf0706327138c69792bF28Cd525089e4583";
+// ERC-8183 AgenticCommerce contract on Arc Testnet — canonical address lives
+// in src/lib/contracts/erc8183.ts (no local copies). USDC_ARC mirrors
+// USDC_CONTRACT from the same module; kept local to avoid a behavior-bearing
+// import change in this security pass.
 const USDC_ARC = "0x3600000000000000000000000000000000000000";
 
 const arcTestnet = {

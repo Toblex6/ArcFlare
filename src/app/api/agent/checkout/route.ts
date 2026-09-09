@@ -1,27 +1,45 @@
-//src\app\api\agent\checkout\route.ts
-import { NextResponse } from 'next/server';
-import { executeAgentPayment } from '@/services/agentPayService';
+// src/app/api/agent/checkout/route.ts
+//
+// DEPRECATED (security cleanup batch 1) — REMOVED, not preserved.
+//
+// This endpoint previously accepted payment parameters straight from the
+// request body and spawned an unauthenticated background payment execution
+// with NO authentication and NO ownership verification: any anonymous caller
+// could drain agent wallets by supplying an arbitrary merchant address/amount.
+// It is intentionally NOT preserved as a payment path — the canonical
+// alternatives are:
+//   - POST /api/agents/[id]/hire          (validated, provider-notified hiring)
+//   - /api/payments/*                     (authenticated payment routes)
+// POST returns 410 Gone; every other method is refused with 405 so the route
+// exposes no reachable payment execution of any kind.
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const { merchantAddress, amountInUSDC, paymentReference } = body;
+import { NextRequest, NextResponse } from 'next/server';
 
-    if (!merchantAddress || !amountInUSDC || !paymentReference) {
-      return NextResponse.json(
-        { success: false, error: 'Missing required agent payload fields.' },
-        { status: 400 }
-      );
-    }
+const GONE_BODY = {
+  success: false as const,
+  error: 'Gone',
+  deprecated: true as const,
+  message:
+    'This unauthenticated agent checkout endpoint has been removed for security ' +
+    '(audit P0). It no longer executes, queues, or schedules any payment. ' +
+    'Use the canonical authenticated alternatives instead: POST /api/agents/[id]/hire ' +
+    'to hire an agent, or the /api/payments/* routes for payments.',
+  alternatives: ['/api/agents/[id]/hire', '/api/payments/*'],
+};
 
-    // Fire the async background sequence to establish the terminal handshake
-    executeAgentPayment({ merchantAddress, amountInUSDC, paymentReference });
+// Kept as a tiny helper (no state, no imports of payment services) so the
+// same response object is returned for every method.
+function gone(): NextResponse {
+  return NextResponse.json(GONE_BODY, {
+    status: 410,
+    headers: { Allow: 'GET, POST' },
+  });
+}
 
-    return NextResponse.json({
-      success: true,
-      message: 'FlareHQ Agent loop spawned. Check persistent connection log to approve.',
-    });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
+export async function GET(_request: NextRequest): Promise<NextResponse> {
+  return gone();
+}
+
+export async function POST(_request: NextRequest): Promise<NextResponse> {
+  return gone();
 }

@@ -1,6 +1,18 @@
 // src/app/api/agents/[id]/card/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { AGENTIC_COMMERCE_CONTRACT as ERC8183_AGENTIC_COMMERCE_CONTRACT } from "@/lib/contracts/erc8183";
+
+// Security cleanup batch 1: the hardcoded ERC-8183 address literal was
+// removed — the canonical AGENTIC_COMMERCE_CONTRACT from
+// src/lib/contracts/erc8183.ts is the single source of truth. Behavior
+// contract is preserved: an explicitly configured AGENTIC_COMMERCE_CONTRACT
+// env value still wins, otherwise the canonical constant is used.
+function resolveEscrowContract(): string {
+  const env = process.env.AGENTIC_COMMERCE_CONTRACT;
+  return typeof env === "string" && env.trim() !== "" ? env : ERC8183_AGENTIC_COMMERCE_CONTRACT;
+}
+
 function buildAgentCard(agent: any, baseUrl: string) {
   return {
     agentId: agent.tokenId,
@@ -22,7 +34,7 @@ function buildAgentCard(agent: any, baseUrl: string) {
     merchantId: agent.merchantId,
     supportedChains: ["ARC-TESTNET"],
     supportedTokens: ["USDC", "EURC"],
-    hiring: { hireEndpoint: `/api/agents/${agent.id}/hire`, createJobEndpoint: `/api/agents/${agent.id}/hire`, escrowContract: process.env.AGENTIC_COMMERCE_CONTRACT || "0x0747EEf0706327138c69792bF28Cd525089e4583", jobTypes: ["escrow"] },
+    hiring: { hireEndpoint: `/api/agents/${agent.id}/hire`, createJobEndpoint: `/api/agents/${agent.id}/hire`, escrowContract: resolveEscrowContract(), jobTypes: ["escrow"] },
     validation: { registryAddress: process.env.VALIDATION_REGISTRY_ADDRESS || "0x8004Cb1BF31DAf7788923b405b754f57acEB4272", verifyEndpoint: `/api/agent/validation?agentId=${agent.tokenId}` },
     generatedAt: new Date().toISOString(),
     schemaVersion: "1.0",

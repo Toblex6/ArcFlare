@@ -1,6 +1,7 @@
 // src/app/api/jobs/route.ts
 // ERC-8183 Job Lifecycle — Arc's native agentic commerce standard.
-// AgenticCommerce contract: 0x0747EEf0706327138c69792bF28Cd525089e4583
+// AgenticCommerce contract: see AGENTIC_COMMERCE_CONTRACT in
+// src/lib/contracts/erc8183.ts (canonical address, no local copies).
 //
 // Flow:
 // 1. Client creates job      → POST /api/jobs { action: "create" }
@@ -49,9 +50,10 @@ import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
+import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
 
 // ── ERC-8183 contract on Arc Testnet ─────────────────────────────────────────
-const AGENTIC_COMMERCE_CONTRACT = '0x0747EEf0706327138c69792bF28Cd525089e4583';
+// Address comes from the canonical source: src/lib/contracts/erc8183.ts.
 const USDC_ARC = '0x3600000000000000000000000000000000000000';
 
 const arcTestnet = {
