@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
@@ -21,10 +22,14 @@ function toUnits(v: any): string | null {
 
 async function getHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Authorization of the RESOLVED agent is
+  // enforced below where required — unchanged.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
+  if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
+  const agentId = agent.id;
 
   // Read is public-safe? Provider policy reveals trust thresholds, not secrets — but keep auth to caller controls or public?
   // Make GET public for discoverability (judge needs to see), but POST is auth-gated.
@@ -37,10 +42,14 @@ async function getHandler(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Authorization of the RESOLVED agent is
+  // enforced below where required — unchanged.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
+  if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
+  const agentId = agent.id;
 
   const wallet = await getOrCreateAgentWallet(agentId).catch(() => null);
   const controlAddress = agent.scaAddress ?? wallet?.address ?? "";

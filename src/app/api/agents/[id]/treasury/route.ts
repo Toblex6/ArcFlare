@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getAgentWalletAddress, getOrCreateAgentWallet } from "@/lib/x402-wallet";
@@ -18,10 +19,14 @@ import { getOrCreatePolicy, upsertPolicy } from "@/lib/ledger/treasuryPolicy";
 // ever runs for an authenticated caller.
 async function getHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Caller-control of the RESOLVED agent is
+  // verified below before any read — unchanged.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
+  if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
+  const agentId = agent.id;
   // Authorization: caller must control this agent.
   // Read-only address resolution ONLY — no wallet rows are created here.
   const controlAddress =
@@ -38,10 +43,14 @@ async function getHandler(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Caller-control of the RESOLVED agent is
+  // verified below before any write — unchanged.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
+  if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
+  const agentId = agent.id;
   const wallet = await getOrCreateAgentWallet(agentId);
   const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? wallet.address);
   if (!actor) return NextResponse.json({ error: "You do not control this agent." }, { status: 403 });

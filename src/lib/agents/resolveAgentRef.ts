@@ -144,3 +144,47 @@ export async function resolveAgentRef(
       return fail();
   }
 }
+
+/**
+ * Route-level wrapper for `/api/agents/[id]/*` handlers.
+ *
+ * Resolves the `[id]` path param via `resolveAgentRef(ref, "auto")` so all
+ * three canonical identity forms work (registry id, ERC-8004 tokenId, SCA
+ * address; ambiguity refused), while preserving the legacy status-code
+ * contract:
+ *   - `ambiguous: true`  → caller must answer 400 "ambiguous agent reference"
+ *   - `malformed: true`  → caller must answer 400 "invalid agent id"
+ *                          (garbage that could never be a reference: "abc",
+ *                          "1.5", "0", "-5" — same inputs the old
+ *                          `Number(id)` guard rejected with 400)
+ *   - `agent: null` otherwise → caller answers its usual 404
+ *     (well-formed but unknown reference).
+ *
+ * Authorization is unchanged: callers still verify control of the RESOLVED
+ * agent's SCA via `verifyCallerControlsAddress` before any fund-moving or
+ * identity-sensitive work.
+ */
+export interface AgentRouteRef {
+  agent: any | null;
+  ambiguous: boolean;
+  malformed: boolean;
+}
+
+export async function resolveAgentRouteRef(
+  ref: string | number | null | undefined
+): Promise<AgentRouteRef> {
+  const { agent, ambiguous } = await resolveAgentRef(ref, "auto");
+  if (agent || ambiguous) return { agent, ambiguous, malformed: false };
+  const raw = String(ref ?? "").trim();
+  const isDigits = /^\d+$/.test(raw);
+  const isAddress = SCA_RE.test(raw);
+  let malformed = !isDigits && !isAddress;
+  if (isDigits) {
+    try {
+      if (BigInt(raw) <= 0n) malformed = true;
+    } catch {
+      malformed = true;
+    }
+  }
+  return { agent: null, ambiguous: false, malformed };
+}

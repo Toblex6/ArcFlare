@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { executeAgentToAgentPayment } from "@/lib/agents/agentPay";
 import { checkRateLimit } from "@/lib/ratelimit";
 
@@ -20,10 +21,14 @@ async function payHandler(req: NextRequest, ctx: { params: Promise<{ id: string 
   const { allowed, response: limitResponse } = await checkRateLimit(req, "payments");
   if (!allowed) return limitResponse!;
   const { id } = await ctx.params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) {
-    return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
-  }
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Caller-control + step-up are enforced on the
+  // RESOLVED agent inside executeAgentToAgentPayment — unchanged.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
+  if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
+  if (!agent) return NextResponse.json({ error: `agent ${id} not found` }, { status: 404 });
+  const agentId = agent.id;
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   return executeAgentToAgentPayment(req, agentId, body);

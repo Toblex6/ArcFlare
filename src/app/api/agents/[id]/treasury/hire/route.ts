@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
@@ -20,12 +21,18 @@ import { checkSpendAllowed } from "@/lib/agents/spendLimitEnforcer";
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const hirerId = Number(id);
-  if (!Number.isInteger(hirerId) || hirerId <= 0) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
+  // Canonical hirer reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Caller-control, step-up, treasury/spend
+  // policy and self-hire gates below all operate on the RESOLVED hirer —
+  // unchanged.
+  const { agent: hirerRef, ambiguous: hirerAmbiguous, malformed: hirerMalformed } = await resolveAgentRouteRef(id);
+  if (hirerAmbiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (hirerMalformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
+  if (!hirerRef) return NextResponse.json({ error: "hirer agent not found" }, { status: 404 });
+  const hirerId = hirerRef.id;
   const body = await req.json().catch(() => ({}));
   const { providerAgentId, description, criteria, budget, evaluatorAddress, validation } = body;
-  const providerId = Number(providerAgentId);
-  if (!providerId || !description || !criteria || budget === undefined) {
+  if (!providerAgentId || !description || !criteria || budget === undefined) {
     return NextResponse.json({ error: "providerAgentId, description, criteria, budget are required" }, { status: 400 });
   }
   if (!Array.isArray(criteria.requirements) || criteria.requirements.length === 0) {
@@ -35,10 +42,18 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
   const budgetBigInt = BigInt(Math.round(Number(budget) * 1_000_000));
   if (budgetBigInt <= 0n) return NextResponse.json({ error: "budget must be > 0" }, { status: 400 });
 
-  const hirer = await (prisma as any).agentRegistry.findUnique({ where: { id: hirerId } });
-  if (!hirer) return NextResponse.json({ error: "hirer agent not found" }, { status: 404 });
-  const provider = await (prisma as any).agentRegistry.findUnique({ where: { id: providerId } });
-  if (!provider) return NextResponse.json({ error: "provider agent not found" }, { status: 404 });
+  const hirer = hirerRef;
+  // Canonical provider reference (body): same three forms as the hirer.
+  // Malformed provider refs keep the legacy "required" 400; well-formed but
+  // unknown providers keep the legacy 404.
+  const { agent: providerRef, ambiguous: providerAmbiguous, malformed: providerMalformed } = await resolveAgentRouteRef(providerAgentId);
+  if (providerAmbiguous) return NextResponse.json({ error: "ambiguous provider agent reference" }, { status: 400 });
+  if (providerMalformed) {
+    return NextResponse.json({ error: "providerAgentId, description, criteria, budget are required" }, { status: 400 });
+  }
+  if (!providerRef) return NextResponse.json({ error: "provider agent not found" }, { status: 404 });
+  const provider = providerRef;
+  const providerId = provider.id;
   if (provider.status !== "ACTIVE_AGENT_PROVISIONED") return NextResponse.json({ error: "provider not available" }, { status: 400 });
 
   // Caller must control hirer

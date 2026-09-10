@@ -1,6 +1,6 @@
 // src/app/api/agents/[id]/card/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { AGENTIC_COMMERCE_CONTRACT as ERC8183_AGENTIC_COMMERCE_CONTRACT } from "@/lib/contracts/erc8183";
 
 // Security cleanup batch 1: the hardcoded ERC-8183 address literal was
@@ -42,10 +42,13 @@ function buildAgentCard(agent: any, baseUrl: string) {
 }
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
-  if (!agent) return NextResponse.json({ error: `agent ${agentId} not found` }, { status: 404 });
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Numeric registry ids remain canonical.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
+  if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
+  if (!agent) return NextResponse.json({ error: `agent ${id} not found` }, { status: 404 });
+  const agentId = agent.id;
   if (agent.status !== "ACTIVE_AGENT_PROVISIONED") return NextResponse.json({ error: "Agent not available for discovery" }, { status: 404 });
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE || req.nextUrl.origin;
   const card: any = buildAgentCard(agent, baseUrl);

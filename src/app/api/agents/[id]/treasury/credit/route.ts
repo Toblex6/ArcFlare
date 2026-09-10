@@ -25,6 +25,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
+import { resolveAgentRouteRef } from '@/lib/agents/resolveAgentRef';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { getCircleClient } from '@/lib/circle/client';
 import { transferUsdc } from '@/lib/circle/transfers';
@@ -48,8 +49,14 @@ async function readUsdcBalance(owner: string): Promise<bigint> {
 
 async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) {
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Merchant-ownership + caller-control of the
+  // RESOLVED agent are enforced below — unchanged.
+  const { agent: refAgent, ambiguous: refAmbiguous, malformed: refMalformed } = await resolveAgentRouteRef(id);
+  if (refAmbiguous) {
+    return NextResponse.json({ error: 'ambiguous agent reference' }, { status: 400 });
+  }
+  if (refMalformed) {
     return NextResponse.json({ error: 'invalid agent id' }, { status: 400 });
   }
 
@@ -74,8 +81,9 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: 'Merchant not found.' }, { status: 401 });
   }
 
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
+  const agent = refAgent;
   if (!agent) return NextResponse.json({ error: 'agent not found' }, { status: 404 });
+  const agentId: number = agent.id;
   const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? '');
   if (!actor) return NextResponse.json({ error: 'You do not control this agent.' }, { status: 403 });
 
