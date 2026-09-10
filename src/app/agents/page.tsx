@@ -117,7 +117,7 @@ export default function AgentsPage() {
   const [deploying, setDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState<any>(null);
   const [deployError, setDeployError] = useState<string | null>(null);
-  const [deployName, setDeployName] = useState('ArcFlare Autonomous Agent');
+  const [deployName, setDeployName] = useState('FlareHQ Autonomous Agent');
   const [deployWasDuplicate, setDeployWasDuplicate] = useState(false);
   const [deployWasPending, setDeployWasPending] = useState(false);
   const [deployPendingTx, setDeployPendingTx] = useState<string | null>(null);

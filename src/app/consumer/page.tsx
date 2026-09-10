@@ -994,7 +994,7 @@ export default function ConsumerApp() {
           <div style={styles.headerLeft}>
             <Image
               src="/arcflare-logo.png"
-              alt="ArcFlare"
+              alt="FlareHQ"
               width={40}
               height={40}
               style={{ borderRadius: 8, flexShrink: 0 }}
@@ -1144,7 +1144,7 @@ export default function ConsumerApp() {
         <div style={styles.headerLeft}>
           <Image
             src="/arcflare-logo.png"
-            alt="ArcFlare"
+            alt="FlareHQ"
             width={32}
             height={32}
             style={{ borderRadius: 6, flexShrink: 0 }}
@@ -2051,7 +2051,7 @@ export default function ConsumerApp() {
                       <div style={{ borderTop: "1px solid var(--flow-border)", paddingTop: 12, display: "flex", flexDirection: "column" as const, gap: 8 }}>
                         <p style={{ margin: 0, fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5, color: "var(--flow-text-muted)" }}>Start interaction</p>
                         {!walletAddress && <p style={{ margin: 0, fontSize: 11, color: "#C0563A" }}>Connect a wallet to hire — discovery is public, hiring requires you control the payer wallet.</p>}
-                        {walletAddress && !consumerWalletId && <p style={{ margin: 0, fontSize: 11, color: "#8a6d2b" }}>Hiring via the existing direct-hire route requires a FlareHQ-managed wallet (CIRCLE). Your current wallet is external — create a FlareHQ wallet to hire, or use a browser wallet that has a Circle wallet linked.</p>}
+                        {walletAddress && !consumerWalletId && <p style={{ margin: 0, fontSize: 11, color: "#8a6d2b" }}>Hiring via the canonical hire route (POST /api/agents/[id]/hire) requires a FlareHQ-managed wallet (CIRCLE). Your current wallet is external — create a FlareHQ wallet to hire, or use a browser wallet that has a Circle wallet linked.</p>}
                         <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
                           <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
                             <label style={{ fontSize: 11, fontWeight: 600, color: "var(--flow-text-muted)" }}>Budget (USDC)</label>
@@ -2077,7 +2077,7 @@ export default function ConsumerApp() {
                             {hireResult.explorerUrl && <a href={hireResult.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#E8714A" }}>View transaction</a>}
                           </div>
                         )}
-                        <p style={{ margin: 0, fontSize: 10, color: "var(--flow-text-faint)" }}>Hiring reuses the existing direct-hire route — no second backend, no fake checkout. The payer wallet is resolved server-side via Circle and caller-control verification.</p>
+                        <p style={{ margin: 0, fontSize: 10, color: "var(--flow-text-faint)" }}>Hiring reuses the canonical hire route (POST /api/agents/[id]/hire) — no second backend, no fake checkout. The payer wallet is resolved server-side via Circle and caller-control verification.</p>
                       </div>
                     </>
                   );

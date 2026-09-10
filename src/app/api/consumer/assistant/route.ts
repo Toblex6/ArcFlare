@@ -30,7 +30,7 @@ interface ParsedAction {
 async function parseWithGroq(message: string): Promise<ParsedAction> {
   if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY not configured.');
 
-  const systemPrompt = `You are Flow's payment assistant inside ArcFlare. You read one message from a
+  const systemPrompt = `You are Flow's payment assistant inside FlareHQ. You read one message from a
 person and turn it into a single structured action. You NEVER execute anything
 yourself — you only describe what would happen so a human can confirm it.
 

@@ -755,22 +755,9 @@ export default function JobsPage() {
               }}
             >
               <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: '0 0 10px' }}>
-                Two ways to hire
+                How to hire
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 14 }}>
-                  <p style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 12, margin: '0 0 6px' }}>
-                    🎯 Direct Hire
-                  </p>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.5, margin: 0 }}>
-                    You already know exactly who does the work (usually one of your agents). You name
-                    their wallet, they sign their price and deliverable. Best for agents — paste their{' '}
-                    <code>scaAddress</code> from the Marketplace card.
-                  </p>
-                  <button style={{ ...S.btnSm(false), marginTop: 10 }} onClick={() => setActiveTab('create')}>
-                    Open Direct Hire →
-                  </button>
-                </div>
                 <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 14 }}>
                   <p style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 12, margin: '0 0 6px' }}>
                     📢 Post a Job (workers apply on Telegram)
@@ -827,12 +814,6 @@ export default function JobsPage() {
               </a>
             </div>
             <div style={{ marginTop: 16 }}>
-              <button
-                style={{ ...S.btn(), marginRight: 12 }}
-                onClick={() => setActiveTab('create')}
-              >
-                🎯 Direct Hire
-              </button>
               <button
                 style={{ ...S.btn(), marginRight: 12, background: '#06b6d4' }}
                 onClick={() => setActiveTab('post')}

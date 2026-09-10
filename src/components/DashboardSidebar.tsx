@@ -61,7 +61,6 @@ const SECTIONS: NavSection[] = [
             { label: 'Agent Brain', href: '/agent-brain', disabled: true, disabledReason: 'LLM reasoning engine is rate-limited (Groq 429s), calls will intermittently fail' },
             { label: 'Agents', href: '/agents' },
             { label: 'Jobs', href: '/jobs' },
-            { label: 'Direct Hire', href: '/jobs', disabled: true, disabledReason: 'Direct Hire wizard is deprecated — use Post a Job instead' },
             { label: 'AI Assistant', href: '/merchant/assistant' },
         ],
     },
@@ -85,7 +84,6 @@ const ICONS: Record<string, JSX.Element> = {
     'Batch Payroll': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>,
     'Payroll Chat': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
     'Scheduled Payroll': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>,
-    'Direct Hire': <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>,
 };
 
 export default function DashboardSidebar({ active }: { active: string }) {
