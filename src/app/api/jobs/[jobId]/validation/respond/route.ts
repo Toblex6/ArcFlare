@@ -28,7 +28,16 @@ async function waitForTx(client: ReturnType<typeof getCircleClient>, txId: strin
 export async function POST(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   const handler = async (innerReq: NextRequest) => {
     const { jobId } = await params;
-    const jobIdBigInt = BigInt(jobId);
+    // Malformed jobIds are a caller error (400), not a server error — the
+    // same invalid-jobId contract as the canonical accept/fund routes.
+    // (This parse previously sat outside any try/catch, so garbage threw an
+    // uncaught exception → 500.)
+    let jobIdBigInt: bigint;
+    try {
+      jobIdBigInt = BigInt(jobId);
+    } catch {
+      return NextResponse.json({ error: `invalid job id ${jobId}` }, { status: 400 });
+    }
     const body = await innerReq.json().catch(() => ({}));
     const { passed, tag } = body;
     if (passed === undefined || tag === undefined) {

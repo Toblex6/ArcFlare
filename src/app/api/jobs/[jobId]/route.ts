@@ -7,16 +7,24 @@ import { arcTestnet } from 'viem/chains';
 export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
     const { jobId } = await params;
+    // Malformed jobIds are a caller error (400), not a server error — the
+    // same invalid-jobId contract as the canonical accept/fund routes.
+    let jobIdBig: bigint;
+    try {
+      jobIdBig = BigInt(jobId);
+    } catch {
+      return NextResponse.json({ error: `invalid job id ${jobId}` }, { status: 400 });
+    }
     const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
 
     const onchainJob = (await publicClient.readContract({
       address: AGENTIC_COMMERCE_CONTRACT,
       abi: agenticCommerceAbi,
       functionName: 'getJob',
-      args: [BigInt(jobId)],
+      args: [jobIdBig],
     })) as any;
 
-    const dbJob = await prisma.erc8183Job.findUnique({ where: { jobId: BigInt(jobId) } });
+    const dbJob = await prisma.erc8183Job.findUnique({ where: { jobId: jobIdBig } });
 
     return NextResponse.json({
       success: true,

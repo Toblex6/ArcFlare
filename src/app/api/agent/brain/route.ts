@@ -33,11 +33,9 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 // ERC-8004 registries
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
 
-// ERC-8183 AgenticCommerce contract on Arc Testnet — canonical address lives
-// in src/lib/contracts/erc8183.ts (no local copies). USDC_ARC mirrors
-// USDC_CONTRACT from the same module; kept local to avoid a behavior-bearing
-// import change in this security pass.
-const USDC_ARC = "0x3600000000000000000000000000000000000000";
+// NOTE: ERC-8183/USDC addresses live in src/lib/contracts/erc8183.ts (the
+// single source of truth). This route performs no direct USDC contract reads,
+// so it carries no local address copy.
 
 const arcTestnet = {
   id: 5042002,

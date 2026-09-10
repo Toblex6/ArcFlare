@@ -16,6 +16,15 @@ async function setBudgetJobHandler(req: NextRequest) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
     }
 
+    // Malformed jobIds are a caller error (400), not a server error — the
+    // same invalid-jobId contract as the canonical [jobId]/accept route.
+    // (Previously BigInt(jobId) threw inside the outer try → 500.)
+    try {
+      BigInt(jobId);
+    } catch {
+      return NextResponse.json({ error: `invalid job id ${jobId}` }, { status: 400 });
+    }
+
     const job = await prisma.erc8183Job.findUnique({ where: { jobId: BigInt(jobId) } });
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
 

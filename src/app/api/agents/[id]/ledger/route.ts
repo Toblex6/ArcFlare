@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { computeTreasuryView, getRecentEntries } from "@/lib/ledger/treasuryService";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { getAgentWalletAddress } from "@/lib/x402-wallet";
-import { resolveAgentRef } from "@/lib/agents/resolveAgentRef";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 
 // Security cleanup batch 1: GET must not have wallet-provisioning side
 // effects. The previous flow provisioned a wallet BEFORE the caller-control
@@ -16,8 +16,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   // User-facing reference lookup: accepts Registry ID, ERC-8004 Token or SCA
   // address (auto, ambiguity refused). Numeric registry ids remain canonical.
-  const { agent, ambiguous } = await resolveAgentRef(id, "auto");
+  // Legacy status contract: garbage references → 400, unknown → 404.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
   if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
   const agentId = agent.id;
 

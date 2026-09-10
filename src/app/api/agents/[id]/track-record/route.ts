@@ -1,14 +1,16 @@
 // GET /api/agents/[id]/track-record — public safe, no treasury/balance leakage
 import { NextRequest, NextResponse } from "next/server";
-import { resolveAgentRef } from "@/lib/agents/resolveAgentRef";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { getTrackRecord } from "@/lib/trust/trackRecord";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   // User-facing reference lookup: accepts Registry ID, ERC-8004 Token or SCA
   // address (auto, ambiguity refused). Numeric registry ids remain canonical.
-  const { agent, ambiguous } = await resolveAgentRef(id, "auto");
+  // Legacy status contract: garbage references → 400, unknown → 404.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
   if (ambiguous) return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: `agent ${id} not found` }, { status: 404 });
   const agentId = agent.id;
 

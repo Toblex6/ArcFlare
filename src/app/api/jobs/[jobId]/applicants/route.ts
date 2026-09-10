@@ -17,7 +17,15 @@ export async function GET(
   try {
     const { jobId } = await params;
 
-    const job = await prisma.erc8183Job.findUnique({ where: { jobId: BigInt(jobId) } });
+    // Malformed jobIds are a caller error (400), not a server error — the
+    // same invalid-jobId contract as the canonical accept/fund routes.
+    let parsedJobId: bigint;
+    try {
+      parsedJobId = BigInt(jobId);
+    } catch {
+      return NextResponse.json({ success: false, error: `invalid job id ${jobId}` }, { status: 400 });
+    }
+    const job = await prisma.erc8183Job.findUnique({ where: { jobId: parsedJobId } });
     if (!job) {
       return NextResponse.json({ success: false, error: `job ${jobId} not found` }, { status: 404 });
     }

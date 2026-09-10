@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
+import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
 import {
   formatBudgetUsdc,
   getProviderNextAction,
@@ -802,10 +803,10 @@ export default function JobsPage() {
                   wordBreak: 'break-all',
                 }}
               >
-                0x0747EEf0706327138c69792bF28Cd525089e4583
+                {AGENTIC_COMMERCE_CONTRACT}
               </p>
               <a
-                href="https://testnet.arcscan.app/address/0x0747EEf0706327138c69792bF28Cd525089e4583"
+                href={`https://testnet.arcscan.app/address/${AGENTIC_COMMERCE_CONTRACT}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--primary)', fontSize: 11 }}

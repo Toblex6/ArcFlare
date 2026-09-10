@@ -54,7 +54,10 @@ test('no ERC-8183 address literals outside the canonical config (allow-listed ex
   for (const file of walk(SRC_ROOT)) {
     const relative = rel(file);
     if (ALLOWED.has(relative)) continue;
-    const matches = read(file).match(new RegExp(ADDRESS_RE, 'g'));
+    // NOTE: new RegExp(ADDRESS_RE, 'g') would silently DROP the /i flag
+    // (explicit flags replace, not merge) and make this scan case-sensitive
+    // — missing checksummed literals. Keep both flags via .source.
+    const matches = read(file).match(new RegExp(ADDRESS_RE.source, 'gi'));
     if (matches) offenders.push(`${relative} (${matches.length}x)`);
   }
   assert.deepEqual(

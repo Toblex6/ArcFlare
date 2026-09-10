@@ -5,7 +5,14 @@ import { getJobValidationStatus } from "@/lib/jobs/jobValidationPolicy";
 export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
     const { jobId } = await params;
-    const jobIdBigInt = BigInt(jobId);
+    // Malformed jobIds are a caller error (400), not a server error — the
+    // same invalid-jobId contract as the canonical accept/fund routes.
+    let jobIdBigInt: bigint;
+    try {
+      jobIdBigInt = BigInt(jobId);
+    } catch {
+      return NextResponse.json({ error: `invalid job id ${jobId}` }, { status: 400 });
+    }
     const job = await prisma.erc8183Job.findUnique({ where: { jobId: jobIdBigInt } });
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
     const status = await getJobValidationStatus(jobIdBigInt);

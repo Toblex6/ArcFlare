@@ -50,11 +50,11 @@ import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
-import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
+import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
 
 // ── ERC-8183 contract on Arc Testnet ─────────────────────────────────────────
-// Address comes from the canonical source: src/lib/contracts/erc8183.ts.
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
+// Addresses AND ABI come from the canonical source:
+// src/lib/contracts/erc8183.ts (no local copies — see config-drift test).
 
 const arcTestnet = {
   id: 5042002,
@@ -73,100 +73,7 @@ const publicClient = createPublicClient({
 
 const JOB_STATUS_NAMES = ['Open', 'Funded', 'Submitted', 'Completed', 'Rejected', 'Expired'];
 
-// ── ABI ───────────────────────────────────────────────────────────────────────
-const AGENTIC_ABI = [
-  {
-    name: 'createJob',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'provider', type: 'address' },
-      { name: 'evaluator', type: 'address' },
-      { name: 'expiredAt', type: 'uint256' },
-      { name: 'description', type: 'string' },
-      { name: 'hook', type: 'address' },
-    ],
-    outputs: [{ name: 'jobId', type: 'uint256' }],
-  },
-  {
-    name: 'setBudget',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'jobId', type: 'uint256' },
-      { name: 'amount', type: 'uint256' },
-      { name: 'optParams', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    name: 'fund',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'jobId', type: 'uint256' },
-      { name: 'optParams', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    name: 'submit',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'jobId', type: 'uint256' },
-      { name: 'deliverable', type: 'bytes32' },
-      { name: 'optParams', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    name: 'complete',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'jobId', type: 'uint256' },
-      { name: 'reason', type: 'bytes32' },
-      { name: 'optParams', type: 'bytes' },
-    ],
-    outputs: [],
-  },
-  {
-    name: 'getJob',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'jobId', type: 'uint256' }],
-    outputs: [
-      {
-        type: 'tuple',
-        components: [
-          { name: 'id', type: 'uint256' },
-          { name: 'client', type: 'address' },
-          { name: 'provider', type: 'address' },
-          { name: 'evaluator', type: 'address' },
-          { name: 'description', type: 'string' },
-          { name: 'budget', type: 'uint256' },
-          { name: 'expiredAt', type: 'uint256' },
-          { name: 'status', type: 'uint8' },
-          { name: 'hook', type: 'address' },
-        ],
-      },
-    ],
-  },
-  {
-    name: 'JobCreated',
-    type: 'event',
-    anonymous: false,
-    inputs: [
-      { indexed: true, name: 'jobId', type: 'uint256' },
-      { indexed: true, name: 'client', type: 'address' },
-      { indexed: true, name: 'provider', type: 'address' },
-      { indexed: false, name: 'evaluator', type: 'address' },
-      { indexed: false, name: 'expiredAt', type: 'uint256' },
-      { indexed: false, name: 'hook', type: 'address' },
-    ],
-  },
-] as const;
+// ABI lives in the canonical config (agenticCommerceAbi) — no local duplicate.
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -219,12 +126,21 @@ function usdc(n: bigint): string {
 }
 
 async function requireJob(jobId: string | number): Promise<any> {
+  // Malformed jobIds are a caller error (400), not a chain/RPC failure —
+  // the same invalid-jobId contract as the canonical [jobId] routes.
+  // (Previously BigInt(jobId) threw inside the read try/catch → 502.)
+  let jobIdBig: bigint;
+  try {
+    jobIdBig = BigInt(jobId);
+  } catch {
+    throw new PreflightError(400, `invalid job id ${String(jobId)} — jobId must be a non-negative integer.`);
+  }
   try {
     return (await publicClient.readContract({
       address: AGENTIC_COMMERCE_CONTRACT,
-      abi: AGENTIC_ABI,
+      abi: agenticCommerceAbi,
       functionName: 'getJob',
-      args: [BigInt(jobId)],
+      args: [jobIdBig],
     })) as any;
   } catch (e: any) {
     const notFound = /revert|execution/i.test(e?.message || '');
@@ -291,7 +207,7 @@ async function ensureErc8183JobBackfilled(jobId: string, req?: Request): Promise
 
 async function readUsdcBalance(owner: string): Promise<bigint> {
   return (await publicClient.readContract({
-    address: USDC_ARC as `0x${string}`,
+    address: USDC_CONTRACT as `0x${string}`,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: [owner as `0x${string}`],
@@ -300,7 +216,7 @@ async function readUsdcBalance(owner: string): Promise<bigint> {
 
 async function readUsdcAllowance(owner: string, spender: string): Promise<bigint> {
   return (await publicClient.readContract({
-    address: USDC_ARC as `0x${string}`,
+    address: USDC_CONTRACT as `0x${string}`,
     abi: erc20Abi,
     functionName: 'allowance',
     args: [owner as `0x${string}`, spender as `0x${string}`],
@@ -318,7 +234,7 @@ async function extractJobId(txHash: string): Promise<string> {
   for (const log of receipt.logs) {
     try {
       const decoded = decodeEventLog({
-        abi: AGENTIC_ABI,
+        abi: agenticCommerceAbi,
         data: log.data,
         topics: log.topics,
       });
@@ -721,7 +637,7 @@ async function jobsHandler(request: Request) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: 'ARC-TESTNET' as any,
-        contractAddress: USDC_ARC,
+        contractAddress: USDC_CONTRACT,
         abiFunctionSignature: 'approve(address,uint256)',
         abiParameters: [AGENTIC_COMMERCE_CONTRACT, amountWei.toString()],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -1145,7 +1061,7 @@ async function jobsHandler(request: Request) {
       // Read final job state
       const jobData = (await publicClient.readContract({
         address: AGENTIC_COMMERCE_CONTRACT,
-        abi: AGENTIC_ABI,
+        abi: agenticCommerceAbi,
         functionName: 'getJob',
         args: [BigInt(jobId)],
       })) as any;
@@ -1204,9 +1120,21 @@ async function getJobHandler(request: Request) {
       );
     }
 
+    // Malformed jobIds are a caller error (400), not a server error — the
+    // same invalid-jobId contract as the canonical [jobId] routes.
+    // (Previously BigInt(jobId) threw inside the outer try → 500.)
+    try {
+      BigInt(jobId);
+    } catch {
+      return NextResponse.json(
+        { success: false, error: `invalid job id ${jobId}` },
+        { status: 400 }
+      );
+    }
+
     const jobData = (await publicClient.readContract({
       address: AGENTIC_COMMERCE_CONTRACT,
-      abi: AGENTIC_ABI,
+      abi: agenticCommerceAbi,
       functionName: 'getJob',
       args: [BigInt(jobId)],
     })) as any;

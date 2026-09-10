@@ -9,20 +9,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { getAgentWalletAddress, getOrCreateAgentWallet } from "@/lib/x402-wallet";
+import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
-import { prisma } from "@/lib/prisma";
 
 async function walletHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const agentId = Number(id);
-  if (!Number.isInteger(agentId) || agentId <= 0) {
+  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
+  // (auto, ambiguity refused). Caller-control + step-up below operate on the
+  // RESOLVED agent — unchanged. Legacy status contract preserved: garbage
+  // references → 400 "invalid agent id", well-formed but unknown → 404.
+  const { agent, ambiguous, malformed } = await resolveAgentRouteRef(id);
+  if (ambiguous) {
+    return NextResponse.json({ error: "ambiguous agent reference" }, { status: 400 });
+  }
+  if (malformed) {
     return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   }
-  const agent = await (prisma as any).agentRegistry.findUnique({ where: { id: agentId } });
   if (!agent) {
-    return NextResponse.json({ error: `agent ${agentId} not found` }, { status: 404 });
+    return NextResponse.json({ error: `agent ${id} not found` }, { status: 404 });
   }
+  const agentId = agent.id;
 
   // F4: authorization + step-up BEFORE provisioning. The SCA is the stable
   // caller-control handle, so authentication can (and must) run without
