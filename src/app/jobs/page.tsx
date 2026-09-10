@@ -2,6 +2,7 @@
 'use client';
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
+import AppDialog from '@/components/AppDialog';
 
 import { useRouter } from 'next/navigation';
 
@@ -227,6 +228,12 @@ export default function JobsPage() {
   const [agentTreasury, setAgentTreasury] = useState<any>(null);
   const [treasuryLoading, setTreasuryLoading] = useState(false);
   const [funding, setFunding] = useState(false);
+  // Amount-entry dialog (replaced the browser prompt); amount is validated before
+  // the treasury credit request is sent.
+  const [fundDialogOpen, setFundDialogOpen] = useState(false);
+  const [fundAmount, setFundAmount] = useState('5');
+  const [fundAmountError, setFundAmountError] = useState<string | null>(null);
+  const fundInputRef = React.useRef<HTMLInputElement>(null);
 
   const callJobsAPI = async (body: any) => {
     const res = await fetch('/api/jobs', {
@@ -491,15 +498,22 @@ export default function JobsPage() {
     }
   };
 
-  const fundTreasury = async () => {
+  const openFundTreasury = () => {
     if (!postAgentId) return;
-    const amount = window.prompt('Fund the agent treasury with how much USDC? (e.g. 5)', '5');
-    if (!amount) return;
-    const n = Number(amount);
+    setFundAmount('5');
+    setFundAmountError(null);
+    setFundDialogOpen(true);
+  };
+
+  const submitFundTreasury = async () => {
+    if (!postAgentId) return;
+    const n = Number(fundAmount);
     if (!Number.isFinite(n) || n <= 0) {
-      setPostError('Enter a positive USDC amount.');
+      setFundAmountError('Enter a positive USDC amount.');
       return;
     }
+    setFundDialogOpen(false);
+    setFundAmountError(null);
     setFunding(true);
     setPostError(null);
     try {
@@ -1264,7 +1278,7 @@ export default function JobsPage() {
                       <button
                         style={{ ...S.btnSm(false), marginTop: 6, color: 'var(--primary)', fontWeight: 700 }}
                         disabled={funding}
-                        onClick={fundTreasury}
+                        onClick={openFundTreasury}
                       >
                         {funding ? 'Funding...' : 'Fund agent treasury (USDC)'}
                       </button>
@@ -2117,6 +2131,63 @@ export default function JobsPage() {
           </div>
         )}
       </main>
+
+      <AppDialog
+        open={fundDialogOpen}
+        title="Fund agent treasury"
+        description="Send USDC from your wallet to the selected agent's on-chain treasury so it can be hired."
+        onClose={() => {
+          setFundDialogOpen(false);
+          setFundAmountError(null);
+        }}
+        maxWidth={380}
+        initialFocusRef={fundInputRef}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitFundTreasury();
+          }}
+          style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+        >
+          <label style={{ ...S.label, marginBottom: 0 }} htmlFor="fund-treasury-amount">
+            Amount (USDC)
+          </label>
+          <input
+            id="fund-treasury-amount"
+            ref={fundInputRef}
+            style={{ ...S.input, marginBottom: 0 }}
+            type="number"
+            min="0"
+            step="0.000001"
+            inputMode="decimal"
+            value={fundAmount}
+            onChange={(e) => {
+              setFundAmount(e.target.value);
+              if (fundAmountError) setFundAmountError(null);
+            }}
+            placeholder="5.00"
+          />
+          {fundAmountError && (
+            <p style={{ color: 'var(--danger)', fontSize: 12, margin: 0 }}>{fundAmountError}</p>
+          )}
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setFundDialogOpen(false);
+                setFundAmountError(null);
+              }}
+              style={{ ...S.btn(false), flex: 1, background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" disabled={funding} style={{ ...S.btn(funding), flex: 1 }}>
+              {funding ? 'Funding...' : 'Fund treasury'}
+            </button>
+          </div>
+        </form>
+      </AppDialog>
     </div>
   );
 }

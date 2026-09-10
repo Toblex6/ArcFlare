@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import AppDialog from '@/components/AppDialog';
 
 interface AdminJobRow {
     id: string;
@@ -40,6 +41,21 @@ export default function AdminJobsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [removing, setRemoving] = useState<string | null>(null);
+    // Reason-entry dialog (replaced the two browser prompt calls). One dialog
+    // serves both jobs and postings; the target disambiguates the endpoint.
+    const [removeTarget, setRemoveTarget] = useState<{ kind: 'job' | 'posting'; id: string } | null>(null);
+    const [reasonInput, setReasonInput] = useState('malicious or bad content');
+    const reasonInputRef = React.useRef<HTMLInputElement>(null);
+
+    const openRemoveJob = (jobId: string) => {
+        setReasonInput('malicious or bad content');
+        setRemoveTarget({ kind: 'job', id: jobId });
+    };
+
+    const openRemovePosting = (id: string) => {
+        setReasonInput('malicious or bad content');
+        setRemoveTarget({ kind: 'posting', id });
+    };
 
     const fetchJobs = async () => {
         try {
@@ -66,35 +82,23 @@ export default function AdminJobsPage() {
         return () => clearInterval(interval);
     }, []);
 
-    const removeJob = async (jobId: string) => {
-        const reason = window.prompt('Reason for removing this job?', 'malicious or bad content');
-        if (reason === null) return;
-        setRemoving(`job:${jobId}`);
+    const confirmRemove = async () => {
+        if (!removeTarget || removing) return;
+        const { kind, id } = removeTarget;
+        // Preserve the prompt's value semantics: an empty/cleared reason still
+        // submits the 'removed by admin' fallback the old code used.
+        const reason = reasonInput || 'removed by admin';
+        setRemoveTarget(null);
+        setReasonInput('malicious or bad content');
+        setRemoving(kind === 'job' ? `job:${id}` : `posting:${id}`);
         try {
-            const res = await fetch(`/api/admin/jobs/${jobId}/remove`, {
+            const url = kind === 'job'
+                ? `/api/admin/jobs/${id}/remove`
+                : `/api/admin/postings/${id}/remove`;
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reason: reason || 'removed by admin' }),
-            });
-            const data = await res.json();
-            if (!data.success) throw new Error(data.error);
-            await fetchJobs();
-        } catch (e: any) {
-            setError(e.message || 'Remove failed.');
-        } finally {
-            setRemoving(null);
-        }
-    };
-
-    const removePosting = async (id: string) => {
-        const reason = window.prompt('Reason for removing this posting?', 'malicious or bad content');
-        if (reason === null) return;
-        setRemoving(`posting:${id}`);
-        try {
-            const res = await fetch(`/api/admin/postings/${id}/remove`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reason: reason || 'removed by admin' }),
+                body: JSON.stringify({ reason }),
             });
             const data = await res.json();
             if (!data.success) throw new Error(data.error);
@@ -181,7 +185,7 @@ export default function AdminJobsPage() {
                                     <span style={{ fontSize: 10, color: '#4b4035' }}>{new Date(p.createdAt).toLocaleDateString()}</span>
                                     {p.status !== 'CANCELLED' && p.status !== 'CLOSED' && (
                                         <button
-                                            onClick={() => removePosting(p.id)}
+                                            onClick={() => openRemovePosting(p.id)}
                                             disabled={removing === `posting:${p.id}`}
                                             style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 8, padding: '6px 12px', color: '#f87171', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
                                         >
@@ -223,7 +227,7 @@ export default function AdminJobsPage() {
                                     <span style={{ fontSize: 10, color: '#4b4035' }}>{new Date(j.createdAt).toLocaleDateString()}</span>
                                     {!j.removed && (
                                         <button
-                                            onClick={() => removeJob(j.jobId)}
+                                            onClick={() => openRemoveJob(j.jobId)}
                                             disabled={removing === `job:${j.jobId}`}
                                             style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 8, padding: '6px 12px', color: '#f87171', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
                                         >
@@ -236,6 +240,61 @@ export default function AdminJobsPage() {
                     )}
                 </div>
             </div>
+
+            <AppDialog
+                open={!!removeTarget}
+                title={removeTarget?.kind === 'job' ? 'Remove this job?' : 'Remove this posting?'}
+                description="This hides it from users. The reason is recorded for moderation audit."
+                onClose={() => setRemoveTarget(null)}
+                maxWidth={400}
+                initialFocusRef={reasonInputRef}
+            >
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        confirmRemove();
+                    }}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+                >
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#6b5a45' }} htmlFor="remove-reason">
+                        Reason
+                    </label>
+                    <input
+                        id="remove-reason"
+                        ref={reasonInputRef}
+                        value={reasonInput}
+                        onChange={(e) => setReasonInput(e.target.value)}
+                        placeholder="malicious or bad content"
+                        style={{
+                            width: '100%',
+                            padding: '10px 14px',
+                            background: '#1a1410',
+                            border: '1px solid #2d2015',
+                            borderRadius: 10,
+                            color: '#f0ece6',
+                            fontSize: 13,
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                        }}
+                    />
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+                        <button
+                            type="button"
+                            onClick={() => setRemoveTarget(null)}
+                            style={{ background: 'transparent', border: '1px solid #2d2015', borderRadius: 8, padding: '8px 16px', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={!!removing}
+                            style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 8, padding: '8px 16px', color: '#f87171', fontSize: 12, fontWeight: 700, cursor: removing ? 'not-allowed' : 'pointer' }}
+                        >
+                            {removing ? 'Removing...' : 'Confirm remove'}
+                        </button>
+                    </div>
+                </form>
+            </AppDialog>
         </main>
     );
 }

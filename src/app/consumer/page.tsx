@@ -19,6 +19,7 @@ import {
   isolateValidAgents,
   getAppropriateAction,
 } from "@/lib/consumer/discoveryHelpers";
+import { useSecurePinDialog } from "@/components/SecurePinDialog";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover";
 
@@ -162,6 +163,8 @@ export default function ConsumerApp() {
     hasPin: boolean;
   } | null>(null);
   const pinRef = useRef<string | null>(null);
+  // Masked, in-memory PIN dialog that replaced the browser prompt for step-up.
+  const { requestPin, dialog: pinDialog } = useSecurePinDialog();
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [emailInput, setEmailInput] = useState("");
   const [emailOtp, setEmailOtp] = useState("");
@@ -643,7 +646,11 @@ export default function ConsumerApp() {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (security?.hasPin) {
       if (!pinRef.current) {
-        const entered = window.prompt("Enter your payment PIN to authorize this action.");
+        const entered = await requestPin({
+          title: "Authorize this action",
+          description: "Enter your payment PIN to continue.",
+          confirmLabel: "Authorize",
+        });
         if (!entered) throw new Error("Payment PIN required.");
         pinRef.current = entered;
       }
@@ -849,7 +856,11 @@ export default function ConsumerApp() {
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (security?.hasPin) {
-        const entered = window.prompt("Enter your payment PIN to change the recovery email.");
+        const entered = await requestPin({
+          title: "Change recovery email",
+          description: "Enter your payment PIN to send the verification code.",
+          confirmLabel: "Send code",
+        });
         if (!entered) throw new Error("Payment PIN required.");
         headers["x-consumer-pin"] = entered;
       }
@@ -875,7 +886,11 @@ export default function ConsumerApp() {
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (security?.hasPin) {
-        const entered = window.prompt("Enter your payment PIN to confirm the new recovery email.");
+        const entered = await requestPin({
+          title: "Confirm recovery email",
+          description: "Enter your payment PIN to attach the new recovery email.",
+          confirmLabel: "Confirm",
+        });
         if (!entered) throw new Error("Payment PIN required.");
         headers["x-consumer-pin"] = entered;
       }
@@ -2101,6 +2116,8 @@ export default function ConsumerApp() {
           </button>
         ))}
       </nav>
+
+      {pinDialog}
     </main>
   );
 }
