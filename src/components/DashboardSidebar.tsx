@@ -6,9 +6,13 @@
 // nav — no per-page copies, no drift.
 'use client';
 
+import { getNetworkConfig } from "@/lib/config/network";
 import Image from 'next/image';
 import { useEffect, useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
+
+// The testnet faucet is only worth offering on testnet; hidden on mainnet.
+const IS_TESTNET = getNetworkConfig().name === 'testnet';
 
 interface NavItem {
     label: string;
@@ -32,12 +36,9 @@ const SECTIONS: NavSection[] = [
             { label: 'Homepage', href: '/' },
         ],
     },
-    {
-        group: 'FAUCET',
-        items: [
-            { label: 'Get Test Tokens', href: 'https://faucet.circle.com/', external: true },
-        ],
-    },
+    ...(IS_TESTNET
+        ? [{ group: 'FAUCET', items: [{ label: 'Get Test Tokens', href: 'https://faucet.circle.com/', external: true }] }]
+        : []),
     {
         group: 'PAYMENTS',
         items: [

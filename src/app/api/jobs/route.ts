@@ -50,12 +50,15 @@ import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
-import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
+import { agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
-// ── ERC-8183 contract on Arc Testnet ─────────────────────────────────────────
-// Addresses AND ABI come from the canonical source:
-// src/lib/contracts/erc8183.ts (no local copies — see config-drift test).
+// ── ERC-8183 contract on Arc ─────────────────────────────────────────────────
+// The ABI comes from the canonical src/lib/contracts/erc8183.ts. The contract
+// + USDC token ADDRESSES resolve from the AUTHORITATIVE network config
+// (getNetworkConfig(), mainnet-aware) — never a static testnet pin.
+const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 const arcTestnet = {
   id: getNetworkConfig().chainId,
@@ -138,7 +141,7 @@ async function requireJob(jobId: string | number): Promise<any> {
   }
   try {
     return (await publicClient.readContract({
-      address: AGENTIC_COMMERCE_CONTRACT,
+      address: ERC8183_ADDRESS,
       abi: agenticCommerceAbi,
       functionName: 'getJob',
       args: [jobIdBig],
@@ -148,7 +151,7 @@ async function requireJob(jobId: string | number): Promise<any> {
     throw new PreflightError(
       notFound ? 404 : 502,
       notFound
-        ? `Job #${jobId} does not exist on the ERC-8183 contract (${AGENTIC_COMMERCE_CONTRACT}) — check the jobId.`
+        ? `Job #${jobId} does not exist on the ERC-8183 contract (${ERC8183_ADDRESS}) — check the jobId.`
         : `Could not read job #${jobId} state from Arc Testnet RPC: ${e.message}`
     );
   }
@@ -208,7 +211,7 @@ async function ensureErc8183JobBackfilled(jobId: string, req?: Request): Promise
 
 async function readUsdcBalance(owner: string): Promise<bigint> {
   return (await publicClient.readContract({
-    address: USDC_CONTRACT as `0x${string}`,
+    address: USDC_ADDRESS,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: [owner as `0x${string}`],
@@ -217,7 +220,7 @@ async function readUsdcBalance(owner: string): Promise<bigint> {
 
 async function readUsdcAllowance(owner: string, spender: string): Promise<bigint> {
   return (await publicClient.readContract({
-    address: USDC_CONTRACT as `0x${string}`,
+    address: USDC_ADDRESS,
     abi: erc20Abi,
     functionName: 'allowance',
     args: [owner as `0x${string}`, spender as `0x${string}`],
@@ -408,7 +411,7 @@ async function jobsHandler(request: Request) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: AGENTIC_COMMERCE_CONTRACT,
+        contractAddress: ERC8183_ADDRESS,
         abiFunctionSignature: 'createJob(address,address,uint256,string,address)',
         abiParameters: [
           providerSCA,
@@ -561,7 +564,7 @@ async function jobsHandler(request: Request) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: AGENTIC_COMMERCE_CONTRACT,
+        contractAddress: ERC8183_ADDRESS,
         abiFunctionSignature: 'setBudget(uint256,uint256,bytes)',
         abiParameters: [jobId.toString(), amountWei.toString(), '0x'],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -619,7 +622,7 @@ async function jobsHandler(request: Request) {
       // users into thinking it was a state transition).
       let existingAllowance = 0n;
       try {
-        existingAllowance = await readUsdcAllowance(clientSCA, AGENTIC_COMMERCE_CONTRACT);
+        existingAllowance = await readUsdcAllowance(clientSCA, ERC8183_ADDRESS);
       } catch { /* RPC hiccup — proceed with the approve */ }
       if (existingAllowance >= amountWei) {
         return NextResponse.json({
@@ -638,9 +641,9 @@ async function jobsHandler(request: Request) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: USDC_CONTRACT,
+        contractAddress: USDC_ADDRESS,
         abiFunctionSignature: 'approve(address,uint256)',
-        abiParameters: [AGENTIC_COMMERCE_CONTRACT, amountWei.toString()],
+        abiParameters: [ERC8183_ADDRESS, amountWei.toString()],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
@@ -731,12 +734,12 @@ async function jobsHandler(request: Request) {
       if (clientBalance < budget) {
         throw new PreflightError(
           400,
-          `Insufficient USDC in payer wallet ${clientSCA}: has ${usdc(clientBalance)}, needs ${usdc(budget)} for this job's budget. Top up at faucet.circle.com and retry.`
+          `Insufficient USDC in payer wallet ${clientSCA}: has ${usdc(clientBalance)}, needs ${usdc(budget)} for this job's budget.${getNetworkConfig().name === 'testnet' ? ' Top up at faucet.circle.com and retry.' : ' Replenish USDC and retry.'}`
         );
       }
       let allowance = 0n;
       try {
-        allowance = await readUsdcAllowance(clientSCA, AGENTIC_COMMERCE_CONTRACT);
+        allowance = await readUsdcAllowance(clientSCA, ERC8183_ADDRESS);
       } catch (e: any) {
         throw new PreflightError(502, `Could not read USDC allowance from Arc Testnet RPC: ${e.message}`);
       }
@@ -754,7 +757,7 @@ async function jobsHandler(request: Request) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: AGENTIC_COMMERCE_CONTRACT,
+        contractAddress: ERC8183_ADDRESS,
         abiFunctionSignature: 'fund(uint256,bytes)',
         abiParameters: [jobId.toString(), '0x'],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -774,7 +777,7 @@ async function jobsHandler(request: Request) {
         const clientAgentId = await resolveAgentIdBySca(String(clientSCA)).catch(() => null);
         if (clientAgentId) {
           await recordLedgerEntry({
-            ...usdcLedgerIdentity(), // Phase 2D: job escrow is explicitly USDC-only (USDC_CONTRACT fund)
+            ...usdcLedgerIdentity(), // Phase 2D: job escrow is explicitly USDC-only (USDC_ADDRESS fund)
             agentRegistryId: clientAgentId,
             type: 'JOB_ESCROW_LOCK',
             amount: budget,
@@ -848,7 +851,7 @@ async function jobsHandler(request: Request) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: AGENTIC_COMMERCE_CONTRACT,
+        contractAddress: ERC8183_ADDRESS,
         abiFunctionSignature: 'submit(uint256,bytes32,bytes)',
         abiParameters: [jobId.toString(), deliverableHash, '0x'],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -950,7 +953,7 @@ async function jobsHandler(request: Request) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: AGENTIC_COMMERCE_CONTRACT,
+        contractAddress: ERC8183_ADDRESS,
         abiFunctionSignature: 'complete(uint256,bytes32,bytes)',
         abiParameters: [jobId.toString(), reasonHash, '0x'],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -1061,7 +1064,7 @@ async function jobsHandler(request: Request) {
 
       // Read final job state
       const jobData = (await publicClient.readContract({
-        address: AGENTIC_COMMERCE_CONTRACT,
+        address: ERC8183_ADDRESS,
         abi: agenticCommerceAbi,
         functionName: 'getJob',
         args: [BigInt(jobId)],
@@ -1134,7 +1137,7 @@ async function getJobHandler(request: Request) {
     }
 
     const jobData = (await publicClient.readContract({
-      address: AGENTIC_COMMERCE_CONTRACT,
+      address: ERC8183_ADDRESS,
       abi: agenticCommerceAbi,
       functionName: 'getJob',
       args: [BigInt(jobId)],
@@ -1180,8 +1183,8 @@ async function getJobHandler(request: Request) {
         isClient,
         budgetZero,
       },
-      contractAddress: AGENTIC_COMMERCE_CONTRACT,
-      arcScanUrl: `${explorerAddressUrl(AGENTIC_COMMERCE_CONTRACT)}`,
+      contractAddress: ERC8183_ADDRESS,
+      arcScanUrl: `${explorerAddressUrl(ERC8183_ADDRESS)}`,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

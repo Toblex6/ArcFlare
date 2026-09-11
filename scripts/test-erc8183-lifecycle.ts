@@ -1,9 +1,6 @@
 import { getCircleClient, waitForTransaction } from '../src/lib/circle/client';
-import {
-  AGENTIC_COMMERCE_CONTRACT,
-  USDC_CONTRACT,
-  agenticCommerceAbi,
-} from '../src/lib/contracts/erc8183';
+import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from '../src/lib/contracts/erc8183';
+import { getNetworkConfig } from '../src/lib/config/network';
 import { keccak256, toHex, createPublicClient, http } from 'viem';
 import { arcTestnet } from 'viem/chains';
 
@@ -65,7 +62,7 @@ async function main() {
   const approveTx = await circleClient.createContractExecutionTransaction({
     walletAddress: CLIENT_ADDRESS,
     blockchain: 'ARC-TESTNET',
-    contractAddress: USDC_CONTRACT,
+    contractAddress: getNetworkConfig().usdcAddress,
     abiFunctionSignature: 'approve(address,uint256)',
     abiParameters: [AGENTIC_COMMERCE_CONTRACT, budget.toString()],
     fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },

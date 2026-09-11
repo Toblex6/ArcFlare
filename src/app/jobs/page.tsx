@@ -8,8 +8,7 @@ import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
-import { explorerAddressUrl } from "@/lib/config/network";
+import { explorerAddressUrl, getNetworkConfig } from "@/lib/config/network";
 import {
   formatBudgetUsdc,
   getProviderNextAction,
@@ -818,10 +817,10 @@ export default function JobsPage() {
                   wordBreak: 'break-all',
                 }}
               >
-                {AGENTIC_COMMERCE_CONTRACT}
+                {getNetworkConfig().erc8183Address}
               </p>
               <a
-                href={`${explorerAddressUrl(AGENTIC_COMMERCE_CONTRACT)}`}
+                href={`${explorerAddressUrl(getNetworkConfig().erc8183Address)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--primary)', fontSize: 11 }}

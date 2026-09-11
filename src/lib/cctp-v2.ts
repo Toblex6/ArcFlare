@@ -19,6 +19,7 @@
 import { BridgeKit, BridgeChain } from '@circle-fin/bridge-kit';
 import { createCircleWalletsAdapter } from '@circle-fin/adapter-circle-wallets';
 import type { BridgeResult } from '@circle-fin/bridge-kit';
+import { getNetworkConfig } from '@/lib/config/network';
 
 // ── Supported source chains (where a user can bridge USDC from) ──
 // `id` matches BridgeChain enum members (what Bridge Kit expects).
@@ -33,10 +34,30 @@ export const CCTP_SOURCE_CHAINS = [
   { id: 'Polygon_Amoy_Testnet', label: 'Polygon Amoy', testnet: true, circleBlockchain: 'MATIC-AMOY' },
 ] as const;
 
-// ── Destination chains (Arc is the only one this app bridges into) ──
-export const CCTP_DEST_CHAINS = [
-  { id: 'Arc_Testnet', label: 'Arc Testnet', testnet: true },
-] as const;
+// ── Destination chains (Arc is the only one this app bridges into) ─────────
+// All destination configuration derives from the authoritative network config:
+//   - the testnet flag + label follow the selected ARC_NETWORK;
+//   - the CCTP V2 destination chain identifier (domain), MessageTransmitter,
+//     destination chain id and Iris URL are owned by network.ts (mainnet fails
+//     closed without the ARC_MAINNET_CCTP_* inputs).
+// `id` is Circle Bridge Kit's destination-chain ENUM ('Arc_Testnet') — a
+// product constant Bridge Kit resolves internally, not a network literal, so
+// it is not duplicated from network.ts (there is no network field for it).
+export function getCctpDestination() {
+  const net = getNetworkConfig();
+  return {
+    id: 'Arc_Testnet' as const,
+    label: net.name === 'mainnet' ? 'Arc Mainnet' : 'Arc Testnet',
+    testnet: net.name !== 'mainnet',
+    // CCTP V2 destination values owned by network.ts:
+    destinationDomain: net.cctpDomain,
+    messageTransmitter: net.cctpMessageTransmitter,
+    destinationChainId: net.chainId,
+    irisApiUrl: net.irisApiUrl,
+  };
+}
+
+export const CCTP_DEST_CHAINS = [getCctpDestination()];
 
 let cachedAdapter: ReturnType<typeof createCircleWalletsAdapter> | null = null;
 let cachedKit: BridgeKit | null = null;

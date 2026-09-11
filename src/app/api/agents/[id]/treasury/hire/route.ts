@@ -15,7 +15,7 @@ import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 const arcTestnet = getArcChain();
-import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from "@/lib/contracts/erc8183";
+import { agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { hashCriteria } from "@/lib/jobs/criteriaHash";
 import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
 import { checkSpendAllowed } from "@/lib/agents/spendLimitEnforcer";
@@ -167,7 +167,9 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     validationPolicy = { validatorSCA: validatorSCA.toLowerCase(), tag: validation.tag || null };
   }
 
-  const escrowContract = (process.env.AGENTIC_COMMERCE_CONTRACT || AGENTIC_COMMERCE_CONTRACT) as `0x${string}`;
+  // ERC-8183 contract address resolves from the authoritative network config
+  // (mainnet-aware) — never a static testnet pin or an env override.
+  const escrowContract = getNetworkConfig().erc8183Address as `0x${string}`;
   const circleClient = getCircleClient();
   const expiredAt = Math.floor(Date.now() / 1000) + (criteria.deadlineUnix ? criteria.deadlineUnix - Math.floor(Date.now()/1000) : 86400);
   const evaluator = evaluatorAddress || clientAddress;

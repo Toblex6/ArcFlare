@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withMerchantAuth } from '@/lib/middleware/withMerchantAuth';
 import { getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
 import { getUsdcBalance } from '@/lib/wallet/usdcBalance';
+import { getNetworkConfig } from '@/lib/config/network';
 
 async function balanceHandler(req: NextRequest, merchant: { id: string }) {
   try {
@@ -43,7 +44,7 @@ async function balanceHandler(req: NextRequest, merchant: { id: string }) {
       address,
       balance,
       currency: 'USDC',
-      chain: 'arc-testnet',
+      chain: getNetworkConfig().circleBlockchain.toLowerCase(),
       merchantId: merchant.id,
     });
   } catch (error: any) {

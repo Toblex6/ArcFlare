@@ -4,7 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { withGateway } from "@/lib/x402";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { getNetworkConfig } from "@/lib/config/network";
-import { AGENTIC_COMMERCE_CONTRACT } from "@/lib/contracts/erc8183";
+
+// ERC-8183 contract address resolves from the authoritative network config.
+const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
 
 // Price table – amounts in dollars (withGateway expects "$X.XX" format)
 const PRICE_TABLE: Record<string, string> = {
@@ -91,7 +93,7 @@ async function handleJobStatus(req: NextRequest): Promise<NextResponse> {
   const publicClient = createPublicClient({ chain: arcTestnet, transport: http(getNetworkConfig().primaryRpc) });
 
   const jobData = await publicClient.readContract({
-    address: AGENTIC_COMMERCE_CONTRACT,
+    address: ERC8183_ADDRESS,
     abi: [{
       name: "getJob", type: "function", stateMutability: "view",
       inputs: [{ name: "jobId", type: "uint256" }],

@@ -33,7 +33,10 @@ export async function verifyArcTestnetTx(
     }
 
     const iface = new ethers.Interface(ERC20_TRANSFER_ABI);
-    const targetToken = process.env.ARC_USDC_ADDRESS?.toLowerCase();
+    // USDC contract address comes from the authoritative network config ONLY
+    // (testnet: pinned testnet value; mainnet: required ARC_MAINNET_USDC_ADDRESS).
+    // The legacy testnet-USDC override is intentionally NOT honored.
+    const targetToken = getNetworkConfig().usdcAddress.toLowerCase();
 
     // Iterate through execution event logs
     for (const log of receipt.logs) {

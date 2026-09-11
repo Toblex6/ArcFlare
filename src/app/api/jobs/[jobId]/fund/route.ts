@@ -20,9 +20,14 @@ import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
-import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT } from "@/lib/contracts/erc8183";
+import { getNetworkConfig } from "@/lib/config/network";
 import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
 import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimitEnforcer";
+
+// ERC-8183 contract + USDC token address resolve from the authoritative
+// network config (mainnet-aware) — never static testnet pins in erc8183.ts.
+const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await ctx.params;
@@ -94,9 +99,9 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   try {
     approveTx = await createContractTransaction(
       payer,
-      USDC_CONTRACT,
+      USDC_ADDRESS,
       'approve(address,uint256)',
-      [AGENTIC_COMMERCE_CONTRACT, job.budget.toString()],
+      [ERC8183_ADDRESS, job.budget.toString()],
       'approve USDC'
     );
   } catch (e: any) {
@@ -107,7 +112,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   try {
     fundTx = await createContractTransaction(
       payer,
-      AGENTIC_COMMERCE_CONTRACT,
+      ERC8183_ADDRESS,
       'fund(uint256,bytes)',
       [jobId, '0x'],
       'fund escrow'

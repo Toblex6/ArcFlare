@@ -20,10 +20,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { resolveAdminSession } from '@/src/lib/middleware/withAdminAuth';
 import { getCircleClient, createContractTransaction } from '@/lib/circle/client';
-import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
+import { agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
 const arcTestnet = getArcChain();
+// ERC-8183 contract address resolves from the authoritative network config.
+const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
 
 const RPC_URL = getNetworkConfig().primaryRpc;
 
@@ -31,7 +33,7 @@ async function readOnChainJob(jobId: bigint): Promise<{ status: number; budget: 
   try {
     const publicClient = createPublicClient({ chain: arcTestnet, transport: http(RPC_URL) });
     const job = (await publicClient.readContract({
-      address: AGENTIC_COMMERCE_CONTRACT as `0x${string}`,
+      address: ERC8183_ADDRESS,
       abi: agenticCommerceAbi as any,
       functionName: 'getJob',
       args: [jobId],
@@ -114,7 +116,7 @@ export async function POST(
           const reasonHash = keccak256(toHex(reason)) as `0x${string}`;
           const txHash = await createContractTransaction(
             evaluatorAddress,
-            AGENTIC_COMMERCE_CONTRACT,
+            ERC8183_ADDRESS,
             'reject(uint256,bytes32,bytes)',
             [jobId, reasonHash, '0x'],
             'admin reject job'

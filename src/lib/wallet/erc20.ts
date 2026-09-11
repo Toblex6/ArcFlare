@@ -1,9 +1,13 @@
 // src/lib/wallet/erc20.ts
 // Minimal ERC20 pieces needed for a customer's wallet to pay a merchant
 // directly on-chain, and for the server to verify that payment afterward.
-import { USDC_CONTRACT } from '@/src/lib/contracts/erc8183';
+import { getNetworkConfig } from "@/lib/config/network";
 
-export { USDC_CONTRACT };
+// USDC address flows from the authoritative network config (testnet: pinned
+// testnet value unchanged; mainnet: required ARC_MAINNET_USDC_ADDRESS). This
+// is the single legacy-compat alias used by merchant-withdraw / escrow-pay;
+// it is NOT a second source of truth.
+export const USDC_CONTRACT: string = getNetworkConfig().usdcAddress;
 export const USDC_DECIMALS = 6;
 
 export const erc20TransferAbi = [

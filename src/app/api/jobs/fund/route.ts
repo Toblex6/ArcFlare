@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, createContractTransaction } from '@/lib/circle/client';
-import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
+import { getNetworkConfig } from '@/lib/config/network';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
+
+// ERC-8183 contract + USDC token address resolve from the authoritative
+// network config (mainnet-aware) — never static testnet pins in erc8183.ts.
+const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 // SECURITY: fully closed now. Previously resolved clientWalletId to any
 // address in our Circle entity and executed as it, without checking it
@@ -54,16 +59,16 @@ async function fundJobHandler(req: NextRequest) {
     // Approve USDC
     const approveTx = await createContractTransaction(
       clientAddress,
-      USDC_CONTRACT,
+      USDC_ADDRESS,
       'approve(address,uint256)',
-      [AGENTIC_COMMERCE_CONTRACT, job.budget.toString()],
+      [ERC8183_ADDRESS, job.budget.toString()],
       'approve USDC'
     );
 
     // Fund escrow
     const fundTx = await createContractTransaction(
       clientAddress,
-      AGENTIC_COMMERCE_CONTRACT,
+      ERC8183_ADDRESS,
       'fund(uint256,bytes)',
       [jobId, '0x'],
       'fund escrow'

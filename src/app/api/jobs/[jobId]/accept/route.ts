@@ -13,7 +13,7 @@ import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
-import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from "@/lib/contracts/erc8183";
+import { agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { evaluateProviderAcceptance } from "@/lib/procurement/procurementService";
 import { createPublicClient, http } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
@@ -21,11 +21,13 @@ const arcTestnet = getArcChain();
 
 // The chain the ERC-8183 contract lives on (same RPC wiring as the hire route).
 const RPC_URL = getNetworkConfig().primaryRpc;
+// ERC-8183 contract address resolves from the authoritative network config.
+const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
 
 async function readOnChainJob(jobIdBig: bigint): Promise<{ budget: bigint; status: number } | null> {
   const publicClient = createPublicClient({ chain: arcTestnet, transport: http(RPC_URL) });
   const job = (await publicClient.readContract({
-    address: AGENTIC_COMMERCE_CONTRACT as `0x${string}`,
+    address: ERC8183_ADDRESS,
     abi: agenticCommerceAbi as any,
     functionName: "getJob",
     args: [jobIdBig],
@@ -185,7 +187,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   try {
     txHash = await createContractTransaction(
       providerWalletAddress,
-      AGENTIC_COMMERCE_CONTRACT,
+      ERC8183_ADDRESS,
       'setBudget(uint256,uint256,bytes)',
       [jobId, budgetToSet.toString(), '0x'],
       'set budget (provider accept)'

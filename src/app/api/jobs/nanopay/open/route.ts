@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createContractTransaction } from "@/lib/circle/client";
-import { USDC_CONTRACT } from "@/lib/contracts/erc8183";
 import { ARC_FLARE_STREAM_CONTRACT_ADDRESS, ARC_FLARE_STREAM_ABI, computeTrancheAmounts } from "@/lib/contracts/streamContract";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { createPublicClient, http } from "viem";
-import { getArcChain } from "@/lib/config/network";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 const arcTestnet = getArcChain();
+// USDC token address resolves from the authoritative network config.
+const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 import { Interface } from "ethers";
 import { recordNanopaymentStreamOpened } from "@/lib/jobs/nanopaymentSplit";
 import type { AcceptanceCriteria } from "@/lib/jobs/criteriaHash";
@@ -65,7 +66,7 @@ async function openHandler(req: NextRequest) {
     // 1) Approve USDC to the stream contract
     const approveTx = await createContractTransaction(
       job.clientSCA,
-      USDC_CONTRACT,
+      USDC_ADDRESS,
       "approve(address,uint256)",
       [ARC_FLARE_STREAM_CONTRACT_ADDRESS, totalBudget],
       "approve USDC for nanopayment stream"
@@ -76,7 +77,7 @@ async function openHandler(req: NextRequest) {
       job.clientSCA,
       ARC_FLARE_STREAM_CONTRACT_ADDRESS,
       "openStream(address,address,uint256,uint256)",
-      [job.providerSCA, USDC_CONTRACT, totalBudget, trancheCount.toString()],
+      [job.providerSCA, USDC_ADDRESS, totalBudget, trancheCount.toString()],
       "open nanopayment stream"
     );
 
@@ -100,7 +101,7 @@ async function openHandler(req: NextRequest) {
       txHash: openTx,
       streamId,
       workerAddress: job.providerSCA,
-      token: USDC_CONTRACT,
+      token: USDC_ADDRESS,
       totalBudget,
       criteria,
     });

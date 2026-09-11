@@ -19,14 +19,7 @@ const CANONICAL_REL = 'src/lib/contracts/erc8183.ts';
 
 // Known, deliberately allow-listed duplicates (documented exceptions):
 // - src/lib/contracts/erc8183.ts: the canonical definition itself.
-// - src/app/api/nano/pay/[endpoint]/route.ts: the payment router is
-//   explicitly out of scope for the config-hygiene fix ("do not modify
-//   payment router"); its inline literal is accepted drift until that
-//   route is changed on purpose.
-const ALLOWED = new Set([
-  CANONICAL_REL,
-  'src/app/api/nano/pay/[endpoint]/route.ts',
-]);
+const ALLOWED = new Set([CANONICAL_REL]);
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -67,17 +60,37 @@ test('no ERC-8183 address literals outside the canonical config (allow-listed ex
   );
 });
 
-test('formerly-flagged consumers import the canonical ERC-8183 config', () => {
+test('production money paths resolve the ERC-8183 address from network config (never the static pin)', () => {
   const consumers = [
     'src/app/api/jobs/route.ts',
+    'src/app/api/jobs/create/route.ts',
+    'src/app/api/jobs/fund/route.ts',
+    'src/app/api/jobs/complete/route.ts',
+    'src/app/api/jobs/set-budget/route.ts',
+    'src/app/api/jobs/submit/route.ts',
+    'src/app/api/jobs/[jobId]/accept/route.ts',
+    'src/app/api/jobs/[jobId]/fund/route.ts',
+    'src/app/api/jobs/[jobId]/route.ts',
+    'src/app/api/agents/[id]/hire/route.ts',
+    'src/app/api/agents/[id]/treasury/hire/route.ts',
+    'src/app/api/procurement/[id]/hire/route.ts',
     'src/app/api/agents/[id]/card/route.ts',
+    'src/app/api/nano/pay/[endpoint]/route.ts',
     'src/app/jobs/page.tsx',
   ];
   for (const c of consumers) {
     const src = read(path.join(ROOT, c));
+    // Resolve the address from the authoritative network config.
+    assert.match(
+      src,
+      /getNetworkConfig\(\)\.erc8183Address/,
+      `${c} must resolve the ERC-8183 address from the network config`
+    );
+    // Must NOT import the static testnet pin from erc8183.ts.
+    const erc8183From = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]@\/lib\/contracts\/erc8183['"]/g)];
     assert.ok(
-      /from\s+['"]@\/lib\/contracts\/erc8183['"]/.test(src),
-      `${c} must import from @/lib/contracts/erc8183`
+      erc8183From.every((m) => !/AGENTIC_COMMERCE_CONTRACT/.test(m[1])),
+      `${c} must not import AGENTIC_COMMERCE_CONTRACT (static pin) from erc8183.ts`
     );
   }
 });

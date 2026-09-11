@@ -1,11 +1,14 @@
 //src\app\api\jobs\create\route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, waitForTransaction } from '@/lib/circle/client';
-import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
+import { agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
 import { createPublicClient, http, decodeEventLog } from 'viem';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
 const arcTestnet = getArcChain();
+// ERC-8183 contract address resolves from the authoritative network config
+// (mainnet-aware) — never the static testnet pin in erc8183.ts.
+const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
@@ -40,7 +43,7 @@ async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
     const createTx = await circleClient.createContractExecutionTransaction({
       walletAddress: clientAddress,
       blockchain: getNetworkConfig().circleBlockchain,
-      contractAddress: AGENTIC_COMMERCE_CONTRACT,
+      contractAddress: ERC8183_ADDRESS,
       abiFunctionSignature: 'createJob(address,address,uint256,string,address)',
       abiParameters: [
         providerAddress,
@@ -59,7 +62,7 @@ async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
     // carries the exact id the contract assigned this tx.
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as `0x${string}` });
     const jobCreatedLog = receipt.logs.find(
-      (log) => log.address.toLowerCase() === AGENTIC_COMMERCE_CONTRACT.toLowerCase()
+      (log) => log.address.toLowerCase() === ERC8183_ADDRESS.toLowerCase()
     );
     let jobId: bigint | null = null;
     try {
@@ -80,7 +83,7 @@ async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
     }
     if (jobId === null || jobId === 0n) {
       const nextJobId = (await publicClient.readContract({
-        address: AGENTIC_COMMERCE_CONTRACT,
+        address: ERC8183_ADDRESS,
         abi: agenticCommerceAbi as any,
         functionName: 'jobCounter',
       })) as bigint;

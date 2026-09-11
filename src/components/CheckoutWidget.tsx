@@ -54,7 +54,11 @@ import { useRoutingQuote } from '@/src/components/checkout/routing/useRoutingQuo
 import { erc20ApproveAbi, paymentRouterRouteAbi } from '@/src/components/checkout/routing/routerAbi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
+import { getNetworkConfig } from '@/lib/config/network';
 import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
+
+// The testnet faucet link is only shown on testnet; hidden on mainnet.
+const IS_TESTNET = getNetworkConfig().name === 'testnet';
 
 export interface PaymentLogData {
     reference: string;
@@ -889,9 +893,11 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                     Disconnect
                                 </button>
                             </div>
+                            {IS_TESTNET && (
                             <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: 10, fontSize: 11, color: '#6b5a45', textDecoration: 'underline' }}>
                                 No test {isRoutedSelection ? paySymbol : invoiceSymbol}? Get some free ↗
                             </a>
+                            )}
                             {!isRoutedSelection ? (
                                 <>
                                     {/* Correct-token balance: the payer sees THEIR balance

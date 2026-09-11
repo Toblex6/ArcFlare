@@ -10,9 +10,11 @@ import { getNetworkConfig } from "@/lib/config/network";
 const ERC20_BALANCE_ABI = ['function balanceOf(address owner) view returns (uint256)'];
 
 export async function getUsdcBalance(walletAddress: string): Promise<number> {
-  // Token address flows from the authoritative network config (legacy
-  // ARC_USDC_ADDRESS still wins when set); testnet value unchanged.
-  const usdcAddress = process.env.ARC_USDC_ADDRESS || getNetworkConfig().usdcAddress;
+  // Token address flows from the authoritative network config ONLY (testnet:
+  // pinned testnet value unchanged; mainnet: required ARC_MAINNET_USDC_ADDRESS).
+  // The legacy testnet-USDC override is intentionally NOT honored — the
+  // network config is the single authority for the USDC contract.
+  const usdcAddress = getNetworkConfig().usdcAddress;
   if (!usdcAddress || !getNetworkConfig().primaryRpc) {
     throw new Error('Arc RPC/USDC address not configured.');
   }

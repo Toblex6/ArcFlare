@@ -1,17 +1,15 @@
 // src/app/api/agents/[id]/card/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
-import { AGENTIC_COMMERCE_CONTRACT as ERC8183_AGENTIC_COMMERCE_CONTRACT } from "@/lib/contracts/erc8183";
 import { getNetworkConfig } from "@/lib/config/network";
 
-// Security cleanup batch 1: the hardcoded ERC-8183 address literal was
-// removed — the canonical AGENTIC_COMMERCE_CONTRACT from
-// src/lib/contracts/erc8183.ts is the single source of truth. Behavior
-// contract is preserved: an explicitly configured AGENTIC_COMMERCE_CONTRACT
-// env value still wins, otherwise the canonical constant is used.
+// Network-cutover: the ERC-8183 escrow contract address resolves from the
+// authoritative network config (getNetworkConfig().erc8183Address), which is
+// testnet's pinned value on testnet and the required ARC_MAINNET_ERC8183_ADDRESS
+// on mainnet. The old AGENTIC_COMMERCE_CONTRACT env override is intentionally
+// NOT honored — the network config is the single authority.
 function resolveEscrowContract(): string {
-  const env = process.env.AGENTIC_COMMERCE_CONTRACT;
-  return typeof env === "string" && env.trim() !== "" ? env : ERC8183_AGENTIC_COMMERCE_CONTRACT;
+  return getNetworkConfig().erc8183Address;
 }
 
 function buildAgentCard(agent: any, baseUrl: string) {

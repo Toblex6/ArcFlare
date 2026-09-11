@@ -1,9 +1,18 @@
 // src/lib/contracts/erc8183.ts
-
-// Canonical testnet addresses (pinned — the config-drift test asserts the
-// exact AGENTIC_COMMERCE_CONTRACT line below stays the single source of truth).
+//
+// Canonical ERC-8183 contracts + ABI. This module stays a PURE constants/ABI
+// module (no imports) so it can be imported by the client-safe network config
+// and by browser bundles.
+//
+//   - AGENTIC_COMMERCE_CONTRACT is the canonical TESTNET pin that
+//     src/lib/config/network.ts consumes to seed the testnet config
+//     (cfg.erc8183Address). Production consumers MUST resolve the address from
+//     getNetworkConfig().erc8183Address — importing this testnet constant is forbidden;
+//     so mainnet can never silently inherit the testnet contract.
+//   - There is deliberately NO USDC token pin here anymore: the USDC address
+//     is owned by src/lib/config/network.ts (cfg.usdcAddress, mainnet-aware)
+//     and surfaced to consumers via getNetworkConfig() / supportedTokens.ts.
 export const AGENTIC_COMMERCE_CONTRACT = '0x0747EEf0706327138c69792bF28Cd525089e4583';
-export const USDC_CONTRACT = '0x3600000000000000000000000000000000000000';
 
 export const agenticCommerceAbi = [
   // Job Management Functions

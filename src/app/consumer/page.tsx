@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useAccount, useConnect, useSignMessage } from "wagmi";
 import type { Address } from "viem";
+import { getNetworkConfig } from "@/lib/config/network";
 import { friendlyWalletError } from "@/lib/wallet/walletErrors";
 import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, withTimeout } from "@/lib/wallet/walletLabels";
 import {
@@ -84,6 +85,8 @@ interface ActivityItem {
 }
 
 export default function ConsumerApp() {
+  // Testnet faucet is only offered on testnet; hidden on mainnet.
+  const isTestnet = getNetworkConfig().name === 'testnet';
   const router = useRouter();
   const { signMessageAsync } = useSignMessage();
   // A4: "Use this wallet" needs an ACTIVE wagmi connection before it can sign
@@ -1237,7 +1240,7 @@ export default function ConsumerApp() {
               <p style={styles.heroSub}>Send to anyone. Save without thinking. Get paid in seconds.</p>
             </section>
 
-            {justCreatedWallet && (
+            {isTestnet && justCreatedWallet && (
               <section style={styles.faucetBanner}>
                 <div>
                   <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 14 }}>🎉 Wallet created!</p>
@@ -1427,15 +1430,17 @@ export default function ConsumerApp() {
               </button>
             </section>
 
-            <section style={styles.faucetCard}>
-              <div>
-                <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 13 }}>Need more test USDC?</p>
-                <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)" }}>Opens Circle's official Arc testnet faucet.</p>
-              </div>
-              <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" style={styles.faucetCardLink}>
-                Open faucet ↗
-              </a>
-            </section>
+            {isTestnet && (
+              <section style={styles.faucetCard}>
+                <div>
+                  <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 13 }}>Need more test USDC?</p>
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)" }}>Opens Circle's official Arc testnet faucet.</p>
+                </div>
+                <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer" style={styles.faucetCardLink}>
+                  Open faucet ↗
+                </a>
+              </section>
+            )}
 
             <section>
               <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "var(--flow-text-muted)" }}>Recent Activity</p>
