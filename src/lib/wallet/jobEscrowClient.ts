@@ -15,10 +15,11 @@
  */
 
 import { Contract, JsonRpcProvider, Wallet, type Signer } from "ethers"; // swap for viem equivalents if that's your standard here
+import { getNetworkConfig } from "@/lib/config/network";
 
 // ---- Config — fill these in for your actual deployment ----
 
-const ARC_TESTNET_RPC_URL = process.env.ARC_TESTNET_RPC ?? "https://rpc.testnet.arc.network";
+const ARC_TESTNET_RPC_URL = getNetworkConfig().primaryRpc;
 export const JOB_ESCROW_CONTRACT_ADDRESS = process.env.JOB_ESCROW_CONTRACT_ADDRESS ?? ""; // set after deploying ArcFlareJobEscrow.sol
 const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY ?? ""; // the relayer wallet's key — see security note above
 

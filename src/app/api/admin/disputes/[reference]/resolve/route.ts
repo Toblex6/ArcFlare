@@ -19,9 +19,10 @@ import { resolveAdminSession } from '@/src/lib/middleware/withAdminAuth';
 import { createWalletClient, createPublicClient, http, parseAbiItem } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet } from '@/src/lib/wagmi';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
-const RPC_URL = process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network';
+const RPC_URL = getNetworkConfig().primaryRpc;
 
 const RESOLVE_DISPUTE_ABI = parseAbiItem(
     'function resolveDispute(bytes32 id, bool releaseToBeneficiary) external'
@@ -120,7 +121,7 @@ export async function POST(
             success: true,
             escrow: updated,
             txHash,
-            explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+            explorerUrl: `${explorerTxUrl(txHash)}`,
             message: releaseToBeneficiary
                 ? `${escrow.amount} USDC released to beneficiary.`
                 : `${escrow.amount} USDC refunded to depositor.`,

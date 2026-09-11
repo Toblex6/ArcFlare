@@ -10,6 +10,7 @@
 
 import { ethers } from 'ethers';
 import { resolveCurrency } from '@/src/lib/tokens/resolveCurrency';
+import { getNetworkConfig } from "@/lib/config/network";
 
 const ERC20_BALANCE_ABI = ['function balanceOf(address owner) view returns (uint256)'];
 
@@ -22,10 +23,9 @@ export interface TokenBalance {
 }
 
 function rpcUrl(): string {
-  const url =
-    process.env.ARC_TESTNET_RPC ||
-    process.env.NEXT_PUBLIC_ARC_RPC ||
-    'https://rpc.testnet.arc.network';
+  // RPC flows from the authoritative network config (was ARC_TESTNET_RPC /
+  // NEXT_PUBLIC_ARC_RPC with a hardcoded testnet fallback).
+  const url = getNetworkConfig().primaryRpc;
   if (!url) throw new Error('Arc RPC not configured.');
   return url;
 }

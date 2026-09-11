@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { resumeTransactionRequest } from "@/lib/wallet/transactionResume";
+import { explorerTxUrl } from "@/lib/config/network";
 
 const TX_HASH_RE = /^0x[a-fA-F0-9]{64}$/;
 
@@ -114,7 +115,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       request: updated,
       txHash: result.txHash,
       details: result.details ?? null,
-      explorerUrl: `https://testnet.arcscan.app/tx/${result.txHash}`,
+      explorerUrl: `${explorerTxUrl(result.txHash)}`,
       message: `Action ${updated.action} completed and verified on-chain.`,
     });
   }

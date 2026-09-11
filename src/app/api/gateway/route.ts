@@ -5,9 +5,16 @@
 
 import { NextResponse } from 'next/server';
 import { withApiKey } from '@/lib/middleware/withApiKey';
+import { getNetworkConfig } from '@/lib/config/network';
 
-const FACILITATOR_URL = 'https://gateway-api-testnet.circle.com';
-const ARC_TESTNET_CHAIN = 'ARC-TESTNET';
+// Facilitator URL + Circle chain flow from the authoritative network config
+// (was hardcoded testnet Gateway URL + 'ARC-TESTNET').
+function facilitatorUrl(): string {
+  return getNetworkConfig().gatewayUrl;
+}
+function arcChain(): string {
+  return getNetworkConfig().circleBlockchain;
+}
 
 // ── GET /api/gateway?sellerAddress=0x... ──────────────────────────────────────
 // Check the Seller Wallet's Gateway Balance (accrued revenue from paid calls)
@@ -24,7 +31,7 @@ async function getBalanceHandler(request: Request) {
     }
 
     const res = await fetch(
-      `${FACILITATOR_URL}/balance?address=${sellerAddress}&chain=${ARC_TESTNET_CHAIN}`,
+      `${facilitatorUrl()}/balance?address=${sellerAddress}&chain=${arcChain()}`,
       { headers: { 'Content-Type': 'application/json' } }
     );
 
@@ -39,7 +46,7 @@ async function getBalanceHandler(request: Request) {
       sellerAddress,
       gatewayBalance: data.balance,
       currency: 'USDC',
-      chain: ARC_TESTNET_CHAIN,
+      chain: arcChain(),
       message: `Seller Gateway balance: ${data.balance} USDC accrued from paid API calls.`,
     });
   } catch (error: any) {
@@ -68,12 +75,12 @@ async function withdrawHandler(request: Request) {
       );
     }
 
-    const res = await fetch(`${FACILITATOR_URL}/withdraw`, {
+    const res = await fetch(`${facilitatorUrl()}/withdraw`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         address: resolvedSeller,
-        chain: ARC_TESTNET_CHAIN,
+        chain: arcChain(),
         recipient: resolvedPayout,
         amount: amount.toString(),
       }),

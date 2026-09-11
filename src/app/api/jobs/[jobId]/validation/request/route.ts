@@ -7,6 +7,7 @@ import { getJobValidationPolicy, recordValidationRequest } from "@/lib/jobs/jobV
 import { notifyValidator } from "@/lib/notifyValidator";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { createPublicClient, http, keccak256, toHex } from "viem";
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const VALIDATION_REGISTRY = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272" as `0x${string}`;
 
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     if (validationStepUp) return validationStepUp;
     const tx = await circleClient.createContractExecutionTransaction({
       walletAddress: signingWalletForRequest,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: VALIDATION_REGISTRY,
       abiFunctionSignature: "validationRequest(address,uint256,string,bytes32)",
       abiParameters: [policy.validatorSCA, agent.tokenId.toString(), requestURI, requestHash],
@@ -96,7 +97,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
       console.error("[job-validation/request] validator notification failed (non-fatal):", notifyError?.message);
       validatorNotified = { notified: false, reason: notifyError?.message || "notify-failed" };
     }
-    return NextResponse.json({ success: true, jobId, agentId: agent.tokenId, validatorSCA: policy.validatorSCA, requestHash, requestURI, txHash, explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`, status: updated.status, validatorNotified, message: `Validation requested for job ${jobId} — validator ${policy.validatorSCA} must now respond` });
+    return NextResponse.json({ success: true, jobId, agentId: agent.tokenId, validatorSCA: policy.validatorSCA, requestHash, requestURI, txHash, explorerUrl: `${explorerTxUrl(txHash)}`, status: updated.status, validatorNotified, message: `Validation requested for job ${jobId} — validator ${policy.validatorSCA} must now respond` });
   };
   return withApiKeyOrAnySession(handler as any)(req);
 }

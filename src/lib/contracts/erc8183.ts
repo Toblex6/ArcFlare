@@ -1,5 +1,7 @@
 // src/lib/contracts/erc8183.ts
 
+// Canonical testnet addresses (pinned — the config-drift test asserts the
+// exact AGENTIC_COMMERCE_CONTRACT line below stays the single source of truth).
 export const AGENTIC_COMMERCE_CONTRACT = '0x0747EEf0706327138c69792bF28Cd525089e4583';
 export const USDC_CONTRACT = '0x3600000000000000000000000000000000000000';
 

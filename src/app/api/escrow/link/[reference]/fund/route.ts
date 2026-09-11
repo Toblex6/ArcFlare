@@ -47,6 +47,7 @@ import {
 import { getReceiptReliable, readContractReliable } from '@/lib/wallet/chainClient';
 import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
 import { notifyBeneficiary } from '@/lib/escrow/notifyBeneficiary';
+import { explorerTxUrl } from "@/lib/config/network";
 
 const ESCROW_CONTRACT =
   process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -254,7 +255,7 @@ export async function POST(
       escrow: { reference: updated.reference, status: updated.status, depositorSCA: updated.depositorSCA },
       txHash,
       escrowId: onchainId,
-      explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+      explorerUrl: `${explorerTxUrl(txHash)}`,
       message: `Escrow funded. ${escrow.amount} USDC is now locked on Arc Testnet for ${escrow.beneficiarySCA}.`,
     });
   } catch (error: any) {

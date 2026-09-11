@@ -13,6 +13,7 @@
 // exposes READ helpers over ethers, plus the ABI used for event parsing.
 
 import { Contract, JsonRpcProvider, id as keccakId } from "ethers";
+import { getNetworkConfig } from "@/lib/config/network";
 
 export const ARC_FLARE_STREAM_CONTRACT_ADDRESS =
   process.env.ARC_FLARE_STREAM_CONTRACT_ADDRESS ?? "";
@@ -42,7 +43,7 @@ export interface StreamOnChainState {
   openedAt: bigint;
 }
 
-const ARC_TESTNET_RPC_URL = process.env.ARC_TESTNET_RPC ?? "https://rpc.testnet.arc.network";
+const ARC_TESTNET_RPC_URL = getNetworkConfig().primaryRpc;
 
 let cachedProvider: JsonRpcProvider | null = null;
 

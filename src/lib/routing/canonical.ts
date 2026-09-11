@@ -6,6 +6,7 @@
 
 import { createPublicClient, http } from 'viem';
 import { arcTestnet } from '@/src/lib/wagmi';
+import { getNetworkConfig } from "@/lib/config/network";
 
 // ── Policy constants ─────────────────────────────────────────────────────────
 export const ROUTING_QUOTE_TTL_MS = 5 * 60 * 1000; // short-lived quotes (~5 min)
@@ -49,7 +50,7 @@ export function getRoutingConfig(): RoutingConfig {
   return {
     poolAddress,
     routerAddress,
-    rpcUrl: (process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network').trim(),
+    rpcUrl: getNetworkConfig().primaryRpc,
   };
 }
 

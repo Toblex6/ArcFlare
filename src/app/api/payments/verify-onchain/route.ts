@@ -17,6 +17,7 @@ import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { transferUsdc } from '@/src/lib/circle/transfers';
 import { getRoutingConfig, readWithRetry } from '@/src/lib/routing/canonical';
 import { checkRoutedExecution, findRoutedEvent } from '@/src/lib/routing/verifier';
+import { getNetworkConfig } from "@/lib/config/network";
 
 const publicClient = createPublicClient({
     chain: arcTestnet,
@@ -287,7 +288,7 @@ export async function POST(req: NextRequest) {
             async function readTokenBalance(owner: string): Promise<bigint> {
                 const pc = createPublicClient({
                     chain: arcTestnet,
-                    transport: http(process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network'),
+                    transport: http(getNetworkConfig().primaryRpc),
                 });
                 return (await pc.readContract({
                     address: token.address as `0x${string}`,

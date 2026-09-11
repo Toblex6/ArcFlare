@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { explorerTxUrl } from "@/lib/config/network";
 
 async function statusHandler(request: Request) {
   try {
@@ -36,7 +37,7 @@ async function statusHandler(request: Request) {
         timeRemaining: isExpired
           ? 0
           : Math.floor((new Date(escrow.deadline).getTime() - now.getTime()) / 1000),
-        explorerUrl: escrow.txHash ? `https://testnet.arcscan.app/tx/${escrow.txHash}` : null,
+        explorerUrl: escrow.txHash ? `${explorerTxUrl(escrow.txHash)}` : null,
       },
     });
   } catch (error: any) {

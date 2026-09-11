@@ -10,6 +10,7 @@ import { prisma } from '@/src/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/src/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 
@@ -71,7 +72,7 @@ async function refundHandler(request: Request, merchant: AuthedMerchant) {
 
         const refundTx = await circleClient.createContractExecutionTransaction({
             walletAddress: callerSCA,
-            blockchain: 'ARC-TESTNET' as any,
+            blockchain: getNetworkConfig().circleBlockchain as any,
             contractAddress: ESCROW_CONTRACT,
             abiFunctionSignature: 'refundExpired(bytes32)',
             abiParameters: [escrow.contractEscrowId],
@@ -130,7 +131,7 @@ async function refundHandler(request: Request, merchant: AuthedMerchant) {
             success: true,
             escrow: updated,
             txHash,
-            explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+            explorerUrl: `${explorerTxUrl(txHash)}`,
             message: `${escrow.amount} USDC refunded to depositor.`,
         });
     } catch (error: any) {

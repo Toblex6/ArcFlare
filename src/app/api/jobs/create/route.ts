@@ -4,7 +4,8 @@ import { getCircleClient, waitForTransaction } from '@/lib/circle/client';
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
 import { createPublicClient, http, decodeEventLog } from 'viem';
-import { arcTestnet } from 'viem/chains';
+import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+const arcTestnet = getArcChain();
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
@@ -38,7 +39,7 @@ async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
 
     const createTx = await circleClient.createContractExecutionTransaction({
       walletAddress: clientAddress,
-      blockchain: 'ARC-TESTNET',
+      blockchain: getNetworkConfig().circleBlockchain,
       contractAddress: AGENTIC_COMMERCE_CONTRACT,
       abiFunctionSignature: 'createJob(address,address,uint256,string,address)',
       abiParameters: [

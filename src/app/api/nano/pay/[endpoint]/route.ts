@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withGateway } from "@/lib/x402";
 import { checkRateLimit } from "@/lib/ratelimit";
+import { getNetworkConfig } from "@/lib/config/network";
+import { AGENTIC_COMMERCE_CONTRACT } from "@/lib/contracts/erc8183";
 
 // Price table – amounts in dollars (withGateway expects "$X.XX" format)
 const PRICE_TABLE: Record<string, string> = {
@@ -75,17 +77,18 @@ async function handleJobStatus(req: NextRequest): Promise<NextResponse> {
   }
 
   const { createPublicClient, http, formatUnits } = await import("viem");
-  const AGENTIC_COMMERCE_CONTRACT = "0x0747EEf0706327138c69792bF28Cd525089e4583";
+  // Canonical ERC-8183 AgenticCommerce pin (network-aware via
+  // @/lib/contracts/erc8183; no per-route literal re-declaration).
   const JOB_STATUS_NAMES = ["Open", "Funded", "Submitted", "Completed", "Rejected", "Expired"];
 
   const arcTestnet = {
-    id: 5042002,
+    id: getNetworkConfig().chainId,
     name: "Arc Testnet",
     nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-    rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] }, public: { http: ["https://rpc.testnet.arc.network"] } },
+    rpcUrls: { default: { http: [getNetworkConfig().primaryRpc] }, public: { http: [getNetworkConfig().primaryRpc] } },
   } as const;
 
-  const publicClient = createPublicClient({ chain: arcTestnet, transport: http("https://rpc.testnet.arc.network") });
+  const publicClient = createPublicClient({ chain: arcTestnet, transport: http(getNetworkConfig().primaryRpc) });
 
   const jobData = await publicClient.readContract({
     address: AGENTIC_COMMERCE_CONTRACT,

@@ -32,6 +32,7 @@ import { prisma } from '@/src/lib/prisma';
 import { pollForAttestationByTxHash, mintOnArc, getChainName, decodeBurnMessage } from '@/src/lib/cctp';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { parseUnits } from 'viem';
+import { explorerTxUrl } from "@/lib/config/network";
 
 const USDC_DECIMALS = 6;
 
@@ -198,7 +199,7 @@ export async function POST(request: Request) {
           status: 'SUCCESS',
           settledAt: new Date().toISOString(),
           settlementType: 'CCTP_V2_CHECKOUT',
-          explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
+          explorerUrl: `${explorerTxUrl(arcTxHash)}`,
         }),
       }).catch(() => { });
     }
@@ -207,7 +208,7 @@ export async function POST(request: Request) {
       success: true,
       payment: settled,
       arcTxHash,
-      explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
+      explorerUrl: `${explorerTxUrl(arcTxHash)}`,
     });
   } catch (error: any) {
     console.error('CCTP checkout settle error:', error);

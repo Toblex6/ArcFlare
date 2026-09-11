@@ -6,6 +6,7 @@ import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getJobValidationPolicy, recordValidationResponse } from "@/lib/jobs/jobValidationPolicy";
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { keccak256, toHex } from "viem";
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const VALIDATION_REGISTRY = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272" as `0x${string}`;
 
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     const responseCode = passed ? 100 : 0;
     const tx = await circleClient.createContractExecutionTransaction({
       walletAddress: validatorSCA,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: VALIDATION_REGISTRY,
       abiFunctionSignature: "validationResponse(bytes32,uint8,string,bytes32,string)",
       abiParameters: [policy.requestHash!, responseCode.toString(), "", "0x0000000000000000000000000000000000000000000000000000000000000000", tag],
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     if (!tx.data?.id) throw new Error("Circle transaction returned no ID.");
     const txHash = await waitForTx(circleClient, tx.data.id);
     const updated = await recordValidationResponse(jobIdBigInt, txHash, passed, tag);
-    return NextResponse.json({ success: true, jobId, requestHash: policy.requestHash, passed, responseCode, tag, validatorSCA, txHash, explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`, status: updated.status, message: `Validation response submitted — ${passed ? "PASSED" : "FAILED"} (tag: ${tag})` });
+    return NextResponse.json({ success: true, jobId, requestHash: policy.requestHash, passed, responseCode, tag, validatorSCA, txHash, explorerUrl: `${explorerTxUrl(txHash)}`, status: updated.status, message: `Validation response submitted — ${passed ? "PASSED" : "FAILED"} (tag: ${tag})` });
   };
   return withApiKeyOrAnySession(handler as any)(req);
 }

@@ -11,24 +11,26 @@
 import { NextResponse } from "next/server";
 import { formatUnits } from "viem";
 import { withApiKeyOrMerchant } from "@/lib/middleware/withMerchantAuth";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 
-const GATEWAY_API = "https://gateway-api-testnet.circle.com/v1/balances";
-const ARC_TESTNET_DOMAIN = 26; // confirmed from CHAIN_CONFIGS / GATEWAY_DOMAINS earlier
+// Gateway API base, CCTP domain, chain, RPC and USDC address flow from the
+// authoritative network config (were hardcoded testnet values).
+function gatewayApi(): string {
+  return `${getNetworkConfig().gatewayUrl}/v1/balances`;
+}
+function arcDomain(): number {
+  return getNetworkConfig().cctpDomain;
+}
 
 async function getWalletUsdcBalance(address: `0x${string}`): Promise<string> {
   // Reads the wallet's raw USDC balance onchain (separate from Gateway balance)
   const { createPublicClient, http } = await import("viem");
-  const arcTestnet = {
-    id: 5042002,
-    name: "Arc Testnet",
-    nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
-    rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] } },
-  } as const;
+  const arcTestnet = getArcChain();
 
-  const client = createPublicClient({ chain: arcTestnet, transport: http("https://rpc.testnet.arc.network") });
+  const client = createPublicClient({ chain: arcTestnet, transport: http(getNetworkConfig().primaryRpc) });
 
   const balance = await client.readContract({
-    address: "0x3600000000000000000000000000000000000000",
+    address: getNetworkConfig().usdcAddress as `0x${string}`,
     abi: [{ name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ name: "account", type: "address" }], outputs: [{ type: "uint256" }] }],
     functionName: "balanceOf",
     args: [address],
@@ -49,13 +51,13 @@ async function getBalanceHandler(request: Request) {
 
   try {
     const [gatewayResponse, walletBalance] = await Promise.all([
-      fetch(GATEWAY_API, {
+      fetch(gatewayApi(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({
           token: "USDC",
-          sources: [{ domain: ARC_TESTNET_DOMAIN, depositor: sellerAddress }],
+          sources: [{ domain: arcDomain(), depositor: sellerAddress }],
         }),
       }),
       getWalletUsdcBalance(sellerAddress),
@@ -72,7 +74,7 @@ async function getBalanceHandler(request: Request) {
     }
 
     const data = await gatewayResponse.json();
-    const bal = data.balances?.find((b: { domain: number }) => b.domain === ARC_TESTNET_DOMAIN);
+    const bal = data.balances?.find((b: { domain: number }) => b.domain === arcDomain());
 
     const raw = bal?.balance ?? "0";
     const withdrawingRaw = bal?.withdrawing ?? "0";

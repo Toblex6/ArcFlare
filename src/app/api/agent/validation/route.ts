@@ -15,22 +15,23 @@ import {
 } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
+import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const VALIDATION_REGISTRY = '0x8004Cb1BF31DAf7788923b405b754f57acEB4272';
 
 const arcTestnet = {
-  id: 5042002,
+  id: getNetworkConfig().chainId,
   name: 'Arc Testnet',
   nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ['https://rpc.testnet.arc.network'] },
-    public: { http: ['https://rpc.testnet.arc.network'] },
+    default: { http: [getNetworkConfig().primaryRpc] },
+    public: { http: [getNetworkConfig().primaryRpc] },
   },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http('https://rpc.testnet.arc.network'),
+  transport: http(getNetworkConfig().primaryRpc),
 });
 
 const VALIDATION_ABI = [
@@ -184,7 +185,7 @@ async function validationHandler(request: NextRequest) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: ownerSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: VALIDATION_REGISTRY,
         abiFunctionSignature: 'validationRequest(address,uint256,string,bytes32)',
         abiParameters: [validatorSCA, agentId.toString(), requestURI, requestHash],
@@ -233,7 +234,7 @@ async function validationHandler(request: NextRequest) {
         requestHash,
         requestURI,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         validatorNotified,
         nextStep: `Call POST /api/agent/validation with action: "respond" and requestHash: "${requestHash}"`,
         message: `Validation requested for agent #${agentId}. Validator ${validatorSCA} must now respond.`,
@@ -305,7 +306,7 @@ async function validationHandler(request: NextRequest) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: designated.validatorAddress,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: VALIDATION_REGISTRY,
         abiFunctionSignature: 'validationResponse(bytes32,uint8,string,bytes32,string)',
         abiParameters: [requestHash, responseCode.toString(), '', `0x${'0'.repeat(64)}`, tag],
@@ -346,7 +347,7 @@ async function validationHandler(request: NextRequest) {
         tag,
         validatorSCA,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         nextStep: `Check status via GET /api/agent/validation?requestHash=${requestHash}`,
         message: `Validation response submitted — ${passed ? 'PASSED ✅' : 'FAILED ❌'} (tag: ${tag})`,
       });
@@ -410,7 +411,7 @@ async function getValidationHandler(request: Request) {
         lastUpdatedAt: lastUpdate > 0n ? new Date(Number(lastUpdate) * 1000).toISOString() : null,
       },
       validationRegistryAddress: VALIDATION_REGISTRY,
-      arcScanUrl: `https://testnet.arcscan.app/address/${VALIDATION_REGISTRY}`,
+      arcScanUrl: `${explorerAddressUrl(VALIDATION_REGISTRY)}`,
       message: pending
         ? 'Validation request pending — validator has not responded yet.'
         : `Validation ${passed ? 'PASSED ✅' : 'FAILED ❌'} — tag: ${tag}`,

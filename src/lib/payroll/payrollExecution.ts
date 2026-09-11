@@ -49,6 +49,7 @@ import { recoverFromSpendLimitRaceFailure, enqueueForReview } from "@/lib/jobs/s
 import { getTokenBySymbol, isSupportedToken, getUsdcAddress, getTokenByAddress } from "@/lib/tokens/supportedTokens";
 import { parseEventValue } from "@/lib/contracts/receiptParser";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
+import { getNetworkConfig } from "@/lib/config/network";
 
 const PAYROLL_CONTRACT_ADDRESS = process.env.PAYROLL_CONTRACT_ADDRESS ?? "";
 
@@ -145,9 +146,11 @@ async function sweepSettledToRelayer(price: string): Promise<SweepResult> {
   const sellerEoa = new (await import("ethers")).Wallet(sellerPrivateKey).address;
 
   const amountUnits = BigInt(Math.round(parseFloat(price) * 1_000_000));
-  const provider = new (await import("ethers")).JsonRpcProvider(process.env.ARC_TESTNET_RPC);
+  // RPC + batching (x402 verifier) contract flow from the authoritative
+  // network config (was hardcoded testnet RPC + 0x0077… literal).
+  const provider = new (await import("ethers")).JsonRpcProvider(getNetworkConfig().primaryRpc);
   const batching = new (await import("ethers")).Contract(
-    "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+    getNetworkConfig().x402VerifierContract,
     ["function totalBalance(address token, address depositor) view returns (uint256)"],
     provider
   );
@@ -362,7 +365,7 @@ export async function fundPayrollViaX402(
   const addresses = recipients.map((r) => r.address);
   const amounts = recipients.map((r) => r.amount);
   await ensurePayrollAllowance(payer, tokenAddress, amounts);
-  const feeProvider = new (await import("ethers")).JsonRpcProvider(process.env.ARC_TESTNET_RPC);
+  const feeProvider = new (await import("ethers")).JsonRpcProvider(getNetworkConfig().primaryRpc);
   const usdcView = new (await import("ethers")).Contract(
     getUsdcAddress(),
     ["function balanceOf(address) view returns (uint256)"],
@@ -468,7 +471,7 @@ export async function fundPayrollViaX402(
       JSON.stringify({
         success: true,
         transaction: fundReceipt.hash,
-        network: "eip155:5042002",
+        network: getNetworkConfig().x402Network,
         payer,
       })
     ).toString("base64")

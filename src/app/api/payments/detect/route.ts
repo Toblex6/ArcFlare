@@ -7,6 +7,7 @@ import { prisma } from '@/src/lib/prisma';
 import { pollForAttestation, mintOnArc, getChainName } from '@/src/lib/cctp';
 import { withApiKey } from '@/src/lib/middleware/withApiKey';
 import { resolveCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
+import { explorerTxUrl } from "@/lib/config/network";
 
 async function detectHandler(request: Request) {
   try {
@@ -118,7 +119,7 @@ async function detectHandler(request: Request) {
           status: 'SUCCESS',
           settledAt: new Date().toISOString(),
           settlementType: 'CCTP_V2_MANUAL_DETECT',
-          explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
+          explorerUrl: `${explorerTxUrl(arcTxHash)}`,
         }),
       }).catch(() => {});
     }
@@ -129,7 +130,7 @@ async function detectHandler(request: Request) {
       arcTxHash,
       sourceChain,
       settlementType: 'CCTP_V2_MANUAL_DETECT',
-      explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
+      explorerUrl: `${explorerTxUrl(arcTxHash)}`,
       message: `USDC auto-routed from ${sourceChain} to Arc Testnet via CCTP V2.`,
     });
   } catch (error: any) {

@@ -51,24 +51,25 @@ import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
 import { AGENTIC_COMMERCE_CONTRACT, USDC_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
+import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 // ── ERC-8183 contract on Arc Testnet ─────────────────────────────────────────
 // Addresses AND ABI come from the canonical source:
 // src/lib/contracts/erc8183.ts (no local copies — see config-drift test).
 
 const arcTestnet = {
-  id: 5042002,
+  id: getNetworkConfig().chainId,
   name: 'Arc Testnet',
   nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ['https://rpc.testnet.arc.network'] },
-    public: { http: ['https://rpc.testnet.arc.network'] },
+    default: { http: [getNetworkConfig().primaryRpc] },
+    public: { http: [getNetworkConfig().primaryRpc] },
   },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http('https://rpc.testnet.arc.network'),
+  transport: http(getNetworkConfig().primaryRpc),
 });
 
 const JOB_STATUS_NAMES = ['Open', 'Funded', 'Submitted', 'Completed', 'Rejected', 'Expired'];
@@ -406,7 +407,7 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
         abiFunctionSignature: 'createJob(address,address,uint256,string,address)',
         abiParameters: [
@@ -498,7 +499,7 @@ async function jobsHandler(request: Request) {
         description,
         deadlineHours,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         ...(balanceWarning ? { warning: balanceWarning } : {}),
         nextStep: `POST /api/jobs/${jobId}/accept { budget: '${amountUSDC}' }`,
         message: `Job #${jobId} created on Arc Testnet — status: Open`,
@@ -559,7 +560,7 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
         abiFunctionSignature: 'setBudget(uint256,uint256,bytes)',
         abiParameters: [jobId.toString(), amountWei.toString(), '0x'],
@@ -581,7 +582,7 @@ async function jobsHandler(request: Request) {
         amountUSDC,
         providerSCA,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         nextStep: `POST /api/jobs { action:'approve', jobId:'${jobId}', clientSCA:'...', amountUSDC:'${amountUSDC}' }`,
         message: `Budget set: ${amountUSDC} USDC for job #${jobId}`,
       });
@@ -636,7 +637,7 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: USDC_CONTRACT,
         abiFunctionSignature: 'approve(address,uint256)',
         abiParameters: [AGENTIC_COMMERCE_CONTRACT, amountWei.toString()],
@@ -653,7 +654,7 @@ async function jobsHandler(request: Request) {
         amountUSDC,
         clientSCA,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         nextStep: `POST /api/jobs { action:'fund', jobId:'${jobId}', clientSCA:'${clientSCA}' }`,
         message: `USDC approved. ${amountUSDC} USDC approved for ERC-8183 contract to spend.`,
       });
@@ -752,7 +753,7 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
         abiFunctionSignature: 'fund(uint256,bytes)',
         abiParameters: [jobId.toString(), '0x'],
@@ -791,7 +792,7 @@ async function jobsHandler(request: Request) {
         jobId,
         clientSCA,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         nextStep: `POST /api/jobs { action:'submit', jobId:'${jobId}', providerSCA:'...', deliverable:'your work description' }`,
         message: `Job #${jobId} funded — status: Funded. Provider can now submit work.`,
       });
@@ -846,7 +847,7 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
         abiFunctionSignature: 'submit(uint256,bytes32,bytes)',
         abiParameters: [jobId.toString(), deliverableHash, '0x'],
@@ -869,7 +870,7 @@ async function jobsHandler(request: Request) {
         deliverableHash,
         providerSCA,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         nextStep: `POST /api/jobs { action:'complete', jobId:'${jobId}', clientSCA:'...' }`,
         message: `Deliverable submitted for job #${jobId} — status: Submitted. Awaiting client completion.`,
       });
@@ -948,7 +949,7 @@ async function jobsHandler(request: Request) {
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: AGENTIC_COMMERCE_CONTRACT,
         abiFunctionSignature: 'complete(uint256,bytes32,bytes)',
         abiParameters: [jobId.toString(), reasonHash, '0x'],
@@ -1075,7 +1076,7 @@ async function jobsHandler(request: Request) {
         jobId,
         clientSCA,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         finalJobState: {
           jobId: jobData.id.toString(),
           status: statusName,
@@ -1180,7 +1181,7 @@ async function getJobHandler(request: Request) {
         budgetZero,
       },
       contractAddress: AGENTIC_COMMERCE_CONTRACT,
-      arcScanUrl: `https://testnet.arcscan.app/address/${AGENTIC_COMMERCE_CONTRACT}`,
+      arcScanUrl: `${explorerAddressUrl(AGENTIC_COMMERCE_CONTRACT)}`,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

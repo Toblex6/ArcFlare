@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { resolveRowCurrency } from '@/lib/tokens/resolveCurrency';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -65,7 +66,7 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
   try {
     const transferTx = await circleClient.createTransaction({
       walletId,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       tokenAddress: token.address,
       destinationAddress: scheduled.receiverSCA,
       amounts: [amountStr],
@@ -80,7 +81,7 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
 
     const erc20Tx = await circleClient.createContractExecutionTransaction({
       walletAddress: scheduled.payerSCA,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: token.address,
       abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [scheduled.receiverSCA, amountWei.toString()],
@@ -191,7 +192,7 @@ async function runScheduledHandler(request: Request) {
               currency: execution.currency,
               tokenAddress: execution.tokenAddress,
               txHash,
-              explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+              explorerUrl: `${explorerTxUrl(txHash)}`,
               runCount: newRunCount,
               nextRunAt: isComplete
                 ? null
@@ -204,7 +205,7 @@ async function runScheduledHandler(request: Request) {
           reference: scheduled.reference,
           success: true,
           txHash,
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          explorerUrl: `${explorerTxUrl(txHash)}`,
           currency: execution.currency,
           tokenAddress: execution.tokenAddress,
         });

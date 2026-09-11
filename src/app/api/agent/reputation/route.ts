@@ -9,6 +9,7 @@ import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { keccak256, toHex } from 'viem';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 // ── Authoritative validator wallet resolution ─────────────────────────────
 // Resolves the Circle wallet ID that AUTHORITATIVELY corresponds to
@@ -207,7 +208,7 @@ async function reputationHandler(request: NextRequest) {
     // Call giveFeedback on ReputationRegistry
     const reputationTx = await circleClient.createContractExecutionTransaction({
       walletAddress: validatorSCA,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: REPUTATION_REGISTRY,
       abiFunctionSignature:
         'giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)',
@@ -241,7 +242,7 @@ async function reputationHandler(request: NextRequest) {
       feedbackHash,
       validatorSCA,
       txHash,
-      explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+      explorerUrl: `${explorerTxUrl(txHash)}`,
       message: `Reputation score ${score}/100 recorded for agent #${agentId} — tag: ${tag}`,
     });
   } catch (error: any) {

@@ -20,6 +20,7 @@ import {
   getAppropriateAction,
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
+import { explorerTxUrl } from "@/lib/config/network";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover";
 
@@ -474,7 +475,7 @@ export default function ConsumerApp() {
         criteria: { requirements: [hireDescription || "Deliver as described"] },
         budget: Number(hireBudget) || 1,
       });
-      setHireResult({ success: true, message: `Hire started — job ${data.jobId} created`, reference: data.jobId, txHash: data.txHash, explorerUrl: `https://testnet.arcscan.app/tx/${data.txHash}` });
+      setHireResult({ success: true, message: `Hire started — job ${data.jobId} created`, reference: data.jobId, txHash: data.txHash, explorerUrl: `${explorerTxUrl(data.txHash)}` });
     } catch (e: any) {
       setHireResult({ success: false, error: e.message });
     } finally {

@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { createPublicClient, http, parseAbiItem, decodeEventLog } from 'viem';
-import { arcTestnet } from 'viem/chains';
+import { getArcChain, explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
+const arcTestnet = getArcChain();
 import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import {
   checkAgentDeployAllowed,
@@ -151,7 +152,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
 
     // 3. Create SCA Wallets
     const walletsResponse = await circleClient.createWallets({
-      blockchains: ['ARC-TESTNET' as any],
+      blockchains: [getNetworkConfig().circleBlockchain as any],
       count: 2,
       walletSetId: walletSetId,
       accountType: 'SCA',
@@ -211,7 +212,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
     // 4. Register identity via Contract Execution using Circle's SDK engine
     const registerTx = await circleClient.createContractExecutionTransaction({
       walletAddress: ownerWallet.address!,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: IDENTITY_REGISTRY as `0x${string}`,
       abiFunctionSignature: 'register(string)',
       abiParameters: [metadataUri],
@@ -356,7 +357,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
           status: 'PENDING_IDENTITY_CONFIRMATION',
           retryable: true,
           txHash,
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          explorerUrl: `${explorerTxUrl(txHash)}`,
           wallets: {
             owner: ownerWallet.address,
             validator: validatorWallet.address,
@@ -407,7 +408,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
             replayed: true,
             agent: after,
             txHash,
-            explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+            explorerUrl: `${explorerTxUrl(txHash)}`,
             wallets: {
               owner: ownerWallet.address,
               validator: validatorWallet.address,
@@ -427,7 +428,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
       success: true,
       agent: registeredAgent,
       txHash,
-      explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+      explorerUrl: `${explorerTxUrl(txHash)}`,
       wallets: {
         owner: ownerWallet.address,
         validator: validatorWallet.address,

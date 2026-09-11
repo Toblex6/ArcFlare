@@ -4,25 +4,17 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
+import { getArcChain, getNetworkConfig } from '@/lib/config/network';
 
-// Official Circle Iris Testnet API Endpoint Sandbox
-const CIRCLE_IRIS_API = 'https://iris-api-sandbox.circle.com/v1/attestations';
+// Circle Iris API + Arc chain flow from the authoritative network config
+// (were hardcoded sandbox URL + testnet chain literal). Mainnet without
+// ARC_MAINNET_CCTP_IRIS_URL fails closed at call time.
+function circleIrisApi(): string {
+  return `${getNetworkConfig().irisApiUrl.replace(/\/v2\/?$/, '')}/v1/attestations`;
+}
 
-// Explicitly defining Arc Testnet for Viem to satisfy type matrix conditions
-const arcTestnet = {
-  id: 5042002, // Arc Testnet Specification Chain ID
-  name: 'Arc Testnet',
-  network: 'arc-testnet',
-  nativeCurrency: {
-    decimals: 18,
-    name: 'USDC',
-    symbol: 'USDC', // Arc uses USDC natively for gas metrics
-  },
-  rpcUrls: {
-    public: { http: ['https://rpc.testnet.arc.network'] },
-    default: { http: ['https://rpc.testnet.arc.network'] },
-  },
-} as const;
+// Explicitly defining the Arc chain for Viem to satisfy type matrix conditions
+const arcTestnet = getArcChain() as any;
 
 // Minimal ABI snippet required to call Circle's MessageTransmitter on target chain
 const TRANSMITTER_ABI = [
@@ -123,7 +115,7 @@ export async function POST(request: Request) {
     while (attempts < maxAttempts) {
       console.log(`Polling Iris API for Message Hash: ${messageHash} (Attempt ${attempts + 1})`);
 
-      const irisResponse = await fetch(`${CIRCLE_IRIS_API}/${messageHash}`);
+      const irisResponse = await fetch(`${circleIrisApi()}/${messageHash}`);
 
       if (irisResponse.ok) {
         const data = await irisResponse.json();
@@ -157,15 +149,15 @@ export async function POST(request: Request) {
     const client = createWalletClient({
       account,
       chain: arcTestnet,
-      transport: http('https://rpc.testnet.arc.network'),
+      transport: http(getNetworkConfig().primaryRpc),
     }).extend(publicActions);
 
     console.log('Broadcasting verification payload to Arc Message Transmitter contract...');
 
     // Execute contract interaction using administrative gas allowance
-    // NOTE: Replace address with the official Arc CCTP MessageTransmitter contract address
+    // (transmitter address from the authoritative network config).
     const txHash = await client.writeContract({
-      address: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+      address: getNetworkConfig().cctpMessageTransmitter as `0x${string}`,
       chain: arcTestnet,
       abi: TRANSMITTER_ABI,
       functionName: 'receiveMessage',

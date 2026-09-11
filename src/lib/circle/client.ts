@@ -1,4 +1,5 @@
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { getNetworkConfig } from '@/lib/config/network';
 
 // Singleton Circle client instance
 let circleClientInstance: ReturnType<typeof initiateDeveloperControlledWalletsClient> | null = null;
@@ -75,7 +76,7 @@ export async function createContractTransaction(
 
   const tx = await circleClient.createContractExecutionTransaction({
     walletAddress,
-    blockchain: 'ARC-TESTNET',
+    blockchain: getNetworkConfig().circleBlockchain,
     contractAddress,
     abiFunctionSignature,
     abiParameters: stringParams,
@@ -135,7 +136,7 @@ export async function createWallets(name: string, count: number = 2) {
   console.log(`  📦 Wallet set created: ${walletSetId}`);
 
   const walletsResponse = await circleClient.createWallets({
-    blockchains: ['ARC-TESTNET'],
+    blockchains: [getNetworkConfig().circleBlockchain as any],
     count,
     walletSetId,
     accountType: 'SCA',

@@ -7,6 +7,7 @@
 import { prisma } from "@/lib/prisma";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { keccak256, toHex } from "viem";
+import { getNetworkConfig } from "@/lib/config/network";
 
 const REPUTATION_REGISTRY = (process.env.REPUTATION_REGISTRY_ADDRESS || "0x8004B663056A597Dffe9eCcC1965A193B7388713") as `0x${string}`;
 
@@ -129,7 +130,7 @@ export async function maybeAutoReputationForValidatedJob(params: {
     const signingAddress = (w as any).data?.wallet?.address || validatorSCA;
     const tx = await circleClient.createContractExecutionTransaction({
       walletAddress: signingAddress,
-      blockchain: "ARC-TESTNET" as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: REPUTATION_REGISTRY,
       abiFunctionSignature: "giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)",
       abiParameters: [String(providerTokenId), String(score), "0", tag, "", "", "", feedbackHash],

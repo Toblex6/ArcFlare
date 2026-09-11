@@ -21,6 +21,7 @@ import {
   verifyExternalTransaction,
 } from "@/lib/wallet/transactionVerification";
 import { TX_ACTIONS } from "@/lib/wallet/signatureQueue";
+import { explorerTxUrl } from "@/lib/config/network";
 
 const SUPPORTED_ACTIONS = new Set<string>(Object.values(TX_ACTIONS));
 
@@ -194,7 +195,7 @@ async function applyEscrowRelease(request: any, txHash: string): Promise<Record<
           beneficiary: escrow.beneficiarySCA,
           txHash,
           releasedAt: new Date().toISOString(),
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          explorerUrl: `${explorerTxUrl(txHash)}`,
         }),
       }).catch(() => {});
     }
@@ -253,7 +254,7 @@ async function applyEscrowDispute(request: any, txHash: string): Promise<Record<
         reason: disputeReason,
         txHash,
         disputedAt: new Date().toISOString(),
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
       }),
     }).catch(() => {});
   }
@@ -302,7 +303,7 @@ async function applyPayrollTransfer(request: any, txHash: string): Promise<Recor
 
   entry.status = "SUCCESS";
   entry.txHash = txHash;
-  entry.explorerUrl = `https://testnet.arcscan.app/tx/${txHash}`;
+  entry.explorerUrl = `${explorerTxUrl(txHash)}`;
 
   const successCount = results.filter((r: any) => r.status === "SUCCESS").length;
   const failedCount = results.filter((r: any) => r.status === "FAILED").length;

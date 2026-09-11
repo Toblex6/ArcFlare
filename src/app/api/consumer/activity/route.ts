@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { prisma } from "@/src/lib/prisma";
 import { resolveRowCurrency, tokenAddressFor } from "@/src/lib/tokens/resolveCurrency";
+import { explorerTxUrl } from "@/lib/config/network";
 
 export async function GET(req: NextRequest) {
     try {
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
                 direction: log.senderEmail === walletAddress ? "out" : "in",
                 counterparty:
                     log.senderEmail === walletAddress ? log.merchantSCA || log.merchant : log.senderEmail,
-                explorerUrl: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
+                explorerUrl: log.arcTxHash ? `${explorerTxUrl(log.arcTxHash)}` : null,
                 token,
             };
         });

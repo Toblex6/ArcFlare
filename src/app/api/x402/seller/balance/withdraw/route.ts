@@ -22,6 +22,7 @@ import { NextResponse } from "next/server";
 import { withApiKey } from "@/lib/middleware/withApiKey";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { privateKeyToAccount } from "viem/accounts";
+import { explorerTxUrl } from "@/lib/config/network";
 
 async function withdrawHandler(request: Request) {
   try {
@@ -83,7 +84,7 @@ async function withdrawHandler(request: Request) {
       destinationChain: result.destinationChain,
       recipient: result.recipient,
       status: "confirmed",
-      explorerUrl: `https://testnet.arcscan.app/tx/${result.mintTxHash}`,
+      explorerUrl: `${explorerTxUrl(result.mintTxHash)}`,
     });
   } catch (error: any) {
     console.error("❌ Gateway withdraw error:", error);

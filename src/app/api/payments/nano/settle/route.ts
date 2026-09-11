@@ -25,6 +25,7 @@ import {
 } from '@/src/lib/nanopayment';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import type { CurrencyRef } from '@/lib/tokens/resolveCurrency';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 // ── Constants & Types ────────────────────────────────────────────────────────
 const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
@@ -166,7 +167,7 @@ async function resumeExistingTransaction(agentSCA: string, merchantSCA: string, 
       return {
         batchRef: existingLog.reference,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         resumed: true,
         total: existingLog.amount,
         count: 0,
@@ -292,7 +293,7 @@ async function settleOnchain(
           amount: lockedTotal,
           currency: token.symbol,
           tokenAddress: token.address,
-          chain: 'ARC-TESTNET',
+          chain: getNetworkConfig().circleBlockchain,
           senderEmail: 'nano-batch-system',
           merchant: merchantSCA,
           agentSCA: agentSCA,
@@ -317,7 +318,7 @@ async function settleOnchain(
   try {
     transferTx = await circleClient.createTransaction({
       walletId: payerWalletId,
-      blockchain: 'ARC-TESTNET',
+      blockchain: getNetworkConfig().circleBlockchain,
       tokenAddress: token.address,
       destinationAddress: merchantSCA,
       amounts: [amountStr],
@@ -326,7 +327,7 @@ async function settleOnchain(
   } catch (nativeError: any) {
     transferTx = await circleClient.createContractExecutionTransaction({
       walletId: payerWalletId,
-      blockchain: 'ARC-TESTNET',
+      blockchain: getNetworkConfig().circleBlockchain,
       contractAddress: token.address,
       abiFunctionSignature: 'transfer(address,uint256)',
       abiParameters: [merchantSCA, amountScaled],
@@ -358,7 +359,7 @@ async function settleOnchain(
 
   try {
     const txHash = await waitForCircleTx(circleClient, transferTx.data.id);
-    const explorerUrl = `https://testnet.arcscan.app/tx/${txHash}`;
+    const explorerUrl = `${explorerTxUrl(txHash)}`;
 
     await prisma.$transaction(async (tx) => {
       await tx.nanoPayment.updateMany({

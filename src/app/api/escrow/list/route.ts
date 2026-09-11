@@ -14,6 +14,7 @@ import { prisma } from '@/src/lib/prisma';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { getCallerControlledAddresses } from '@/src/lib/wallet/verifyCallerControlsAddress';
 import { beneficiaryConfirmUrl } from '@/src/lib/escrow/resolveBeneficiary';
+import { explorerTxUrl } from "@/lib/config/network";
 
 export const dynamic = 'force-dynamic';
 
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
           timeRemaining: e.deadline
             ? Math.max(0, Math.floor((new Date(e.deadline).getTime() - now.getTime()) / 1000))
             : null,
-          explorerUrl: e.txHash ? `https://testnet.arcscan.app/tx/${e.txHash}` : null,
+          explorerUrl: e.txHash ? `${explorerTxUrl(e.txHash)}` : null,
           confirmUrl: beneficiaryConfirmUrl(e.reference),
         })),
       });
@@ -131,7 +132,7 @@ export async function GET(request: NextRequest) {
         timeRemaining: e.deadline
           ? Math.max(0, Math.floor((new Date(e.deadline).getTime() - now.getTime()) / 1000))
           : null,
-        explorerUrl: e.txHash ? `https://testnet.arcscan.app/tx/${e.txHash}` : null,
+        explorerUrl: e.txHash ? `${explorerTxUrl(e.txHash)}` : null,
         confirmUrl: beneficiaryConfirmUrl(e.reference),
       })),
     });

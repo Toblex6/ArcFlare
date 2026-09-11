@@ -13,7 +13,8 @@ import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
-import { arcTestnet } from "viem/chains";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+const arcTestnet = getArcChain();
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { hashCriteria } from "@/lib/jobs/criteriaHash";
 import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
@@ -173,7 +174,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
 
   const createTx = await circleClient.createContractExecutionTransaction({
     walletAddress: clientAddress,
-    blockchain: "ARC-TESTNET",
+    blockchain: getNetworkConfig().circleBlockchain,
     contractAddress: escrowContract,
     abiFunctionSignature: "createJob(address,address,uint256,string,address)",
     abiParameters: [provider.scaAddress, evaluator, expiredAt.toString(), description, "0x0000000000000000000000000000000000000000"],

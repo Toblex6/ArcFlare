@@ -9,17 +9,15 @@
 
 import { prisma } from "@/lib/prisma";
 import { createPublicClient, http } from "viem";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 
 const VALIDATION_REGISTRY = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272" as `0x${string}`; // job validation uses the same registry as agent validation (validationRequest), not NEXT_PUBLIC_VALIDATION_REGISTRY (requestValidation)
 
-const arcTestnet = {
-  id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] }, public: { http: ["https://rpc.testnet.arc.network"] } },
-} as const;
+// Chain + RPC flow from the authoritative network config (was hardcoded
+// id 5042002 + testnet RPC). Registry address + ABI unchanged.
+const arcTestnet = getArcChain();
 
-const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
+const publicClient = createPublicClient({ chain: arcTestnet, transport: http(getNetworkConfig().primaryRpc) });
 
 // ABI matching the deployed ValidationRegistry (route's ABI, not contract file's requestValidation)
 // The route uses validationRequest/validationResponse/getValidationStatus

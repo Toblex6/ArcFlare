@@ -20,10 +20,14 @@
 //                    them from the environment (they are dead fallbacks).
 //   CUSTODY_WALLET — Circle-custody SCA vars (no private key expected; keys
 //                    live with Circle). Only address format is checked.
+//   ARC NETWORK    — src/lib/config/network.ts: "testnet" (default) needs no
+//                    mainnet-only variables; ARC_NETWORK=mainnet fails closed
+//                    on missing/malformed ARC_MAINNET_* configuration.
 //
 // Placeholder detection: "YOUR_…" prefixes, "changeme", and near-zero keys.
 
 import { Wallet } from "ethers";
+import { validateNetworkEnv } from "@/lib/config/network";
 
 export interface SignerPair {
   addressVar: string;
@@ -124,6 +128,12 @@ export interface WalletEnvValidationResult {
 
 export function validateWalletEnv(env: Record<string, string | undefined> = process.env): WalletEnvValidationResult {
   const errors: string[] = [];
+
+  // Arc network configuration (src/lib/config/network.ts): testnet needs no
+  // mainnet-only variables and is always valid here; ARC_NETWORK=mainnet
+  // fails closed if any ARC_MAINNET_* input is missing/malformed. The
+  // returned messages are already operator-actionable.
+  errors.push(...validateNetworkEnv(env));
 
   for (const { addressVar, keyVar, description } of SIGNER_PAIRS) {
     const address = env[addressVar];

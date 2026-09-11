@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { checkBridgeStatus, findStep } from "@/lib/cctp-v2";
+import { explorerTxUrl } from "@/lib/config/network";
 
 export async function GET(req: NextRequest) {
     try {
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
         // fully finalized — fall back to building the Arc explorer link
         // ourselves from the tx hash if we have one but no ready-made URL yet.
         const destinationExplorerUrl =
-            mintStep?.explorerUrl || (mintStep?.txHash ? `https://testnet.arcscan.app/tx/${mintStep.txHash}` : undefined);
+            mintStep?.explorerUrl || (mintStep?.txHash ? `${explorerTxUrl(mintStep.txHash)}` : undefined);
 
         return NextResponse.json({
             success: true,

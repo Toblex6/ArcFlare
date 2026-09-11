@@ -16,6 +16,7 @@ import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
 import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 
@@ -160,7 +161,7 @@ async function disputeHandler(request: NextRequest) {
       const circleClient = getCircleClient();
       const disputeTx = await circleClient.createContractExecutionTransaction({
         walletAddress: callerSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: ESCROW_CONTRACT,
         abiFunctionSignature: 'dispute(bytes32,string)',
         abiParameters: [escrow.contractEscrowId, disputeReason],
@@ -193,7 +194,7 @@ async function disputeHandler(request: NextRequest) {
           reason: disputeReason,
           txHash,
           disputedAt: new Date().toISOString(),
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          explorerUrl: `${explorerTxUrl(txHash)}`,
         }),
       }).catch(() => { });
     }
@@ -202,7 +203,7 @@ async function disputeHandler(request: NextRequest) {
       success: true,
       escrow: updated,
       txHash,
-      explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+      explorerUrl: `${explorerTxUrl(txHash)}`,
       message: 'Dispute raised. FlareHQ admin will review and resolve.',
     });
   } catch (error: any) {

@@ -22,9 +22,10 @@ import { resolveAdminSession } from '@/src/lib/middleware/withAdminAuth';
 import { getCircleClient, createContractTransaction } from '@/lib/circle/client';
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
-import { arcTestnet } from 'viem/chains';
+import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+const arcTestnet = getArcChain();
 
-const RPC_URL = process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network';
+const RPC_URL = getNetworkConfig().primaryRpc;
 
 async function readOnChainJob(jobId: bigint): Promise<{ status: number; budget: bigint } | null> {
   try {

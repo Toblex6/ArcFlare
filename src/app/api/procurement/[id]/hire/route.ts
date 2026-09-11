@@ -17,7 +17,8 @@ import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
-import { arcTestnet } from "viem/chains";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+const arcTestnet = getArcChain();
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
 import { checkSpendAllowed } from "@/lib/agents/spendLimitEnforcer";
@@ -283,7 +284,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const createTx = await circleClient.createContractExecutionTransaction({
     walletAddress: clientWalletAddress,
-    blockchain: "ARC-TESTNET",
+    blockchain: getNetworkConfig().circleBlockchain,
     contractAddress: escrowContract,
     abiFunctionSignature: "createJob(address,address,uint256,string,address)",
     abiParameters: [providerAddress, evaluator, expiredAt.toString(), description, "0x0000000000000000000000000000000000000000"],

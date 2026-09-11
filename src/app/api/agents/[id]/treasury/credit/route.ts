@@ -32,13 +32,14 @@ import { transferUsdc } from '@/lib/circle/transfers';
 import { recordLedgerEntry, usdcLedgerIdentity } from '@/lib/ledger/ledgerService';
 import { computeTreasuryView } from '@/lib/ledger/treasuryService';
 import { createPublicClient, http, erc20Abi } from 'viem';
-import { arcTestnet } from 'viem/chains';
+import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+const arcTestnet = getArcChain();
 
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
+const USDC_ARC: string = getNetworkConfig().usdcAddress;
 const AMOUNT_RE = /^\d+(\.\d{1,6})?$/;
 
 async function readUsdcBalance(owner: string): Promise<bigint> {
-  const publicClient = createPublicClient({ chain: arcTestnet, transport: http(process.env.ARC_TESTNET_RPC || 'https://rpc.testnet.arc.network') });
+  const publicClient = createPublicClient({ chain: arcTestnet, transport: http(getNetworkConfig().primaryRpc) });
   return (await publicClient.readContract({
     address: USDC_ARC as `0x${string}`,
     abi: erc20Abi,

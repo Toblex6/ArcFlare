@@ -16,10 +16,11 @@ import { getCircleClient, createContractTransaction } from "@/lib/circle/client"
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { evaluateProviderAcceptance } from "@/lib/procurement/procurementService";
 import { createPublicClient, http } from "viem";
-import { arcTestnet } from "viem/chains";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+const arcTestnet = getArcChain();
 
 // The chain the ERC-8183 contract lives on (same RPC wiring as the hire route).
-const RPC_URL = process.env.ARC_TESTNET_RPC || "https://rpc.testnet.arc.network";
+const RPC_URL = getNetworkConfig().primaryRpc;
 
 async function readOnChainJob(jobIdBig: bigint): Promise<{ budget: bigint; status: number } | null> {
   const publicClient = createPublicClient({ chain: arcTestnet, transport: http(RPC_URL) });

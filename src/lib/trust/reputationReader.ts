@@ -4,14 +4,12 @@
 // Do NOT introduce a second registry.
 
 import { createPublicClient, http } from "viem";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 
 const REPUTATION_REGISTRY = (process.env.REPUTATION_REGISTRY_ADDRESS || "0x8004B663056A597Dffe9eCcC1965A193B7388713") as `0x${string}`;
-const arcTestnet = {
-  id: 5042002,
-  name: "Arc Testnet",
-  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
-  rpcUrls: { default: { http: [process.env.ARC_TESTNET_RPC || "https://rpc.testnet.arc.network"] } },
-} as const;
+// Chain + RPC flow from the authoritative network config (was hardcoded
+// id 5042002 + testnet RPC). Registry address stays env-driven (unchanged).
+const arcTestnet = getArcChain();
 
 const REPUTATION_ABI = [
   { name: "getReputation", type: "function", stateMutability: "view", inputs: [{ name: "tokenId", type: "uint256" }], outputs: [{ name: "", type: "int128" }] },
@@ -24,7 +22,7 @@ const REPUTATION_ABI = [
 let _publicClient: any = null;
 function getPublicClient(): any {
   if (_publicClient) return _publicClient;
-  _publicClient = createPublicClient({ chain: arcTestnet as any, transport: http(process.env.ARC_TESTNET_RPC || "https://rpc.testnet.arc.network") });
+  _publicClient = createPublicClient({ chain: arcTestnet as any, transport: http(getNetworkConfig().primaryRpc) });
   return _publicClient;
 }
 

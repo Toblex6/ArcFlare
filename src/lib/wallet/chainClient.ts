@@ -24,37 +24,25 @@ import {
   type Abi,
   type AbiFunction,
 } from "viem";
+import { getNetworkConfig, getRpcUrls } from "@/lib/config/network";
 
-export const chainId = 5042002;
+// Authoritative chain ID — was hardcoded 5042002. Mainnet resolves from
+// ARC_MAINNET_CHAIN_ID (fail-closed when selected without configuration).
+export const chainId = getNetworkConfig().chainId;
 
 const arcTestnet = defineChain({
-  id: chainId,
-  name: "Arc Testnet",
+  id: getNetworkConfig().chainId,
+  name: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
   nativeCurrency: { name: "ARC", symbol: "ARC", decimals: 18 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] } },
-  testnet: true,
+  rpcUrls: { default: { http: [getNetworkConfig().primaryRpc] } },
+  testnet: getNetworkConfig().name !== "mainnet",
 });
 
 function candidateRpcUrls(): string[] {
-  const urls = new Set<string>();
-  const primary = process.env.ARC_TESTNET_RPC?.trim();
-  if (primary) urls.add(primary);
-  const fallbacks = (process.env.ARC_TESTNET_RPC_FALLBACKS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const f of fallbacks) urls.add(f);
-  // Known-good alternates (verified 2026-08-31 — they serve txs the primary
-  // node misses). Order matters: primary first, then these.
-  for (const alt of [
-    "https://rpc.drpc.testnet.arc.io",
-    "https://rpc.quicknode.testnet.arc.io",
-    "https://rpc.testnet.arc.io",
-    "https://rpc.blockdaemon.testnet.arc.io",
-  ]) {
-    urls.add(alt);
-  }
-  return [...urls];
+  // Primary first, then fallbacks — full coverage preserved (testnet keeps
+  // the verified 2026-08-31 alternates; mainnet uses ARC_MAINNET_RPC_URL +
+  // ARC_MAINNET_RPC_FALLBACKS and never inherits testnet URLs).
+  return getRpcUrls();
 }
 
 export function getPublicClient(): PublicClient {

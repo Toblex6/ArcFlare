@@ -46,6 +46,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveBeneficiary } from "@/lib/escrow/resolveBeneficiary";
 import { notify } from "@/lib/notifications";
 import { sendTelegramMessage } from "@/lib/telegram/sendTelegramMessage";
+import { explorerTxUrl } from "@/lib/config/network";
 
 export interface ValidationNotifyInput {
   /** Authoritative validator wallet = the on-chain `validator` arg. Echoed, never re-derived. */
@@ -112,7 +113,7 @@ export async function notifyValidator(
   const subject = input.jobId != null && String(input.jobId) !== ""
     ? `validation requested for job ${input.jobId} (${agentLabel})`
     : `validation requested for ${agentLabel}`;
-  const explorerUrl = `https://testnet.arcscan.app/tx/${input.txHash}`;
+  const explorerUrl = `${explorerTxUrl(input.txHash)}`;
   const respondHint =
     `Respond: POST /api/agent/validation { "action": "respond", "validatorSCA": "<your wallet>", ` +
     `"requestHash": "${input.requestHash}", "passed": true/false, "tag": "<label>" }. ` +

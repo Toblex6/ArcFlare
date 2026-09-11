@@ -28,6 +28,7 @@ import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue
 import { ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import { parseUnits } from 'viem';
+import { explorerTxUrl } from "@/lib/config/network";
 
 interface PayrollRecipient {
   recipientSCA: string;
@@ -296,7 +297,7 @@ async function runPayrollHandler(request: NextRequest) {
           label: recipient.label || null,
           status: 'SUCCESS',
           txHash: outcome.txHash,
-          explorerUrl: `https://testnet.arcscan.app/tx/${outcome.txHash}`,
+          explorerUrl: `${explorerTxUrl(outcome.txHash)}`,
         });
         console.log(`✅ Paid ${recipient.recipientSCA}: ${outcome.txHash}`);
       } else if (outcome.status === 'pending_signature') {

@@ -8,8 +8,15 @@
 
 import { parseUnits } from 'viem';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { getNetworkConfig } from '@/lib/config/network';
 
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
+// Default transfer token flows from the authoritative network config (was a
+// hardcoded testnet USDC literal). Explicit per-call tokenAddress still wins.
+// Resolved lazily per call below so mainnet fail-closed happens at call time,
+// never at import.
+function defaultTokenAddress(): string {
+  return getNetworkConfig().usdcAddress;
+}
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -55,16 +62,19 @@ export async function transferUsdc({
   walletAddress,
   destinationAddress,
   amount,
-  tokenAddress = USDC_ARC,
+  tokenAddress,
   decimals = 6,
 }: TransferUsdcParams): Promise<{ arcTxHash: string; circleTxId: string }> {
+  // Resolve lazily from the authoritative network config (testnet value
+  // unchanged; mainnet: required ARC_MAINNET_USDC_ADDRESS, fail-closed).
+  tokenAddress = tokenAddress ?? defaultTokenAddress();
   const client = getCircleClient();
   let circleTxId: string | undefined;
 
   try {
     const transferTx = await client.createTransaction({
       walletId,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       tokenAddress,
       destinationAddress,
       amounts: [amount],
@@ -79,7 +89,7 @@ export async function transferUsdc({
     try {
       const contractTx = await client.createContractExecutionTransaction({
         walletAddress,
-        blockchain: 'ARC-TESTNET',
+        blockchain: getNetworkConfig().circleBlockchain,
         contractAddress: tokenAddress,
         abiFunctionSignature: 'transfer(address,uint256)',
         abiParameters: [destinationAddress, parseUnits(amount, decimals).toString()],

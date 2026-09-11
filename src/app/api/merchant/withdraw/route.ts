@@ -11,6 +11,7 @@ import { isAddress, parseUnits } from 'viem';
 import { createContractTransaction, getWalletBalance } from '@/src/lib/circle/client';
 import { erc20TransferAbi, USDC_CONTRACT, USDC_DECIMALS } from '@/src/lib/wallet/erc20';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
+import { explorerTxUrl } from "@/lib/config/network";
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
             success: true,
             txHash,
-            explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+            explorerUrl: `${explorerTxUrl(txHash)}`,
             amount: amountNum,
             currency: 'USDC',
             from: merchant.walletAddress,

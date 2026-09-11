@@ -4,6 +4,7 @@ import { prisma } from '@/src/lib/prisma';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 import { conversionView, payTokenView } from '@/src/lib/routing/receiptView';
+import { explorerTxUrl } from "@/lib/config/network";
 
 export const dynamic = 'force-dynamic';
 
@@ -104,7 +105,7 @@ export async function GET(req: NextRequest) {
         // Ensure date is a string to prevent serialization errors
         paid_at: (log.timestamp || new Date()).toISOString(),
         arc_tx_hash: log.arcTxHash || null,
-        explorer_url: log.arcTxHash ? `https://testnet.arcscan.app/tx/${log.arcTxHash}` : null,
+        explorer_url: log.arcTxHash ? `${explorerTxUrl(log.arcTxHash)}` : null,
         gateway_reference: (log as any).gatewayReference || null,
         // Canonical settlement-token identity (additive).
         token,

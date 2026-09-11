@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
+import { explorerAddressUrl } from "@/lib/config/network";
 
 interface Metrics {
   totalVolume: number;
@@ -285,7 +286,7 @@ export default function PublicStatsPage() {
                 >
                   <span style={{ fontSize: 13, color: '#f0ece6', fontWeight: 600 }}>{c.name}</span>
                   <a
-                    href={`https://testnet.arcscan.app/address/${c.address}`}
+                    href={`${explorerAddressUrl(c.address)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ fontSize: 11, color: '#c8975a', fontFamily: 'monospace' }}

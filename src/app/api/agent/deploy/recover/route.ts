@@ -21,7 +21,8 @@
 import { NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { createPublicClient, http } from "viem";
-import { arcTestnet } from "viem/chains";
+import { getArcChain } from "@/lib/config/network";
+const arcTestnet = getArcChain();
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { withMerchantAuth, AuthedMerchant } from "@/src/lib/middleware/withMerchantAuth";
 import {

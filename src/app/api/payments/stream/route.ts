@@ -17,6 +17,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { withApiKey } from '@/src/lib/middleware/withApiKey';
+import { explorerTxUrl } from "@/lib/config/network";
 
 // ─── GET /api/payments/stream — List streams with live metrics ────────────────
 export const dynamic = 'force-dynamic';
@@ -59,7 +60,7 @@ async function listStreamsHandler(request: Request) {
         remainingBalance: parseFloat(remaining.toFixed(6)),
         secondsRemaining: s.status !== 'ACTIVE' ? 0 : Math.floor(secondsRemaining),
         percentComplete: parseFloat(Math.min((streamed / s.totalDeposited) * 100, 100).toFixed(2)),
-        explorerUrl: s.txHash ? `https://testnet.arcscan.app/tx/${s.txHash}` : null,
+        explorerUrl: s.txHash ? `${explorerTxUrl(s.txHash)}` : null,
       };
     });
 

@@ -29,6 +29,7 @@ import { arcTestnet } from '@/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
+import { explorerTxUrl } from "@/lib/config/network";
 
 // Minimal ABIs — approve from the ERC-20 surface Checkout uses, createEscrow
 // with the exact signature escrow/create/route.ts sends via Circle.
@@ -156,7 +157,7 @@ export default function EscrowPayPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Could not record the deposit.');
-      setExplorerUrl(data.explorerUrl || `https://testnet.arcscan.app/tx/${hash}`);
+      setExplorerUrl(data.explorerUrl || `${explorerTxUrl(hash)}`);
       setStep('done');
     } catch (err: any) {
       setStep('error');

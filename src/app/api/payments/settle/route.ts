@@ -6,7 +6,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { createWalletClient, createPublicClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { arcTestnet } from 'viem/chains';
+import { getArcChain } from '@/lib/config/network';
+const arcTestnet = getArcChain();
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveConsumerSession } from '@/lib/middleware/withConsumerAuth';
 import { requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
@@ -14,17 +15,25 @@ import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
 
-// ── Constants & Config ───────────────────────────────────────────────────────
-const MESSAGE_TRANSMITTER_V2 = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
-const IRIS_API = 'https://iris-api-sandbox.circle.com/v2';
+// ── Constants & Config (authoritative network config) ────────────────────────
 // NOTE (Phase 2A): USDC_ARC is intentionally kept as the documented USDC-only
 // constant for the CCTP bridge path (Path A below), which has no proven EURC
 // mechanism in this repository. The same-chain settlement path (Path B) does
 // NOT use this constant — it uses the invoice's canonical resolved token
 // (resolveRowCurrency) so USDC invoices settle USDC and EURC invoices settle
 // EURC. Do not "simplify" Path B back onto USDC_ARC.
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
+function messageTransmitter(): `0x${string}` {
+  return getNetworkConfig().cctpMessageTransmitter as `0x${string}`;
+}
+function irisApi(): string {
+  return getNetworkConfig().irisApiUrl;
+}
+// Documented USDC-only address for the CCTP bridge path (Path A) — resolved
+// from the authoritative network config, not a literal (testnet: 0x3600…0000
+// unchanged; mainnet: required ARC_MAINNET_USDC_ADDRESS, fail-closed).
+const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
 // SCA Defaults
 
@@ -57,7 +66,7 @@ function getCircleClient() {
 async function pollForAttestation(messageHash: string) {
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
-      const res = await fetch(`${IRIS_API}/attestations/${messageHash}`);
+      const res = await fetch(`${irisApi()}/attestations/${messageHash}`);
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'complete' && data.attestation) {
@@ -348,15 +357,15 @@ async function mergedSettleHandler(request: NextRequest) {
       const walletClient = createWalletClient({
         account,
         chain: arcTestnet,
-        transport: http('https://rpc.testnet.arc.network'),
+        transport: http(getNetworkConfig().primaryRpc),
       });
       const publicClient = createPublicClient({
         chain: arcTestnet,
-        transport: http('https://rpc.testnet.arc.network'),
+        transport: http(getNetworkConfig().primaryRpc),
       });
 
       const txHash = await walletClient.writeContract({
-        address: MESSAGE_TRANSMITTER_V2,
+        address: messageTransmitter(),
         abi: MESSAGE_TRANSMITTER_ABI,
         functionName: 'receiveMessage',
         args: [message as `0x${string}`, attestation as `0x${string}`],
@@ -380,7 +389,7 @@ async function mergedSettleHandler(request: NextRequest) {
           status: 'SUCCESS',
           settlementType: 'CCTP_BRIDGE',
           arcTxHash: txHash,
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          explorerUrl: explorerTxUrl(txHash),
         });
       }
 
@@ -503,7 +512,7 @@ async function mergedSettleHandler(request: NextRequest) {
       try {
         const transferTx = await circleClient.createTransaction({
           walletId: payerWalletId,
-          blockchain: 'ARC-TESTNET' as any,
+          blockchain: getNetworkConfig().circleBlockchain as any,
           tokenAddress: token.address,
           destinationAddress: merchantSCA,
           amounts: [payment.amount.toFixed(token.decimals)],
@@ -523,7 +532,7 @@ async function mergedSettleHandler(request: NextRequest) {
           console.log(`Executing fallback ERC-20 ${token.symbol} transfer via contract execution...`);
           const contractTx = await circleClient.createContractExecutionTransaction({
             walletAddress: payerSCA,
-            blockchain: 'ARC-TESTNET',
+            blockchain: getNetworkConfig().circleBlockchain,
             contractAddress: token.address,
             abiFunctionSignature: 'transfer(address,uint256)',
             abiParameters: [merchantSCA, parseUnits(payment.amount.toFixed(token.decimals), token.decimals).toString()],
@@ -587,7 +596,7 @@ async function mergedSettleHandler(request: NextRequest) {
         settlementType: 'ONCHAIN_SCA_TRANSFER',
         arcTxHash,
         circleTxId,
-        explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
+        explorerUrl: explorerTxUrl(arcTxHash),
       });
     }
 

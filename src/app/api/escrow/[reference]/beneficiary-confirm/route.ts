@@ -37,6 +37,7 @@ import {
 } from '@/lib/wallet/flarehqContracts';
 import { getReceiptReliable, getTransactionReliable, extractSelector, readContractReliable } from '@/lib/wallet/chainClient';
 import { notify } from '@/lib/notifications';
+import { explorerTxUrl } from "@/lib/config/network";
 
 const ESCROW_CONTRACT =
   process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
@@ -252,7 +253,7 @@ export async function POST(
       beneficiaryConfirmed: true,
       depositorConfirmed: Boolean(depositorConfirmed),
       amount: Number(amount) / 1_000_000,
-      explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+      explorerUrl: `${explorerTxUrl(txHash)}`,
       message:
         newStatus === 'RELEASED'
           ? `Both parties confirmed — escrow auto-released. ${escrow.amount} USDC sent to ${escrow.beneficiarySCA}.`

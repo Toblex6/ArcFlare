@@ -3,12 +3,24 @@
 
 import { createWalletClient, createPublicClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { arcTestnet } from 'viem/chains';
+import { getArcChain, getNetworkConfig } from '@/lib/config/network';
 
-// ─── CCTP V2 endpoints and contracts ─────────────────────────────────────────
-const IRIS_API_V2 = 'https://iris-api-sandbox.circle.com/v2';
-const MESSAGE_TRANSMITTER_V2 = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
-const ARC_TESTNET_DOMAIN = 26; // Arc Testnet CCTP V2 domain
+// ─── CCTP V2 endpoints and contracts (authoritative network config) ──────────
+// Testnet keeps the exact live values (Iris sandbox, domain 26,
+// MessageTransmitterV2 0xE737…); mainnet without ARC_MAINNET_CCTP_*
+// configuration fails closed at call time instead of pretending CCTP
+// mainnet configuration exists. Reads are lazy (per call) so importing
+// this module never throws — only actual CCTP use on a misconfigured
+// mainnet does.
+function irisApi(): string {
+  return getNetworkConfig().irisApiUrl;
+}
+function messageTransmitter(): `0x${string}` {
+  return getNetworkConfig().cctpMessageTransmitter as `0x${string}`;
+}
+function arcDomain(): number {
+  return getNetworkConfig().cctpDomain;
+}
 
 const MESSAGE_TRANSMITTER_ABI = [
   {
@@ -64,7 +76,7 @@ export async function pollForAttestation(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       // CCTP V2 attestation endpoint
-      const res = await fetch(`${IRIS_API_V2}/attestations/${messageHash}`, {
+      const res = await fetch(`${irisApi()}/attestations/${messageHash}`, {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -108,7 +120,7 @@ export async function pollForAttestationByTxHash(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const res = await fetch(
-        `${IRIS_API_V2}/messages/${sourceDomainId}?transactionHash=${transactionHash}`,
+        `${irisApi()}/messages/${sourceDomainId}?transactionHash=${transactionHash}`,
         { headers: { 'Content-Type': 'application/json' } }
       );
 
@@ -142,21 +154,24 @@ export async function mintOnArc(message: string, attestation: string): Promise<s
 
   const account = privateKeyToAccount(adminKey as `0x${string}`);
 
+  const arcChain = getArcChain();
+  const rpcUrl = getNetworkConfig().primaryRpc;
+
   const walletClient = createWalletClient({
     account,
-    chain: arcTestnet,
-    transport: http('https://rpc.testnet.arc.network'),
+    chain: arcChain,
+    transport: http(rpcUrl),
   });
 
   const publicClient = createPublicClient({
-    chain: arcTestnet,
-    transport: http('https://rpc.testnet.arc.network'),
+    chain: arcChain,
+    transport: http(rpcUrl),
   });
 
   console.log(`⚡ Submitting CCTP V2 attestation to Arc MessageTransmitterV2...`);
 
   const txHash = await walletClient.writeContract({
-    address: MESSAGE_TRANSMITTER_V2 as `0x${string}`,
+    address: messageTransmitter(),
     abi: MESSAGE_TRANSMITTER_ABI,
     functionName: 'receiveMessage',
     args: [message as `0x${string}`, attestation as `0x${string}`],
@@ -207,7 +222,7 @@ export function getChainName(domain: number): string {
 // Used when initiating a cross-chain transfer from source to Arc
 export function buildCCTPV2TransferParams(recipientAddress: string, amount: bigint) {
   return {
-    destinationDomain: ARC_TESTNET_DOMAIN,
+    destinationDomain: arcDomain(),
     mintRecipient: recipientAddress,
     burnToken: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', // USDC on Ethereum Sepolia
     amount,

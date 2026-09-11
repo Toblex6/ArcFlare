@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AGENTIC_COMMERCE_CONTRACT, agenticCommerceAbi, JOB_STATUS } from '@/lib/contracts/erc8183';
 import { createPublicClient, http, formatUnits } from 'viem';
-import { arcTestnet } from 'viem/chains';
+import { getArcChain } from '@/lib/config/network';
+const arcTestnet = getArcChain();
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {

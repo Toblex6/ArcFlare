@@ -13,6 +13,8 @@
  *   - EURC: 0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a, 6 decimals
  */
 
+import { getNetworkConfig } from "@/lib/config/network";
+
 export interface SupportedToken {
   symbol: "USDC" | "EURC";
   address: string;
@@ -32,19 +34,43 @@ export const SUPPORTED_TOKENS: Record<string, SupportedToken> = {
   },
 };
 
+/**
+ * Environment-selected address for a supported symbol. Testnet returns the
+ * pinned table values above (unchanged); mainnet returns the required
+ * ARC_MAINNET_USDC_ADDRESS / ARC_MAINNET_EURC_ADDRESS inputs (fail-closed
+ * when absent — never testnet values).
+ */
+function addressFor(symbol: "USDC" | "EURC"): string {
+  const net = getNetworkConfig();
+  if (net.name === "mainnet") {
+    return symbol === "USDC" ? net.usdcAddress : net.eurcAddress;
+  }
+  const token = SUPPORTED_TOKENS[symbol];
+  if (!token) throw new Error(`unsupported token: ${symbol}`);
+  return token.address;
+}
+
 const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export function getTokenBySymbol(symbol: "USDC" | "EURC"): SupportedToken {
   const token = SUPPORTED_TOKENS[symbol];
   if (!token) throw new Error(`unsupported token: ${symbol}`);
-  if (token.address === PLACEHOLDER_ADDRESS) {
+  const address = addressFor(symbol);
+  if (address === PLACEHOLDER_ADDRESS) {
     throw new Error(`${symbol} address is a placeholder — set the real Arc Testnet address in supportedTokens.ts before use`);
   }
-  return token;
+  return { ...token, address };
 }
 
 export function getTokenByAddress(address: string): SupportedToken | undefined {
   const normalized = address.toLowerCase();
+  // Match the environment-selected addresses first (mainnet-aware), then the
+  // pinned testnet table.
+  for (const symbol of ["USDC", "EURC"] as const) {
+    if (addressFor(symbol).toLowerCase() === normalized) {
+      return { ...SUPPORTED_TOKENS[symbol]!, address: addressFor(symbol) };
+    }
+  }
   return Object.values(SUPPORTED_TOKENS).find(t => t.address.toLowerCase() === normalized);
 }
 

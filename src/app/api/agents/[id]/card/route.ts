@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { AGENTIC_COMMERCE_CONTRACT as ERC8183_AGENTIC_COMMERCE_CONTRACT } from "@/lib/contracts/erc8183";
+import { getNetworkConfig } from "@/lib/config/network";
 
 // Security cleanup batch 1: the hardcoded ERC-8183 address literal was
 // removed — the canonical AGENTIC_COMMERCE_CONTRACT from
@@ -32,7 +33,7 @@ function buildAgentCard(agent: any, baseUrl: string) {
     lastActiveAt: agent.lastActiveAt,
     createdAt: agent.createdAt,
     merchantId: agent.merchantId,
-    supportedChains: ["ARC-TESTNET"],
+    supportedChains: [getNetworkConfig().circleBlockchain],
     supportedTokens: ["USDC", "EURC"],
     hiring: { hireEndpoint: `/api/agents/${agent.id}/hire`, createJobEndpoint: `/api/agents/${agent.id}/hire`, escrowContract: resolveEscrowContract(), jobTypes: ["escrow"] },
     validation: { registryAddress: process.env.VALIDATION_REGISTRY_ADDRESS || "0x8004Cb1BF31DAf7788923b405b754f57acEB4272", verifyEndpoint: `/api/agent/validation?agentId=${agent.tokenId}` },

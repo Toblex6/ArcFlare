@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { getNetworkConfig } from "@/lib/config/network";
 
 // Standard ERC-20 transfer event ABI snippet
 const ERC20_TRANSFER_ABI = [
@@ -20,7 +21,7 @@ export async function verifyArcTestnetTx(
   }
 
   try {
-    const provider = new ethers.JsonRpcProvider(process.env.ARC_TESTNET_RPC);
+    const provider = new ethers.JsonRpcProvider(getNetworkConfig().primaryRpc);
 
     console.log(`📡 [Arc Engine]: Indexing chain state for transaction hash: ${txHash}`);
     const receipt = await provider.getTransactionReceipt(txHash);

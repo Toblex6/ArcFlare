@@ -40,6 +40,7 @@ import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
 import { CONSUMER_PIN_HEADER, verifyConsumerPinForBot } from '@/lib/auth/consumerStepUp';
 import { NextRequest } from 'next/server';
 import { formatUnits } from 'viem';
+import { explorerTxUrl } from "@/lib/config/network";
 
 export interface BotReply {
   text: string;
@@ -303,7 +304,7 @@ export async function handleAccept(
     return {
       text:
         `Budget set for job #${jobId} (${data.budget ?? '?'} USDC).\n` +
-        `Tx: https://testnet.arcscan.app/tx/${data.txHash}\n` +
+        `Tx: ${explorerTxUrl(data.txHash)}\n` +
         `The client can now fund the escrow.`,
     };
   } catch (err) {
@@ -361,7 +362,7 @@ export async function handleDeliver(
     return {
       text:
         `Deliverable submitted for job ${jobId}.\n` +
-        `Tx: https://testnet.arcscan.app/tx/${data.txHash}\n` +
+        `Tx: ${explorerTxUrl(data.txHash)}\n` +
         `Awaiting client completion.`,
     };
   } catch (err) {
@@ -515,7 +516,7 @@ export async function handleConfirmWithdraw(telegramUserId: string, pin?: string
     return {
       text:
         `Withdrawn ${amount} USDC to \`${intent.destinationAddress}\`.\n` +
-        `Tx: https://testnet.arcscan.app/tx/${arcTxHash}\n` +
+        `Tx: ${explorerTxUrl(arcTxHash)}\n` +
         `(Circle tx ${circleTxId})`,
       parseMode: 'Markdown',
     };

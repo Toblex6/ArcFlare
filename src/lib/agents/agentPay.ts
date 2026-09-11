@@ -49,6 +49,7 @@ import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimi
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 import { enqueueForReview } from "@/lib/jobs/settlementRecovery";
 import { getUsdcAddress } from "@/lib/tokens/supportedTokens";
+import { getNetworkConfig } from "@/lib/config/network";
 
 const USDC_ERC20_ABI = ["function balanceOf(address) view returns (uint256)"];
 
@@ -61,7 +62,7 @@ const MAX_AMOUNT = 1_000_000n * 1_000_000n;
  * dev-server hot reload and keeps testnet flakes isolated to this path.
  */
 function getProvider(): JsonRpcProvider {
-  return new JsonRpcProvider(process.env.ARC_TESTNET_RPC ?? "https://rpc.testnet.arc.network");
+  return new JsonRpcProvider(getNetworkConfig().primaryRpc);
 }
 
 export interface AgentPayResult {

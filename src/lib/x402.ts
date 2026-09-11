@@ -26,6 +26,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BatchFacilitatorClient } from "@circle-fin/x402-batching/server";
 import { prisma } from "@/lib/prisma";
+import { getNetworkConfig } from "@/lib/config/network";
 
 // The seller that x402 settlements are paid to (payTo). MUST be the address
 // whose private key we hold (SELLER_PRIVATE_KEY / the withdraw path) —
@@ -34,8 +35,11 @@ import { prisma } from "@/lib/prisma";
 // (src/lib/env/walletEnvCheck.ts) rejects a signer address without a key.
 export const sellerAddress = process.env.SELLER_ADDRESS as `0x${string}`;
 
+// Facilitator (Circle Gateway) base URL comes from the authoritative network
+// config. Mainnet without ARC_MAINNET_GATEWAY_URL fails closed here instead
+// of silently verifying through the testnet facilitator.
 const facilitator = new BatchFacilitatorClient({
-  url: "https://gateway-api-testnet.circle.com",
+  url: getNetworkConfig().gatewayUrl,
 });
 
 function sanitizeBigInts(obj: any): any {
@@ -51,17 +55,18 @@ function sanitizeBigInts(obj: any): any {
 
 export function buildRequirements(price: string) {
   const amount = Math.round(parseFloat(price.replace("$", "")) * 1_000_000);
+  const net = getNetworkConfig();
   return {
     scheme: "exact" as const,
-    network: "eip155:5042002",
-    asset: "0x3600000000000000000000000000000000000000",
+    network: net.x402Network,
+    asset: net.usdcAddress,
     amount: amount.toString(),
     payTo: sellerAddress,
     maxTimeoutSeconds: 345600, // matches Circle's own confirmed-working reference value
     extra: {
       name: "GatewayWalletBatched",
       version: "1",
-      verifyingContract: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+      verifyingContract: net.x402VerifierContract,
     },
   };
 }

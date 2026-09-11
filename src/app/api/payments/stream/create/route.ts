@@ -19,9 +19,10 @@ import { withApiKey } from '@/lib/middleware/withApiKey';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { parseUnits } from 'viem';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
+const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -114,7 +115,7 @@ async function createStreamHandler(request: NextRequest) {
     // ── Step 1: Approve stream contract to spend USDC ─────────────────────
     const approveTx = await circleClient.createContractExecutionTransaction({
       walletAddress: senderSCA,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: USDC_ARC,
       abiFunctionSignature: 'approve(address,uint256)',
       abiParameters: [STREAM_CONTRACT, depositWei.toString()],
@@ -127,7 +128,7 @@ async function createStreamHandler(request: NextRequest) {
     // ── Step 2: Create stream on Arc ──────────────────────────────────────
     const streamTx = await circleClient.createContractExecutionTransaction({
       walletAddress: senderSCA,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: STREAM_CONTRACT,
       abiFunctionSignature: 'createStream(address,uint256,uint256,string)',
       abiParameters: [receiverSCA, rateWei.toString(), depositWei.toString(), reference],
@@ -169,7 +170,7 @@ async function createStreamHandler(request: NextRequest) {
           estimatedDurationSeconds: durationSeconds,
           estimatedEndTime: estimatedEndTime.toISOString(),
           txHash: streamTxHash,
-          explorerUrl: `https://testnet.arcscan.app/tx/${streamTxHash}`,
+          explorerUrl: `${explorerTxUrl(streamTxHash)}`,
         }),
       }).catch(() => {});
     }
@@ -178,7 +179,7 @@ async function createStreamHandler(request: NextRequest) {
       success: true,
       stream: streamRecord,
       txHash: streamTxHash,
-      explorerUrl: `https://testnet.arcscan.app/tx/${streamTxHash}`,
+      explorerUrl: `${explorerTxUrl(streamTxHash)}`,
       estimatedDurationSeconds: durationSeconds,
       estimatedEndTime: estimatedEndTime.toISOString(),
       message: `Stream created — ${ratePerSecond} USDC/s flowing from ${senderSCA} to ${receiverSCA} on Arc Testnet.`,
@@ -227,7 +228,7 @@ async function listStreamsHandler(request: Request) {
         currentStreamed: parseFloat(streamed.toFixed(6)),
         remainingBalance: parseFloat(remaining.toFixed(6)),
         secondsRemaining: s.status !== 'ACTIVE' ? 0 : Math.floor(secondsRemaining),
-        explorerUrl: s.txHash ? `https://testnet.arcscan.app/tx/${s.txHash}` : null,
+        explorerUrl: s.txHash ? `${explorerTxUrl(s.txHash)}` : null,
       };
     });
 

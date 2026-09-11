@@ -5,15 +5,18 @@
 // duplicating it.
 
 import { ethers } from 'ethers';
+import { getNetworkConfig } from "@/lib/config/network";
 
 const ERC20_BALANCE_ABI = ['function balanceOf(address owner) view returns (uint256)'];
 
 export async function getUsdcBalance(walletAddress: string): Promise<number> {
-  const usdcAddress = process.env.ARC_USDC_ADDRESS;
-  if (!usdcAddress || !process.env.ARC_TESTNET_RPC) {
+  // Token address flows from the authoritative network config (legacy
+  // ARC_USDC_ADDRESS still wins when set); testnet value unchanged.
+  const usdcAddress = process.env.ARC_USDC_ADDRESS || getNetworkConfig().usdcAddress;
+  if (!usdcAddress || !getNetworkConfig().primaryRpc) {
     throw new Error('Arc RPC/USDC address not configured.');
   }
-  const provider = new ethers.JsonRpcProvider(process.env.ARC_TESTNET_RPC);
+  const provider = new ethers.JsonRpcProvider(getNetworkConfig().primaryRpc);
   const usdc = new ethers.Contract(usdcAddress, ERC20_BALANCE_ABI, provider);
   const raw = await usdc.balanceOf(walletAddress);
   return Number(ethers.formatUnits(raw, 6)); // USDC = 6 decimals

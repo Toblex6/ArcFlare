@@ -11,9 +11,10 @@ import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-
 import { parseUnits, keccak256, toBytes, isAddress } from 'viem';
 import { resolveBeneficiary, beneficiaryConfirmUrl } from '@/lib/escrow/resolveBeneficiary';
 import { notifyBeneficiary } from '@/lib/escrow/notifyBeneficiary';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
-const USDC_ARC = '0x3600000000000000000000000000000000000000';
+const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -152,7 +153,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
 
     const approveTx = await circleClient.createContractExecutionTransaction({
       walletAddress: depositorSCA,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: USDC_ARC,
       abiFunctionSignature: 'approve(address,uint256)',
       abiParameters: [ESCROW_CONTRACT, amountWei.toString()],
@@ -168,7 +169,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
 
     const escrowTx = await circleClient.createContractExecutionTransaction({
       walletAddress: depositorSCA,
-      blockchain: 'ARC-TESTNET' as any,
+      blockchain: getNetworkConfig().circleBlockchain as any,
       contractAddress: ESCROW_CONTRACT,
       abiFunctionSignature: 'createEscrow(bytes32,address,uint256,uint256,string)',
       abiParameters: [
@@ -255,7 +256,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
           deadline: deadlineDate.toISOString(),
           txHash,
           beneficiaryConfirmUrl: confirmUrl,
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          explorerUrl: `${explorerTxUrl(txHash)}`,
           createdAt: new Date().toISOString(),
         }),
       }).catch(() => { });
@@ -265,7 +266,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       success: true,
       escrow: escrowRecord,
       txHash,
-      explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+      explorerUrl: `${explorerTxUrl(txHash)}`,
       contractAddress: ESCROW_CONTRACT,
       beneficiaryKind: beneficiary.kind,
       beneficiaryConfirmUrl: confirmUrl,

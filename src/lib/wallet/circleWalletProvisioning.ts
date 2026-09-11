@@ -22,6 +22,7 @@ import { randomUUID } from 'crypto';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { prisma } from '@/lib/prisma'; // adjust to your actual client path
 import { getRelayerSigner } from '@/lib/wallet/jobEscrowClient'; // existing relayer, reused for gas sponsorship — same signer used across batches 1-6
+import { getNetworkConfig } from '@/lib/config/network';
 
 let cachedClient: ReturnType<typeof initiateDeveloperControlledWalletsClient> | null = null;
 let cachedCreds: { apiKey: string; entitySecret: string } | null = null;
@@ -31,7 +32,10 @@ function getProvisioningConfig() {
     apiKey: process.env.CIRCLE_API_KEY ?? '',
     entitySecret: process.env.CIRCLE_ENTITY_SECRET ?? '',
     walletSetId: process.env.CIRCLE_WALLET_SET_ID ?? '',
-    blockchain: process.env.CIRCLE_ARC_BLOCKCHAIN_ID ?? 'ARC-TESTNET',
+    // Circle blockchain flows from the authoritative network config (testnet:
+    // 'ARC-TESTNET' unchanged; mainnet: required ARC_MAINNET_CIRCLE_BLOCKCHAIN).
+    // Explicit CIRCLE_ARC_BLOCKCHAIN_ID still wins when set.
+    blockchain: process.env.CIRCLE_ARC_BLOCKCHAIN_ID ?? getNetworkConfig().circleBlockchain,
     gasWei: process.env.GAS_SPONSORSHIP_AMOUNT_WEI ?? '10000000000000000',
   };
 }

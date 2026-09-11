@@ -38,16 +38,19 @@
 // This module is read-only state + ABI definitions; it never broadcasts.
 
 import { parseAbi } from "viem";
+import { getNetworkConfig } from "@/lib/config/network";
 
 export const ARCFLARE_ESCROW_CONTRACT_ADDRESS =
   process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || "";
 export const ARCFLARE_STREAM_CONTRACT_ADDRESS =
   process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
 
-export const ARCFLARE_USDC_CONTRACT = "0x3600000000000000000000000000000000000000";
+// USDC + chain ID now flow from the authoritative network config (testnet:
+// the exact values below; mainnet: required ARC_MAINNET_* env inputs).
+export const ARCFLARE_USDC_CONTRACT = getNetworkConfig().usdcAddress;
 export const ARCFLARE_USDC_DECIMALS = 6;
 
-export const ARC_TESTNET_CHAIN_ID = 5042002;
+export const ARC_TESTNET_CHAIN_ID = getNetworkConfig().chainId;
 
 // ── FlareHQEscrow — deployed interface ────────────────────────────────────────
 // NOTE: ABI items are plain object literals, NOT parseAbiItem()-parsed — the

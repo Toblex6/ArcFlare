@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { AGENTIC_COMMERCE_CONTRACT } from '@/lib/contracts/erc8183';
+import { explorerAddressUrl } from "@/lib/config/network";
 import {
   formatBudgetUsdc,
   getProviderNextAction,
@@ -820,7 +821,7 @@ export default function JobsPage() {
                 {AGENTIC_COMMERCE_CONTRACT}
               </p>
               <a
-                href={`https://testnet.arcscan.app/address/${AGENTIC_COMMERCE_CONTRACT}`}
+                href={`${explorerAddressUrl(AGENTIC_COMMERCE_CONTRACT)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--primary)', fontSize: 11 }}

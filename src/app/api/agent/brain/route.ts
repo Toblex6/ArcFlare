@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withGateway } from "@/lib/x402";
 import { prisma } from "@/lib/prisma";
 import { createPublicClient, http, keccak256, toHex } from "viem";
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import {
   getCircleClient,
   waitForTransaction,
@@ -38,15 +39,15 @@ const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
 // so it carries no local address copy.
 
 const arcTestnet = {
-  id: 5042002,
+  id: getNetworkConfig().chainId,
   name: "Arc Testnet",
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
-  rpcUrls: { default: { http: ["https://rpc.testnet.arc.network"] } },
+  rpcUrls: { default: { http: [getNetworkConfig().primaryRpc] } },
 } as const;
 
 const publicClient = createPublicClient({
   chain: arcTestnet,
-  transport: http("https://rpc.testnet.arc.network"),
+  transport: http(getNetworkConfig().primaryRpc),
 });
 
 // ── TOOL DEFINITIONS (what the agent brain can do) ────────────────────────────
@@ -535,7 +536,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
           senderWalletId: process.env.AGENT_OWNER_WALLET_ID,
           destinationAddress: input.destinationAddress,
           amount: input.amount,
-          sourceChain: input.sourceChain || "ARC-TESTNET",
+          sourceChain: input.sourceChain || getNetworkConfig().circleBlockchain,
           destinationChain: input.destinationChain,
         }),
       });
@@ -559,7 +560,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
 
       const tx = await circle.createContractExecutionTransaction({
         walletAddress: validatorAddress,
-        blockchain: "ARC-TESTNET" as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: REPUTATION_REGISTRY,
         abiFunctionSignature:
           "giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)",
@@ -582,7 +583,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
       return {
         success: true,
         txHash,
-        explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+        explorerUrl: `${explorerTxUrl(txHash)}`,
         agentTokenId: input.agentTokenId,
         score,
         tag: input.tag,

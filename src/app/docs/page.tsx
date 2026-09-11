@@ -1,4 +1,7 @@
+import { getNetworkConfig } from "@/lib/config/network";
+
 export default function DocsPage() {
+  const network = getNetworkConfig();
   return (
     <main className="max-w-4xl mx-auto px-6 py-16 prose prose-invert prose-blue">
       <header className="mb-12 border-b border-zinc-800 pb-8">
@@ -53,20 +56,22 @@ export default function DocsPage() {
             <tbody className="divide-y divide-zinc-800">
               <tr>
                 <td className="py-3 font-medium text-zinc-500 w-1/3">Network</td>
-                <td className="py-3 text-zinc-200">Arc Testnet</td>
+                <td className="py-3 text-zinc-200">
+                  {network.name === "mainnet" ? "Arc Mainnet" : "Arc Testnet"}
+                </td>
               </tr>
               <tr>
                 <td className="py-3 font-medium text-zinc-500">Chain ID</td>
-                <td className="py-3 font-mono text-blue-400">5042002</td>
+                <td className="py-3 font-mono text-blue-400">{network.chainId}</td>
               </tr>
               <tr>
                 <td className="py-3 font-medium text-zinc-500">CCTP Domain</td>
-                <td className="py-3 text-zinc-200">26</td>
+                <td className="py-3 text-zinc-200">{network.cctpDomain}</td>
               </tr>
               <tr>
                 <td className="py-3 font-medium text-zinc-500">RPC</td>
                 <td className="py-3 font-mono text-xs break-all text-zinc-400">
-                  https://rpc.testnet.arc.network
+                  {network.primaryRpc}
                 </td>
               </tr>
             </tbody>

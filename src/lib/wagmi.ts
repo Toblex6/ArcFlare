@@ -4,31 +4,34 @@ import { injected, walletConnect } from 'wagmi/connectors';
 
 import { defineChain } from 'viem';
 
+import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+
+// Chain definition now flows from the authoritative network config (testnet:
+// chainId 5042002 verified live; mainnet: ARC_MAINNET_* inputs, fail-closed).
+// The exported name is kept so existing importers (ensureArcNetwork,
+// routing/canonical) keep working unchanged.
+const arcChainDef = getArcChain();
+
 export const arcTestnet = defineChain({
-  id: 5042002, // verified live: rpc.testnet.arc.network eth_chainId = 0x4cef52
-
-  name: 'Arc Testnet',
-
+  id: arcChainDef.id,
+  name: arcChainDef.name,
   nativeCurrency: {
     decimals: 18,
     name: 'ARC',
     symbol: 'ARC',
   },
-
   rpcUrls: {
     default: {
-      http: ['https://rpc.testnet.arc.network'],
+      http: [getNetworkConfig().primaryRpc],
     },
   },
-
   blockExplorers: {
     default: {
       name: 'ArcScan',
-      url: 'https://testnet.arcscan.app',
+      url: getNetworkConfig().explorerBaseUrl,
     },
   },
-
-  testnet: true,
+  testnet: arcChainDef.testnet,
 });
 
 // Injected wallets (MetaMask/Rabby/etc.) — wagmi's injected() supports

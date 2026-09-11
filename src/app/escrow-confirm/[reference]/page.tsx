@@ -24,6 +24,7 @@ import { arcTestnet } from '@/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { friendlyConnectorLabel } from '@/lib/wallet/walletLabels';
+import { explorerTxUrl } from "@/lib/config/network";
 
 const confirmDeliveryAbi = [
   {
@@ -126,7 +127,7 @@ export default function EscrowConfirmPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Could not record the confirmation.');
-      setExplorerUrl(data.explorerUrl || `https://testnet.arcscan.app/tx/${hash}`);
+      setExplorerUrl(data.explorerUrl || `${explorerTxUrl(hash)}`);
       setStep('done');
       setDetails((prev) => prev ? { ...prev, beneficiaryConfirmed: true, status: data.released ? 'RELEASED' : prev.status } : prev);
     } catch (err: any) {

@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import { explorerTxUrl } from "@/lib/config/network";
 import {
   pollForAttestation,
   mintOnArc,
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
                 status: 'SUCCESS',
                 settledAt: new Date().toISOString(),
                 settlementType: 'CCTP_V2_AUTO_ROUTED',
-                explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
+                explorerUrl: `${explorerTxUrl(arcTxHash)}`,
               }),
             }).catch(() => {});
           }
@@ -213,7 +214,7 @@ async function autoSettleV2(reference: string, messageHash: string) {
           status: 'SUCCESS',
           settledAt: new Date().toISOString(),
           settlementType: 'CCTP_V2_AUTO_ROUTED',
-          explorerUrl: `https://testnet.arcscan.app/tx/${arcTxHash}`,
+          explorerUrl: `${explorerTxUrl(arcTxHash)}`,
         }),
       }).catch(() => {});
     }

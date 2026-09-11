@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { getNetworkConfig } from "@/lib/config/network";
 
 // Circle CCTP official domain IDs for cross-chain mapping
 export const CCTP_DOMAINS: Record<string, number> = {
@@ -10,7 +11,7 @@ export const CCTP_DOMAINS: Record<string, number> = {
 };
 
 const CIRCLE_API_URL =
-  process.env.CIRCLE_ATTESTATION_API || 'https://iris-api-sandbox.circle.com/attestations';
+  process.env.CIRCLE_ATTESTATION_API || `${getNetworkConfig().irisApiUrl.replace(/\/v2\/?$/, '')}/attestations`;
 
 /**
  * Service to manage cross-chain USDC settlement protocols via Circle CCTP

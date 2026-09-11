@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { withApiKeyOrMerchant, resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getOrCreateBuyerWallet } from "@/lib/x402-wallet";
+import { explorerTxUrl } from "@/lib/config/network";
 
 function sanitizeBigInts(obj: any): any {
   if (typeof obj === "bigint") return obj.toString();
@@ -45,7 +46,7 @@ async function depositPostHandler(req: NextRequest) {
       depositTxHash: result.depositTxHash,
       approvalTxHash: result.approvalTxHash || null,
       amountDeposited: result.formattedAmount,
-      explorerUrl: `https://testnet.arcscan.app/tx/${result.depositTxHash}`,
+      explorerUrl: `${explorerTxUrl(result.depositTxHash)}`,
       message: `Deposited ${result.formattedAmount} USDC into Gateway for ${wallet.address}.`,
     }));
   } catch (error: any) {

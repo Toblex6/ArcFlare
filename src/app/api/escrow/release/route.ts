@@ -23,6 +23,7 @@ import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID, escrowAbi } fro
 import { readContractReliable } from '@/lib/wallet/chainClient';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import type { Hash } from 'viem';
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 
@@ -176,7 +177,7 @@ async function releaseHandler(request: NextRequest) {
       const circleClient = getCircleClient();
       const confirmTx = await circleClient.createContractExecutionTransaction({
         walletAddress: callerSCA,
-        blockchain: 'ARC-TESTNET' as any,
+        blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: ESCROW_CONTRACT,
         abiFunctionSignature: 'confirmDelivery(bytes32)',
         abiParameters: [escrow.contractEscrowId],
@@ -266,7 +267,7 @@ async function releaseHandler(request: NextRequest) {
           beneficiary: escrow.beneficiarySCA,
           txHash,
           releasedAt: new Date().toISOString(),
-          explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+          explorerUrl: `${explorerTxUrl(txHash)}`,
         }),
       }).catch(() => { });
     }
@@ -276,7 +277,7 @@ async function releaseHandler(request: NextRequest) {
       escrow: updated,
       txHash,
       released: newStatus === 'RELEASED',
-      explorerUrl: `https://testnet.arcscan.app/tx/${txHash}`,
+      explorerUrl: `${explorerTxUrl(txHash)}`,
       message:
         newStatus === 'RELEASED'
           ? `Escrow fully released — ${escrow.amount} USDC sent to ${escrow.beneficiarySCA}`
