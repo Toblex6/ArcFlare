@@ -110,10 +110,21 @@ async function registryTests() {
   expectThrow('select unregistered venue fails closed', () => createVenueRegistry().selectProvider('tower', { ROUTING_PROVIDER_TOWER_ENABLED: '1' }), 'not registered');
   ok('select enabled venue returns it', full.selectProvider('tower', { ROUTING_PROVIDER_TOWER_ENABLED: '1' }).venueId === 'tower');
 
-  for (const p of [new TowerProvider(), new UnitFlowV3Provider()]) {
-    for (const op of ['buildExecution', 'verifyExecution'] as const) {
-      try { await (p as any)[op](); ok(`${p.venueId} ${op} throws NOT_IMPLEMENTED`, false, 'did NOT throw'); }
-      catch (e: any) { ok(`${p.venueId} ${op} throws NOT_IMPLEMENTED`, (e as any)?.code === PROVIDER_NOT_IMPLEMENTED || String(e?.message ?? '').includes(PROVIDER_NOT_IMPLEMENTED)); }
+  // Tower stays quote-only: execution stubs still throw NOT_IMPLEMENTED.
+  for (const op of ['buildExecution', 'verifyExecution'] as const) {
+    try { await (new TowerProvider() as any)[op](); ok(`tower ${op} throws NOT_IMPLEMENTED`, false, 'did NOT throw'); }
+    catch (e: any) { ok(`tower ${op} throws NOT_IMPLEMENTED`, (e as any)?.code === PROVIDER_NOT_IMPLEMENTED || String(e?.message ?? '').includes(PROVIDER_NOT_IMPLEMENTED)); }
+  }
+  // UnitFlow Phase 2: execution is implemented — no-arg calls now fail closed
+  // (typed 400, never NOT_IMPLEMENTED). Full verifier matrix lives in
+  // scripts/unitflow-execution-tests.ts.
+  for (const op of ['buildExecution', 'verifyExecution'] as const) {
+    try { await (new UnitFlowV3Provider() as any)[op](); ok(`unitflow-v3 ${op} fails closed without args`, false, 'did NOT throw'); }
+    catch (e: any) {
+      const msg = String(e?.message ?? e);
+      ok(`unitflow-v3 ${op} fails closed without args`,
+        !msg.includes(PROVIDER_NOT_IMPLEMENTED) && ((e as any)?.status === 400 || msg.includes('missing') || msg.includes('malformed')),
+        msg.slice(0, 120));
     }
   }
   try { await new UnitFlowV3Provider().quote({ inputSymbol: 'USDC', outputSymbol: 'EURC', inputAmount: 1n }); ok('unitflow quote throws NOT_IMPLEMENTED', false, 'did NOT throw'); }
