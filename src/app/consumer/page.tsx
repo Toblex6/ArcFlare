@@ -22,8 +22,9 @@ import {
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
 import { explorerTxUrl } from "@/lib/config/network";
+import { FlowSwapView } from "@/components/swap/FlowSwapView";
 
-type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover";
+type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover" | "swap";
 
 interface ActionResult {
   success: boolean;
@@ -41,6 +42,7 @@ const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "save", label: "Save", icon: "🐷" },
   { id: "request", label: "Request", icon: "📥" },
   { id: "crosschain", label: "Bridge", icon: "🌉" },
+  { id: "swap", label: "Swap", icon: "🔄" },
   { id: "payroll-chat", label: "Payroll", icon: "💬" },
 ];
 
@@ -220,7 +222,7 @@ export default function ConsumerApp() {
   const initialViewRef = useRef<View | null>(null);
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("view");
-    const valid: View[] = ["home", "discover", "send", "save", "request", "crosschain"];
+    const valid: View[] = ["home", "discover", "send", "save", "request", "crosschain", "swap"];
     if (requested && valid.includes(requested as View)) {
       initialViewRef.current = requested as View;
     }
@@ -1423,6 +1425,11 @@ export default function ConsumerApp() {
                 <span style={styles.actionLabel}>Bridge to Arc</span>
                 <span style={styles.actionSub}>Move USDC into Arc</span>
               </button>
+              <button style={styles.actionCard} onClick={() => goTo("swap")}>
+                <span style={styles.actionIconBadge}><span style={styles.actionIcon}>🔄</span></span>
+                <span style={styles.actionLabel}>Swap tokens</span>
+                <span style={styles.actionSub}>Swap USDC and EURC on Arc</span>
+              </button>
               <button style={styles.actionCard} onClick={() => goTo("payroll-chat")}>
                 <span style={styles.actionIconBadge}><span style={styles.actionIcon}>💬</span></span>
                 <span style={styles.actionLabel}>Payroll Chat</span>
@@ -1827,6 +1834,15 @@ export default function ConsumerApp() {
               </>
             )}
           </section>
+        )}
+
+        {/* ── Flow Swap view (self-custody USDC↔EURC on Arc) ── */}
+        {view === "swap" && (
+          <FlowSwapView
+            walletAddress={walletAddress}
+            walletType={walletType}
+            onSwitchWallet={disconnectWallet}
+          />
         )}
 
         {/* ── Discover view ── */}
