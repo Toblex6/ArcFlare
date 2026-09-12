@@ -157,6 +157,14 @@ const UNIVERSAL_ROUTER_ABI = [
   },
 ] as const;
 
+/**
+ * Shared decode ABI for the proven execute(bytes,bytes[],uint256) entry
+ * point. Exported for the swap application service (verify-onchain evidence
+ * collection decodes mined tx calldata with this — the one ABI authority
+ * stays here, no copies in service/route files).
+ */
+export const UNITFLOW_V3_ROUTER_ABI = UNIVERSAL_ROUTER_ABI;
+
 // ─── Helpers (pure) ──────────────────────────────────────────────────────────
 function isAddress(v: unknown): v is string {
   return typeof v === 'string' && /^0x[a-fA-F0-9]{40}$/.test(v);
@@ -229,6 +237,15 @@ export interface UnitFlowV3BuildInput {
   feeTier?: number;
   /** RPC override (test seam; same network only). */
   rpcUrl?: string;
+  /**
+   * Self-custody scope (Flow Swap only): payer == recipient == the
+   * authenticated user's own wallet. The default (false) preserves the
+   * checkout invariant — expectedPayer must be a third party distinct from
+   * the merchant recipient. The swap service sets this ONLY for Flow
+   * intents where recipient and payer are both the session wallet; the
+   * envelope echoes it as `selfPayer` so verification stays bound.
+   */
+  allowSelfPayer?: boolean;
 }
 
 export interface UnitFlowUnsignedTx {
@@ -264,6 +281,8 @@ export interface UnitFlowV3ExecutionEnvelope extends UnsignedExecution {
   readonly slippageBps: number;
   readonly merchantSCA: string;
   readonly expectedPayer?: string;
+  /** Echo of the build-time self-custody scope (Flow Swap only). */
+  readonly selfPayer: boolean;
   readonly commands: `0x${string}`;
   readonly inputs: [`0x${string}`];
   readonly deadline: bigint;
@@ -369,11 +388,12 @@ export async function buildUnitFlowV3Execution(
   if (!(UNITFLOW_V3_ALLOWED_FEES as readonly number[]).includes(preferredFee)) {
     throw routingError(400, `[unitflow-v3] feeTier must be one of ${UNITFLOW_V3_ALLOWED_FEES.join(',')}.`);
   }
+  const selfPayer = input.allowSelfPayer === true;
   let expectedPayer: string | undefined;
   if (input.expectedPayer !== undefined) {
     if (!isAddress(input.expectedPayer)) throw routingError(400, '[unitflow-v3] expectedPayer must be a 0x address.');
     expectedPayer = input.expectedPayer;
-    if (eqAddr(expectedPayer, merchantSCA)) {
+    if (eqAddr(expectedPayer, merchantSCA) && !selfPayer) {
       throw routingError(400, '[unitflow-v3] expectedPayer must not equal the merchant recipient.');
     }
   }
@@ -455,12 +475,12 @@ export async function buildUnitFlowV3Execution(
     wrapTx = { to: deployment.wusdc, data: depositData, value: amountInSwap, label: 'WUSDC.deposit (wrap native USDC)' };
   }
 
-  const executionIdentity = keccak256(
-    encodePacked(
-      ['address', 'bytes', 'bytes', 'uint256'],
-      [deployment.universalRouter as `0x${string}`, commands, v3input, deadline]
-    )
-  );
+  const executionIdentity = computeUnitFlowExecutionIdentity({
+    router: deployment.universalRouter,
+    commands,
+    v3input,
+    deadline,
+  });
 
   return {
     venueId: 'unitflow-v3',
@@ -478,6 +498,7 @@ export async function buildUnitFlowV3Execution(
     minOutSwap,
     slippageBps,
     merchantSCA,
+    selfPayer,
     ...(expectedPayer ? { expectedPayer } : {}),
     commands,
     inputs: [v3input],
@@ -488,6 +509,43 @@ export async function buildUnitFlowV3Execution(
     approvals,
     executionIdentity,
   };
+}
+
+// ─── Pure: canonical execution-identity encoding (single authority) ──────────
+// buildUnitFlowV3Execution() binds the unsigned envelope with exactly this
+// hash; verification recomputes it from the DECODED mined calldata and
+// compares it to the stored binding (fail-closed on mismatch). One helper,
+// used by both sides — no duplicated hashing logic.
+
+export function computeUnitFlowExecutionIdentity(args: {
+  router: string;
+  commands: `0x${string}`;
+  v3input: `0x${string}`;
+  deadline: bigint;
+}): string {
+  return keccak256(
+    encodePacked(
+      ['address', 'bytes', 'bytes', 'uint256'],
+      [args.router as `0x${string}`, args.commands, args.v3input, args.deadline]
+    )
+  );
+}
+
+// ─── Pure: wrap-before-swap ordering ─────────────────────────────────────────
+// The USDC-leg wrap and the router execute() are SEPARATE wallet transactions.
+// We prove only what the chain shows: both receipts exist, the wrap succeeded,
+// and the wrap was included strictly before the swap (deliberately
+// conservative — same-block wraps are refused rather than ranked by index).
+// This is validated/correlated evidence, NOT cryptographic funding linkage:
+// nothing on-chain proves the wrapped WUSDC funded this exact swap.
+
+export function assertWrapBeforeSwap(wrapBlockNumber: bigint, swapBlockNumber: bigint): void {
+  if (wrapBlockNumber < 0n || swapBlockNumber < 0n) {
+    throw routingError(400, '[unitflow-v3] wrap ordering failed — missing block numbers.');
+  }
+  if (wrapBlockNumber >= swapBlockNumber) {
+    throw routingError(403, '[unitflow-v3] wrap ordering failed — wrap must be included before the swap.');
+  }
 }
 
 // ─── verifyExecution() — PURE (no RPC/Prisma/fetch/wallet) ───────────────────
@@ -520,6 +578,15 @@ export interface UnitFlowExecutionEvidence {
   /** Settlement-token (swap-leg) merchant balances around the execution. */
   merchantBalanceBefore: bigint | string;
   merchantBalanceAfter: bigint | string;
+  /**
+   * Self-custody scope echo (Flow Swap only): relaxes ONLY the
+   * "merchant cannot be its own payer" rule, because payer == recipient ==
+   * the user's own wallet is the entire Flow shape. Default (absent/false)
+   * preserves the checkout rule. Every other check — router identity,
+   * exact input, output token, fee, pool, expiry, minOut delta, payer ==
+   * expectedPayer — applies unchanged.
+   */
+  allowSelfPayer?: boolean;
 }
 
 export interface UnitFlowVerifiedExecution {
@@ -654,7 +721,10 @@ export function verifyUnitFlowExecution(ev: UnitFlowExecutionEvidence): UnitFlow
   if (eqAddr(ev.payer, d.universalRouter) || isZeroAddress(ev.payer)) {
     throw routingError(403, '[unitflow-v3] payer mismatch — router/zero address cannot be the payer.');
   }
-  if (eqAddr(ev.payer, ev.merchantSCA)) {
+  // Self-custody (Flow Swap) is the one scope where payer == recipient is
+  // legitimate: the user swaps into their own wallet. Checkout keeps the
+  // strict third-party-payer rule.
+  if (eqAddr(ev.payer, ev.merchantSCA) && ev.allowSelfPayer !== true) {
     throw routingError(403, '[unitflow-v3] payer mismatch — merchant cannot be its own payer.');
   }
 

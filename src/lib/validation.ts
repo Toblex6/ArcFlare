@@ -63,7 +63,47 @@ export const SettleSchema = z.object({
 export const QuoteSchema = z.object({
   reference: z.string().min(1).max(128),
   payToken: z.string().min(1).max(16),
+  // Optional symbolic venue hint for the shared swap service. Absent =
+  // canonical (existing behavior unchanged). 'tower' is rejected (quote-
+  // only venue, never checkout execution); 'unitflow-v3' selects the
+  // UnitFlow branch only when its opt-in flag is enabled (fail-closed).
+  venue: z.string().min(1).max(32).optional(),
 });
+
+// ── /api/swap/* (Flow Swap backend — authenticated consumer session) ────────
+// The client supplies symbols + decimal amounts only. Addresses, pools,
+// fees, recipients, payers, and unsigned-tx construction are all
+// server-resolved via the shared swap service (src/lib/swap/service.ts).
+const swapSymbol = z.string().min(1).max(16);
+const swapAmount = z
+  .string()
+  .regex(/^\d+(\.\d{1,6})?$/, 'Amount must be a positive number with up to 6 decimals')
+  .refine((v) => parseFloat(v) > 0, 'Amount must be greater than 0');
+const txHash = z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a valid 0x transaction hash');
+
+export const SwapQuoteSchema = z.object({
+  inputSymbol: swapSymbol,
+  outputSymbol: swapSymbol,
+  amount: swapAmount,
+});
+
+export const SwapExecuteIntentSchema = z
+  .object({
+    intentId: z.string().uuid().optional(),
+    quoteHash: txHash.optional(),
+    wrapTxHash: txHash.optional(),
+    executionTxHash: txHash,
+  })
+  .refine((d) => d.intentId || d.quoteHash, 'intentId or quoteHash is required.');
+
+export const SwapVerifySchema = z
+  .object({
+    intentId: z.string().uuid().optional(),
+    quoteHash: txHash.optional(),
+    wrapTxHash: txHash.optional(),
+    executionTxHash: txHash.optional(),
+  })
+  .refine((d) => d.intentId || d.quoteHash, 'intentId or quoteHash is required.');
 
 // ── /api/merchant/me (PATCH settlement preference) ───────────────────────────
 // Routing v1: merchants choose the default settlement token for FUTURE

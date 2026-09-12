@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
         if (!allowed) return limitResponse;
 
         const body = await req.json().catch(() => ({}));
-        const { reference, txHash } = body;
+        const { reference, txHash, wrapTxHash } = body;
 
         if (!reference || !txHash) {
             return NextResponse.json(
@@ -96,15 +96,17 @@ export async function POST(req: NextRequest) {
         // decimals today — still resolved, not hardcoded, because the resolver
         // is the canonical abstraction).
         //
-        // ── ROUTED LEG (Payment Routing v1) ─────────────────────────────
+        // ── ROUTED LEG (Payment Routing v1 + UnitFlow branch) ────────────
         // A payment carrying a live conversion quote (payTokenAddress X !=
-        // settlement Y) is satisfied ONLY by one real execution of the
-        // canonical router — never by a plain ERC-20 transfer. The receipt
-        // must contain a PaymentRouted event from the canonical router
-        // proving payer, tokenIn, exact input, settlement tokenOut,
+        // settlement Y) is satisfied ONLY by one real execution on the
+        // QUOTED venue — never by a plain ERC-20 transfer. Canonical
+        // conversions require a PaymentRouted event from the canonical
+        // router proving payer, tokenIn, exact input, settlement tokenOut,
         // canonical pool, frozen merchant recipient, output >= minOut, and
-        // execution inside quote validity. Direct-transfer matching below is
-        // skipped entirely for these rows.
+        // execution inside quote validity. UnitFlow conversions are proven
+        // by the shared swap service instead (UniversalRouter execute()
+        // calldata + recipient balance delta + wrap linkage + payer binding).
+        // Direct-transfer matching below is skipped entirely for these rows.
         const payTokenAddr = ((payment as any).payTokenAddress as string | null) ?? null;
         const wantsRoute =
             !!payTokenAddr && payTokenAddr.toLowerCase() !== token.address.toLowerCase();
@@ -112,6 +114,10 @@ export async function POST(req: NextRequest) {
         let routedConversion: any = null;
 
         let matchedTransfer: { from: string; value: bigint } | null = null;
+
+        // UnitFlow settlement (if the service already persisted it — the
+        // canonical tail below is skipped in that case).
+        let unitFlowSettled: { payment: any; payer: string; actualOutput: string } | null = null;
 
         if (wantsRoute) {
             routedConversion = await (prisma as any).paymentConversion.findUnique({
@@ -126,6 +132,55 @@ export async function POST(req: NextRequest) {
                     { status: 400 }
                 );
             }
+            // Sender-hint derivation (existing checkout convention — shared
+            // by both venue branches below).
+            const senderHint =
+                payment.senderEmail?.startsWith('0x') &&
+                payment.senderEmail.toLowerCase() !== 'pending@checkout'
+                    ? payment.senderEmail
+                    : payment.payerSCA?.startsWith('0x')
+                      ? payment.payerSCA
+                      : null;
+
+            // ── UnitFlow branch (shared swap service) ───────────────────
+            // Selected ONLY when the stored conversion was quoted on the
+            // UnitFlow venue. Evidence collection, pure verification, wrap
+            // linkage, payer binding, and the atomic conversion-EXECUTED +
+            // payment-SUCCESS persistence all live in the service; the
+            // webhook + fee tail below is shared unchanged.
+            if (((routedConversion as any).venueId ?? 'canonical') === 'unitflow-v3') {
+                const consumedByUnitFlow = await (prisma as any).paymentConversion
+                    .findUnique({ where: { executionTxHash: txHash } })
+                    .catch(() => null);
+                if (consumedByUnitFlow && consumedByUnitFlow.paymentLogId !== payment.id) {
+                    return NextResponse.json(
+                        { success: false, error: 'This transaction was already consumed by another payment.' },
+                        { status: 409 }
+                    );
+                }
+                const allowUnitFlowResume =
+                    !!consumedByUnitFlow && consumedByUnitFlow.paymentLogId === payment.id;
+                try {
+                    const { verifyCheckoutUnitFlow } = await import('@/src/lib/swap/service');
+                    const uf = await verifyCheckoutUnitFlow({
+                        payment,
+                        conversion: routedConversion,
+                        txHash,
+                        wrapTxHash: wrapTxHash ?? null,
+                        senderHint,
+                        allowExecutedResume: allowUnitFlowResume,
+                    });
+                    unitFlowSettled = { payment: uf.payment, payer: uf.payer, actualOutput: uf.actualOutput };
+                    matchedTransfer = { from: uf.payer, value: BigInt(uf.actualOutput) };
+                } catch (ufErr: any) {
+                    const ufStatus = typeof ufErr?.status === 'number' ? ufErr.status : 500;
+                    if (ufStatus === 500) console.error('UnitFlow on-chain verification error:', ufErr);
+                    return NextResponse.json(
+                        { success: false, error: ufErr.message || 'Verification failed.' },
+                        { status: ufStatus }
+                    );
+                }
+            } else {
             const { routerAddress, poolAddress } = getRoutingConfig();
             const event = findRoutedEvent((receipt.logs as any) ?? [], routerAddress);
             if (!event) {
@@ -152,13 +207,6 @@ export async function POST(req: NextRequest) {
             const block = await readWithRetry('block', () =>
                 publicClient.getBlock({ blockHash: receipt.blockHash })
             );
-            const senderHint =
-                payment.senderEmail?.startsWith('0x') &&
-                payment.senderEmail.toLowerCase() !== 'pending@checkout'
-                    ? payment.senderEmail
-                    : payment.payerSCA?.startsWith('0x')
-                      ? payment.payerSCA
-                      : null;
             try {
                 routedCheck = checkRoutedExecution({
                     event,
@@ -179,6 +227,7 @@ export async function POST(req: NextRequest) {
                 );
             }
             matchedTransfer = { from: routedCheck.payer, value: BigInt(routedCheck.actualOutput) };
+            }
         } else {
         // Direct-transfer matching: only a Transfer log emitted by the
         // resolved token contract can satisfy this invoice: a USDC log never
@@ -238,21 +287,26 @@ export async function POST(req: NextRequest) {
             currency: token.symbol,
             tokenAddress: token.address,
         };
+        // UnitFlow conversions are already persisted atomically inside the
+        // shared swap service (conversion EXECUTED + payment SUCCESS) —
+        // reuse that row so the webhook + fee tail below sees one update.
         const updated =
-            routedConversion && routedCheck
-                ? await prisma.$transaction(async (db: any) => {
-                      await db.paymentConversion.update({
-                          where: { id: routedConversion.id },
-                          data: {
-                              status: 'EXECUTED',
-                              executionTxHash: txHash,
-                              actualInputAmount: routedCheck.actualInput,
-                              actualOutputAmount: routedCheck.actualOutput,
-                          },
-                      });
-                      return db.paymentLog.update({ where: { reference }, data: successData });
-                  })
-                : await prisma.paymentLog.update({ where: { reference }, data: successData });
+            unitFlowSettled
+                ? unitFlowSettled.payment
+                : routedConversion && routedCheck
+                  ? await prisma.$transaction(async (db: any) => {
+                        await db.paymentConversion.update({
+                            where: { id: routedConversion.id },
+                            data: {
+                                status: 'EXECUTED',
+                                executionTxHash: txHash,
+                                actualInputAmount: routedCheck.actualInput,
+                                actualOutputAmount: routedCheck.actualOutput,
+                            },
+                        });
+                        return db.paymentLog.update({ where: { reference }, data: successData });
+                    })
+                  : await prisma.paymentLog.update({ where: { reference }, data: successData });
 
         if (updated.webhookUrl) {
             fetch(updated.webhookUrl, {

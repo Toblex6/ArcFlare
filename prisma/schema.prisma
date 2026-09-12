@@ -667,12 +667,98 @@ model PaymentConversion {
   executionTxHash    String?     @unique // router execution tx (set on EXECUTED)
   actualInputAmount  String? // measured X debit (set on EXECUTED)
   actualOutputAmount String? // measured Y credit to merchantSCA (set on EXECUTED)
+  // ── Swap-backend stage: UnitFlow provider binding (additive) ──────────
+  // venueId selects the execution venue: 'canonical' (PaymentRouter path —
+  // default, backfilled on all existing rows) or 'unitflow-v3' (UnitFlow
+  // UniversalRouter path). Tower never executes, so it can never appear
+  // here — checkout quote rejects venue=tower.
+  venueId            String      @default("canonical")
+  // Atomic UnitFlow deployment family: 'testnet' | 'mainnet' (NULL =
+  // canonical). deploymentRouter pins the exact router endpoint the quote
+  // was built against; the family itself stays authoritative in
+  // src/lib/config/unitflow.ts (this is a per-quote binding, not config).
+  deploymentName     String?
+  deploymentRouter   String?
+  // Live-validated V3 fee tier bound at quote time (NULL = canonical).
+  feeTier            Int?
+  // Pre-broadcast UnitFlow envelope binding (keccak over router/commands/
+  // inputs/deadline). Uniqueness-enforced replay id (NULL = canonical).
+  executionIdentity  String?     @unique
+  // Bound payer wallet. NULL = permissionless checkout invoice (no session
+  // at quote time) — bound from on-chain tx evidence at execution instead.
+  expectedPayer      String?
+  // Slippage tolerance (bps) used to derive minOutputAmount (NULL =
+  // canonical ROUTING_SLIPPAGE_BPS default).
+  slippageBps        Int?
+  // USDC-leg WUSDC.deposit tx hash. Validated correlation only (NOT funding
+  // proof): matching to/from/value receipt + wrap-before-swap ordering +
+  // verification-time single-consumption across both tables. Uniqueness-
+  // enforced (PG NULLs exempt). NULL when the leg needs no wrap.
+  wrapTxHash         String?     @unique
+  // Exact swap-leg views bound at quote time (NULL = canonical): V3 path
+  // addresses/amounts the pure verifier consumes. tokenIn/OutSwap are the
+  // pool-leg tokens (WUSDC for the USDC leg); amountIn/ quotedOutput/
+  // minOutSwap are swap-leg units (18-dec on the USDC leg, 6-dec EURC).
+  tokenInSwap        String?
+  tokenOutSwap       String?
+  amountInSwap       String?
+  quotedOutputSwap   String?
+  minOutputSwap      String?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
   @@index([status])
   @@index([quoteExpiresAt])
   @@map("payment_conversions")
+}
+
+// ── Swap-backend stage: Flow Swap intent ─────────────────────────────────────
+// Dedicated self-custody swap record — NOT a payment ledger (never touches
+// PaymentLog). One row per user swap intent; v1 is payer == recipient ==
+// ownerWallet (the authenticated consumer session wallet, enforced by the
+// swap service — never from the request body). Lifecycle mirrors
+// PaymentConversion: QUOTED → EXECUTED (or lazily EXPIRED past
+// quoteExpiresAt).
+//
+// Unit conventions (load-bearing): inputAmount is canonical 6-dec base
+// units; the *Swap columns are exact swap-leg views (18-dec on the USDC/
+// WUSDC leg, 6-dec EURC) consumed verbatim by the pure UnitFlow verifier —
+// they are the persisted quote binding, not a second ledger.
+model FlowSwapIntent {
+  id                 String   @id @default(uuid())
+  ownerWallet        String
+  inputSymbol        String // 'USDC' | 'EURC' (symbol only; addresses resolved server-side)
+  outputSymbol       String // 'USDC' | 'EURC'
+  inputAmount        String // exact input, canonical 6-dec base units
+  inputAmountSwap    String // exact swap-leg input (18-dec on USDC leg)
+  tokenInSwap        String // V3 path tokenIn (WUSDC for the USDC leg)
+  tokenOutSwap       String // V3 path tokenOut
+  quotedOutputSwap   String // expected output, swap-leg units
+  minOutputSwap      String // floor credited to recipient, swap-leg units
+  venueId            String   @default("unitflow-v3") // executor venue (Tower never executes)
+  deploymentName     String // atomic UnitFlow family: 'testnet' | 'mainnet'
+  deploymentRouter   String // router endpoint bound at quote time
+  poolAddress        String // live-validated V3 pool (server-resolved)
+  feeTier            Int // live-validated V3 fee tier
+  slippageBps        Int // tolerance used to derive minOutputSwap
+  quoteExpiresAt     DateTime // short-lived; expired quotes are never executable
+  deadline           String // on-chain execute() deadline (bigint string; == expiresAtSec in v1)
+  quoteHash          String   @unique // provider-aware binding (scope+venue+deployment+pool+fee+amounts+expiry+parties)
+  executionIdentity  String   @unique // pre-broadcast envelope binding (set at quote)
+  idempotencyKey     String   @unique // resumable quote identity (owner-scoped)
+  expectedPayer      String // == ownerWallet in v1 (explicit, no default-payer fallback)
+  recipient          String // == ownerWallet in v1 (kept distinct for forward-compat)
+  wrapTxHash         String?  @unique // USDC-leg WUSDC.deposit tx (validated correlation, not funding proof)
+  executionTxHash    String?  @unique // swap execution tx (set on EXECUTED)
+  actualInputAmount  String? // measured input debit, canonical units (set on EXECUTED)
+  actualOutputAmount String? // measured output credit, canonical units (set on EXECUTED)
+  status             String   @default("QUOTED") // QUOTED | EXECUTED | EXPIRED
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([ownerWallet])
+  @@index([status])
+  @@map("flow_swap_intents")
 }
 
 // ── Build 3: Economic Ledger + Treasury ────────────────────────────────────
