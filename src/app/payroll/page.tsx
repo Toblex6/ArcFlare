@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { explorerTxUrl } from "@/lib/config/network";
+import { deriveReturnTo, loginRedirectUrl } from "@/lib/auth/returnTo";
 
 
 
@@ -35,10 +36,13 @@ export default function PayrollPage() {
     // Auth gate + payer prefill + live balance. The old hardcoded 0x7a8214…
     // prefill was the shared PLATFORM payer wallet — every run against it
     // failed caller-control.
+    // Anonymous homepage visitors keep their destination: the login gate
+    // returns them here after sign-in.
+    const gate = () => _router.replace(loginRedirectUrl(deriveReturnTo('/payroll')));
     fetch('/api/merchant/me')
       .then(async (r) => {
         if (r.status === 401) {
-          _router.replace('/merchant/login');
+          gate();
           return null;
         }
         return r.json().catch(() => null);
@@ -47,7 +51,7 @@ export default function PayrollPage() {
         const addr = data?.merchant?.walletAddress;
         if (addr) setPayerSCA(addr);
       })
-      .catch(() => _router.replace('/merchant/login'));
+      .catch(() => gate());
   }, []);
 
   React.useEffect(() => {

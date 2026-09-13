@@ -43,6 +43,21 @@ export interface SwapQuoteView extends SwapQuote {
   quotedDisplay: string;
   minOutDisplay: string;
   rateDisplay: string;
+  /** Execution venue id as returned by the backend (e.g. 'unitflow-v3'). */
+  venueId: string | null;
+  /** Deployment family name bound into the quote (informational). */
+  deploymentName: string | null;
+  /**
+   * Informational Tower rate-discovery candidate. Tower is quote/discovery
+   * only — it never executes. Absent when the flag is off or unavailable.
+   */
+  tower: {
+    consulted: boolean;
+    available: boolean;
+    quotedOutput?: string;
+    minOut?: string;
+    note: string;
+  } | null;
 }
 
 export type SwapQuoteStatus = 'idle' | 'loading' | 'quoted' | 'expired' | 'error';
@@ -90,6 +105,10 @@ function toViewModel(data: Record<string, unknown>): SwapQuoteView {
     const formatted = rate >= 100 ? rate.toFixed(2) : rate >= 1 ? rate.toFixed(4) : rate.toPrecision(4);
     rateDisplay = `1 ${input.symbol} ≈ ${formatted} ${output.symbol}`;
   }
+  const venueId = typeof data.venueId === 'string' && data.venueId.trim() !== '' ? data.venueId : null;
+  const deploymentName = typeof data.deploymentName === 'string' && data.deploymentName.trim() !== '' ? data.deploymentName : null;
+  const rawTower = data.tower as SwapQuoteView['tower'];
+  const tower = rawTower && typeof rawTower === 'object' && typeof rawTower.consulted === 'boolean' ? rawTower : null;
   return {
     intentId: String(data.intentId ?? ''),
     quoteHash: String(data.quoteHash ?? ''),
@@ -106,6 +125,9 @@ function toViewModel(data: Record<string, unknown>): SwapQuoteView {
     quotedDisplay,
     minOutDisplay,
     rateDisplay,
+    venueId,
+    deploymentName,
+    tower,
   };
 }
 

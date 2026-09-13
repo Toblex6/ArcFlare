@@ -276,6 +276,65 @@ const badgeStyle = (status?: string): React.CSSProperties => {
     return { ...base, background: "rgba(239,68,68,0.12)", color: "var(--danger)" };
 };
 
+// Neutral public header for anonymous visitors — brand continuity with the
+// homepage, zero merchant-dashboard chrome.
+function PublicMarketplaceNav() {
+    return (
+        <header
+            style={{
+                width: "100%",
+                borderBottom: "1px solid var(--border)",
+                background: "var(--surface)",
+                padding: "12px 32px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                boxSizing: "border-box",
+            }}
+        >
+            <a href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "var(--text)", fontWeight: 800, fontSize: 16 }}>
+                <span aria-hidden>⚡</span> FlareHQ
+            </a>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13, fontWeight: 600 }}>
+                <a href="/" style={{ color: "var(--text-secondary)", textDecoration: "none" }}>Home</a>
+                <a href={loginRedirectUrl(deriveReturnTo("/marketplace"))} style={{ color: "var(--primary)", textDecoration: "none" }}>
+                    Business Login →
+                </a>
+            </div>
+        </header>
+    );
+}
+
+// Sign-in gate card for provider-only tabs when browsed anonymously.
+function AuthGateCard({ title, body }: { title: string; body: string }) {
+    return (
+        <div style={{ ...styles.card, textAlign: "center" } as React.CSSProperties}>
+            <p style={{ margin: "0 0 6px", fontWeight: 800, fontSize: 14 }}>{title}</p>
+            <p style={{ margin: "0 0 16px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>{body}</p>
+            <a
+                href={loginRedirectUrl(deriveReturnTo("/marketplace"))}
+                style={{ ...btnStyle(false), textDecoration: "none", display: "inline-block" } as React.CSSProperties}
+            >
+                Business Login →
+            </a>
+        </div>
+    );
+}
+
+const publicBanner: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    flexWrap: "wrap",
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    borderRadius: 16,
+    padding: "16px 20px",
+    marginBottom: 20,
+};
+
 export default function MarketplacePage() {
     const router = useRouter();
     const [tab, setTab] = useState<"discover" | "publish" | "mine" | "agents">("discover");
@@ -525,10 +584,45 @@ export default function MarketplacePage() {
     };
 
     return (
-        <div className="light" style={styles.page}>
-            <DashboardSidebar active="Marketplace" />
+        <div
+            className="light"
+            style={
+                authChecked && !hasSession
+                    ? { ...styles.page, flexDirection: "column" as const }
+                    : styles.page
+            }
+        >
+            {/* Authenticated merchants keep the dashboard/sidebar experience.
+                Anonymous visitors get a neutral public header — never the
+                merchant chrome with a blank "Signed in as" area. */}
+            {(hasSession || !authChecked) ? (
+                <DashboardSidebar active="Marketplace" />
+            ) : (
+                <PublicMarketplaceNav />
+            )}
 
             <main style={styles.main}>
+                {/* Anonymous explainer: what browsing offers and where the
+                    sign-in gate sits. */}
+                {authChecked && !hasSession && (
+                    <div style={publicBanner}>
+                        <div>
+                            <p style={{ margin: "0 0 4px", fontWeight: 800, fontSize: 14 }}>
+                                Browse freely — sign in to pay or publish
+                            </p>
+                            <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                                Listings and agents are public. Paying for an API, publishing one, or
+                                managing your listings needs a FlareHQ business account.
+                            </p>
+                        </div>
+                        <a
+                            href={loginRedirectUrl(deriveReturnTo("/marketplace"))}
+                            style={{ ...btnStyle(false), textDecoration: "none", whiteSpace: "nowrap" } as React.CSSProperties}
+                        >
+                            Business Login
+                        </a>
+                    </div>
+                )}
                 <div style={{ marginBottom: 28 }}>
                     <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", margin: "0 0 4px" }}>
                         x402 Marketplace
@@ -538,18 +632,26 @@ export default function MarketplacePage() {
                     </p>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" as const }}>
                     <button style={tabStyle(tab === "discover")} onClick={() => setTab("discover")}>
                         🔍 Discover
                     </button>
                     <button style={tabStyle(tab === "agents")} onClick={() => setTab("agents")}>
                         🤖 Agents
                     </button>
-                    <button style={tabStyle(tab === "publish")} onClick={() => setTab("publish")}>
-                        📤 Publish an API
+                    <button
+                        style={tabStyle(tab === "publish")}
+                        onClick={() => setTab("publish")}
+                        title={authChecked && !hasSession ? "Publishing needs a business account — you'll be asked to sign in." : undefined}
+                    >
+                        📤 Publish an API{authChecked && !hasSession ? " · sign-in" : ""}
                     </button>
-                    <button style={tabStyle(tab === "mine")} onClick={() => setTab("mine")}>
-                        📋 My Listings
+                    <button
+                        style={tabStyle(tab === "mine")}
+                        onClick={() => setTab("mine")}
+                        title={authChecked && !hasSession ? "Your listings need a business account — you'll be asked to sign in." : undefined}
+                    >
+                        📋 My Listings{authChecked && !hasSession ? " · sign-in" : ""}
                     </button>
                 </div>
 
@@ -568,6 +670,14 @@ export default function MarketplacePage() {
                                 ) : wallet ? (
                                     <p style={{ margin: 0, fontFamily: "monospace", fontSize: 12 }}>
                                         {wallet.address} — <span style={{ color: "var(--primary)", fontWeight: 700 }}>{wallet.gatewayBalance} USDC</span> available
+                                    </p>
+                                ) : authChecked && !hasSession ? (
+                                    <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
+                                        Paying needs a business account —{" "}
+                                        <a href={loginRedirectUrl(deriveReturnTo("/marketplace"))} style={{ color: "var(--primary)", fontWeight: 700 }}>
+                                            sign in
+                                        </a>{" "}
+                                        to pay for APIs with your x402 wallet.
                                     </p>
                                 ) : (
                                     <p style={{ margin: 0, fontSize: 12, color: "var(--danger)" }}>Couldn't load your wallet — log in and retry.</p>
@@ -717,9 +827,15 @@ export default function MarketplacePage() {
                 {tab === "agents" && <AgentDiscovery />}
 
                 {/* ══════════════════════════════════════════════════════ */}
-                {/* PUBLISH                                                 */}
+                {/* PUBLISH (provider action — gated for anonymous visitors)   */}
                 {/* ══════════════════════════════════════════════════════ */}
-                {tab === "publish" && (
+                {tab === "publish" && authChecked && !hasSession && (
+                    <AuthGateCard
+                        title="Publishing is for API providers"
+                        body="Sign in with your FlareHQ business account to list an API. Browsing stays public — only publishing needs the sign-in."
+                    />
+                )}
+                {tab === "publish" && (!authChecked || hasSession) && (
                     <div style={styles.card}>
                         <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 4px" }}>Publish a new API listing</h3>
                         <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: "0 0 16px" }}>
@@ -764,9 +880,15 @@ export default function MarketplacePage() {
                 )}
 
                 {/* ══════════════════════════════════════════════════════ */}
-                {/* MY LISTINGS                                             */}
+                {/* MY LISTINGS (provider action — gated for anonymous visitors) */}
                 {/* ══════════════════════════════════════════════════════ */}
-                {tab === "mine" && (
+                {tab === "mine" && authChecked && !hasSession && (
+                    <AuthGateCard
+                        title="Your listings live behind sign-in"
+                        body="Sign in with your FlareHQ business account to manage listings and see revenue analytics."
+                    />
+                )}
+                {tab === "mine" && (!authChecked || hasSession) && (
                     <>
                         {mineLoading ? (
                             <p style={{ color: "var(--text-secondary)" }}>Loading your listings...</p>

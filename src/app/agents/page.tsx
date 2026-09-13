@@ -29,7 +29,6 @@ const NAV = [
   { label: 'Escrow', href: '/escrow' },
   { label: 'Agents', href: '/agents', active: true },
   { label: 'Jobs', href: '/jobs' },
-  { label: 'Support', href: '/support' },
 ];
 
 interface Agent {

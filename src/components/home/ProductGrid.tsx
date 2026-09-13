@@ -4,7 +4,14 @@ import Link from 'next/link';
 import Reveal from './Reveal';
 import SectionHeading from './SectionHeading';
 
-const PRODUCTS = [
+const PRODUCTS: {
+  icon: string;
+  title: string;
+  desc: string;
+  href: string;
+  tag: string;
+  secondary?: { label: string; href: string };
+}[] = [
   {
     icon: '🧾',
     title: 'Checkout + payment links',
@@ -15,9 +22,9 @@ const PRODUCTS = [
   {
     icon: '🌊',
     title: 'Per-second streaming',
-    desc: 'USDC drips every second to receivers. Salaries and grants — live.',
-    href: '/stats',
-    tag: 'Money',
+    desc: 'USDC streaming via API — create, stop, and withdraw streams on Arc. Integrate through the docs; there is no hosted streaming dashboard yet.',
+    href: '/docs/api',
+    tag: 'API',
   },
   {
     icon: '🔐',
@@ -42,10 +49,11 @@ const PRODUCTS = [
   },
   {
     icon: '🌉',
-    title: 'CCTP bridge + x402',
-    desc: 'Cross-chain USDC routing and $0.002-per-call API micro-billing via HTTP 402.',
-    href: '/marketplace',
-    tag: 'Infrastructure',
+    title: 'CCTP bridge',
+    desc: 'Move USDC from supported chains into your Arc wallet, inside the Flow app.',
+    href: '/consumer?view=crosschain',
+    tag: 'Bridge',
+    secondary: { label: 'Browse x402 APIs', href: '/marketplace' },
   },
 ];
 
@@ -55,7 +63,7 @@ export default function ProductGrid() {
       <SectionHeading
         eyebrow="Core products"
         title="Six things that are strong today"
-        sub="Only real, live surfaces — no yield, lending, cards, or DEX promises. Every card opens the actual product."
+        sub="Only real, live surfaces — no yield, lending, cards, or DEX promises. Every card opens the live surface it describes."
       />
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         {PRODUCTS.map((p, i) => (
@@ -72,6 +80,11 @@ export default function ProductGrid() {
               <Link href={p.href} className="mt-5 text-sm font-bold text-cyan-600 dark:text-cyan-300 inline-flex items-center gap-2 hover:gap-3 transition-all">
                 Open live →
               </Link>
+              {p.secondary && (
+                <Link href={p.secondary.href} className="mt-2 text-sm font-semibold text-[var(--text-secondary)] inline-flex items-center gap-2 hover:gap-3 transition-all">
+                  {p.secondary.label} →
+                </Link>
+              )}
             </div>
           </Reveal>
         ))}

@@ -11,7 +11,7 @@ const TABS = [
     icon: '🏪',
     label: 'Merchants',
     title: 'Get paid in USDC in seconds',
-    desc: 'Sign up, get an API key, share a link. Customers pay — funds land directly in your wallet. Non-custodial, always.',
+    desc: 'Sign up, get an API key, share a link. Checkout is non-custodial — customers pay directly into your wallet; FlareHQ never holds checkout funds.',
     points: ['Hosted + embedded checkout', 'Payment links + webhooks', 'External wallets'],
     cta: 'Merchant signup',
     href: '/merchant/signup',

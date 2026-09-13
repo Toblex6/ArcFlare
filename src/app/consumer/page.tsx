@@ -131,6 +131,22 @@ export default function ConsumerApp() {
   // page load — so a wallet extension that reconnects on load cannot silently
   // sign the user in without their intent.
   const resumeConnectRef = useRef(false);
+  // ── Wallet switch (managed → external, Part 1+3) ──
+  // Opens the existing connector picker WITHOUT destroying the current
+  // session. The active session is replaced only after the new wallet
+  // completes the full nonce/signature challenge. Cancel/failure leaves the
+  // current session untouched — never a silent disconnect.
+  const [switchOpen, setSwitchOpen] = useState(false);
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const switchReturnRef = useRef<View>("home");
+  // ── Bridge upgrade confirmation (Part 10) ──
+  // Creating a FlareHQ wallet silently replaced an external session; now it
+  // requires explicit confirmation first.
+  const [confirmFlareOpen, setConfirmFlareOpen] = useState(false);
+  // ── Email OTP resend cooldowns (Part 4, seconds remaining) ──
+  const [emailCooldown, setEmailCooldown] = useState(0);
+  const [recoverCooldown, setRecoverCooldown] = useState(0);
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [frequency, setFrequency] = useState("7");
@@ -586,6 +602,103 @@ export default function ConsumerApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
 
+  // ── OTP resend cooldown ticker (Part 4) ──
+  useEffect(() => {
+    if (emailCooldown <= 0 && recoverCooldown <= 0) return;
+    const t = setTimeout(() => {
+      setEmailCooldown((s) => Math.max(0, s - 1));
+      setRecoverCooldown((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [emailCooldown, recoverCooldown]);
+
+  // ── Wallet switch: challenge → sign → replace session (Part 1) ──
+  // Same nonce/signature ownership challenge as connectExisting — the ONLY
+  // auth system (wagmi connectAsync + signMessageAsync + POST
+  // /api/consumer/session). Resolves the session ONLY on success; throws
+  // otherwise so the caller never partially switches wallets.
+  const authenticateWalletAddress = async (address: string) => {
+    const challengeRes = await fetch(`/api/consumer/session?nonce=1&address=${address}`);
+    const challengeData = await challengeRes.json();
+    if (!challengeData.success || !challengeData.message) {
+      throw new Error(challengeData.error || "Could not start wallet connection.");
+    }
+    const signature = await signMessageAsync({
+      message: challengeData.message,
+      account: address as Address,
+    });
+    const res = await fetch("/api/consumer/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ walletAddress: address, message: challengeData.message, signature }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
+    return data;
+  };
+
+  const openWalletSwitch = () => {
+    setSwitchError(null);
+    setSwitchOpen(true);
+    switchReturnRef.current = view;
+    setWalletMenuOpen(false);
+  };
+
+  const completeWalletSwitch = async (address: string) => {
+    setSwitchBusy(true);
+    setSwitchError(null);
+    try {
+      const data = await authenticateWalletAddress(address);
+      setWalletAddress(data.account.walletAddress);
+      setWalletType(data.account.walletType ?? null);
+      setJustCreatedWallet(false);
+      setSwitchOpen(false);
+      // Return to wherever the switch started (Flow Swap when launched
+      // from there) — never onboarding, never a blank state.
+      setView(switchReturnRef.current);
+    } catch (e: any) {
+      // Session preserved: walletAddress/walletType are untouched, so the
+      // managed-wallet session survives cancel, connection failure, and
+      // signature failure alike.
+      const lower = String(e?.shortMessage ?? e?.message ?? '').toLowerCase();
+      setSwitchError(
+        lower.includes('user rejected') || lower.includes('user denied')
+          ? 'Signature was cancelled. Your current wallet session is unchanged.'
+          : friendlyWalletError(e)
+      );
+    } finally {
+      setSwitchBusy(false);
+    }
+  };
+
+  // Connect via a chosen connector, then run the ownership challenge for the
+  // newly connected address. A cancelled picker or failed connect never
+  // touches the existing session.
+  const switchViaConnector = async (connectorUid: string) => {
+    setSwitchError(null);
+    setSwitchBusy(true);
+    try {
+      const target = connectors.find((c) => c.uid === connectorUid);
+      if (!target) throw new Error('Wallet connector unavailable.');
+      const result = await withTimeout(connectAsync({ connector: target }), 45000, 'Wallet connection timed out').catch((e) => {
+        throw e;
+      });
+      const picked = (result as unknown as { accounts?: string[] })?.accounts?.[0] ?? connectedAddress;
+      if (!picked) throw new Error('Wallet connected, but no address was exposed. Try again.');
+      await completeWalletSwitch(picked);
+    } catch (e: any) {
+      const lower = String(e?.shortMessage ?? e?.message ?? '').toLowerCase();
+      if (lower.includes('user rejected') || lower.includes('user denied')) {
+        // Picker/connection cancelled — stay on the Swap screen with the
+        // managed-wallet session intact; a transient hint only.
+        setSwitchError('Connection was cancelled. Your current wallet session is unchanged.');
+      } else {
+        setSwitchError(friendlyWalletError(e));
+      }
+      setSwitchBusy(false);
+    }
+  };
+
   const createNewWallet = async () => {
     setCreatingWallet(true);
     setOnboardingError(null);
@@ -900,7 +1013,15 @@ export default function ConsumerApp() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not send a code.");
       setEmailStep("code");
-      setEmailMsg("Code sent — check your inbox (10 minutes, one use).");
+      // Anti-enumeration safe: the backend returns generic success even when
+      // no code was sent (email attached elsewhere), so the guidance must
+      // cover both cases without revealing which happened.
+      setEmailMsg(
+        "Code requested — check your inbox (and spam/junk). Codes expire after 10 minutes and can be used once. " +
+        "If no code arrives within a few minutes, this email may already be linked to another FlareHQ wallet — " +
+        "recover that wallet from the sign-in screen or try a different email."
+      );
+      setEmailCooldown(30);
     } catch (e: any) {
       setEmailMsg(e.message);
     } finally {
@@ -936,7 +1057,14 @@ export default function ConsumerApp() {
       setEmailStep("enter");
       await refreshSecurityState();
     } catch (e: any) {
-      setEmailMsg(e.message);
+      const raw = String(e?.message ?? '');
+      // Expired-code path: codes are single-use with a 10-minute window, so
+      // a failure usually means expiry or a typo — say so and offer resend.
+      setEmailMsg(
+        /invalid|expired/i.test(raw)
+          ? `${raw} Codes expire after 10 minutes and can be used only once — request a new code below if needed.`
+          : raw
+      );
     } finally {
       setEmailBusy(false);
     }
@@ -989,7 +1117,8 @@ export default function ConsumerApp() {
       await res.json();
       // Always generic — the response never reveals registration state.
       setRecoverStep("code");
-      setRecoverMsg("If this email is attached to a wallet, a code is on its way (10 minutes, one use).");
+      setRecoverMsg("If this email is attached to a wallet, a code is on its way (10 minutes, one use). Check spam/junk too.");
+      setRecoverCooldown(30);
     } catch {
       setRecoverMsg("Could not request a code. Try again.");
     } finally {
@@ -1011,7 +1140,12 @@ export default function ConsumerApp() {
       // Session cookie is now set — reload into the wallet.
       window.location.reload();
     } catch (e: any) {
-      setRecoverMsg(e.message);
+      const raw = String(e?.message ?? '');
+      setRecoverMsg(
+        /invalid|expired/i.test(raw)
+          ? `${raw} Codes expire after 10 minutes and can be used only once — request a new code if needed.`
+          : raw
+      );
     } finally {
       setRecoverBusy(false);
     }
@@ -1095,6 +1229,16 @@ export default function ConsumerApp() {
                   <button style={styles.secondaryButton} onClick={confirmRecoverCode} disabled={recoverBusy}>
                     {recoverBusy ? "Verifying..." : "Verify & sign in"}
                   </button>
+                  <button
+                    style={{ ...styles.secondaryButton, marginTop: 0 } as React.CSSProperties}
+                    onClick={requestRecoverCode}
+                    disabled={recoverBusy || recoverCooldown > 0}
+                  >
+                    {recoverCooldown > 0 ? `Resend code in ${recoverCooldown}s` : "Resend code"}
+                  </button>
+                  <p style={{ ...styles.onboardingSub, margin: 0, fontSize: 12 }}>
+                    No code? Check spam/junk, then resend. Codes expire after 10 minutes and can be used once.
+                  </p>
                 </>
               )}
               {recoverMsg && <p style={styles.onboardingSub}>{recoverMsg}</p>}
@@ -1237,6 +1381,15 @@ export default function ConsumerApp() {
                     {addressCopied ? '✓ Copied' : '📋 Copy address'}
                   </button>
                   <button
+                    onClick={openWalletSwitch}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
+                      border: 'none', borderTop: '1px solid var(--flow-border)', fontSize: 13, color: 'var(--flow-text)', cursor: 'pointer',
+                    }}
+                  >
+                    ⇄ Connect another wallet
+                  </button>
+                  <button
                     onClick={() => {
                       setWalletMenuOpen(false);
                       disconnectWallet();
@@ -1376,6 +1529,18 @@ export default function ConsumerApp() {
                         <button style={styles.secondaryButton} onClick={confirmEmailCode} disabled={emailBusy}>
                           {emailBusy ? "Verifying..." : "Verify & attach"}
                         </button>
+                        <button
+                          style={{ ...styles.secondaryButton, marginTop: 0 } as React.CSSProperties}
+                          onClick={requestEmailCode}
+                          disabled={emailBusy || emailCooldown > 0}
+                        >
+                          {emailCooldown > 0 ? `Resend code in ${emailCooldown}s` : "Resend code"}
+                        </button>
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)", lineHeight: 1.5 }}>
+                          No code? Check spam/junk, then resend. If it never arrives, this email may
+                          already belong to another wallet — sign out and use “Recover with email”
+                          on the sign-in screen to get back into it.
+                        </p>
                       </>
                     )}
                     {emailMsg && <p style={styles.securityMsg}>{emailMsg}</p>}
@@ -1761,7 +1926,15 @@ export default function ConsumerApp() {
                 <button
                   style={styles.submitButton}
                   disabled={creatingFlareWallet}
-                  onClick={createFlareHQWallet}
+                  onClick={() => {
+                    // Part 10: never silently replace an active external-wallet
+                    // session — confirm first.
+                    if ((walletType ?? '').toUpperCase() === 'EXTERNAL') {
+                      setConfirmFlareOpen(true);
+                    } else {
+                      createFlareHQWallet();
+                    }
+                  }}
                 >
                   {creatingFlareWallet ? "Creating your wallet..." : "Create a FlareHQ wallet"}
                 </button>
@@ -1884,7 +2057,8 @@ export default function ConsumerApp() {
           <FlowSwapView
             walletAddress={walletAddress}
             walletType={walletType}
-            onSwitchWallet={disconnectWallet}
+            onSwitchWallet={openWalletSwitch}
+            onStayManaged={() => goTo("home")}
             onSwapVerified={refreshActivity}
           />
         )}
@@ -1899,10 +2073,7 @@ export default function ConsumerApp() {
           <section>
             <h2 style={styles.flowTitle}>Discover agents</h2>
             <p style={{ color: "var(--flow-text-faint)", fontSize: 13, margin: "0 0 14px", lineHeight: 1.5 }}>
-              Browse discoverable agents → inspect what they do, trust & serviceability → hire via the existing hiring route. Data is live from the Agent Registry; one bad record never hides the rest.
-            </p>
-            <p style={{ color: "var(--flow-text-faint)", fontSize: 12, margin: "0 0 14px", lineHeight: 1.5 }}>
-              Canonical discovery lives under <a href="/marketplace" style={styles.resultLink}>Marketplace → Agents</a> — same registry, fuller journey. This tab stays for quick in-app hiring.
+              Browse available agents, inspect what they do and how they are rated, then hire in a few taps. Listings are live.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
               <input
@@ -2132,7 +2303,7 @@ export default function ConsumerApp() {
                       <div style={{ borderTop: "1px solid var(--flow-border)", paddingTop: 12, display: "flex", flexDirection: "column" as const, gap: 8 }}>
                         <p style={{ margin: 0, fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5, color: "var(--flow-text-muted)" }}>Start interaction</p>
                         {!walletAddress && <p style={{ margin: 0, fontSize: 11, color: "#C0563A" }}>Connect a wallet to hire — discovery is public, hiring requires you control the payer wallet.</p>}
-                        {walletAddress && !consumerWalletId && <p style={{ margin: 0, fontSize: 11, color: "#8a6d2b" }}>Hiring via the canonical hire route (POST /api/agents/[id]/hire) requires a FlareHQ-managed wallet (CIRCLE). Your current wallet is external — create a FlareHQ wallet to hire, or use a browser wallet that has a Circle wallet linked.</p>}
+                        {walletAddress && !consumerWalletId && <p style={{ margin: 0, fontSize: 11, color: "#8a6d2b" }}>Hiring requires a FlareHQ-managed wallet. Your current wallet is external — create a FlareHQ wallet to hire.</p>}
                         <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
                           <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
                             <label style={{ fontSize: 11, fontWeight: 600, color: "var(--flow-text-muted)" }}>Budget (USDC)</label>
@@ -2149,7 +2320,7 @@ export default function ConsumerApp() {
                           onClick={handleHire}
                           title={action.hint}
                         >
-                          {action.disabled ? action.label : hireBusy ? "Hiring…" : `Hire ${d.name || selectedAgent?.name || "agent"} (POST /api/agents/${selectedAgent?.id}/hire)`}
+                          {action.disabled ? action.label : hireBusy ? "Hiring…" : `Hire ${d.name || selectedAgent?.name || "agent"}`}
                         </button>
                         {action.disabled && <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)" }}>{action.hint} No payment was attempted.</p>}
                         {hireResult && (
@@ -2158,7 +2329,7 @@ export default function ConsumerApp() {
                             {hireResult.explorerUrl && <a href={hireResult.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#E8714A" }}>View transaction</a>}
                           </div>
                         )}
-                        <p style={{ margin: 0, fontSize: 10, color: "var(--flow-text-faint)" }}>Hiring reuses the canonical hire route (POST /api/agents/[id]/hire) — no second backend, no fake checkout. The payer wallet is resolved server-side via Circle and caller-control verification.</p>
+                        <p style={{ margin: 0, fontSize: 10, color: "var(--flow-text-faint)" }}>The payer wallet is resolved securely on the server — you only confirm the budget and description here.</p>
                       </div>
                     </>
                   );
@@ -2168,6 +2339,120 @@ export default function ConsumerApp() {
           </div>
         )}
       </div>
+
+      {/* ── Wallet switch modal (Part 1): pick → connect → sign → replace.
+          The current session stays active until the new wallet authenticates.
+          Cancelling or failing never signs out and never leaves this screen. */}
+      {switchOpen && (
+        <div
+          style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+          onClick={() => { if (!switchBusy) { setSwitchOpen(false); setSwitchError(null); } }}
+        >
+          <div
+            style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 16, width: "100%", maxWidth: 440, maxHeight: "85vh", display: "flex", flexDirection: "column" as const, boxShadow: "0 12px 40px rgba(0,0,0,0.25)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--flow-border)", flexShrink: 0 }}>
+              <h3 style={{ margin: 0, fontSize: 14 }}>Connect another wallet</h3>
+              <button aria-label="Close wallet switch" onClick={() => { if (!switchBusy) { setSwitchOpen(false); setSwitchError(null); } }} style={{ background: "transparent", border: "1px solid var(--flow-border)", borderRadius: 8, width: 28, height: 28, cursor: "pointer", color: "var(--flow-text-muted)" }}>✕</button>
+            </div>
+            <div style={{ padding: 16, overflowY: "auto" as const, display: "flex", flexDirection: "column" as const, gap: 8, fontSize: 13 }}>
+              <p style={{ margin: "0 0 4px", color: "var(--flow-text-muted)", lineHeight: 1.5 }}>
+                Your current wallet stays signed in until the new wallet is verified.
+                You will be asked to sign a message to prove you control it.
+              </p>
+              {isConnected && connectedAddress && connectedAddress.toLowerCase() !== walletAddress.trim().toLowerCase() && (
+                <button
+                  style={{ ...styles.secondaryButton, marginTop: 0 } as React.CSSProperties}
+                  disabled={switchBusy}
+                  onClick={() => void completeWalletSwitch(connectedAddress)}
+                >
+                  {switchBusy ? "Verifying…" : `Continue with ${connectedAddress.slice(0, 6)}…${connectedAddress.slice(-4)}`}
+                </button>
+              )}
+              {(() => {
+                const pickers = dedupeConnectors(connectors);
+                if (pickers.length === 0) {
+                  return (
+                    <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                      No wallet connector found.{" "}
+                      <a href="https://ethereum.org/en/wallets/" target="_blank" rel="noopener noreferrer" style={{ color: "#E8714A", fontWeight: 600 }}>
+                        Get a wallet ↗
+                      </a>
+                    </p>
+                  );
+                }
+                return pickers.map((c) => (
+                  <button
+                    key={c.uid}
+                    disabled={switchBusy || isConnecting}
+                    onClick={() => void switchViaConnector(c.uid)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%",
+                      padding: "11px 14px", borderRadius: 10,
+                      border: "1px solid var(--flow-border)", background: "transparent",
+                      color: "var(--flow-text)", fontSize: 14, fontWeight: 600,
+                      cursor: switchBusy || isConnecting ? "not-allowed" : "pointer",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {switchBusy || isConnecting ? "Connecting…" : friendlyConnectorLabel(c)}
+                    <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--flow-text-faint)" }}>→</span>
+                  </button>
+                ));
+              })()}
+              {switchError && <p style={{ margin: "4px 0 0", fontSize: 12, color: "#C0563A" }}>{switchError}</p>}
+              <button
+                onClick={() => { if (!switchBusy) { setSwitchOpen(false); setSwitchError(null); } }}
+                style={{ background: "none", border: "none", color: "var(--flow-text-faint)", fontSize: 12, cursor: "pointer", padding: 0, marginTop: 4 }}
+              >
+                Cancel — keep my current wallet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FlareHQ-wallet confirmation (Part 10): external → managed is an
+          explicit session replacement, never a silent one. */}
+      {confirmFlareOpen && (
+        <div
+          style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+          onClick={() => { if (!creatingFlareWallet) setConfirmFlareOpen(false); }}
+        >
+          <div
+            style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 16, width: "100%", maxWidth: 440, boxShadow: "0 12px 40px rgba(0,0,0,0.25)", padding: 20 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>Switch to a FlareHQ wallet?</h3>
+            <div style={{ fontSize: 13, color: "var(--flow-text-muted)", lineHeight: 1.55, display: "flex", flexDirection: "column" as const, gap: 8 }}>
+              <p style={{ margin: 0 }}>
+                A new FlareHQ-managed wallet session will become active so bridging can proceed.
+              </p>
+              <p style={{ margin: 0 }}>
+                Your current external wallet stays yours — reconnect it anytime with “Connect a wallet”.
+                Activity tied to your current wallet does not transfer to the new one.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button
+                style={{ ...styles.secondaryButton, marginTop: 0, flex: 1 } as React.CSSProperties}
+                disabled={creatingFlareWallet}
+                onClick={() => setConfirmFlareOpen(false)}
+              >
+                Keep my wallet
+              </button>
+              <button
+                style={{ ...styles.submitButton, marginTop: 0, flex: 1 } as React.CSSProperties}
+                disabled={creatingFlareWallet}
+                onClick={() => { setConfirmFlareOpen(false); void createFlareHQWallet(); }}
+              >
+                {creatingFlareWallet ? "Creating…" : "Create FlareHQ wallet"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Bottom Nav ── */}
       <nav style={styles.bottomNav}>

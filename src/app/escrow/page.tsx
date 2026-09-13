@@ -4,6 +4,7 @@
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 
 interface EscrowItem {
   id: string;
@@ -115,9 +116,12 @@ const labelStyle: React.CSSProperties = {
 export default function EscrowDashboard() {
   const _router = useRouter();
   React.useEffect(() => {
+    // Anonymous visitors land here from the homepage product grid — preserve
+    // the destination through the login gate so sign-in returns them here.
+    const gate = () => _router.replace(loginRedirectUrl(deriveReturnTo('/escrow')));
     fetch('/api/merchant/me').then((r) => {
-      if (r.status === 401) _router.replace('/merchant/login');
-    }).catch(() => _router.replace('/merchant/login'));
+      if (r.status === 401) gate();
+    }).catch(() => gate());
   }, []);
 
   const [escrows, setEscrows] = useState<EscrowItem[]>([]);

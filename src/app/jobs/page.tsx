@@ -27,7 +27,6 @@ const NAV = [
   { label: 'Escrow', href: '/escrow' },
   { label: 'Agents', href: '/agents' },
   { label: 'Jobs', href: '/jobs', active: true },
-  { label: 'Support', href: '/support' },
 ];
 
 const JOB_STATUSES = ['Open', 'Funded', 'Submitted', 'Completed', 'Rejected', 'Expired'];

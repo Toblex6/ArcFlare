@@ -28,11 +28,13 @@
 //   address inputs.
 // - No private keys, no server-side signing, no Tower execution, no
 //   cross-chain path, no tokens beyond USDC/EURC.
-// - No pool/router/fee-tier/calldata/provider internals are displayed.
+// - No pool/router/fee-tier/calldata internals are displayed. The execution
+//   venue label (from the backend quote) and the informational Tower
+//   rate-discovery candidate are shown as secondary provenance only.
 
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useAccount,
   useChainId,
@@ -57,6 +59,7 @@ import {
   formatCountdown,
   friendlySwapError,
   friendlySwapWalletError,
+  friendlyVenueLabel,
   parseAmountToBaseUnits,
   shortAddress,
   shortHash,
@@ -98,11 +101,14 @@ export function FlowSwapView({
   walletAddress,
   walletType,
   onSwitchWallet,
+  onStayManaged,
   onSwapVerified,
 }: {
   walletAddress: string;
   walletType: string | null;
   onSwitchWallet?: () => void;
+  /** Optional: leave the managed wallet in place and go back (e.g. Home). */
+  onStayManaged?: () => void;
   /** Called once per verified swap so the parent can refresh activity. */
   onSwapVerified?: () => void;
 }) {
@@ -145,6 +151,15 @@ export function FlowSwapView({
   const balances = useSwapBalances(sessionLive);
   const quoteActive = sessionLive && flow === 'form';
   const quote = useSwapQuote(inputSymbol, outputSymbol, amount, quoteActive);
+
+  // A fresh live quote supersedes the expired-quote notice from a previous
+  // confirm attempt — clear it so the form doesn't cry wolf.
+  useEffect(() => {
+    if (quote.status === 'quoted' && flow === 'form') {
+      setFlowError((prev) => (prev !== null && prev.includes('expired') ? null : prev));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote.status, quote.quote?.intentId]);
 
   // Component-scope signing helpers so both the swap sequence (handleConfirm)
   // and the chained receive step (registerAndVerify) sign exactly the
@@ -238,10 +253,11 @@ export function FlowSwapView({
     if (confirmBusyRef.current) return;
     const live = quote.quote;
     if (!live || quote.status !== 'quoted' || quote.secondsLeft <= 0) {
-      const { headline, raw } = friendlySwapError('Swap quote expired before execution.');
-      setFlowError(headline);
-      setFlowRawError(raw);
-      setFlow('failed');
+      // Prefer a fresh quote over a dead-end failure state: stay in the form
+      // and re-request automatically. Nothing was signed, nothing was lost.
+      quote.refresh();
+      setFlowError('That quote expired before it could be used. Getting a fresh quote — confirm again once it arrives.');
+      setFlowRawError(null);
       return;
     }
     if (!walletsMatch) {
@@ -652,16 +668,25 @@ export function FlowSwapView({
       )}
       {sessionLive && !sessionIsSelfCustody && (
         <div style={styles.noticeBox}>
-          <p style={styles.boxTitle}>A wallet you control is needed</p>
+          <p style={styles.boxTitle}>Use a wallet you control</p>
           <p style={styles.boxText}>
-            You signed in with a FlareHQ-managed wallet ({shortAddress(walletAddress)}), which cannot sign
-            swaps in this browser. Flow Swap is self-custody: reconnect with a wallet you control to swap.
+            Flow Swap requires a wallet that can approve transactions in your browser.
+            Your FlareHQ wallet ({shortAddress(walletAddress)}) remains available for FlareHQ-managed features.
           </p>
           {onSwitchWallet && (
             <button style={styles.secondaryButton} onClick={onSwitchWallet}>
-              Switch to a wallet you control
+              Connect another wallet
             </button>
           )}
+          {onStayManaged && (
+            <button
+              style={{ ...styles.secondaryButton, marginTop: 8, border: '1px solid var(--flow-border)', color: 'var(--flow-text-muted)' }}
+              onClick={onStayManaged}
+            >
+              Keep using FlareHQ wallet
+            </button>
+          )}
+          <p style={styles.underText}>Connecting another wallet keeps this session — nothing is signed out.</p>
         </div>
       )}
 
@@ -682,18 +707,34 @@ export function FlowSwapView({
                   ? 'Connect the wallet you signed in with — the swap must be signed by it.'
                   : `Connected wallet ${shortAddress(connectedAddress)} is not the wallet you signed in with (${shortAddress(walletAddress)}). Reconnect the matching wallet.`}
               </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                {dedupeConnectors(connectors).map((c) => (
-                  <button
-                    key={c.uid}
-                    style={styles.secondaryButton}
-                    disabled={isConnecting}
-                    onClick={() => void connectWith(c.uid)}
-                  >
-                    {isConnecting ? 'Connecting…' : `Connect ${friendlyConnectorLabel(c)}`}
-                  </button>
-                ))}
-              </div>
+              {(() => {
+                const pickers = dedupeConnectors(connectors);
+                if (pickers.length === 0) {
+                  return (
+                    <p style={{ ...styles.boxText, marginTop: 8 }}>
+                      No wallet connector is available in this browser. Install a wallet extension
+                      first, then reconnect.{" "}
+                      <a href="https://ethereum.org/en/wallets/" target="_blank" rel="noopener noreferrer" style={styles.link}>
+                        Get a wallet ↗
+                      </a>
+                    </p>
+                  );
+                }
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                    {pickers.map((c) => (
+                      <button
+                        key={c.uid}
+                        style={styles.secondaryButton}
+                        disabled={isConnecting}
+                        onClick={() => void connectWith(c.uid)}
+                      >
+                        {isConnecting ? 'Connecting…' : `Connect ${friendlyConnectorLabel(c)}`}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               {connectError && <p style={styles.inlineError}>{connectError}</p>}
             </div>
           )}
@@ -727,19 +768,41 @@ export function FlowSwapView({
 
           {/* ── Balances (both tokens, parallel) ── */}
           <div style={styles.balanceRow}>
-            {(['USDC', 'EURC'] as SwapSymbol[]).map((s) => (
-              <div key={s} style={styles.balanceChip}>
-                <span style={styles.balanceSym}>{s}</span>
-                <span style={styles.balanceVal}>
-                  {balances.loading ? '…' : balances.balances[s] !== null ? balances.balances[s] : '—'}
-                </span>
-              </div>
-            ))}
+            {(['USDC', 'EURC'] as SwapSymbol[]).map((s) => {
+              const v = balances.balances[s];
+              const failed = !balances.loading && v === null && balances.error !== null;
+              return (
+                <div key={s} style={styles.balanceChip}>
+                  <span style={styles.balanceSym}>{s}</span>
+                  <span
+                    style={styles.balanceVal}
+                    title={
+                      balances.loading
+                        ? 'Loading balance…'
+                        : failed
+                          ? 'Balance failed to load — retry below.'
+                          : v === null
+                            ? 'Balance not loaded yet.'
+                            : `${v} ${s}`
+                    }
+                  >
+                    {balances.loading ? '…' : v !== null ? v : failed ? '! Failed to load' : '—'}
+                  </span>
+                </div>
+              );
+            })}
             <button style={styles.miniButton} onClick={balances.refresh} disabled={balances.loading || flow !== 'form'}>
               {balances.loading ? '…' : '↻'}
             </button>
           </div>
-          {balances.error && <p style={styles.inlineError}>{balances.error}</p>}
+          {balances.error && (
+            <div style={styles.errorBox}>
+              <p style={styles.boxText}>⚠️ {balances.error}</p>
+              <button style={styles.secondaryButton} onClick={balances.refresh} disabled={balances.loading}>
+                {balances.loading ? 'Retrying…' : 'Retry loading balances'}
+              </button>
+            </div>
+          )}
 
           {/* ── Swap form ── */}
           {(flow === 'form' || flow === 'failed') && (
@@ -833,6 +896,20 @@ export function FlowSwapView({
                       {quote.refreshing ? 'Refreshing…' : formatCountdown(quote.secondsLeft)}
                     </span>
                   </div>
+                  {/* Routing provenance (secondary): who executes this quote,
+                      plus the informational Tower rate-discovery candidate
+                      when the backend consulted it. Tower never executes. */}
+                  {quote.quote.venueId && (
+                    <p style={styles.routeNote}>
+                      Route selected · Execution via {friendlyVenueLabel(quote.quote.venueId)}
+                    </p>
+                  )}
+                  {quote.quote.tower?.consulted && quote.quote.tower.available && (
+                    <p style={styles.routeNote}>
+                      Rate comparison via {friendlyVenueLabel('tower')} — info only, execution stays
+                      with {friendlyVenueLabel(quote.quote.venueId ?? 'unitflow-v3')}.
+                    </p>
+                  )}
                   <button style={styles.linkButton} onClick={quote.refresh} disabled={quote.refreshing}>
                     {quote.refreshing ? 'Refreshing quote…' : 'Refresh quote'}
                   </button>
@@ -840,7 +917,12 @@ export function FlowSwapView({
               )}
               {quote.status === 'loading' && !quote.quote && (
                 <div style={styles.quoteBox}>
-                  <p style={styles.boxText}>Getting your quote…</p>
+                  <p style={styles.boxText}>Searching for the best available rate…</p>
+                </div>
+              )}
+              {flow === 'form' && flowError && (
+                <div style={styles.noticeBox}>
+                  <p style={styles.boxText}>⚠️ {flowError}</p>
                 </div>
               )}
               {(quote.status === 'error' || quote.status === 'expired') && (
@@ -1007,6 +1089,7 @@ const styles: Record<string, React.CSSProperties> = {
   quoteRow: { display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 6 },
   quoteLabel: { fontSize: 12, color: 'var(--flow-text-muted)' },
   quoteVal: { fontSize: 13, fontWeight: 700, textAlign: 'right' },
+  routeNote: { margin: '8px 0 0', fontSize: 11, color: 'var(--flow-text-faint)', lineHeight: 1.5 },
   linkButton: { background: 'none', border: 'none', color: '#E8714A', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0, marginTop: 4 },
   link: { fontSize: 12, color: '#E8714A', fontWeight: 600, fontFamily: 'monospace', wordBreak: 'break-all' },
   hashLine: { margin: '8px 0 0', fontSize: 12, color: 'var(--flow-text-muted)', wordBreak: 'break-all' },

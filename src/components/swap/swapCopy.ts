@@ -9,8 +9,11 @@
 // - Swap-leg units (what the quoter settles in) differ from canonical
 //   display units on the USDC leg (WUSDC is 18-dec; EURC is 6-dec). The two
 //   helpers below keep that conversion in exactly one place.
-// - Never surface pool addresses, router internals, fee-tier numbers,
-//   calldata, or provider names — those stay server-side.
+// - Never surface pool addresses, router internals, fee-tier numbers, or
+//   calldata — those stay server-side. Execution/rate-discovery VENUE labels
+//   (e.g. UnitFlow, Tower) are the deliberate exception: FlowSwapView shows
+//   them as secondary provenance ("who executed / who compared") derived
+//   from the backend quote response, never hardcoded.
 
 import { formatUnits, parseUnits } from 'viem';
 
@@ -101,6 +104,19 @@ export function shortHash(hash: string): string {
 export function shortAddress(address: string): string {
   if (!address || address.length < 10) return address;
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/**
+ * Customer-facing label for a swap venue id returned by the backend quote
+ * response. Unknown ids fall back to the raw id (never blank, never a
+ * hardcoded claim about a venue the backend did not name).
+ */
+export function friendlyVenueLabel(venueId: string | null | undefined): string {
+  const v = (venueId ?? '').trim().toLowerCase();
+  if (v === 'unitflow-v3' || v === 'unitflow') return 'UnitFlow';
+  if (v === 'tower') return 'Tower';
+  if (v === 'canonical') return 'Canonical router';
+  return v === '' ? 'Unknown venue' : venueId!.trim();
 }
 
 /**

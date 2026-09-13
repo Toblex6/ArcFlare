@@ -46,7 +46,7 @@ export default function Hero() {
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
             </span>
             <span className="text-[var(--text)]">Live on Arc Testnet</span>
-            <span className="text-[var(--text-secondary)]">· USDC · non-custodial</span>
+            <span className="text-[var(--text-secondary)]">· USDC · checkout is non-custodial</span>
           </motion.div>
 
           <motion.h1

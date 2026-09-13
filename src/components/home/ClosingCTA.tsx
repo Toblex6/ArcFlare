@@ -68,7 +68,7 @@ export default function ClosingCTA() {
               <Image src="/arcflare-logo.png" alt="FlareHQ" width={26} height={26} />
               <span className="font-extrabold tracking-tight">FlareHQ</span>
             </div>
-            <p className="text-[var(--text-secondary)] text-xs font-medium">© {new Date().getFullYear()} FlareHQ · Non-custodial · Arc Testnet</p>
+            <p className="text-[var(--text-secondary)] text-xs font-medium">© {new Date().getFullYear()} FlareHQ · Checkout is non-custodial · Arc Testnet</p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm font-semibold text-[var(--text-secondary)]">
             <a href="https://docs.flarehq.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition">Docs</a>

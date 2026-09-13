@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
+import { deriveReturnTo, loginRedirectUrl } from "@/lib/auth/returnTo";
 
 
 const STATUS_COLORS: Record<string, string> = {
@@ -29,10 +30,13 @@ export default function ScheduledPaymentsPage() {
   const [payerSCA, setPayerSCA] = useState('');
   const [walletBalance, setWalletBalance] = useState<string | null>(null);
   React.useEffect(() => {
+    // Anonymous homepage visitors keep their destination: the login gate
+    // returns them here after sign-in.
+    const gate = () => _router.replace(loginRedirectUrl(deriveReturnTo('/scheduled')));
     fetch('/api/merchant/me')
       .then(async (r) => {
         if (r.status === 401) {
-          _router.replace('/merchant/login');
+          gate();
           return null;
         }
         return r.json().catch(() => null);
@@ -41,7 +45,7 @@ export default function ScheduledPaymentsPage() {
         const addr = data?.merchant?.walletAddress;
         if (addr) setPayerSCA(addr);
       })
-      .catch(() => _router.replace('/merchant/login'));
+      .catch(() => gate());
   }, []);
 
   React.useEffect(() => {
