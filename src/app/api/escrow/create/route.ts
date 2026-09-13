@@ -270,7 +270,7 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       contractAddress: ESCROW_CONTRACT,
       beneficiaryKind: beneficiary.kind,
       beneficiaryConfirmUrl: confirmUrl,
-      message: `${amount} USDC locked in FlareHQEscrow contract on Arc Testnet. Both parties must confirm to release.`,
+      message: `${amount} USDC locked in FlareHQEscrow contract on ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'}. Both parties must confirm to release.`,
       nextSteps: {
         release: `POST /api/escrow/release { reference: "${reference}", callerSCA: "depositorOrBeneficiarySCA" }`,
         dispute: `POST /api/escrow/dispute { reference: "${reference}", callerSCA: "...", reason: "..." }`,

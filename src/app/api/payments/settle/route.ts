@@ -35,11 +35,49 @@ function irisApi(): string {
 // unchanged; mainnet: required ARC_MAINNET_USDC_ADDRESS, fail-closed).
 const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
-// SCA Defaults
+// SCA Defaults — TESTNET-ONLY legacy pins. On mainnet these MUST be supplied
+// explicitly (MERCHANT_SCA_ADDRESS / PLATFORM_PAYER_WALLET_ID): mainnet
+// silently inheriting the testnet constants below was the class of bug behind
+// the C1 drain, so resolution is fail-closed (see the resolvers). Testnet
+// behavior is byte-identical to before.
 
-const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
-const DEFAULT_MERCHANT_SCA =
-  process.env.MERCHANT_SCA_ADDRESS || '0x902C565bE31c146a79350387C1f77d6896814B58';
+const TESTNET_DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
+const TESTNET_DEFAULT_MERCHANT_SCA = '0x902C565bE31c146a79350387C1f77d6896814B58';
+
+function isMainnetSelected(): boolean {
+  try {
+    return getNetworkConfig().name === 'mainnet';
+  } catch {
+    // getNetworkConfig itself throws on mainnet-with-missing-config — which
+    // already means "do not use testnet values". Treat as mainnet so both
+    // resolvers below throw fail-closed instead of returning testnet pins.
+    return (process.env.ARC_NETWORK ?? '').trim().toLowerCase() === 'mainnet';
+  }
+}
+
+/** Explicit platform-default payer wallet. Throws on mainnet without config. */
+function resolveDefaultPayerWalletId(): string {
+  const explicit = (process.env.PLATFORM_PAYER_WALLET_ID ?? '').trim();
+  if (explicit) return explicit;
+  if (isMainnetSelected()) {
+    throw new Error(
+      'PLATFORM_PAYER_WALLET_ID is required on mainnet — refusing to debit the testnet platform-default wallet.'
+    );
+  }
+  return TESTNET_DEFAULT_PAYER_WALLET_ID;
+}
+
+/** Explicit platform-default merchant SCA. Throws on mainnet without config. */
+function resolveDefaultMerchantSca(): string {
+  const explicit = (process.env.MERCHANT_SCA_ADDRESS ?? '').trim();
+  if (explicit) return explicit;
+  if (isMainnetSelected()) {
+    throw new Error(
+      'MERCHANT_SCA_ADDRESS is required on mainnet — refusing to credit the testnet platform-default merchant.'
+    );
+  }
+  return TESTNET_DEFAULT_MERCHANT_SCA;
+}
 
 const MESSAGE_TRANSMITTER_ABI = [
   {
@@ -462,13 +500,14 @@ async function mergedSettleHandler(request: NextRequest) {
           `No Circle wallet is bound to payer ${payerSCA} — refusing to debit a shared default wallet.`
         );
       }
-      payerWalletId = DEFAULT_PAYER_WALLET_ID;
+      payerWalletId = resolveDefaultPayerWalletId();
     }
 
     // Resolve the real merchant payout wallet. Falls back to the platform
     // default ONLY for legacy/test payments with no merchantId attached —
     // any real merchant payment link must have merchantSCA set already.
-    let merchantSCA = payment.merchantSCA || DEFAULT_MERCHANT_SCA;
+    // On mainnet the default itself is explicit-or-throw (see resolver).
+    let merchantSCA = payment.merchantSCA || resolveDefaultMerchantSca();
     if (payment.merchantId) {
       const merchantRecord = await (prisma as any).merchant.findUnique({
         where: { id: payment.merchantId },
@@ -578,7 +617,7 @@ async function mergedSettleHandler(request: NextRequest) {
       data: {
         status: 'SUCCESS',
         arcTxHash,
-        chain: 'Arc Testnet (On-chain Transfer)',
+        chain: getNetworkConfig().name === 'mainnet' ? 'Arc (On-chain Transfer)' : 'Arc Testnet (On-chain Transfer)',
         circleTxId: circleTxId,
         currency: token.symbol,
         tokenAddress: token.address,

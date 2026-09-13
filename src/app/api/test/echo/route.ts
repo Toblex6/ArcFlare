@@ -4,8 +4,23 @@
 // production listings — just a stable thing to point targetUrl at while testing.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getArcNetworkName } from '@/lib/config/network';
+
+// Production gate: internal marketplace-proxy test target — available in
+// dev/testnet, refused on production mainnet.
+function demoRouteBlocked(): boolean {
+  if (process.env.NODE_ENV !== 'production') return false;
+  try {
+    return getArcNetworkName() === 'mainnet';
+  } catch {
+    return true;
+  }
+}
 
 async function echo(req: NextRequest) {
+    if (demoRouteBlocked()) {
+        return NextResponse.json({ ok: false, error: 'Demo route disabled in production.' }, { status: 404 });
+    }
     let body: unknown = null;
     try {
         body = await req.text();

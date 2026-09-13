@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getNetworkConfig } from "@/lib/config/network";
+import { getArcNetworkName, getNetworkConfig } from "@/lib/config/network";
+
+// Production gate: this demo x402-verify scratch route stays available in
+// dev/testnet but refuses on production mainnet so scanners cannot poke it.
+function demoRouteBlocked(): boolean {
+  if (process.env.NODE_ENV !== "production") return false;
+  try {
+    return getArcNetworkName() === "mainnet";
+  } catch {
+    return true;
+  }
+}
 
 export async function POST(req: NextRequest) {
+  if (demoRouteBlocked()) {
+    return NextResponse.json({ success: false, error: "Demo route disabled in production." }, { status: 404 });
+  }
   const sig = req.headers.get("payment-signature");
   console.log("Received signature:", sig);
   // Network + asset + facilitator flow from the authoritative network config

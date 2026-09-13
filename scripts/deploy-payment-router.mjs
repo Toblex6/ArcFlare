@@ -4,16 +4,44 @@ import { network } from "hardhat";
 // ArcFlarePaymentRouter deployment (Hardhat 3 + hardhat-ethers v4)
 //
 // Run:  npx hardhat run scripts/deploy-payment-router.mjs --network arc-testnet
+//       npx hardhat run scripts/deploy-payment-router.mjs --network arc-mainnet
+//         (mainnet: requires ROUTER_TOKEN_A + ROUTER_TOKEN_B — never inherits
+//         testnet values; see below)
 //
 // Binds the canonical pair + canonical pool immutably; the constructor itself
 // cross-checks pool.tokenA()/tokenB() against the pair and reverts on mismatch.
-//   USDC 0x3600000000000000000000000000000000000000 (6 decimals)
-//   EURC 0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a (6 decimals)
+//   testnet defaults: USDC 0x3600000000000000000000000000000000000000 (6 decimals)
+//                     EURC 0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a (6 decimals)
 //   POOL from SWAP_POOL_CONTRACT_ADDRESS
+//   mainnet: NO addresses are known in this repo — set BOTH token env vars
+//     explicitly from official Arc/Circle mainnet sources. NEVER copy testnet
+//     values. The script refuses to deploy unless both are valid 0x addresses.
 // ---------------------------------------------------------------------------
 
-const USDC = "0x3600000000000000000000000000000000000000";
-const EURC = "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a";
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+function resolveRouterToken(envName, testnetDefault, label) {
+  const raw = (process.env[envName] ?? "").trim();
+  // Explicit value always wins (both networks).
+  if (raw) {
+    if (!ADDRESS_RE.test(raw)) throw new Error(`${envName} is not a valid 0x address: ${raw}`);
+    return raw;
+  }
+  // No override: testnet keeps its verified default; a mainnet deploy FAILS
+  // CLOSED instead of silently binding the testnet pair on mainnet.
+  const net = (process.env.ARC_NETWORK ?? "").trim().toLowerCase();
+  if (net === "mainnet") {
+    throw new Error(
+      `${envName} is required for a mainnet deployment — no mainnet token addresses are published in this repo. ` +
+        `Set ${envName} explicitly (and ROUTER_TOKEN_B) from official mainnet sources; never copy testnet values.`
+    );
+  }
+  console.log(`  ${envName} not set — using Arc Testnet ${label} default ${testnetDefault}`);
+  return testnetDefault;
+}
+
+const USDC = resolveRouterToken("ROUTER_TOKEN_A", "0x3600000000000000000000000000000000000000", "USDC");
+const EURC = resolveRouterToken("ROUTER_TOKEN_B", "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a", "EURC");
 
 const { ethers } = await network.getOrCreate();
 

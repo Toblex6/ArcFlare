@@ -9,7 +9,25 @@
 import { prisma } from '@/src/lib/prisma';
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY!);
+let cachedResend: Resend | null = null;
+
+/**
+ * Lazy Resend client — constructing `new Resend(undefined)` at import time
+ * throws and can crash server startup/routes that merely IMPORT this module
+ * even when no email will ever be sent. First email use initializes once;
+ * when RESEND_API_KEY is absent we log once and skip (in-app + webhook
+ * channels still work; notify() itself never throws).
+ */
+function getResend(): Resend | null {
+  if (cachedResend) return cachedResend;
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn('[notifications] RESEND_API_KEY is not set — email channel disabled (in-app + webhook unaffected).');
+    return null;
+  }
+  cachedResend = new Resend(apiKey);
+  return cachedResend;
+}
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'FlareHQ <onboarding@resend.dev>';
 
 // ── Event registry ──────────────────────────────────────────────────────
@@ -86,7 +104,9 @@ async function getOrCreatePreference(merchantId: string) {
 
 async function sendNotificationEmail(toEmail: string, title: string, message: string) {
     try {
-        await resend.emails.send({
+        const client = getResend();
+        if (!client) return; // email disabled — already warned once above
+        await client.emails.send({
             from: FROM_EMAIL,
             to: toEmail,
             subject: title,

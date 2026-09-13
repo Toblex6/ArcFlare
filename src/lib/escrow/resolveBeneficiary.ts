@@ -17,6 +17,8 @@
 
 import { prisma } from "@/lib/prisma";
 
+import { publicUrl } from "@/lib/publicOrigin";
+
 export type BeneficiaryKind = "merchant" | "consumer" | "agent" | "external";
 
 export interface ResolvedBeneficiary {
@@ -67,5 +69,5 @@ export async function resolveBeneficiary(address: string): Promise<ResolvedBenef
  * list but the link is still returned so a depositor can share it either way.
  */
 export function beneficiaryConfirmUrl(reference: string): string {
-  return `${process.env.NEXT_PUBLIC_BASE_URL || "https://flarehq.xyz"}/escrow-confirm/${reference}`;
+  return publicUrl(`/escrow-confirm/${reference}`);
 }

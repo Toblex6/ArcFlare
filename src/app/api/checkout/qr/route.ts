@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import QRCode from 'qrcode';
+import { publicUrl } from '@/lib/publicOrigin';
 
 export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
@@ -29,8 +30,9 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'Payment reference not found.' }, { status: 404 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz';
-    const checkoutUrl = `${baseUrl}/checkout/${reference}`;
+    // Canonical public origin (fail-closed in production) so the QR always
+    // encodes the exact same domain the copy-link text shows.
+    const checkoutUrl = publicUrl(`/checkout/${reference}`);
 
     const pngBuffer = await QRCode.toBuffer(checkoutUrl, {
         type: 'png',

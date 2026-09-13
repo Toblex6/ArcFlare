@@ -17,6 +17,7 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
 import { keccak256, toBytes, isAddress } from 'viem';
 import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
+import { publicUrl } from '@/lib/publicOrigin';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const escrowPayUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/escrow-pay/${reference}`;
+    const escrowPayUrl = publicUrl(`/escrow-pay/${reference}`);
 
     return NextResponse.json({
       success: true,
@@ -134,7 +135,7 @@ export async function GET(req: NextRequest) {
         status: e.status,
         depositorSCA: e.depositorSCA,
         beneficiarySCA: e.beneficiarySCA,
-        escrowPayUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/escrow-pay/${e.reference}`,
+        escrowPayUrl: publicUrl(`/escrow-pay/${e.reference}`),
         createdAt: e.createdAt,
       })),
     });

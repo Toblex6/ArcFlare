@@ -7,6 +7,8 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { tryJwtSecret } from '@/src/lib/auth/secrets';
 import { resolveCurrency, resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preference';
+import { getNetworkConfig } from '@/lib/config/network';
+import { publicUrl } from '@/lib/publicOrigin';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
         amount: parseFloat(amount),
         currency: token.symbol,
         tokenAddress: token.address,
-        chain: 'Arc Testnet v1.0',
+        chain: getNetworkConfig().name === 'mainnet' ? 'Arc v1.0' : 'Arc Testnet v1.0',
         senderEmail: 'pending@checkout',
         merchant: merchant.businessName,
         merchantId: merchant.id,
@@ -95,7 +97,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const checkoutUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/checkout/${reference}`;
+    const checkoutUrl = publicUrl(`/checkout/${reference}`);
 
     return NextResponse.json({
       success: true,
@@ -164,7 +166,7 @@ export async function GET(req: NextRequest) {
           displayStatus,
           isExpired,
           expiresAt: (p as any).expiresAt ?? null,
-          checkoutUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://flarehq.xyz'}/checkout/${p.reference}`,
+          checkoutUrl: publicUrl(`/checkout/${p.reference}`),
           createdAt: p.timestamp,
         };
       }),

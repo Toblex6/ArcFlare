@@ -5,7 +5,7 @@
 // balance for bridging FROM Arbitrum Sepolia etc. must be read from that
 // chain's wallet, not from the Arc balance the home dashboard shows.
 import { NextRequest, NextResponse } from "next/server";
-import { CCTP_SOURCE_CHAINS } from "@/lib/cctp-v2";
+import { getCctpSources } from "@/lib/cctp-v2";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { ensureWalletOnChain, getWalletBalance } from "@/src/lib/circle/client";
 import { prisma } from "@/src/lib/prisma";
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Missing fromChain." }, { status: 400 });
     }
 
-    const source = CCTP_SOURCE_CHAINS.find((c) => c.id === fromChain);
+    const source = getCctpSources().find((c) => c.id === fromChain);
     if (!source) {
       return NextResponse.json(
         { success: false, error: `Unsupported source chain: ${fromChain}` },

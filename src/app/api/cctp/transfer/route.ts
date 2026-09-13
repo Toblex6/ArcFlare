@@ -1,6 +1,6 @@
 // src/app/api/cctp/transfer/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { startBridge, CCTP_SOURCE_CHAINS, CCTP_DEST_CHAINS } from "@/lib/cctp-v2";
+import { startBridge, getCctpSources, getCctpDestinations } from "@/lib/cctp-v2";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { requireConsumerStepUp } from "@/lib/auth/consumerStepUp";
 import { ensureWalletOnChain } from "@/src/lib/circle/client";
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const source = CCTP_SOURCE_CHAINS.find((c) => c.id === fromChain);
+    const source = getCctpSources().find((c) => c.id === fromChain);
     if (!source) {
       return NextResponse.json(
         { success: false, error: `Unsupported source chain: ${fromChain}` },
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const destExists = CCTP_DEST_CHAINS.some((c) => c.id === toChain);
+    const destExists = getCctpDestinations().some((c) => c.id === toChain);
     if (!destExists) {
       return NextResponse.json(
         { success: false, error: `Unsupported destination chain: ${toChain}` },
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    sourceChains: CCTP_SOURCE_CHAINS,
-    destinationChains: CCTP_DEST_CHAINS,
+    sourceChains: getCctpSources(),
+    destinationChains: getCctpDestinations(),
   });
 }
