@@ -141,7 +141,22 @@ const PERMIT2_ABI = [
 
 const WUSDC_ABI = [
   { name: 'deposit', type: 'function', stateMutability: 'payable', inputs: [], outputs: [] },
+  {
+    name: 'withdraw',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'wad', type: 'uint256' }],
+    outputs: [],
+  },
 ] as const;
+
+/**
+ * Canonical WUSDC.withdraw(uint256) selector (WETH9-style unwrap, verified in
+ * the deployed bytecode alongside deposit()). Exported so the swap service
+ * and its tests decode/validate unwrap calldata against this one authority —
+ * no selector copies elsewhere.
+ */
+export const UNITFLOW_WUSDC_WITHDRAW_SELECTOR = '0x2e1a7d4d' as const;
 
 const UNIVERSAL_ROUTER_ABI = [
   {
@@ -545,6 +560,70 @@ export function assertWrapBeforeSwap(wrapBlockNumber: bigint, swapBlockNumber: b
   }
   if (wrapBlockNumber >= swapBlockNumber) {
     throw routingError(403, '[unitflow-v3] wrap ordering failed — wrap must be included before the swap.');
+  }
+}
+
+// ─── Pure: WUSDC -> native-USDC unwrap (Flow Swap EURC->USDC exit) ───────────
+// The UnitFlow V3 pools settle the USDC leg in WUSDC (18-dec). A Flow Swap
+// into USDC therefore credits WUSDC first; the user-facing settlement is
+// completed by a SEPARATE unsigned WUSDC.withdraw(wad) wallet transaction
+// that burns the caller's WUSDC 1:1 into native USDC (the same asset the
+// 0x3600… 6-dec ERC-20 view reports).
+//
+// Evidence basis (Arc Testnet, no invented functions):
+//   - WUSDC 0x911b…382Df reads name=Wrapped USDC / symbol=WUSDC / decimals=18
+//     live; its bytecode carries both the deposit() (0xd0e30db0) and the
+//     canonical WETH9 withdraw(uint256) (0x2e1a7d4d) selectors.
+//   - WETH9 semantics: withdraw pays native to msg.sender (no recipient
+//     parameter, no approval — the caller burns its own balance), so the
+//     unsigned tx below carries value 0 and is signed only by the user's own
+//     wallet for the exact verified swap proceeds.
+// Nothing here signs, broadcasts, or touches RPC/DB — pure construction and
+// decoding only; the swap service binds amounts/recipients server-side.
+
+/**
+ * Build the unsigned WUSDC.withdraw(wad) unwrap transaction for the exact
+ * verified swap proceeds (swap-leg units, 18-dec). Recipient is implicitly
+ * the signing wallet (WETH9 withdraw pays msg.sender) — there is no
+ * recipient parameter to get wrong.
+ */
+export function buildWusdcWithdrawTx(wusdc: string, amountSwap: bigint): UnitFlowUnsignedTx {
+  if (!isAddress(wusdc)) throw routingError(400, '[unitflow-v3] WUSDC address must be a 0x address.');
+  if (typeof amountSwap !== 'bigint' || amountSwap <= 0n) {
+    throw routingError(400, '[unitflow-v3] unwrap amount must be a positive bigint (swap-leg units).');
+  }
+  const data = encodeFunctionData({ abi: WUSDC_ABI, functionName: 'withdraw', args: [amountSwap] });
+  if (!data.toLowerCase().startsWith(UNITFLOW_WUSDC_WITHDRAW_SELECTOR)) {
+    throw routingError(500, '[unitflow-v3] withdraw calldata selector drift — refusing.');
+  }
+  return { to: wusdc, data, value: 0n, label: 'WUSDC.withdraw (receive native USDC)' };
+}
+
+/**
+ * Decode and strictly validate a WUSDC.withdraw(uint256) calldata payload.
+ * Returns the exact wad. Rejects non-hex, wrong-selector, and malformed
+ * payloads fail-closed — a foreign or truncated calldata can never satisfy
+ * an unwrap verification.
+ */
+export function decodeWusdcWithdraw(data: unknown): bigint {
+  if (typeof data !== 'string' || !/^0x[0-9a-fA-F]+$/.test(data)) {
+    throw routingError(400, '[unitflow-v3] malformed withdraw() calldata: not hex.');
+  }
+  const lower = data.toLowerCase();
+  if (!lower.startsWith(UNITFLOW_WUSDC_WITHDRAW_SELECTOR)) {
+    throw routingError(400, '[unitflow-v3] malformed withdraw() calldata: wrong selector.');
+  }
+  // selector (4 bytes) + single uint256 (32 bytes) => 74 chars incl. 0x.
+  if (data.length !== 74) {
+    throw routingError(400, '[unitflow-v3] malformed withdraw() calldata: bad length.');
+  }
+  try {
+    const decoded = decodeAbiParameters([{ type: 'uint256' }], `0x${data.slice(10)}` as `0x${string}`);
+    const wad = (decoded as unknown as [bigint])[0];
+    if (typeof wad !== 'bigint' || wad <= 0n) throw new Error('non-positive wad');
+    return wad;
+  } catch {
+    throw routingError(400, '[unitflow-v3] malformed withdraw() calldata: undecodable amount.');
   }
 }
 

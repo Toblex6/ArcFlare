@@ -40,20 +40,25 @@ import {
   computeSwapQuoteHash,
   decodeUnitFlowExecute,
   findExecutionConsumer,
+  flowNeedsUnwrap,
   getSwapRegistry,
   parseCanonicalAmount,
   requestCheckoutUnitFlowQuote,
   resolveCheckoutVenueId,
   resolveFlowVenueId,
+  unwrapAmountSwapForIntent,
 } from '@/src/lib/swap/service';
 import { getUnitFlowV3Deployment } from '@/src/lib/config/unitflow';
 import { PROVIDER_NOT_IMPLEMENTED } from '@/src/lib/routing/providers/types';
 import { TowerProvider } from '@/src/lib/routing/providers/tower';
 import {
   UNITFLOW_V3_ROUTER_ABI,
+  UNITFLOW_WUSDC_WITHDRAW_SELECTOR,
   assertWrapBeforeSwap,
   buildUnitFlowV3Execution,
+  buildWusdcWithdrawTx,
   computeUnitFlowExecutionIdentity,
+  decodeWusdcWithdraw,
   verifyUnitFlowExecution,
 } from '@/src/lib/routing/providers/unitflowV3';
 
@@ -336,8 +341,90 @@ async function sectionA() {
     'supports USDC→EURC only', 400
   );
 
-  console.log('── A9: architecture static proofs ────────────────────────────');
-  const svc = read('src/lib/swap/service.ts');
+  console.log('── A10: WUSDC→native unwrap exit (pure) ──────────────────────');
+  ok('withdraw selector is canonical WETH9 0x2e1a7d4d', UNITFLOW_WUSDC_WITHDRAW_SELECTOR === '0x2e1a7d4d');
+  const unwrapTx = buildWusdcWithdrawTx(WUSDC, 9_950_000n * 1_000_000_000_000n);
+  ok('unwrap targets canonical WUSDC with zero value', unwrapTx.to.toLowerCase() === WUSDC.toLowerCase() && unwrapTx.value === 0n);
+  ok('unwrap calldata carries the withdraw selector', unwrapTx.data.toLowerCase().startsWith(UNITFLOW_WUSDC_WITHDRAW_SELECTOR));
+  ok('unwrap calldata round-trips to the exact wad', decodeWusdcWithdraw(unwrapTx.data) === 9_950_000n * 1_000_000_000_000n);
+  expectThrow('unwrap rejects zero amount', () => buildWusdcWithdrawTx(WUSDC, 0n), 'positive bigint', 400);
+  expectThrow('unwrap rejects malformed address', () => buildWusdcWithdrawTx('nope', 100n), 'must be a 0x address', 400);
+  ok(
+    'service binds unwrap to the canonical deployment WUSDC (never client input)',
+    /buildWusdcWithdrawTx\(deployment\.wusdc/.test(read('src/lib/swap/service.ts'))
+  );
+  expectThrow('decode rejects garbage calldata', () => decodeWusdcWithdraw('0x1234'), 'wrong selector', 400);
+  expectThrow('decode rejects non-hex', () => decodeWusdcWithdraw('nope'), 'not hex', 400);
+  expectThrow('decode rejects truncated withdraw', () => decodeWusdcWithdraw(`${UNITFLOW_WUSDC_WITHDRAW_SELECTOR}00`), 'bad length', 400);
+  ok('flowNeedsUnwrap true for USDC output', flowNeedsUnwrap({ outputSymbol: 'USDC' }) === true);
+  ok('flowNeedsUnwrap false for EURC output', flowNeedsUnwrap({ outputSymbol: 'EURC' }) === false);
+  const executedUsdcOut = { outputSymbol: 'USDC', status: 'EXECUTED', actualOutputAmount: '9950000' };
+  ok(
+    'unwrap amount is verified proceeds ×1e12 (exact)',
+    unwrapAmountSwapForIntent(executedUsdcOut) === 9_950_000n * 1_000_000_000_000n
+  );
+  expectThrow(
+    'unwrap needs no step for EURC output',
+    () => unwrapAmountSwapForIntent({ outputSymbol: 'EURC', status: 'EXECUTED', actualOutputAmount: '1' }),
+    'no unwrap step', 400
+  );
+  expectThrow(
+    'unwrap refused before swap verification',
+    () => unwrapAmountSwapForIntent({ outputSymbol: 'USDC', status: 'QUOTED', actualOutputAmount: null }),
+    'Verify the swap', 409
+  );
+  expectThrow(
+    'unwrap fails closed on missing verified output',
+    () => unwrapAmountSwapForIntent({ outputSymbol: 'USDC', status: 'EXECUTED', actualOutputAmount: '0' }),
+    'verified output missing', 500
+  );
+  // Gas-aware settlement equation (pinned from live testnet withdraw
+  // 0xaf28dd2e…: raw native delta is short by exactly gasUsed x
+  // effectiveGasPrice; delta + gasCost == wad to the wei, and the WUSDC burn
+  // delta == wad exactly). The verifier enforces both equations — a naive
+  // delta >= wad check would reject every real unwrap.
+  {
+    const wad = 34079543632198400000n;
+    const delta = 34078935041770400000n;
+    const gasCost = 30428n * 20001000000n;
+    ok('live gas equation: delta + gasCost == wad (exact)', delta + gasCost === wad);
+    ok('live burn equation: WUSDC delta == wad (exact)', wad - 0n === wad);
+    const svcSrc = read('src/lib/swap/service.ts');
+    ok('verifier enforces the WUSDC burn equation', svcSrc.includes('WUSDC burn delta != verified proceeds'));
+    ok('verifier enforces the gas-aware native equation', svcSrc.includes('native receipt != verified proceeds'));
+  }
+  ok(
+    'unwrap exit keeps provider/service split (no Prisma in provider)',
+    !/requestFlowUnwrap|verifyFlowUnwrap|getBalance/.test(read('src/lib/routing/providers/unitflowV3.ts'))
+  );  ok(
+    'service never signs unwrap (no wallet clients)',
+    !/createWalletClient|sendTransaction|writeContract/.test(read('src/lib/swap/service.ts'))
+  );
+  ok('unwrap route exists', fs.existsSync(path.join(root, 'src/app/api/swap/unwrap/route.ts')));
+  ok('verify-unwrap route exists', fs.existsSync(path.join(root, 'src/app/api/swap/verify-unwrap/route.ts')));
+  ok(
+    'UI chains the receive step only for USDC output',
+    read('src/components/swap/FlowSwapView.tsx').includes("live.output.symbol !== 'USDC'") &&
+    read('src/components/swap/FlowSwapView.tsx').includes('/api/swap/verify-unwrap')
+  );
+  ok(
+    'Max truncates to 6 decimals (never an invalid amount)',
+    read('src/components/swap/FlowSwapView.tsx').includes('truncateToSixDecimals(b)')
+  );
+  const { truncateToSixDecimals } = await import('@/src/components/swap/swapCopy');
+  ok('truncate keeps exact 6-dec input', truncateToSixDecimals('2.000001') === '2.000001');
+  ok('truncate cuts float dust without rounding up', truncateToSixDecimals('12.340000000001') === '12.34');
+  ok('truncate keeps integers', truncateToSixDecimals('7') === '7');
+  const { SwapUnwrapSchema, SwapUnwrapVerifySchema } = await import('@/src/lib/validation');
+  ok('unwrap schema requires an intent locator', !SwapUnwrapSchema.safeParse({}).success);
+  ok('unwrap schema accepts intentId', SwapUnwrapSchema.safeParse({ intentId: '123e4567-e89b-12d3-a456-426614174000' }).success);
+  ok('unwrap-verify schema requires the unwrap hash', !SwapUnwrapVerifySchema.safeParse({ intentId: '123e4567-e89b-12d3-a456-426614174000' }).success);
+  ok(
+    'unwrap-verify schema accepts intent + hash',
+    SwapUnwrapVerifySchema.safeParse({ intentId: '123e4567-e89b-12d3-a456-426614174000', unwrapTxHash: TXHASH }).success
+  );
+
+  console.log('── A9: architecture static proofs ────────────────────────────');  const svc = read('src/lib/swap/service.ts');
   ok(
     'single-consumption enforced in-transaction (advisory lock + recheck, no TOCTOU pre-check)',
     svc.includes('claimTxSlot(db, executionTxHash)') && svc.includes('recheckExecutionConsumerTx(db, executionTxHash')

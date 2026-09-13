@@ -105,6 +105,25 @@ export const SwapVerifySchema = z
   })
   .refine((d) => d.intentId || d.quoteHash, 'intentId or quoteHash is required.');
 
+// ── /api/swap/unwrap + /api/swap/verify-unwrap (WUSDC→native-USDC exit) ─────
+// EURC→USDC Flow Swaps credit WUSDC first; the unwrap exit burns exactly the
+// verified proceeds into native USDC. Amounts are never client-supplied —
+// both routes resolve the exact wad from the EXECUTED intent server-side.
+export const SwapUnwrapSchema = z
+  .object({
+    intentId: z.string().uuid().optional(),
+    quoteHash: txHash.optional(),
+  })
+  .refine((d) => d.intentId || d.quoteHash, 'intentId or quoteHash is required.');
+
+export const SwapUnwrapVerifySchema = z
+  .object({
+    intentId: z.string().uuid().optional(),
+    quoteHash: txHash.optional(),
+    unwrapTxHash: txHash,
+  })
+  .refine((d) => d.intentId || d.quoteHash, 'intentId or quoteHash is required.');
+
 // ── /api/merchant/me (PATCH settlement preference) ───────────────────────────
 // Routing v1: merchants choose the default settlement token for FUTURE
 // invoices. Symbol, address, or both (both must agree). Persisted value is

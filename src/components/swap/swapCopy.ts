@@ -52,6 +52,20 @@ export function formatCountdown(totalSeconds: number): string {
   return `${m.toString().padStart(2, '0')}:${rest.toString().padStart(2, '0')}`;
 }
 
+/**
+ * Truncate a decimal string to at most 6 decimals (no rounding-up, so the
+ * result never exceeds the source balance). Used by Max: balance strings
+ * from the API are floats-as-strings and can carry more than 6 decimals,
+ * which would otherwise produce an amount the form itself rejects.
+ */
+export function truncateToSixDecimals(raw: string): string {
+  const s = raw.trim();
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(s);
+  if (!m) return s;
+  const frac = (m[2] ?? '').slice(0, 6).replace(/0+$/, '');
+  return frac === '' ? m[1]! : `${m[1]}.${frac}`;
+}
+
 /** Strict decimal string → canonical 6-dec base units, or null when invalid. */
 export function parseAmountToBaseUnits(raw: string): bigint | null {
   const s = raw.trim();
@@ -130,6 +144,9 @@ export function friendlySwapError(raw: string | null | undefined): {
   }
   if (lower.includes('wrap') && lower.includes('required')) {
     return { headline: 'This swap needs its preparation transaction first — it was not completed. Start the swap again.', raw: msg };
+  }
+  if (lower.includes('unwrap') || lower.includes('receive step')) {
+    return { headline: 'The final receive step could not be completed. Your swap output is safe in your wallet — try again.', raw: msg };
   }
   if (lower.includes('reverted on-chain')) {
     return { headline: 'The swap transaction reverted on-chain. No output was credited — check the explorer link for details.', raw: msg };

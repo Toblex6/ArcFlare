@@ -8,7 +8,15 @@
 //   enter amount → quote (POST /api/swap/quote) → confirm → sign each
 //   server-provided step (approvals, optional wrap, swap) → wait for mining
 //   → register (POST /api/swap/execute-intent) → verify on-chain
-//   (POST /api/swap/verify) → verified success.
+//   (POST /api/swap/verify) → [USDC-output only] receive step
+//   (POST /api/swap/unwrap → sign withdraw → POST /api/swap/verify-unwrap)
+//   → verified success.
+//
+// The UnitFlow pools settle the USDC leg in WUSDC, so a swap INTO USDC
+// credits WUSDC first; the receive step burns exactly the verified proceeds
+// into native USDC in the user's own wallet (unsigned server-built
+// WUSDC.withdraw, never server-signed). The user experiences EURC → USDC —
+// WUSDC is never presented as the result.
 //
 // Success is shown ONLY after server verification. The verified
 // actualOutput is authoritative — the pre-execution quote is never presented
@@ -24,7 +32,7 @@
 
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   useAccount,
   useChainId,
@@ -52,6 +60,7 @@ import {
   parseAmountToBaseUnits,
   shortAddress,
   shortHash,
+  truncateToSixDecimals,
   validateSwapAmount,
   type SwapSymbol,
 } from './swapCopy';
@@ -74,6 +83,8 @@ interface VerifiedSwap {
   outputSymbol: SwapSymbol;
   executionTxHash: string | null;
   wrapTxHash: string | null;
+  /** Present only for USDC-output swaps (the WUSDC→native exit). */
+  unwrapTxHash: string | null;
   alreadySettled: boolean;
 }
 
@@ -87,10 +98,13 @@ export function FlowSwapView({
   walletAddress,
   walletType,
   onSwitchWallet,
+  onSwapVerified,
 }: {
   walletAddress: string;
   walletType: string | null;
   onSwitchWallet?: () => void;
+  /** Called once per verified swap so the parent can refresh activity. */
+  onSwapVerified?: () => void;
 }) {
   const [inputSymbol, setInputSymbol] = useState<SwapSymbol>('USDC');
   const [outputSymbol, setOutputSymbol] = useState<SwapSymbol>('EURC');
@@ -103,8 +117,14 @@ export function FlowSwapView({
   const [verified, setVerified] = useState<VerifiedSwap | null>(null);
   const [minedExecHash, setMinedExecHash] = useState<string | null>(null);
   const [minedWrapHash, setMinedWrapHash] = useState<string | null>(null);
+  const [minedUnwrapHash, setMinedUnwrapHash] = useState<string | null>(null);
   const [lastIntentId, setLastIntentId] = useState<string | null>(null);
+  const [lastOutputSymbol, setLastOutputSymbol] = useState<SwapSymbol | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
+  // In-flight guard: Confirm is disabled once the flow leaves 'form', but two
+  // rapid clicks before re-render would both pass the render-time check and
+  // broadcast twice. The ref closes that gap (reset on every terminal path).
+  const confirmBusyRef = useRef(false);
 
   // ── Wallet plumbing (existing wagmi infrastructure, no second system) ──
   const { address: connectedAddress, isConnected, connector: activeConnector } = useAccount();
@@ -125,6 +145,28 @@ export function FlowSwapView({
   const balances = useSwapBalances(sessionLive);
   const quoteActive = sessionLive && flow === 'form';
   const quote = useSwapQuote(inputSymbol, outputSymbol, amount, quoteActive);
+
+  // Component-scope signing helpers so both the swap sequence (handleConfirm)
+  // and the chained receive step (registerAndVerify) sign exactly the
+  // server-provided transactions, wait for mining, and fail fast on revert.
+  const markStep = (key: string, patch: Partial<ExecStepState>) =>
+    setSteps((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+
+  const sendAndMine = async (to: string, data: `0x${string}`, value: string): Promise<string> => {
+    if (!publicClient) throw new Error('Swap service unavailable — reconnect your wallet and try again.');
+    const hash = await sendTransactionAsync({
+      to: to as Address,
+      data,
+      value: BigInt(value),
+      chainId: ARC_CHAIN_ID,
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    // Fail fast on a reverted step instead of broadcasting the remaining
+    // steps against a broken sequence — verification below stays the
+    // success gate either way.
+    if (receipt.status !== 'success') throw new Error('Transaction reverted on-chain.');
+    return hash;
+  };
 
   const amountError = validateSwapAmount(amount);
   const inputBaseUnits = useMemo(() => parseAmountToBaseUnits(amount), [amount]);
@@ -161,10 +203,13 @@ export function FlowSwapView({
 
   const maxAmount = () => {
     const b = balances.balances[inputSymbol];
-    if (b !== null) setAmount(b);
+    // Truncate (never round up): raw balance strings can carry more than 6
+    // decimals, which the amount field itself would reject.
+    if (b !== null) setAmount(truncateToSixDecimals(b));
   };
 
   const resetAfterSuccess = () => {
+    confirmBusyRef.current = false;
     setAmount('');
     setFlow('form');
     setSteps([]);
@@ -173,11 +218,14 @@ export function FlowSwapView({
     setVerified(null);
     setMinedExecHash(null);
     setMinedWrapHash(null);
+    setMinedUnwrapHash(null);
     setLastIntentId(null);
+    setLastOutputSymbol(null);
     balances.refresh();
   };
 
   const startOver = () => {
+    confirmBusyRef.current = false;
     setFlow('form');
     setSteps([]);
     setFlowError(null);
@@ -187,6 +235,7 @@ export function FlowSwapView({
 
   // ── Execution: sign each server-provided step, wait for mining ──
   const handleConfirm = async () => {
+    if (confirmBusyRef.current) return;
     const live = quote.quote;
     if (!live || quote.status !== 'quoted' || quote.secondsLeft <= 0) {
       const { headline, raw } = friendlySwapError('Swap quote expired before execution.');
@@ -214,7 +263,10 @@ export function FlowSwapView({
     setVerified(null);
     setMinedExecHash(null);
     setMinedWrapHash(null);
+    setMinedUnwrapHash(null);
     setLastIntentId(live.intentId);
+    setLastOutputSymbol(live.output.symbol);
+    confirmBusyRef.current = true;
     setFlow('executing');
 
     const initialSteps: ExecStepState[] = [
@@ -231,9 +283,6 @@ export function FlowSwapView({
     ];
     setSteps(initialSteps);
 
-    const markStep = (key: string, patch: Partial<ExecStepState>) =>
-      setSteps((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
-
     try {
       // Network safety first (existing ensureArcNetwork, never silent).
       if (chainId !== ARC_CHAIN_ID) {
@@ -248,17 +297,6 @@ export function FlowSwapView({
         if (!net.ok) throw new Error(net.message);
       }
       if (!publicClient) throw new Error('Swap service unavailable — reconnect your wallet and try again.');
-
-      const sendAndMine = async (to: string, data: `0x${string}`, value: string): Promise<string> => {
-        const hash = await sendTransactionAsync({
-          to: to as Address,
-          data,
-          value: BigInt(value),
-          chainId: ARC_CHAIN_ID,
-        });
-        await publicClient.waitForTransactionReceipt({ hash });
-        return hash;
-      };
 
       // Step(s): approvals exactly as the server issued them, in order.
       for (let i = 0; i < live.unsigned.approvals.length; i++) {
@@ -287,14 +325,20 @@ export function FlowSwapView({
 
       await registerAndVerify(live, wrapHash, execHash);
     } catch (err: unknown) {
+      confirmBusyRef.current = false;
       const raw = err instanceof Error ? err.message : String(err ?? '');
       const lower = raw.toLowerCase();
-      const headline = lower.includes("couldn't switch") ||
-        lower.includes('arc testnet') ||
-        lower.includes('cancelled') ||
-        lower.includes('network switch was cancelled')
-        ? raw
-        : friendlySwapWalletError(err);
+      // On-chain failures (revert / missing receipt) already have precise
+      // product copy — prefer it over the generic wallet-step message.
+      const onchain = lower.includes('revert') || lower.includes('not found on-chain') || lower.includes('receipt not found');
+      const headline = onchain
+        ? friendlySwapError(raw).headline
+        : lower.includes("couldn't switch") ||
+          lower.includes('arc testnet') ||
+          lower.includes('cancelled') ||
+          lower.includes('network switch was cancelled')
+          ? raw
+          : friendlySwapWalletError(err);
       setFlowError(headline);
       setFlowRawError(raw || null);
       setFlow('failed');
@@ -352,28 +396,159 @@ export function FlowSwapView({
       setFlow('failed');
       return;
     }
-    // Authoritative actuals come from verification — never from the quote.
+    const swapActualInput = String(verifyData.actualInput ?? live.input.amount);
+    const swapActualOutput = String(verifyData.actualOutput ?? '0');
+    const swapExecHash = verifyData.executionTxHash ?? execHash;
+    const swapWrapHash = verifyData.wrapTxHash ?? wrapHash;
+
+    // USDC-output swaps credit WUSDC first — the receive step burns exactly
+    // the verified proceeds into native USDC before any success is shown.
+    // EURC-output swaps settle directly and skip this step entirely.
+    if (live.output.symbol !== 'USDC') {
+      // Authoritative actuals come from verification — never from the quote.
+      setVerified({
+        actualInput: swapActualInput,
+        actualOutput: swapActualOutput,
+        inputSymbol: live.input.symbol,
+        outputSymbol: live.output.symbol,
+        executionTxHash: swapExecHash,
+        wrapTxHash: swapWrapHash,
+        unwrapTxHash: null,
+        alreadySettled: !!verifyData.alreadySettled,
+      });
+      setFlow('verified');
+      balances.refresh();
+      onSwapVerified?.();
+      return;
+    }
+
+    setSteps((prev) => [
+      ...prev,
+      { key: 'unwrap', label: 'Receive USDC', status: 'pending' as const, hash: null as string | null },
+    ]);
+    setFlow('executing');
+    const unwrapRes = await fetchWithTimeout(
+      '/api/swap/unwrap',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intentId: live.intentId }),
+      },
+      30000
+    );
+    const unwrapData = (await unwrapRes.json().catch(() => null)) as {
+      success?: boolean;
+      error?: string;
+      unwrapTx?: { to: string; data: `0x${string}`; value: string; label: string };
+      finalReceived?: string;
+    } | null;
+    if (!unwrapRes.ok || !unwrapData || unwrapData.success !== true || !unwrapData.unwrapTx) {
+      const { headline, raw } = friendlySwapError(unwrapData?.error ?? 'The receive step could not be prepared.');
+      setFlowError(headline);
+      setFlowRawError(raw);
+      setFlow('failed');
+      return;
+    }
+    markStep('unwrap', { status: 'active' });
+    const unwrapHash = await sendAndMine(unwrapData.unwrapTx.to, unwrapData.unwrapTx.data, unwrapData.unwrapTx.value);
+    markStep('unwrap', { status: 'done', hash: unwrapHash });
+    setMinedUnwrapHash(unwrapHash);
+    setFlow('verifying');
+
+    const unwrapVerifyRes = await fetchWithTimeout(
+      '/api/swap/verify-unwrap',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intentId: live.intentId, unwrapTxHash: unwrapHash }),
+      },
+      90000
+    );
+    const unwrapVerifyData = (await unwrapVerifyRes.json().catch(() => null)) as {
+      success?: boolean;
+      error?: string;
+      finalReceived?: string;
+      unwrapTxHash?: string;
+    } | null;
+    if (!unwrapVerifyRes.ok || !unwrapVerifyData || unwrapVerifyData.success !== true) {
+      const { headline, raw } = friendlySwapError(unwrapVerifyData?.error ?? 'The receive step could not be verified.');
+      setFlowError(headline);
+      setFlowRawError(raw);
+      setFlow('failed');
+      return;
+    }
+    // Final USDC received comes from unwrap verification — the native
+    // settlement proof — never from the quote.
     setVerified({
-      actualInput: String(verifyData.actualInput ?? live.input.amount),
-      actualOutput: String(verifyData.actualOutput ?? '0'),
+      actualInput: swapActualInput,
+      actualOutput: String(unwrapVerifyData.finalReceived ?? swapActualOutput),
       inputSymbol: live.input.symbol,
       outputSymbol: live.output.symbol,
-      executionTxHash: verifyData.executionTxHash ?? execHash,
-      wrapTxHash: verifyData.wrapTxHash ?? wrapHash,
+      executionTxHash: swapExecHash,
+      wrapTxHash: swapWrapHash,
+      unwrapTxHash: unwrapVerifyData.unwrapTxHash ?? unwrapHash,
       alreadySettled: !!verifyData.alreadySettled,
     });
     setFlow('verified');
     balances.refresh();
+    onSwapVerified?.();
   };
 
   // Manual "verify again" — resubmits evidence for the same mined
-  // transaction. Never rebroadcasts a money-moving transaction.
+  // transaction. Never rebroadcasts a money-moving transaction. When the
+  // receive step already mined, it re-verifies the unwrap (not the swap).
   const retryVerify = async () => {
     if (!lastIntentId || !minedExecHash) return;
     const live = quote.quote;
     setFlowError(null);
     setFlowRawError(null);
     setFlow('verifying');
+    if (minedUnwrapHash) {
+      try {
+        const unwrapVerifyRes = await fetchWithTimeout(
+          '/api/swap/verify-unwrap',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ intentId: lastIntentId, unwrapTxHash: minedUnwrapHash }),
+          },
+          90000
+        );
+        const unwrapVerifyData = (await unwrapVerifyRes.json().catch(() => null)) as {
+          success?: boolean;
+          error?: string;
+          finalReceived?: string;
+          unwrapTxHash?: string;
+        } | null;
+        if (!unwrapVerifyRes.ok || !unwrapVerifyData || unwrapVerifyData.success !== true) {
+          const { headline, raw } = friendlySwapError(unwrapVerifyData?.error);
+          setFlowError(headline);
+          setFlowRawError(raw);
+          setFlow('failed');
+          return;
+        }
+        setVerified({
+          actualInput: verified?.actualInput ?? '0',
+          actualOutput: String(unwrapVerifyData.finalReceived ?? verified?.actualOutput ?? '0'),
+          inputSymbol: live?.input.symbol ?? inputSymbol,
+          outputSymbol: (lastOutputSymbol ?? live?.output.symbol ?? outputSymbol) as SwapSymbol,
+          executionTxHash: minedExecHash,
+          wrapTxHash: minedWrapHash,
+          unwrapTxHash: unwrapVerifyData.unwrapTxHash ?? minedUnwrapHash,
+          alreadySettled: false,
+        });
+        setFlow('verified');
+        balances.refresh();
+        onSwapVerified?.();
+      } catch (err: unknown) {
+        const raw = err instanceof Error ? err.message : String(err ?? '');
+        const { headline, raw: mappedRaw } = friendlySwapError(raw);
+        setFlowError(headline);
+        setFlowRawError(mappedRaw);
+        setFlow('failed');
+      }
+      return;
+    }
     try {
       const verifyRes = await fetchWithTimeout(
         '/api/swap/verify',
@@ -411,10 +586,12 @@ export function FlowSwapView({
         outputSymbol: live?.output.symbol ?? outputSymbol,
         executionTxHash: verifyData.executionTxHash ?? minedExecHash,
         wrapTxHash: verifyData.wrapTxHash ?? minedWrapHash,
+        unwrapTxHash: null,
         alreadySettled: !!verifyData.alreadySettled,
       });
       setFlow('verified');
       balances.refresh();
+      onSwapVerified?.();
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : String(err ?? '');
       const { headline, raw: mappedRaw } = friendlySwapError(raw);
@@ -771,10 +948,18 @@ export function FlowSwapView({
                   </a>
                 </p>
               )}
+              {verified.unwrapTxHash && (
+                <p style={styles.hashLine}>
+                  Settlement transaction:{' '}
+                  <a href={explorerTxUrl(verified.unwrapTxHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                    {shortHash(verified.unwrapTxHash)} ↗
+                  </a>
+                </p>
+              )}
               <button style={styles.submitButton} onClick={resetAfterSuccess}>
                 Swap again
               </button>
-              <p style={styles.underText}>Recent Activity on Home does not list swaps yet — this verified result is your receipt.</p>
+              <p style={styles.underText}>This verified result is your receipt — you'll also find it in Recent Activity on Home.</p>
             </div>
           )}
         </>

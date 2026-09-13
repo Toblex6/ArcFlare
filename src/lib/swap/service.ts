@@ -74,7 +74,9 @@ import {
   UNITFLOW_V3_ROUTER_ABI,
   assertWrapBeforeSwap,
   buildUnitFlowV3Execution,
+  buildWusdcWithdrawTx,
   computeUnitFlowExecutionIdentity,
+  decodeWusdcWithdraw,
   verifyUnitFlowExecution,
   UnitFlowV3Provider,
   type UnitFlowExecutionEvidence,
@@ -900,6 +902,7 @@ export async function collectUnitFlowEvidence(args: {
     txTimestampSec,
     merchantBalanceBefore,
     merchantBalanceAfter,
+    allowSelfPayer: args.allowSelfPayer,
   };
   return { evidence, payer: tx.from, txValue: BigInt((tx as any).value ?? 0n), txTo: tx.to ?? '', swapBlockNumber: atBlock };
 }
@@ -1066,7 +1069,23 @@ export async function verifyFlowSwap(req: VerifyFlowRequest): Promise<{
   }
 
   const actualInput = canonicalFromSwapUnits(row.inputSymbol as SwapSymbol, verified.inputAmount).toString();
-  const actualOutput = canonicalFromSwapUnits(row.outputSymbol as SwapSymbol, verified.actualOutput).toString();
+  // USDC-output swaps settle in dust-inclusive WUSDC swap units: the Quoter's
+  // 18-dec output is essentially never 1e12-aligned, so an exact rescale is
+  // impossible (canonicalFromSwapUnits throws by design — alignment IS
+  // required on the input/wrap direction). Floor to canonical micro-USDC
+  // instead: dust < 1e-6 USDC stays in the wallet as WUSDC (still owned by
+  // the user, never claimed), and the unwrap exit burns exactly this floored
+  // amount, keeping every downstream exact equation intact.
+  let actualOutput: string;
+  if ((row.outputSymbol as SwapSymbol) === 'USDC') {
+    const floored = verified.actualOutput - (verified.actualOutput % UNITFLOW_6_TO_18_SCALE);
+    if (floored <= 0n) {
+      throw routingError(503, '[unitflow-v3] USDC-leg output below one micro-USDC — refusing.');
+    }
+    actualOutput = (floored / UNITFLOW_6_TO_18_SCALE).toString();
+  } else {
+    actualOutput = canonicalFromSwapUnits(row.outputSymbol as SwapSymbol, verified.actualOutput).toString();
+  }
 
   // Atomic claim: per-hash advisory lock + in-transaction cross-table recheck
   // (execution + wrap). First committer wins — even under a Flow-vs-checkout
@@ -1105,6 +1124,225 @@ export async function verifyFlowSwap(req: VerifyFlowRequest): Promise<{
   } catch (e: any) {
     throw executionConflict(e);
   }
+}
+
+// ─── Application: Flow Swap unwrap (WUSDC -> native USDC exit) ───────────────
+// The UnitFlow V3 pools settle the USDC leg in WUSDC, so a verified Flow Swap
+// into USDC credits WUSDC first. The user-facing settlement is completed by
+// ONE further unsigned wallet transaction — WUSDC.withdraw(wad) — that burns
+// the caller's WUSDC 1:1 into native USDC (the same asset the 0x3600… 6-dec
+// ERC-20 balance view reports, so post-unwrap balance refreshes just work).
+//
+// Rules (fail-closed, server-resolved, stateless):
+// - The unwrap amount is NEVER client-supplied: it is exactly the verified
+//   swap proceeds (EXECUTED intent actualOutputAmount, canonical 6-dec,
+//   rescaled ×1e12 to swap-leg units). Partial or foreign amounts fail.
+// - The unwrap tx is unsigned server output only (to = canonical WUSDC,
+//   value = 0, withdraw selector); the user's wallet signs and broadcasts.
+// - Verification is evidence-based: tx.to is the canonical WUSDC contract,
+//   tx.from is the session wallet, calldata decodes to withdraw(exact wad),
+//   the receipt succeeded, the unwrap is ordered after the swap execution
+//   (block + transactionIndex), and the native balance delta at fixed block
+//   tags covers the unwrapped amount. No DB write, no migration surface:
+//   the EXECUTED swap row already carries the authoritative actuals, and an
+//   unwrap burns the caller's own WUSDC — replaying it reverts on-chain
+//   (insufficient balance) instead of double-settling anything.
+// - Only USDC-output intents need this step. USDC inputs (wrap) and EURC
+//   outputs are untouched.
+
+/** True when a Flow intent settles into USDC and needs the unwrap exit step. */
+export function flowNeedsUnwrap(row: { outputSymbol: string }): boolean {
+  return String(row.outputSymbol ?? '').toUpperCase() === 'USDC';
+}
+
+/**
+ * Exact unwrap amount in swap-leg units for an EXECUTED USDC-output intent.
+ * Throws fail-closed unless the swap itself is already verified on-chain
+ * (actualOutputAmount is set only by verifyFlowSwap after proof).
+ */
+export function unwrapAmountSwapForIntent(row: any): bigint {
+  if (!flowNeedsUnwrap(row ?? {})) {
+    throw routingError(400, 'This swap settles directly — no unwrap step is needed.');
+  }
+  if (row.status !== 'EXECUTED') {
+    throw routingError(409, 'Verify the swap on-chain first — the unwrap amount is the verified output.');
+  }
+  let canonical: bigint;
+  try {
+    canonical = BigInt(String(row.actualOutputAmount ?? ''));
+  } catch {
+    throw routingError(500, '[unitflow-v3] verified output missing — refusing to build unwrap.');
+  }
+  if (canonical <= 0n) {
+    throw routingError(500, '[unitflow-v3] verified output missing — refusing to build unwrap.');
+  }
+  return canonical * UNITFLOW_6_TO_18_SCALE;
+}
+
+export interface RequestFlowUnwrapRequest extends IntentLocator {
+  ownerWallet: string;
+}
+
+/**
+ * Build the unsigned WUSDC.withdraw unwrap transaction for a verified
+ * USDC-output swap. Server-resolved amount/recipient; nothing is signed.
+ */
+export async function requestFlowUnwrap(req: RequestFlowUnwrapRequest): Promise<{
+  intentId: string;
+  unwrapTx: UnsignedTxJson;
+  /** Exact withdraw wad, swap-leg units (18-dec). */
+  amountSwap: string;
+  /** Expected final native USDC credit, canonical 6-dec units. */
+  finalReceived: string;
+}> {
+  const ownerWallet = assertAddress('ownerWallet', req.ownerWallet);
+  const row = await loadFlowIntent(ownerWallet, req);
+  const deployment = getUnitFlowV3Deployment();
+  if (deployment.name !== row.deploymentName || deployment.wusdc.toLowerCase() !== String(row.tokenOutSwap ?? '').toLowerCase()) {
+    throw routingError(503, '[unitflow-v3] deployment drift — stored binding does not match the atomic family. Refusing.');
+  }
+  const amountSwap = unwrapAmountSwapForIntent(row);
+  const tx = buildWusdcWithdrawTx(deployment.wusdc, amountSwap);
+  return {
+    intentId: row.id,
+    unwrapTx: txJson(tx),
+    amountSwap: amountSwap.toString(),
+    finalReceived: String(row.actualOutputAmount),
+  };
+}
+
+export interface VerifyFlowUnwrapRequest extends IntentLocator {
+  ownerWallet: string;
+  unwrapTxHash: string;
+  rpcUrl?: string;
+}
+
+/**
+ * Prove the unwrap on-chain: exact-withdraw calldata from the session wallet
+ * to the canonical WUSDC contract, mined successfully after the swap, with
+ * the native USDC balance delta covering the verified proceeds. Stateless —
+ * returns the final received USDC (canonical units) without writing.
+ */
+export async function verifyFlowUnwrap(req: VerifyFlowUnwrapRequest): Promise<{
+  intentId: string;
+  payer: string;
+  finalReceived: string;
+  unwrapTxHash: string;
+}> {
+  const ownerWallet = assertAddress('ownerWallet', req.ownerWallet);
+  const unwrapTxHash = assertTxHash('unwrapTxHash', req.unwrapTxHash);
+  const row = await loadFlowIntent(ownerWallet, req);
+
+  const deployment = getUnitFlowV3Deployment();
+  if (deployment.name !== row.deploymentName || deployment.wusdc.toLowerCase() !== String(row.tokenOutSwap ?? '').toLowerCase()) {
+    throw routingError(503, '[unitflow-v3] deployment drift — stored binding does not match the atomic family. Refusing.');
+  }
+  const expectedSwap = unwrapAmountSwapForIntent(row);
+
+  const rpcUrl = (req.rpcUrl ?? '').trim() || getNetworkConfig().primaryRpc;
+  const client = getRoutingPublicClient(rpcUrl);
+
+  const tx = await readWithRetry('unwrap tx', () =>
+    client.getTransaction({ hash: unwrapTxHash as `0x${string}` })
+  ).catch(() => null);
+  if (!tx) throw routingError(404, 'Unwrap transaction not found on-chain.');
+  const receipt = await readWithRetry('unwrap receipt', () =>
+    client.getTransactionReceipt({ hash: unwrapTxHash as `0x${string}` })
+  ).catch(() => null);
+  if (!receipt) throw routingError(404, 'Unwrap transaction receipt not found on-chain.');
+  if (receipt.status !== 'success') {
+    throw routingError(400, 'Unwrap transaction reverted on-chain.');
+  }
+
+  // Linkage: canonical WUSDC destination, session-wallet sender, zero value
+  // (withdraw carries no native value — unlike the wrap deposit), exact wad.
+  const eq = (a: string, b: string) => a?.toLowerCase() === b?.toLowerCase();
+  if (!eq(tx.to ?? '', deployment.wusdc)) {
+    throw routingError(403, '[unitflow-v3] unwrap linkage failed — destination is not the canonical WUSDC contract.');
+  }
+  if (!eq(tx.from ?? '', ownerWallet)) {
+    throw routingError(403, 'Unwrap sender does not match the authenticated wallet — refusing.');
+  }
+  if (BigInt((tx as any).value ?? 0n) !== 0n) {
+    throw routingError(403, '[unitflow-v3] unwrap linkage failed — withdraw must carry zero native value.');
+  }
+  const wad = decodeWusdcWithdraw(tx.input);
+  if (wad !== expectedSwap) {
+    throw routingError(403, '[unitflow-v3] unwrap amount != verified swap proceeds — refusing.');
+  }
+
+  // Ordering: the unwrap must settle after the swap execution (same-block
+  // unwrap is ordered by transactionIndex — no false rejection).
+  const swapReceipt = await readWithRetry('swap receipt for unwrap ordering', () =>
+    client.getTransactionReceipt({ hash: String(row.executionTxHash) as `0x${string}` })
+  ).catch(() => null);
+  if (!swapReceipt) throw routingError(404, 'Swap execution receipt not found on-chain.');
+  const unwrapBlock = receipt.blockNumber;
+  const swapBlock = swapReceipt.blockNumber;
+  const ordered =
+    unwrapBlock > swapBlock ||
+    (unwrapBlock === swapBlock && receipt.transactionIndex > swapReceipt.transactionIndex);
+  if (!ordered) {
+    throw routingError(403, '[unitflow-v3] unwrap ordering failed — unwrap must settle after the swap.');
+  }
+
+  // Settlement proof (gas-aware, exact equations at fixed block tags).
+  // Gas is paid in the SAME native asset the withdraw credits, so the raw
+  // native delta is short by exactly gasUsed x effectiveGasPrice (verified
+  // live on a main-history withdraw: delta + gasCost == wad to the wei).
+  // Both equations must hold:
+  //   (a) WUSDC.balanceOf(owner) decreases by exactly the wad (burn proof —
+  //       gas-free, since gas is native and WUSDC is a separate token);
+  //   (b) native delta + actual gas cost equals the wad exactly (receipt
+  //       proof — the user net-received the verified proceeds).
+  // Together with the calldata/linkage/ordering checks above, an arbitrary
+  // native credit or a foreign withdraw can never satisfy this.
+  const owner = assertAddress('ownerWallet', ownerWallet) as `0x${string}`;
+  const beforeBlock = unwrapBlock > 0n ? unwrapBlock - 1n : unwrapBlock;
+  const wusdc = deployment.wusdc as `0x${string}`;
+  const wusdcBefore = (await readWithRetry('WUSDC balance before unwrap', () =>
+    client.readContract({
+      address: wusdc,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [owner],
+      blockNumber: beforeBlock,
+    })
+  )) as bigint;
+  const wusdcAfter = (await readWithRetry('WUSDC balance after unwrap', () =>
+    client.readContract({
+      address: wusdc,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [owner],
+      blockNumber: unwrapBlock,
+    })
+  )) as bigint;
+  if (wusdcBefore < wusdcAfter || wusdcBefore - wusdcAfter !== expectedSwap) {
+    throw routingError(403, '[unitflow-v3] unwrap settlement not proven — WUSDC burn delta != verified proceeds.');
+  }
+  const nativeBefore = (await readWithRetry('native balance before unwrap', () =>
+    client.getBalance({ address: owner, blockNumber: beforeBlock })
+  )) as bigint;
+  const nativeAfter = (await readWithRetry('native balance after unwrap', () =>
+    client.getBalance({ address: owner, blockNumber: unwrapBlock })
+  )) as bigint;
+  const gasPriceRaw = (receipt as any).effectiveGasPrice ?? (tx as any).gasPrice ?? (tx as any).maxFeePerGas;
+  let gasPrice: bigint | null = null;
+  try {
+    gasPrice = BigInt(gasPriceRaw);
+  } catch {
+    gasPrice = null;
+  }
+  if (gasPrice === null || gasPrice < 0n) {
+    throw routingError(503, '[unitflow-v3] unwrap settlement not provable — gas price unavailable.');
+  }
+  const gasCost = BigInt(receipt.gasUsed) * gasPrice;
+  if (nativeAfter < nativeBefore || nativeAfter - nativeBefore + gasCost !== expectedSwap) {
+    throw routingError(403, '[unitflow-v3] unwrap settlement not proven — native receipt != verified proceeds.');
+  }
+
+  return { intentId: row.id, payer: tx.from, finalReceived: String(row.actualOutputAmount), unwrapTxHash };
 }
 
 // ─── Application: merchant-checkout UnitFlow branch ──────────────────────────

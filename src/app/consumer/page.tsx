@@ -84,6 +84,13 @@ interface ActivityItem {
   expiresAt?: string | null;
   timestamp: string;
   explorerUrl?: string | null;
+  // Flow Swap rows (kind === "swap"): verified self-custody conversions.
+  // Rendered with input→output amounts; PaymentLog rows never carry kind.
+  kind?: string;
+  inputSymbol?: string;
+  outputSymbol?: string;
+  inputAmountDisplay?: string;
+  outputAmountDisplay?: string;
 }
 
 export default function ConsumerApp() {
@@ -288,6 +295,21 @@ export default function ConsumerApp() {
       })
       .catch(console.error);
   }, [walletAddress]);
+
+  // ── Refresh Recent Activity whenever the user comes back to Home ──
+  // (a Flow Swap verified in the Swap view lands here without a reload).
+  const refreshActivity = () => {
+    fetch("/api/consumer/activity")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setActivity(data.activity || []);
+      })
+      .catch(console.error);
+  };
+  useEffect(() => {
+    if (view === "home" && walletAddress) refreshActivity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, walletAddress]);
 
   // ── Refresh the home balance whenever the user comes back to Home ──
   useEffect(() => {
@@ -1456,6 +1478,26 @@ export default function ConsumerApp() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {activity.map((a) => (
+                    a.kind === "swap" ? (
+                    <div key={a.reference} style={styles.activityRow}>
+                      <div>
+                        <p style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 600 }}>
+                          Swapped {a.inputAmountDisplay} {a.inputSymbol} → {a.outputAmountDisplay} {a.outputSymbol}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 11, color: "#3F7A57" }}>
+                          {new Date(a.timestamp).toLocaleString()} · <span style={{ fontWeight: 700, color: "#3F7A57" }}>SWAP COMPLETE</span>
+                        </p>
+                        {a.explorerUrl ? (
+                          <a href={a.explorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>
+                            View on ArcScan
+                          </a>
+                        ) : null}
+                      </div>
+                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "#3F7A57" }}>
+                        +{a.outputAmountDisplay} {a.outputSymbol}
+                      </p>
+                    </div>
+                    ) : (
                     <div key={a.reference} style={styles.activityRow}>
                       <div>
                         <p style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 600 }}>
@@ -1479,6 +1521,7 @@ export default function ConsumerApp() {
                         {a.direction === "out" ? "-" : "+"}{a.amount.toFixed(2)} {a.currency || a.token?.symbol || "USDC"}
                       </p>
                     </div>
+                    )
                   ))}
                 </div>
               )}
@@ -1842,6 +1885,7 @@ export default function ConsumerApp() {
             walletAddress={walletAddress}
             walletType={walletType}
             onSwitchWallet={disconnectWallet}
+            onSwapVerified={refreshActivity}
           />
         )}
 
