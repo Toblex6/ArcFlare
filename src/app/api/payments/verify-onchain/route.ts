@@ -18,6 +18,7 @@ import { transferUsdc } from '@/src/lib/circle/transfers';
 import { getRoutingConfig, readWithRetry } from '@/src/lib/routing/canonical';
 import { checkRoutedExecution, findRoutedEvent } from '@/src/lib/routing/verifier';
 import { getNetworkConfig } from "@/lib/config/network";
+import { claimTxSlot, recheckExecutionConsumerTx, executionConflict } from '@/src/lib/swap/service';
 
 const publicClient = createPublicClient({
     chain: arcTestnet,
@@ -290,23 +291,41 @@ export async function POST(req: NextRequest) {
         // UnitFlow conversions are already persisted atomically inside the
         // shared swap service (conversion EXECUTED + payment SUCCESS) —
         // reuse that row so the webhook + fee tail below sees one update.
-        const updated =
-            unitFlowSettled
-                ? unitFlowSettled.payment
-                : routedConversion && routedCheck
-                  ? await prisma.$transaction(async (db: any) => {
-                        await db.paymentConversion.update({
-                            where: { id: routedConversion.id },
-                            data: {
-                                status: 'EXECUTED',
-                                executionTxHash: txHash,
-                                actualInputAmount: routedCheck.actualInput,
-                                actualOutputAmount: routedCheck.actualOutput,
-                            },
-                        });
-                        return db.paymentLog.update({ where: { reference }, data: successData });
-                    })
-                  : await prisma.paymentLog.update({ where: { reference }, data: successData });
+        // Canonical routed conversions are atomically protected inside the
+        // transaction below: claimTxSlot + in-transaction cross-table recheck
+        // serialize concurrent claimants for the same execution tx hash,
+        // and same-record idempotent resume is preserved.
+        let updated: any;
+        if (unitFlowSettled) {
+            updated = unitFlowSettled.payment;
+        } else if (routedConversion && routedCheck) {
+            try {
+                updated = await prisma.$transaction(async (db: any) => {
+                    await claimTxSlot(db, txHash);
+                    await recheckExecutionConsumerTx(db, txHash, { kind: 'checkout', paymentLogId: payment.id });
+                    const live = await db.paymentConversion.findUnique({ where: { id: routedConversion.id } });
+                    if (live?.status === 'EXECUTED') {
+                        if (live.executionTxHash && live.executionTxHash.toLowerCase() === txHash.toLowerCase()) {
+                            return db.paymentLog.findUnique({ where: { reference } });
+                        }
+                    }
+                    await db.paymentConversion.update({
+                        where: { id: routedConversion.id },
+                        data: {
+                            status: 'EXECUTED',
+                            executionTxHash: txHash,
+                            actualInputAmount: routedCheck.actualInput,
+                            actualOutputAmount: routedCheck.actualOutput,
+                        },
+                    });
+                    return db.paymentLog.update({ where: { reference }, data: successData });
+                });
+            } catch (e: any) {
+                throw executionConflict(e);
+            }
+        } else {
+            updated = await prisma.paymentLog.update({ where: { reference }, data: successData });
+        }
 
         if (updated.webhookUrl) {
             fetch(updated.webhookUrl, {

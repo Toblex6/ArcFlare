@@ -676,7 +676,7 @@ export async function claimTxSlot(db: any, txHash: string): Promise<void> {
 }
 
 /** In-transaction cross-table single-consumption recheck (no TOCTOU gap). */
-async function recheckExecutionConsumerTx(
+export async function recheckExecutionConsumerTx(
   db: any,
   txHash: string,
   self: { kind: 'flow'; id: string } | { kind: 'checkout'; paymentLogId: string }
@@ -709,7 +709,7 @@ async function recheckWrapConsumerTx(
 }
 
 /** Map a lost uniqueness race at commit time to a deterministic 409. */
-function executionConflict(e: any): Error & { status: number } {
+export function executionConflict(e: any): Error & { status: number } {
   if (e?.code === 'P2002') {
     return routingError(409, 'This transaction was already consumed by another swap or payment.');
   }
