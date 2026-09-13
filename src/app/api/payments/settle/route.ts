@@ -483,6 +483,16 @@ async function mergedSettleHandler(request: NextRequest) {
           `Wallet ${payerSCA} is an external (non-custodial) wallet — ArcFlare does not hold its private key and cannot sign transactions on its behalf. This wallet must sign and submit the transfer itself.`
         );
       }
+      if (consumerAccount.walletType === 'USER_CONTROLLED') {
+        // Circle user-controlled wallet (Google / email OTP). The user —
+        // not the server — holds the signing key via Circle's Web SDK, so
+        // the developer-controlled Circle client cannot sign for it. It
+        // must sign and submit the transfer itself through Circle; the
+        // server must never fall back to debiting a shared wallet instead.
+        throw new Error(
+          `Wallet ${payerSCA} is a Circle user-controlled wallet (Google/email login) — only its owner can sign for it through Circle. ArcFlare cannot debit it server-side.`
+        );
+      }
       if (consumerAccount.circleWalletId) {
         payerWalletId = consumerAccount.circleWalletId;
       }

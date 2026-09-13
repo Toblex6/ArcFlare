@@ -109,6 +109,16 @@ async function createScheduledHandler(request: Request) {
         );
       }
 
+      if (consumerAccount?.walletType === 'USER_CONTROLLED') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Wallet ${payerSCA} is a Circle user-controlled wallet (Google/email login) — only its owner can sign for it through Circle, so it can't be debited automatically on a schedule. Recurring "Save" currently only works with a Flow-created (Circle-custodied) wallet.`,
+          },
+          { status: 400 }
+        );
+      }
+
       resolvedPayerWalletId = consumerAccount?.circleWalletId || undefined;
     } else if (controlsPayer.type === 'merchant') {
       const merchant = await (prisma as any).merchant.findUnique({

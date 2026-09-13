@@ -12,6 +12,7 @@
     "@circle-fin/adapter-circle-wallets": "1.4.3",
     "@circle-fin/bridge-kit": "^1.12.1",
     "@circle-fin/developer-controlled-wallets": "^10.8.0",
+    "@circle-fin/w3s-pw-web-sdk": "^1.1.11",
     "@circle-fin/x402-batching": "^3.2.0",
     "@openzeppelin/contracts": "^5.0.2",
     "@prisma/client": "^6.13.0",

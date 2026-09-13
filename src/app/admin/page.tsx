@@ -23,6 +23,7 @@ interface AdminStats {
         merchantExternal: number;
         consumerCircle: number;
         consumerExternal: number;
+        consumerUserControlled?: number;
     };
     newMerchantsPerDay: { date: string; count: number }[];
     newConsumersPerDay: { date: string; count: number }[];
@@ -175,6 +176,7 @@ export default function AdminDashboard() {
                             { label: 'Merchant — External', value: stats.walletBreakdown.merchantExternal },
                             { label: 'Consumer — Circle', value: stats.walletBreakdown.consumerCircle },
                             { label: 'Consumer — External', value: stats.walletBreakdown.consumerExternal },
+                            { label: 'Consumer — FlareHQ (Google/email)', value: stats.walletBreakdown.consumerUserControlled ?? 0 },
                         ].map((w) => (
                             <div key={w.label} style={{ background: '#251c12', border: '1px solid #3d2e1a', borderRadius: 12, padding: 14 }}>
                                 <p style={{ fontSize: 10, color: '#6b5a45', margin: '0 0 4px' }}>{w.label}</p>

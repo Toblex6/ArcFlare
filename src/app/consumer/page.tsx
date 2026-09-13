@@ -21,6 +21,7 @@ import {
   getAppropriateAction,
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
+import { CircleUserWallet } from "@/components/consumer/CircleUserWallet";
 import { explorerTxUrl } from "@/lib/config/network";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
 
@@ -206,12 +207,21 @@ export default function ConsumerApp() {
   const [pinBusy, setPinBusy] = useState(false);
   const [pinMsg, setPinMsg] = useState<string | null>(null);
   // Onboarding recovery (second device): email → code → session.
+  // (Legacy recovery for instant/Flow-created wallets. Circle
+  // user-controlled wallets recover through the same Google/email identity
+  // in the FlareHQ-wallet panel above — no code needed.)
   const [showRecover, setShowRecover] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState("");
   const [recoverCode, setRecoverCode] = useState("");
   const [recoverStep, setRecoverStep] = useState<"enter" | "code">("enter");
   const [recoverBusy, setRecoverBusy] = useState(false);
   const [recoverMsg, setRecoverMsg] = useState<string | null>(null);
+  // ── Circle user-controlled wallet onboarding (Google / email OTP) ──
+  // Primary FlareHQ-wallet path: Circle's Web SDK authenticates the user and
+  // creates a wallet they own; the session link lands in this app normally.
+  // The legacy instant (developer-controlled) creation stays for backwards
+  // compatibility; external-wallet connect is unchanged.
+  const [circleOpen, setCircleOpen] = useState<null | "google" | "email">(null);
 
   // ── Savings plans (scheduled self-transfers) ──
   const [savingsPlans, setSavingsPlans] = useState<SavingsPlan[]>([]);
@@ -1180,26 +1190,67 @@ export default function ConsumerApp() {
           </div>
           <h1 style={styles.onboardingTitle}>Welcome to FlareHQ</h1>
           <p style={styles.onboardingSub}>
-            Connect an existing wallet, or create a free FlareHQ wallet for this browser. No signup required.
+            Create a free FlareHQ wallet with Google or email — you own it, secured by Circle — or connect a wallet you already have. No signup form.
           </p>
-          <button style={styles.primaryButton} disabled={creatingWallet || isConnecting} onClick={connectExisting}>
+          {/* ── Primary: Circle user-controlled FlareHQ wallet (Google/email).
+              Authenticates via Circle's Web SDK, creates/reuses the user's
+              own Circle wallet, then links the existing consumer session. */}
+          {!circleOpen ? (
+            <>
+              <button
+                style={styles.primaryButton}
+                disabled={creatingWallet || isConnecting}
+                onClick={() => { setCircleOpen("google"); setOnboardingError(null); }}
+              >
+                Continue with Google
+              </button>
+              <button
+                style={{ ...styles.secondaryButton, marginTop: 8 } as React.CSSProperties}
+                disabled={creatingWallet || isConnecting}
+                onClick={() => { setCircleOpen("email"); setOnboardingError(null); }}
+              >
+                Continue with email
+              </button>
+              <div style={styles.orDivider}><span>or</span></div>
+            </>
+          ) : (
+            <CircleUserWallet
+              initialMode={circleOpen}
+              onClose={() => setCircleOpen(null)}
+              onLinked={(account) => {
+                setWalletAddress(account.walletAddress);
+                setWalletType(account.walletType ?? "USER_CONTROLLED");
+                setCircleOpen(null);
+                // Faucet banner only for genuinely new wallets — returning
+                // users land straight in the app.
+                setJustCreatedWallet(account.isNew);
+                setView("home");
+              }}
+            />
+          )}
+          <button style={styles.secondaryButton} disabled={creatingWallet || isConnecting || !!circleOpen} onClick={connectExisting}>
             {isConnecting ? "Connecting..." : "Connect a wallet"}
           </button>
           <div style={styles.orDivider}><span>or</span></div>
+          {/* ── Legacy instant wallet (developer-controlled, zero-email).
+              Kept for backwards compatibility — Circle Google/email above is
+              the primary FlareHQ-wallet path for new users. */}
           <button style={styles.secondaryButton} disabled={creatingWallet} onClick={createNewWallet}>
             {creatingWallet ? "Setting things up..." : "Create a FlareHQ wallet"}
           </button>
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
 
-          {/* Second-device recovery (Stage 2 / B1): email + OTP → the same
-              consumer_token session the login flow sets. Zero-email creation
-              above is unchanged. */}
+          {/* Legacy second-device recovery (Stage 2 / B1): FlareHQ-sent email
+              OTP → the same consumer_token session the login flow sets.
+              Only for instant/legacy wallets with an attached recovery
+              email. Circle user-controlled wallets instead re-sign with
+              the same Google/email identity above — no code needed. */}
           <div style={styles.orDivider}><span>or</span></div>
           <button
             style={styles.secondaryButton}
             onClick={() => { setShowRecover((s) => !s); setRecoverMsg(null); setRecoverStep("enter"); }}
           >
-            Recover with email
+            Recover a legacy wallet with email
           </button>
           {showRecover && (
             <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>

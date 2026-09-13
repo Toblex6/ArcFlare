@@ -270,8 +270,22 @@ model WalletSignatureRequest {
 model ConsumerAccount {
   id               String   @id @default(uuid())
   walletAddress    String   @unique
-  walletType       String   @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
+  // Custody model for this row:
+  //   "CIRCLE"          — legacy developer-controlled Circle wallet (server
+  //                       signs via CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET).
+  //   "EXTERNAL"        — bring-your-own wallet (browser/wagmi signs; the
+  //                       server never signs and never sees keys).
+  //   "USER_CONTROLLED" — Circle user-controlled wallet (Google / email OTP
+  //                       via the Circle Web SDK; the user signs Circle
+  //                       challenges — the server never holds key material and
+  //                       cannot sign on this wallet's behalf).
+  walletType       String   @default("CIRCLE") // "CIRCLE" | "EXTERNAL" | "USER_CONTROLLED"
   circleWalletId   String?
+  // Circle user-controlled user id (the `userId` Circle returns alongside
+  // the userToken after Google/email authentication). @unique so a returning
+  // Google/email identity resolves to its existing row instead of creating
+  // a duplicate. Null for legacy CIRCLE/EXTERNAL rows.
+  circleUserId     String?  @unique
   walletSetId      String? // needed to provision this same SCA address on additional chains (e.g. for bridging)
   email            String?  @unique // optional — recovery/notifications only, never required
   emailVerifiedAt  DateTime? // set when the address is proven via OTP (attach/change/recover); recovery requires non-null

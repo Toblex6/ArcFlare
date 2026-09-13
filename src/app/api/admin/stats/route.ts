@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
         const merchantWalletsExternal = merchants.filter((m: any) => m.walletProvider !== 'CIRCLE').length;
         const consumerWalletsCircle = consumers.filter((c: any) => c.walletType === 'CIRCLE').length;
         const consumerWalletsExternal = consumers.filter((c: any) => c.walletType === 'EXTERNAL').length;
+        const consumerWalletsUserControlled = consumers.filter((c: any) => c.walletType === 'USER_CONTROLLED').length;
 
         return NextResponse.json({
             success: true,
@@ -76,6 +77,7 @@ export async function GET(req: NextRequest) {
                     merchantExternal: merchantWalletsExternal,
                     consumerCircle: consumerWalletsCircle,
                     consumerExternal: consumerWalletsExternal,
+                    consumerUserControlled: consumerWalletsUserControlled,
                 },
                 newMerchantsPerDay: bucketByDay(
                     merchants.map((m: any) => new Date(m.createdAt)),
