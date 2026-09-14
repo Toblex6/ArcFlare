@@ -20,7 +20,8 @@
 //   frontend: Google performLogin + email verifyOtp + challenge execute +
 //     circleAuth link, memory-only credentials, cancel/failure paths.
 //   consumer page: Google/email primary, external connect preserved, legacy
-//     recovery demoted, legacy instant creation preserved.
+//     recovery demoted, redundant create-button removed (legacy instant
+//     creation preserved at the session API + bridge-upgrade flow only).
 //   swap: only EXTERNAL is wagmi-signable (USER_CONTROLLED gets the managed
 //     notice — no swap math touched).
 //   schema/migration/env/docs: circleUserId unique, additive migration,
@@ -122,7 +123,9 @@ ok("Google primary entry", consumerPage.includes("Continue with Google"), "missi
 ok("email primary entry", consumerPage.includes("Continue with email"), "missing");
 ok("Circle panel wired", consumerPage.includes("CircleUserWallet") && consumerPage.includes("circleOpen"), "not wired");
 ok("external connect preserved", consumerPage.includes("Connect a wallet") && consumerPage.includes("connectExisting"), "external flow changed");
-ok("legacy creation preserved", consumerPage.includes("Create a FlareHQ wallet") && consumerPage.includes("createNewWallet"), "legacy entry removed");
+ok("legacy creation API preserved (Path B, not a primary button)", sessionRoute.includes("createAccountWallet(`consumer_${Date.now()}`)"), "legacy creation changed");
+ok("redundant onboarding create-button removed", !consumerPage.includes("onClick={createNewWallet}"), "redundant button still present");
+ok("bridge-upgrade wallet creation preserved", consumerPage.includes("createFlareHQWallet"), "bridge flow changed");
   ok("legacy recovery removed from primary onboarding", !consumerPage.includes("Recover a legacy wallet with email"), "recovery still shown as primary option");
 ok("link lands in app", consumerPage.includes('setWalletType(account.walletType ?? "USER_CONTROLLED")'), "link not wired");
 ok("wallet switching untouched", consumerPage.includes("openWalletSwitch") && consumerPage.includes("completeWalletSwitch"), "switch flow changed");

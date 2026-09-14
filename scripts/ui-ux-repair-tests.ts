@@ -91,7 +91,8 @@ ok("reads connected account address", consumerSrc.includes("address: connectedAd
 ok("connector picker dedupes connectors", consumerSrc.includes("dedupeConnectors(connectors)"), "");
 ok("sign challenge binds connected address", consumerSrc.includes("account: address as Address"), "");
 ok("connect flow opens picker when nothing connected", consumerSrc.includes("setConnectPickerOpen(true)") && consumerSrc.includes("hasInjectedProvider()"), "");
-ok("create-wallet path preserved", consumerSrc.includes("Create a FlareHQ wallet") && consumerSrc.includes("createNewWallet"), "");
+ok("no redundant onboarding create-button", !consumerSrc.includes("onClick={createNewWallet}"), "redundant button present");
+ok("bridge-upgrade create-wallet path preserved", consumerSrc.includes("Create a FlareHQ wallet") && consumerSrc.includes("createFlareHQWallet"), "");
 
 // ── 5. Public marketplace stays public ──────────────────────────────────
 console.log("\n[5] Public marketplace remains public");

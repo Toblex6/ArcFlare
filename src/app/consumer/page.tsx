@@ -720,28 +720,6 @@ export default function ConsumerApp() {
     }
   };
 
-  const createNewWallet = async () => {
-    setCreatingWallet(true);
-    setOnboardingError(null);
-    try {
-      const res = await fetch("/api/consumer/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not create a wallet right now.");
-      setWalletAddress(data.account.walletAddress);
-      setWalletType(data.account.walletType ?? "CIRCLE");
-      setJustCreatedWallet(true);
-      setView("home");
-    } catch (e: any) {
-      setOnboardingError(friendlyWalletError(e));
-    } finally {
-      setCreatingWallet(false);
-    }
-  };
-
   // ── Bridge upgrade flow: give an external-wallet user a FlareHQ wallet ──
   // POST {} provisions a brand-new Circle-managed wallet and reissues the
   // session against it. The user's connected wallet still works for sending/
@@ -1242,13 +1220,11 @@ export default function ConsumerApp() {
           <button style={styles.secondaryButton} disabled={creatingWallet || isConnecting || !!circleOpen} onClick={connectExisting}>
             {isConnecting ? "Connecting..." : "Connect a wallet"}
           </button>
-          <div style={styles.orDivider}><span>or</span></div>
-          {/* ── Legacy instant wallet (developer-controlled, zero-email).
-              Kept for backwards compatibility — Circle Google/email above is
-              the primary FlareHQ-wallet path for new users. */}
-          <button style={styles.secondaryButton} disabled={creatingWallet} onClick={createNewWallet}>
-            {creatingWallet ? "Setting things up..." : "Create a FlareHQ wallet"}
-          </button>
+          {/* Legacy instant (developer-controlled) wallet creation stays
+              available via POST /api/consumer/session {} (Path B) for
+              backwards compatibility and the bridge-upgrade flow — it is
+              intentionally not a primary onboarding button. Onboarding offers
+              exactly: Google, email, Connect a wallet. */}
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
 
           {/* A4: connector picker — appears only when "Use this wallet" is
