@@ -16,6 +16,11 @@
 //   POST /v1/w3s/user/initialize     (X-User-Token)          -> challengeId for wallet creation
 //   GET  /v1/w3s/wallets              (X-User-Token)          -> authoritative wallet list for that Circle user
 //   POST /v1/w3s/users/token/refresh (X-User-Token)          -> fresh userToken before expiry
+//   POST /v1/w3s/user/transactions/contractExecution (X-User-Token) -> challengeId for a contract call
+//   POST /v1/w3s/user/wallets         (X-User-Token)          -> challengeId to provision the wallet on new chains
+//   GET  /v1/w3s/user/challenges/{id} (X-User-Token)         -> challenge status (browser executes it via the Web SDK)
+//   GET  /v1/w3s/transactions         (filters)               -> poll Circle-side tx state after execution
+//   GET  /v1/w3s/transactions/{id}                            -> single tx state + txHash
 //
 // The browser keeps the userToken/encryptionKey in memory only (never in
 // localStorage, never in a cookie). The FlareHQ consumer session
@@ -99,10 +104,20 @@ async function circleFetch<T>(args: {
   method: "GET" | "POST";
   path: string;
   body?: Record<string, unknown>;
+  query?: Record<string, string | undefined>;
   userToken?: string;
   label: string;
 }): Promise<T> {
-  const res = await fetch(`${args.config.baseUrl}${args.path}`, {
+  let url = `${args.config.baseUrl}${args.path}`;
+  if (args.query) {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(args.query)) {
+      if (v !== undefined && v !== "") params.set(k, v);
+    }
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
+  }
+  const res = await fetch(url, {
     method: args.method,
     headers: {
       "Content-Type": "application/json",
@@ -229,6 +244,212 @@ export function selectArcWallet(
     (w) => w.blockchain?.toUpperCase() === blockchain.toUpperCase()
   );
   return onArc ?? wallets[0];
+}
+
+// ── User-controlled contract execution → challengeId ────────────────────────
+// The browser executes the returned challengeId through the Web SDK
+// (setAuthentication -> execute). Circle requires contractAddress +
+// idempotencyKey; calldata goes in EITHER callData XOR
+// abiFunctionSignature+abiParameters — this module always passes explicit
+// callData (built by cctpChallenge.ts), never ABI shorthand. walletId pins
+// the challenge to the user's own wallet; blockchain scopes it to the
+// source chain. feeLevel/gasLimit are Circle gas controls — unrelated to
+// the CCTP maxFee inside the calldata.
+export interface UserContractExecutionRequest {
+  contractAddress: string;
+  callData: string;
+  blockchain: string;
+  walletId: string;
+  feeLevel?: "LOW" | "MEDIUM" | "HIGH";
+  gasLimit?: string;
+  refId?: string;
+}
+
+export async function createUserContractExecutionChallenge(
+  userToken: string,
+  req: UserContractExecutionRequest,
+  config: UserControlledConfig = getUserControlledConfig()
+): Promise<{ challengeId: string }> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(req.contractAddress)) {
+    throw circleError(400, "INVALID_CONTRACT_ADDRESS", "A valid contract address is required.");
+  }
+  if (!/^0x[0-9a-fA-F]+$/.test(req.callData) || req.callData.length < 10) {
+    throw circleError(400, "INVALID_CALLDATA", "Valid contract calldata (0x + selector) is required.");
+  }
+  if (!req.blockchain || !req.walletId) {
+    throw circleError(400, "INVALID_CHALLENGE_REQUEST", "blockchain and walletId are required.");
+  }
+  return circleFetch({
+    config,
+    method: "POST",
+    path: "/v1/w3s/user/transactions/contractExecution",
+    body: {
+      contractAddress: req.contractAddress,
+      callData: req.callData,
+      blockchain: req.blockchain,
+      walletId: req.walletId,
+      ...(req.feeLevel ? { feeLevel: req.feeLevel } : {}),
+      ...(req.gasLimit ? { gasLimit: req.gasLimit } : {}),
+      ...(req.refId ? { refId: req.refId } : {}),
+    },
+    userToken: assertUserToken(userToken),
+    label: "user contract execution",
+  });
+}
+
+// ── Provision the user wallet on additional chains → challengeId ────────────
+// User-controlled equivalent of ensureWalletOnChain — but unlike the dev
+// path it returns a challenge the BROWSER must execute, not a provisioned
+// wallet. The same SCA address is shared across chains; this just adds a
+// signable resource on each listed blockchain.
+export async function createUserWalletOnChainChallenge(
+  userToken: string,
+  blockchains: string[],
+  config: UserControlledConfig = getUserControlledConfig()
+): Promise<{ challengeId: string }> {
+  const cleaned = [...new Set((blockchains ?? []).map((b) => String(b ?? "").trim()).filter(Boolean))];
+  if (cleaned.length === 0) {
+    throw circleError(400, "INVALID_BLOCKCHAINS", "At least one blockchain is required.");
+  }
+  return circleFetch({
+    config,
+    method: "POST",
+    path: "/v1/w3s/user/wallets",
+    body: { blockchains: cleaned, accountType: "SCA" },
+    userToken: assertUserToken(userToken),
+    label: "user wallet on chain",
+  });
+}
+
+// ── Challenge status ────────────────────────────────────────────────────────
+// challenge.correlationIds carries the transaction id for
+// CONTRACT_EXECUTION/CREATE_TRANSACTION types. status is one of
+// PENDING/IN_PROGRESS/COMPLETE/FAILED/EXPIRED; failures carry
+// errorCode/errorMessage.
+export interface UserChallenge {
+  challengeId?: string;
+  status?: string;
+  type?: string;
+  correlationIds?: string[];
+  errorCode?: number | string;
+  errorMessage?: string;
+  [k: string]: unknown;
+}
+
+export async function getUserChallenge(
+  userToken: string,
+  challengeId: string,
+  config: UserControlledConfig = getUserControlledConfig()
+): Promise<{ challenge: UserChallenge }> {
+  if (!challengeId || typeof challengeId !== "string") {
+    throw circleError(400, "INVALID_CHALLENGE_ID", "A valid challengeId is required.");
+  }
+  return circleFetch({
+    config,
+    method: "GET",
+    path: `/v1/w3s/user/challenges/${encodeURIComponent(challengeId)}`,
+    userToken: assertUserToken(userToken),
+    label: "get challenge",
+  });
+}
+
+// ── Circle-side transaction state ───────────────────────────────────────────
+// TransactionState: INITIATED/CLEARED/QUEUED/SENT/STUCK/CONFIRMED/COMPLETE/
+// FAILED/DENIED/CANCELLED. Terminal success is COMPLETE (on-chain confirmed
+// AND Circle-indexed); STUCK/FAILED/DENIED/CANCELLED are terminal failures.
+export type CircleTransactionState =
+  | "INITIATED"
+  | "CLEARED"
+  | "QUEUED"
+  | "SENT"
+  | "STUCK"
+  | "CONFIRMED"
+  | "COMPLETE"
+  | "FAILED"
+  | "DENIED"
+  | "CANCELLED";
+
+const TERMINAL_FAILURE_STATES: ReadonlySet<string> = new Set([
+  "STUCK",
+  "FAILED",
+  "DENIED",
+  "CANCELLED",
+]);
+
+export function isCircleTxComplete(state: unknown): boolean {
+  return String(state ?? "").toUpperCase() === "COMPLETE";
+}
+
+export function isCircleTxTerminalFailure(state: unknown): boolean {
+  return TERMINAL_FAILURE_STATES.has(String(state ?? "").toUpperCase());
+}
+
+export interface CircleTransaction {
+  id?: string;
+  state?: CircleTransactionState | string;
+  txHash?: string;
+  blockchain?: string;
+  [k: string]: unknown;
+}
+
+export async function getUserTransaction(
+  transactionId: string,
+  userToken?: string,
+  config: UserControlledConfig = getUserControlledConfig()
+): Promise<CircleTransaction> {
+  if (!transactionId || typeof transactionId !== "string") {
+    throw circleError(400, "INVALID_TRANSACTION_ID", "A valid transaction id is required.");
+  }
+  // ServerCredential path (no X-User-Token) when the caller has no user
+  // token; userToken-authenticated when polling on behalf of a bridge
+  // request that carried one.
+  const res = await fetch(
+    `${config.baseUrl}/v1/w3s/transactions/${encodeURIComponent(transactionId)}`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+        ...(userToken ? { "X-User-Token": userToken } : {}),
+      },
+    }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw circleError(
+      res.status >= 500 ? 502 : res.status,
+      "CIRCLE_REQUEST_FAILED",
+      String((data as any)?.message ?? `Circle transaction lookup failed (HTTP ${res.status}).`)
+    );
+  }
+  return ((data as any)?.data?.transaction ?? (data as any)?.data ?? {}) as CircleTransaction;
+}
+
+export async function listUserTransactions(
+  filters: { walletIds?: string[]; txHash?: string; blockchain?: string; state?: string },
+  userToken?: string,
+  config: UserControlledConfig = getUserControlledConfig()
+): Promise<CircleTransaction[]> {
+  const query: Record<string, string | undefined> = {
+    blockchain: filters.blockchain,
+    txHash: filters.txHash,
+    state: filters.state,
+  };
+  // Circle accepts repeated walletIds params; URLSearchParams via
+  // circleFetch handles single values — join multiple with comma only as a
+  // coarse filter (callers needing exact multi-wallet semantics pass one).
+  if (filters.walletIds && filters.walletIds.length > 0) {
+    query.walletIds = filters.walletIds.join(",");
+  }
+  const data = await circleFetch<{ transactions?: Array<Record<string, unknown>> }>({
+    config,
+    method: "GET",
+    path: "/v1/w3s/transactions",
+    query,
+    ...(userToken ? { userToken: assertUserToken(userToken) } : {}),
+    label: "list transactions",
+  });
+  return Array.isArray(data.transactions) ? (data.transactions as CircleTransaction[]) : [];
 }
 
 // ── Session extension before the 14-day userToken expiry ────────────────────

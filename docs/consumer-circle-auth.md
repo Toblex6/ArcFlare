@@ -45,8 +45,25 @@ bring-your-own external wallet flow (nonce challenge + `viem verifyMessage`).
 - Send / scheduled Save / settle: the server cannot sign for these wallets
   (only the owner signs through Circle), so settle and scheduled creation
   fail closed with an explicit message instead of debiting anything else.
-  Bridge (CCTP) needs a Circle-custodied wallet the server can sign with —
-  unchanged behavior.
+- Bridge (CCTP v2): supported via the server-orchestrated,
+  browser-executed burn flow. `POST /api/cctp/transfer` (with a per-request
+  `userToken`, never stored) resolves the user's source-chain wallet from
+  Circle's authoritative list, checks the TokenMessenger allowance, and
+  returns a challenge (`needs-provision` / `needs-approval` / `needs-burn`)
+  that the browser executes through the Web SDK
+  (`UserControlledBridge.tsx`: setAuthentication → execute). The browser
+  then advances via `POST /api/cctp/transfer/challenge` (challenge →
+  Circle tx → mined-receipt verification, Pattern A on the burn event) and
+  polls `GET /api/cctp/transfer/status` for the Arc mint (balance-delta —
+  the destination mint needs no wallet signature, Circle's relayer
+  completes it). Source-chain balances for these wallets are read straight
+  from the chain (USDC `balanceOf`), no Circle call needed.
+  Signing-model authority: `src/lib/wallet/signingModel.ts`
+  (`server-signed` / `user-controlled-challenge` / `external-eoa` /
+  `unsupported`) — routes branch on the model, never on raw `walletType`
+  strings. Calldata authority: `src/lib/circle/cctpChallenge.ts` (mirrors
+  `@circle-fin/adapter-viem-v2` 1:1; SLOW path only, maxFee 0 — FAST fee
+  pricing is future work).
 
 ## Required console configuration (cannot be done from code)
 
@@ -85,9 +102,12 @@ bring-your-own external wallet flow (nonce challenge + `viem verifyMessage`).
 
 - No server-side Google OAuth: intentionally — Circle's Web SDK owns the
   social flow (per Circle docs, the supported integration).
-- No in-app signing for user-controlled wallets yet (send/swap/settle from
-  these wallets via Circle challenge-based signing is future work; routes
-  fail closed with explicit messages today).
+- No in-app signing for user-controlled wallets yet except the CCTP bridge
+  burn flow above (send/swap/settle from these wallets via Circle
+  challenge-based signing is future work; those routes fail closed with
+  explicit messages today). The bridge ships SLOW finality only (maxFee 0);
+  FAST burns need the Iris fee-tier pricing wired into `cctpChallenge.ts`
+  first.
 - Google and email identities are distinct Circle users (Circle-side
   behavior): signing in with Google then email creates two Circle users and
   therefore two FlareHQ rows — documented, not deduplicated.

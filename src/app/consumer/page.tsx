@@ -22,6 +22,7 @@ import {
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
 import { CircleUserWallet } from "@/components/consumer/CircleUserWallet";
+import { UserControlledBridge } from "@/components/consumer/UserControlledBridge";
 import { explorerTxUrl } from "@/lib/config/network";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
 
@@ -814,9 +815,23 @@ export default function ConsumerApp() {
       // Wallet-upgrade signal (bridge needs a FlareHQ wallet) is caller
       // UX, not a failure — return it for the caller to handle.
       if (data?.code === "EXTERNAL_WALLET") return data;
-      throw new Error(data?.error || `Request failed (${res.status})`);
+      // Attach the server code/status so challenge-flow callers (CCTP
+      // user-controlled bridge) can branch on typed codes — message-only
+      // callers are unaffected.
+      const err = new Error(data?.error || `Request failed (${res.status})`) as any;
+      err.code = data?.code;
+      err.status = res.status;
+      throw err;
     }
     return data;
+  };
+
+  // ── CCTP user-controlled bridge POST helper ──
+  // Routes to the initiation vs continue endpoint; PIN step-up headers come
+  // from protectedFetch. Typed server codes ride on the thrown error.
+  const bridgeAuthPost = async (route: "transfer" | "challenge", body: Record<string, unknown>) => {
+    const url = route === "challenge" ? "/api/cctp/transfer/challenge" : "/api/cctp/transfer";
+    return protectedFetch(url, { method: "POST" }, body);
   };
 
   // ── Action Handlers ──
@@ -1915,7 +1930,23 @@ export default function ConsumerApp() {
               <span style={styles.flowDot} />
             </div>
 
-            {(walletType === "EXTERNAL" || bridgeNeedsFlareWallet) && !crossResult ? (
+            {(walletType ?? "").toUpperCase() === "USER_CONTROLLED" ? (
+              <UserControlledBridge
+                chains={chains}
+                fromChain={fromChain}
+                onFromChainChange={(id) => {
+                  setCrossAmount("");
+                  setFromChain(id);
+                }}
+                toChain={toChain}
+                walletAddress={walletAddress}
+                authPost={bridgeAuthPost}
+                chainBalance={chainBalance}
+                chainBalanceLoading={chainBalanceLoading}
+                chainBalanceError={chainBalanceError}
+                onRetryBalance={() => setChainBalanceTick((t) => t + 1)}
+              />
+            ) : (walletType === "EXTERNAL" || bridgeNeedsFlareWallet) && !crossResult ? (
               <div style={styles.flareWalletCard}>
                 <p style={styles.flareWalletIcon}>👛</p>
                 <p style={styles.flareWalletTitle}>Bridging needs a FlareHQ wallet</p>
