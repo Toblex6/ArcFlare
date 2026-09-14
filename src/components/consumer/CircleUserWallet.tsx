@@ -254,6 +254,17 @@ export function CircleUserWallet({
     let cancelled = false;
     (async () => {
       if (!appId) return;
+      const hasOAuthResponse = /access_token=|id_token=|[?&]code=/.test(
+        window.location.hash + window.location.search
+      );
+      if (!hasOAuthResponse) {
+        try {
+          sessionStorage.removeItem(PENDING_KEY);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       let pending: { deviceToken?: string; deviceEncryptionKey?: string } | null = null;
       try {
         const raw = sessionStorage.getItem(PENDING_KEY);
@@ -272,7 +283,7 @@ export function CircleUserWallet({
           deviceEncryptionKey: pending.deviceEncryptionKey,
           google: {
             clientId: googleClientId,
-            redirectUri: window.location.origin,
+            redirectUri: `${window.location.origin}/consumer`,
             selectAccountPrompt: true,
           },
         });
@@ -323,7 +334,7 @@ export function CircleUserWallet({
           deviceEncryptionKey: tokens.deviceEncryptionKey,
           google: {
             clientId: googleClientId,
-            redirectUri: window.location.origin,
+            redirectUri: `${window.location.origin}/consumer`,
             selectAccountPrompt: true,
           },
         },

@@ -203,6 +203,15 @@ export default function ConsumerApp() {
     maskedEmail: string | null;
     hasPin: boolean;
   } | null>(null);
+  // Recovery-email + payment-PIN rows belong to the OLD custodial wallet
+  // model: Circle handles security/recovery natively for user-controlled
+  // (Google/email) wallets, so those rows would be confusing there. Render
+  // them ONLY for everything else — the legacy custodial 'CIRCLE' accounts
+  // (and any unknown/EXTERNAL value) keep the full panel; the wallet-kind +
+  // address row above stays visible for everyone. The enrollment logic and
+  // API routes (/api/consumer/email, /api/consumer/pin) are unchanged —
+  // legacy accounts still enroll through the gated rows.
+  const legacySecurityPanel = (walletType ?? "").toUpperCase() !== "USER_CONTROLLED";
   const pinRef = useRef<string | null>(null);
   // Masked, in-memory PIN dialog that replaced the browser prompt for step-up.
   const { requestPin, dialog: pinDialog } = useSecurePinDialog();
@@ -1461,7 +1470,13 @@ export default function ConsumerApp() {
 
             {/* ── Wallet security panel (Stage 2 / B4) — a security panel, not
                 a marketing settings page. Shows the three states explicitly
-                and flips each ⚠ to ✓ once configured. */}
+                and flips each ⚠ to ✓ once configured. The recovery-email and
+                payment-PIN rows (+ their forms) render ONLY for non-
+                USER_CONTROLLED wallets: Circle handles security/recovery
+                natively for user-controlled (Google/email) wallets. The
+                wallet-kind row shows for everyone. Underlying enrollment
+                logic and API routes are untouched (legacy CIRCLE accounts
+                still need them). */}
             <section style={styles.securityCard} aria-label="Wallet security">
               <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "var(--flow-text-muted)" }}>Wallet security</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1470,21 +1485,23 @@ export default function ConsumerApp() {
                   <span style={styles.securityLabel}>{friendlyWalletKind(walletType)}</span>
                   <span style={styles.securityAddr}>{walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : ""}</span>
                 </div>
-                <div style={styles.securityRow}>
-                  <span style={security?.hasRecoveryEmail ? styles.securityOk : styles.securityWarn}>
-                    {security?.hasRecoveryEmail ? "✓" : "⚠"}
-                  </span>
-                  <span style={styles.securityLabel}>
-                    {security?.hasRecoveryEmail ? `Recovery email (${security.maskedEmail})` : "No recovery method"}
-                  </span>
-                  <button
-                    style={styles.securityButton}
-                    onClick={() => { setShowEmailForm((s) => !s); setEmailMsg(null); setEmailStep("enter"); }}
-                  >
-                    {security?.hasRecoveryEmail ? "Change" : "Add email recovery"}
-                  </button>
-                </div>
-                {showEmailForm && (
+                {legacySecurityPanel && (
+                  <>
+                    <div style={styles.securityRow}>
+                      <span style={security?.hasRecoveryEmail ? styles.securityOk : styles.securityWarn}>
+                        {security?.hasRecoveryEmail ? "✓" : "⚠"}
+                      </span>
+                      <span style={styles.securityLabel}>
+                        {security?.hasRecoveryEmail ? `Recovery email (${security.maskedEmail})` : "No recovery method"}
+                      </span>
+                      <button
+                        style={styles.securityButton}
+                        onClick={() => { setShowEmailForm((s) => !s); setEmailMsg(null); setEmailStep("enter"); }}
+                      >
+                        {security?.hasRecoveryEmail ? "Change" : "Add email recovery"}
+                      </button>
+                    </div>
+                    {showEmailForm && (
                   <div style={styles.securityForm}>
                     {emailStep === "enter" ? (
                       <>
@@ -1570,6 +1587,8 @@ export default function ConsumerApp() {
                     </button>
                     {pinMsg && <p style={styles.securityMsg}>{pinMsg}</p>}
                   </div>
+                )}
+                  </>
                 )}
               </div>
             </section>

@@ -587,13 +587,13 @@ const doc = new Document({
           'npm install && npx prisma generate && npx prisma db push && next build'
         ),
         kv('Start Command', 'next start'),
-        kv('Database', 'Render PostgreSQL (free tier)'),
+        kv('Database', 'Neon Postgres (only production database)'),
         kv('Node Version', '18+'),
 
         h2('7.2 Required Environment Variables'),
         apiTable([
           ['Variable', 'Description'],
-          ['DATABASE_URL', 'Render PostgreSQL connection string'],
+          ['DATABASE_URL', 'Neon Postgres connection string (Neon is the only production database)'],
           ['CIRCLE_API_KEY', 'Circle Developer API key (TEST_API_KEY:id:secret format)'],
           ['CIRCLE_ENTITY_SECRET', 'Circle entity secret for SCA wallet signing'],
           ['ARC_ADMIN_PRIVATE_KEY', 'Admin wallet private key for contract deployment'],
