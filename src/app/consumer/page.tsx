@@ -1251,62 +1251,6 @@ export default function ConsumerApp() {
           </button>
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
 
-          {/* Legacy second-device recovery (Stage 2 / B1): FlareHQ-sent email
-              OTP → the same consumer_token session the login flow sets.
-              Only for instant/legacy wallets with an attached recovery
-              email. Circle user-controlled wallets instead re-sign with
-              the same Google/email identity above — no code needed. */}
-          <div style={styles.orDivider}><span>or</span></div>
-          <button
-            style={styles.secondaryButton}
-            onClick={() => { setShowRecover((s) => !s); setRecoverMsg(null); setRecoverStep("enter"); }}
-          >
-            Recover a legacy wallet with email
-          </button>
-          {showRecover && (
-            <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-              {recoverStep === "enter" ? (
-                <>
-                  <input
-                    style={styles.input}
-                    value={recoverEmail}
-                    onChange={(e) => setRecoverEmail(e.target.value)}
-                    placeholder="Recovery email"
-                    inputMode="email"
-                    autoComplete="email"
-                  />
-                  <button style={styles.secondaryButton} onClick={requestRecoverCode} disabled={recoverBusy}>
-                    {recoverBusy ? "Sending..." : "Send code"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <input
-                    style={styles.input}
-                    value={recoverCode}
-                    onChange={(e) => setRecoverCode(e.target.value)}
-                    placeholder="6-digit code"
-                    inputMode="numeric"
-                  />
-                  <button style={styles.secondaryButton} onClick={confirmRecoverCode} disabled={recoverBusy}>
-                    {recoverBusy ? "Verifying..." : "Verify & sign in"}
-                  </button>
-                  <button
-                    style={{ ...styles.secondaryButton, marginTop: 0 } as React.CSSProperties}
-                    onClick={requestRecoverCode}
-                    disabled={recoverBusy || recoverCooldown > 0}
-                  >
-                    {recoverCooldown > 0 ? `Resend code in ${recoverCooldown}s` : "Resend code"}
-                  </button>
-                  <p style={{ ...styles.onboardingSub, margin: 0, fontSize: 12 }}>
-                    No code? Check spam/junk, then resend. Codes expire after 10 minutes and can be used once.
-                  </p>
-                </>
-              )}
-              {recoverMsg && <p style={styles.onboardingSub}>{recoverMsg}</p>}
-            </div>
-          )}
-
           {/* A4: connector picker — appears only when "Use this wallet" is
               tapped without an active wallet connection. Uses the same wagmi
               connectors configured in providers.tsx (EIP-6963 injected

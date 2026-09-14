@@ -72,7 +72,6 @@ export default function ClosingCTA() {
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm font-semibold text-[var(--text-secondary)]">
             <a href="https://docs.flarehq.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition">Docs</a>
-            <a href="https://github.com/Toblex6/ArcFlare" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition">GitHub</a>
             <Link href="/marketplace" className="hover:text-[var(--text)] transition">Marketplace</Link>
             <Link href="/consumer" className="hover:text-[var(--text)] transition">Individual app</Link>
             <Link href="/start" className="hover:text-[var(--text)] transition">Get started</Link>

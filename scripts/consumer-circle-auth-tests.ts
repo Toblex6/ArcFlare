@@ -123,7 +123,7 @@ ok("email primary entry", consumerPage.includes("Continue with email"), "missing
 ok("Circle panel wired", consumerPage.includes("CircleUserWallet") && consumerPage.includes("circleOpen"), "not wired");
 ok("external connect preserved", consumerPage.includes("Connect a wallet") && consumerPage.includes("connectExisting"), "external flow changed");
 ok("legacy creation preserved", consumerPage.includes("Create a FlareHQ wallet") && consumerPage.includes("createNewWallet"), "legacy entry removed");
-ok("legacy recovery demoted", consumerPage.includes("Recover a legacy wallet with email"), "recovery not demoted");
+  ok("legacy recovery removed from primary onboarding", !consumerPage.includes("Recover a legacy wallet with email"), "recovery still shown as primary option");
 ok("link lands in app", consumerPage.includes('setWalletType(account.walletType ?? "USER_CONTROLLED")'), "link not wired");
 ok("wallet switching untouched", consumerPage.includes("openWalletSwitch") && consumerPage.includes("completeWalletSwitch"), "switch flow changed");
 
