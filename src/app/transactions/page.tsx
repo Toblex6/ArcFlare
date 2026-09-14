@@ -2,6 +2,7 @@
 'use client';
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
+import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 
@@ -24,11 +25,14 @@ export default function TransactionsPage() {
   const _router = useRouter();
 
   useEffect(() => {
+    // Anonymous visitors land here from site navigation — preserve the
+    // destination through the login gate so sign-in returns them here.
+    const gate = () => _router.replace(loginRedirectUrl(deriveReturnTo('/transactions')));
     fetch('/api/merchant/me')
       .then((r) => {
-        if (r.status === 401) _router.replace('/merchant/login');
+        if (r.status === 401) gate();
       })
-      .catch(() => _router.replace('/merchant/login'));
+      .catch(() => gate());
   }, [_router]);
 
   const [payments, setPayments] = useState<PaymentItem[]>([]);

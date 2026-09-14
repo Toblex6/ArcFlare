@@ -3,6 +3,7 @@
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 import AppDialog from '@/components/AppDialog';
+import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 
 import { useRouter } from 'next/navigation';
 
@@ -86,13 +87,16 @@ interface JobResult {
 export default function JobsPage() {
   const _router = useRouter();
   React.useEffect(() => {
+    // Anonymous homepage visitors keep their destination: the login gate
+    // returns them here after sign-in.
+    const gate = () => _router.replace(loginRedirectUrl(deriveReturnTo('/jobs')));
     // Auth gate + prefill the client (payer) wallet from the merchant's own
     // profile. The old hardcoded 0x7a8214… prefill was the shared PLATFORM
     // payer wallet — every create/fund attempt against it failed caller-control.
     fetch('/api/merchant/me')
       .then(async (r) => {
         if (r.status === 401) {
-          _router.replace('/merchant/login');
+          gate();
           return null;
         }
         return r.json().catch(() => null);
@@ -103,7 +107,7 @@ export default function JobsPage() {
         const mId = data?.merchant?.id;
         if (mId) setMerchantId(mId);
       })
-      .catch(() => _router.replace('/merchant/login'));
+      .catch(() => gate());
   }, []);
 
   const [activeTab, setActiveTab] = useState<'board' | 'create' | 'post' | 'manage' | 'mine'>('board');

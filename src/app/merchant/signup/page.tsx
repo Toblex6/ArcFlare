@@ -260,6 +260,20 @@ export default function MerchantSignup() {
   return (
     <main style={shellStyle}>
       <div style={{ width: '100%', maxWidth: 460 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+          <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
+            <Image src="/arcflare-logo.png" alt="FlareHQ" width={28} height={28} style={{ borderRadius: 7, objectFit: 'contain' }} />
+            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>FlareHQ</span>
+          </a>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <a href="/start" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', textDecoration: 'none' }}>
+              Get started
+            </a>
+            <a href="/" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', textDecoration: 'none' }}>
+              ← Back to home
+            </a>
+          </div>
+        </div>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <Image src="/arcflare-logo.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
           <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Create Merchant Account</h1>

@@ -38,7 +38,9 @@ export function isServiceable(status: unknown): boolean {
 
 export function serviceabilityLabel(status: unknown): { label: string; tone: "ok" | "warn" | "unknown" } {
   if (status === "ACTIVE_AGENT_PROVISIONED") return { label: "Available now", tone: "ok" };
-  if (typeof status === "string" && status.length > 0) return { label: String(status), tone: "warn" };
+  // Never leak raw backend status enums to customers — a pending or
+  // suspended agent simply reads as not yet available.
+  if (typeof status === "string" && status.length > 0) return { label: "Not available yet", tone: "warn" };
   return { label: "Unavailable", tone: "unknown" };
 }
 
@@ -102,13 +104,14 @@ export function isolateValidAgents(list: any[]): any[] {
   return out;
 }
 
-// Serviceability-aware action label — never show "Hire" when it would fail validation.
+// Customer-facing action label — never show "Hire" when it would fail, and
+// never leak backend vocabulary ("serviceable", "validation", status enums).
 export function getAppropriateAction(agent: any, walletConnected: boolean): { label: string; disabled: boolean; hint: string } {
   if (!isServiceable(agent?.status)) {
-    return { label: "Not serviceable", disabled: true, hint: "This agent is not currently serviceable — hiring would fail validation." };
+    return { label: "Unavailable", disabled: true, hint: "This agent isn't available for hire right now." };
   }
   if (!walletConnected) {
     return { label: "Connect wallet to hire", disabled: true, hint: "Connect a wallet before hiring." };
   }
-  return { label: "Hire", disabled: false, hint: "Start a job with this agent via the existing hiring route." };
+  return { label: "Hire", disabled: false, hint: "Start a job with this agent." };
 }

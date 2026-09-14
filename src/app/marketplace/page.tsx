@@ -298,6 +298,8 @@ function PublicMarketplaceNav() {
             </a>
             <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13, fontWeight: 600 }}>
                 <a href="/" style={{ color: "var(--text-secondary)", textDecoration: "none" }}>Home</a>
+                <a href="/consumer" style={{ color: "var(--text-secondary)", textDecoration: "none" }}>Individual app</a>
+                <a href="/start" style={{ color: "var(--text-secondary)", textDecoration: "none" }}>Get started</a>
                 <a href={loginRedirectUrl(deriveReturnTo("/marketplace"))} style={{ color: "var(--primary)", textDecoration: "none" }}>
                     Business Login →
                 </a>

@@ -215,15 +215,15 @@ export function deriveOwnerLifecycle(agent: unknown, input?: DeriveLifecycleInpu
         key: "serviceability",
         label: STAGE_LABELS.serviceability,
         state: "ready",
-        detail: "Serviceable — passes the backend hire gate.",
+        detail: "Ready — passes the hire check.",
       }
     : {
         key: "serviceability",
         label: STAGE_LABELS.serviceability,
         state: "attention",
         detail: status
-          ? `Not serviceable (status: ${statusLabel}). Hiring would be rejected.`
-          : "Not serviceable — hiring would be rejected.",
+          ? `Not ready for hire (status: ${statusLabel}). Hiring would be rejected.`
+          : "Not ready for hire — hiring would be rejected.",
       };
 
   // ── Discoverability ──────────────────────────────────────────────

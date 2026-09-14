@@ -2,6 +2,7 @@
 'use client';
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
+import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 
 import { useRouter } from 'next/navigation';
 
@@ -77,9 +78,12 @@ interface ValidationResult {
 export default function AgentsPage() {
   const _router = useRouter();
   React.useEffect(() => {
+    // Anonymous homepage visitors keep their destination: the login gate
+    // returns them here after sign-in.
+    const gate = () => _router.replace(loginRedirectUrl(deriveReturnTo('/agents')));
     fetch('/api/merchant/me').then((r) => {
-      if (r.status === 401) _router.replace('/merchant/login');
-    }).catch(() => _router.replace('/merchant/login'));
+      if (r.status === 401) gate();
+    }).catch(() => gate());
   }, []);
 
   const [agents, setAgents] = useState<Agent[]>([]);

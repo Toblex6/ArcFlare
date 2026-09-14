@@ -633,7 +633,7 @@ export default function AgentDiscovery() {
         {/* Serviceability-aware action */}
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-            <span style={badge(detailServiceable)}>{detailServiceable ? "Ready to take jobs" : "Not serviceable"}</span>
+            <span style={badge(detailServiceable)}>{detailServiceable ? "Ready to take jobs" : "Not available for hire"}</span>
             <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
               Status: {humanStatusLabel(detailStatus)}
             </span>

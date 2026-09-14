@@ -5,6 +5,14 @@ import Link from 'next/link';
 import Image from 'next/image';
 import ThemeToggle from '@/src/components/ThemeToggle';
 
+// Product routes a visitor can move between directly — Home → Get started →
+// Individual / Business → Marketplace. Section anchors below are in-page
+// scroll targets for this page's own composition.
+const ROUTES: { href: string; label: string }[] = [
+  { href: '/marketplace', label: 'Marketplace' },
+  { href: '/consumer', label: 'Individual app' },
+];
+
 // Section anchors rendered on this page (src/app/page.tsx composition).
 // These are intentional scroll targets, not routes — the navbar smooth-scrolls
 // to them and highlights whichever section is currently in view. Converting
@@ -79,6 +87,11 @@ export default function HomeNavbar() {
         </Link>
 
         <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-[var(--text-secondary)]">
+          {ROUTES.map(({ href, label }) => (
+            <Link key={href} href={href} className="hover:text-[var(--text)] transition">
+              {label}
+            </Link>
+          ))}
           {SECTIONS.map(({ id, label }) => (
             <a
               key={id}
@@ -154,6 +167,20 @@ export default function HomeNavbar() {
       />
       {open && (
         <div id="home-menu" className="lg:hidden border-t border-[var(--border)] bg-[var(--background)]/95 backdrop-blur-xl px-4 py-4 flex flex-col gap-1 text-base font-medium">
+          <Link href="/marketplace" onClick={() => setOpen(false)} className="p-2.5 rounded-xl hover:bg-[var(--surface-secondary)] transition">
+            Marketplace
+          </Link>
+          <Link href="/consumer" onClick={() => setOpen(false)} className="p-2.5 rounded-xl hover:bg-[var(--surface-secondary)] transition">
+            Individual app
+          </Link>
+          <a
+            href="https://docs.flarehq.xyz"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2.5 rounded-xl hover:bg-[var(--surface-secondary)] transition"
+          >
+            Docs ↗
+          </a>
           {SECTIONS.map(({ id, label }) => (
             <a
               key={id}

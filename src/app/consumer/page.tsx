@@ -27,6 +27,17 @@ import { FlowSwapView } from "@/components/swap/FlowSwapView";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover" | "swap";
 
+// Customer-facing wallet identity: which wallet is signed in and who holds
+// its keys. USER_CONTROLLED = Circle user wallet the user owns (Google /
+// email); EXTERNAL = a wallet the user connected and controls themselves;
+// CIRCLE/legacy = a FlareHQ-created wallet. Never expose raw walletType enums.
+function friendlyWalletKind(walletType: string | null): string {
+  const t = (walletType ?? "").toUpperCase();
+  if (t === "USER_CONTROLLED") return "FlareHQ wallet · you own it (Google/email)";
+  if (t === "EXTERNAL") return "Connected wallet · you control it";
+  return "FlareHQ wallet";
+}
+
 interface ActionResult {
   success: boolean;
   message?: string;
@@ -512,7 +523,7 @@ export default function ConsumerApp() {
       return;
     }
     if (!consumerWalletId) {
-      setHireResult({ success: false, error: "Hiring requires a FlareHQ-managed wallet (CIRCLE). Create a FlareHQ wallet or connect one that has a Circle wallet." });
+      setHireResult({ success: false, error: "Hiring needs a FlareHQ wallet. Create one with Google or email, or connect a wallet that already has one." });
       return;
     }
     if (!isServiceable(cardData.status ?? selectedAgent.status)) {
@@ -1401,7 +1412,8 @@ export default function ConsumerApp() {
             <button
               style={styles.walletPill}
               onClick={() => setWalletMenuOpen((o) => !o)}
-              title="Wallet options"
+              title={friendlyWalletKind(walletType)}
+              aria-label="Wallet options"
             >
               {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
             </button>
@@ -1535,7 +1547,7 @@ export default function ConsumerApp() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={styles.securityRow}>
                   <span style={styles.securityOk}>✓</span>
-                  <span style={styles.securityLabel}>Wallet created</span>
+                  <span style={styles.securityLabel}>{friendlyWalletKind(walletType)}</span>
                   <span style={styles.securityAddr}>{walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : ""}</span>
                 </div>
                 <div style={styles.securityRow}>
@@ -2193,7 +2205,7 @@ export default function ConsumerApp() {
               <div style={{ background: "var(--flow-surface-2)", borderRadius: 12, padding: "20px 16px", textAlign: "center" as const }}>
                 <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14 }}>No agents found</p>
                 <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)" }}>
-                  Try a broader search or lower the trust filter. Discovery uses the live Agent Registry — only agents with status ACTIVE_AGENT_PROVISIONED appear.
+                  Try a broader search or lower the trust filter. Discovery is live — only agents that are ready to take jobs appear here.
                 </p>
               </div>
             )}
@@ -2328,11 +2340,11 @@ export default function ConsumerApp() {
                           {tr && <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--flow-text-faint)" }}>{tr.completedJobs ?? 0} completed · {tr.validatedJobs ?? 0} validated{tr.validationPassRate !== null && tr.validationPassRate !== undefined ? ` · ${Math.round(tr.validationPassRate * 100)}% pass` : ""} · {tr.validatedVolumeUSDC ?? "0.00"} USDC volume</p>}
                         </div>
                       ) : (
-                        <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>Trust data unavailable — the backend did not supply a trust score for this agent.</p>
+                        <p style={{ margin: 0, fontSize: 11, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>No trust score yet for this agent.</p>
                       )}
                       {rep || tr ? (
                         <div style={{ fontSize: 11, color: "var(--flow-text-muted)" }}>
-                          {rep?.onChain && <p style={{ margin: "0 0 4px" }}>On-chain reputation: {rep.onChain.reputationScore ?? "—"} {rep.onChain.readOk === false ? "(read unavailable)" : ""}</p>}
+                          {rep?.onChain && <p style={{ margin: "0 0 4px" }}>On-chain reputation: {rep.onChain.reputationScore ?? "—"} {rep.onChain.readOk === false ? "(unavailable right now)" : ""}</p>}
                           {tr && <p style={{ margin: 0 }}>Track record: {tr.totalJobs ?? tr.completedJobs ?? 0} total · {tr.failedJobs ?? 0} failed · {tr.uniqueValidators ?? 0} unique validators</p>}
                           {!rep && !tr && <p style={{ margin: 0, color: "var(--flow-text-faint)", fontStyle: "italic" as const }}>Reputation data unavailable</p>}
                         </div>
@@ -2353,8 +2365,8 @@ export default function ConsumerApp() {
                       </div>
                       <div style={{ borderTop: "1px solid var(--flow-border)", paddingTop: 12, display: "flex", flexDirection: "column" as const, gap: 8 }}>
                         <p style={{ margin: 0, fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: 0.5, color: "var(--flow-text-muted)" }}>Start interaction</p>
-                        {!walletAddress && <p style={{ margin: 0, fontSize: 11, color: "#C0563A" }}>Connect a wallet to hire — discovery is public, hiring requires you control the payer wallet.</p>}
-                        {walletAddress && !consumerWalletId && <p style={{ margin: 0, fontSize: 11, color: "#8a6d2b" }}>Hiring requires a FlareHQ-managed wallet. Your current wallet is external — create a FlareHQ wallet to hire.</p>}
+                        {!walletAddress && <p style={{ margin: 0, fontSize: 11, color: "#C0563A" }}>Connect a wallet to hire — browsing is public, hiring needs a wallet you control.</p>}
+                        {walletAddress && !consumerWalletId && <p style={{ margin: 0, fontSize: 11, color: "#8a6d2b" }}>Hiring needs a FlareHQ wallet. You connected your own wallet — create a FlareHQ wallet to hire.</p>}
                         <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
                           <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
                             <label style={{ fontSize: 11, fontWeight: 600, color: "var(--flow-text-muted)" }}>Budget (USDC)</label>
@@ -2380,7 +2392,7 @@ export default function ConsumerApp() {
                             {hireResult.explorerUrl && <a href={hireResult.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "#E8714A" }}>View transaction</a>}
                           </div>
                         )}
-                        <p style={{ margin: 0, fontSize: 10, color: "var(--flow-text-faint)" }}>The payer wallet is resolved securely on the server — you only confirm the budget and description here.</p>
+                        <p style={{ margin: 0, fontSize: 10, color: "var(--flow-text-faint)" }}>You only confirm the budget and description here — FlareHQ handles the payment details.</p>
                       </div>
                     </>
                   );

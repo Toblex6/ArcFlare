@@ -59,7 +59,7 @@ const SECTIONS: NavSection[] = [
         group: 'AI & AGENTS',
         items: [
             { label: 'Marketplace', href: '/marketplace' },
-            { label: 'Agent Brain', href: '/agent-brain', disabled: true, disabledReason: 'LLM reasoning engine is rate-limited (Groq 429s), calls will intermittently fail' },
+            { label: 'Agent Brain', href: '/agent-brain', disabled: true, disabledReason: 'Temporarily unavailable — check back soon' },
             { label: 'Agents', href: '/agents' },
             { label: 'Jobs', href: '/jobs' },
             { label: 'AI Assistant', href: '/merchant/assistant' },

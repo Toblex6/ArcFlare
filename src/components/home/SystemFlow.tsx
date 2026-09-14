@@ -15,7 +15,7 @@ const PILLARS = [
   {
     icon: '🤖',
     title: 'Agents',
-    desc: 'Identity, wallets, spend policies, reputation, procurement, jobs, Brain.',
+    desc: 'Identity, wallets, spend policies, reputation, jobs, Brain.',
     items: ['ERC-8004 wallets', 'Reputation + validation', 'ERC-8183 jobs', 'Agent Brain operator'],
   },
   {
@@ -29,7 +29,7 @@ const PILLARS = [
 // The real job lifecycle: accept → fund → submit → validate → complete → ledger.
 const LIFECYCLE = [
   { label: 'Discover', detail: 'find agents + jobs' },
-  { label: 'Hire', detail: 'procurement selects' },
+  { label: 'Hire', detail: 'worker selected' },
   { label: 'Fund', detail: 'USDC into escrow' },
   { label: 'Work', detail: 'provider submits' },
   { label: 'Validate', detail: 'validator approves' },

@@ -860,31 +860,31 @@ export default function MerchantDashboard() {
           </div>
         </div>
 
-        <div className="bg-[#1f140f] border border-[#3a2a20] rounded-3xl p-4 md:p-6 shadow-2xl overflow-hidden">
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: isMobile ? 16 : 24, boxShadow: "0 1px 4px rgba(0,0,0,0.05)", overflow: "hidden" }}>
           <div className="flex flex-wrap items-center justify-between mb-6 gap-2">
-            <h3 className="text-sm md:text-base font-bold tracking-wide uppercase font-mono text-white">
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: 0 }}>
               Your Recent Payments
             </h3>
           </div>
 
-          {error && <div className="text-red-400 text-xs font-mono mb-4">❌ {error}</div>}
+          {error && <div style={{ color: "var(--danger)", fontSize: 12, fontFamily: "monospace", marginBottom: 16 }}>❌ {error}</div>}
 
           <div className="overflow-x-auto">
-            <table className="w-full text-xs font-mono min-w-[600px]">
+            <table className="w-full text-xs font-mono min-w-[600px]" style={{ borderCollapse: "collapse" }}>
               <thead>
-                <tr className="text-gray-500 uppercase tracking-wider border-b border-[#3a2a20]">
-                  <th className="text-left pb-3 pr-3">Reference</th>
-                  <th className="text-left pb-3 pr-3">Sender</th>
-                  <th className="text-left pb-3 pr-3">Chain</th>
-                  <th className="text-left pb-3 pr-3">Amount</th>
-                  <th className="text-left pb-3">Status</th>
+                <tr style={{ color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ textAlign: "left", padding: "0 12px 12px 0" }}>Reference</th>
+                  <th style={{ textAlign: "left", padding: "0 12px 12px 0" }}>Sender</th>
+                  <th style={{ textAlign: "left", padding: "0 12px 12px 0" }}>Chain</th>
+                  <th style={{ textAlign: "left", padding: "0 12px 12px 0" }}>Amount</th>
+                  <th style={{ textAlign: "left", padding: "0 0 12px 0" }}>Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#3a2a20]/40">
+              <tbody>
                 {payments.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-center py-12 text-gray-500 text-sm font-mono">
-                      No payments yet. Create a payment link to get started.
+                    <td colSpan={5} style={{ textAlign: "center", padding: "48px 0", color: "var(--text-secondary)", fontSize: 13, fontFamily: "Inter, system-ui, sans-serif" }}>
+                      No payments yet. Create a payment link above to get started.
                     </td>
                   </tr>
                 ) : (
@@ -899,40 +899,40 @@ export default function MerchantDashboard() {
                       ? (payment.conversion?.actualInputDisplay ?? payment.conversion?.inputAmountDisplay ?? null)
                       : null;
                     return (
-                    <tr key={payment.id} className="hover:bg-[#120b08]/40 transition-colors">
-                      <td className="py-3 pr-3">
+                    <tr key={payment.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "12px 12px 12px 0" }}>
                         {payment.explorer_url ? (
                           <a
                             href={payment.explorer_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-cyan-400 text-xs hover:underline"
+                            style={{ color: "var(--primary)", fontSize: 12 }}
                           >
                             {payment.reference.slice(0, 12)}...
                           </a>
                         ) : (
-                          <div className="text-cyan-400 text-xs">{payment.reference.slice(0, 12)}...</div>
+                          <div style={{ color: "var(--primary)", fontSize: 12 }}>{payment.reference.slice(0, 12)}...</div>
                         )}
-                        <div className="text-gray-500 text-[9px] mt-0.5">
+                        <div style={{ color: "var(--text-secondary)", fontSize: 9, marginTop: 2 }}>
                           {new Date(payment.paid_at).toLocaleDateString()}
                         </div>
                       </td>
-                      <td className="py-3 pr-3">
-                        <div className="text-gray-300 text-xs">{payment.sender_email ? `${payment.sender_email.slice(0, 10)}...` : '—'}</div>
+                      <td style={{ padding: "12px 12px 12px 0" }}>
+                        <div style={{ color: "var(--text)", fontSize: 12 }}>{payment.sender_email ? `${payment.sender_email.slice(0, 10)}...` : '—'}</div>
                       </td>
-                      <td className="py-3 pr-3">
-                        <span className="text-cyan-400 text-[10px]">{payment.chain}</span>
+                      <td style={{ padding: "12px 12px 12px 0" }}>
+                        <span style={{ color: "var(--primary)", fontSize: 10 }}>{payment.chain}</span>
                       </td>
-                      <td className="py-3 pr-3">
-                        <div className="text-white font-bold text-xs">{payment.amount.toFixed(2)}</div>
-                        <div className="text-amber-400 text-[9px]">{payment.currency}</div>
+                      <td style={{ padding: "12px 12px 12px 0" }}>
+                        <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 12 }}>{payment.amount.toFixed(2)}</div>
+                        <div style={{ color: "var(--primary)", fontSize: 9 }}>{payment.currency}</div>
                         {rowConverted && (
-                          <div className="text-cyan-400 text-[9px] mt-0.5">
+                          <div style={{ color: "var(--primary)", fontSize: 9, marginTop: 2 }}>
                             Paid with{rowPaidWith ? ` ${rowPaidWith}` : ''} {payment.payToken?.symbol}
                           </div>
                         )}
                       </td>
-                      <td className="py-3">
+                      <td style={{ padding: "12px 0" }}>
                         <span className={`px-2 py-1 rounded text-[9px] font-bold border ${payment.status === "SUCCESS"
                           ? "bg-green-500/10 text-green-400 border-green-500/20"
                           : payment.status === "EXPIRED"

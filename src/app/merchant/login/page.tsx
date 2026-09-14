@@ -89,17 +89,36 @@ function MerchantLoginForm() {
           />
           <span style={{ fontSize: 17, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em' }}>FlareHQ</span>
         </Link>
-        <Link
-          href="/"
+        <div
           style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: 'var(--text-secondary)',
-            textDecoration: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 20,
           }}
         >
-          ← Back to home
-        </Link>
+          <Link
+            href="/start"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-secondary)',
+              textDecoration: 'none',
+            }}
+          >
+            Get started
+          </Link>
+          <Link
+            href="/"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-secondary)',
+              textDecoration: 'none',
+            }}
+          >
+            ← Back to home
+          </Link>
+        </div>
       </header>
 
       <div style={{ width: '100%', maxWidth: 420, marginTop: 48 }}>

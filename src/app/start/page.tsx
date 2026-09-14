@@ -6,15 +6,11 @@ import Image from 'next/image';
 // /start keeps its persona-choice concept, styled in the shared FlareHQ
 // theme (var() tokens — no third visual language) so it reads as part of
 // the same product as the homepage. Choosing the individual path leads into
-// wallet/account onboarding in /consumer (create a FlareHQ-managed wallet
-// or connect one you control).
-//
-// Wallet-creation reality (no Google auth exists in this repo): consumer
-// onboarding offers exactly two paths — "Connect a wallet" (EIP-6963 /
-// WalletConnect via wagmi + nonce/signature challenge) or "Create a
-// FlareHQ wallet" (Circle-managed, POST /api/consumer/session). Email is
-// recovery/verification only (OTP via /api/consumer/email + /recover), not
-// a wallet-creation method. Nothing here invents another provider.
+// wallet/account onboarding in /consumer: Continue with Google or email for
+// a Circle user-controlled wallet you own, connect a wallet you already
+// have, or create a FlareHQ wallet. Email is also recovery/verification
+// (OTP via /api/consumer/email + /recover). Nothing here invents another
+// provider.
 export default function StartPage() {
     return (
         <main className="min-h-screen bg-[var(--background)] text-[var(--text)] flex flex-col items-center px-6">
@@ -64,8 +60,9 @@ export default function StartPage() {
                     <div className="text-4xl mb-4">👤</div>
                     <h3 className="text-xl font-bold mb-2">I&apos;m here for myself</h3>
                     <p className="text-[var(--text-secondary)] text-sm leading-relaxed flex-1">
-                        Next you&apos;ll create a FlareHQ-managed wallet or connect one you control —
-                        then send, request, save, and chat with an agent. No signup form.
+                        Continue with Google or email to get a wallet you own, secured by Circle —
+                        or connect one you control. Then send, request, save, and chat with an
+                        agent. No signup form.
                     </p>
                     <span className="mt-6 text-cyan-600 dark:text-cyan-300 text-sm font-semibold group-hover:text-cyan-500 transition">
                         Continue to wallet setup →
@@ -73,10 +70,18 @@ export default function StartPage() {
                 </Link>
             </div>
 
-            <div className="mt-12 mb-10 text-sm text-[var(--text-secondary)]">
-                Already have a business account?{' '}
-                <Link href="/merchant/login" className="text-cyan-600 dark:text-cyan-300 hover:text-cyan-500 transition font-semibold">
-                    Log in
+            <div className="mt-12 mb-10 text-sm text-[var(--text-secondary)] flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+                <span>
+                    Already have a business account?{' '}
+                    <Link href="/merchant/login" className="text-cyan-600 dark:text-cyan-300 hover:text-cyan-500 transition font-semibold">
+                        Log in
+                    </Link>
+                </span>
+                <Link href="/marketplace" className="hover:text-[var(--text)] transition font-medium">
+                    Browse the marketplace
+                </Link>
+                <Link href="/consumer" className="hover:text-[var(--text)] transition font-medium">
+                    Open the individual app
                 </Link>
             </div>
         </main>

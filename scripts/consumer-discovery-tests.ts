@@ -53,6 +53,8 @@ function ok(name: string, cond: boolean, extra = "") {
   ok("serviceabilityLabel ok", svcOk.label === "Available now" && svcOk.tone === "ok");
   const svcWarn = serviceabilityLabel("SUSPENDED");
   ok("serviceabilityLabel warn", svcWarn.tone === "warn");
+  // Customer copy: raw backend status enums never leak into labels.
+  ok("serviceabilityLabel hides raw status", svcWarn.label === "Not available yet" && !svcWarn.label.includes("SUSPENDED"));
   const svcUnknown = serviceabilityLabel(null);
   ok("serviceabilityLabel unknown", svcUnknown.tone === "unknown");
 
@@ -63,9 +65,9 @@ function ok(name: string, cond: boolean, extra = "") {
   const actNoWallet = getAppropriateAction(aSvc, false);
   ok("action: wallet not connected => disabled Connect wallet", actNoWallet.disabled === true && actNoWallet.label.includes("Connect"));
   const actUnsvc = getAppropriateAction(aUnsvc, true);
-  ok("action: unserviceable => disabled Not serviceable", actUnsvc.disabled === true && actUnsvc.label === "Not serviceable");
+  ok("action: unserviceable => disabled Unavailable", actUnsvc.disabled === true && actUnsvc.label === "Unavailable");
   const actUnsvcNoWallet = getAppropriateAction(aUnsvc, false);
-  ok("action: unserviceable takes precedence over wallet check", actUnsvcNoWallet.label === "Not serviceable");
+  ok("action: unserviceable takes precedence over wallet check", actUnsvcNoWallet.label === "Unavailable");
 }
 
 // ── 3. Identifier labeling (must distinguish three IDs, never merged) ──
