@@ -182,7 +182,7 @@ async function createStreamHandler(request: NextRequest) {
       explorerUrl: `${explorerTxUrl(streamTxHash)}`,
       estimatedDurationSeconds: durationSeconds,
       estimatedEndTime: estimatedEndTime.toISOString(),
-      message: `Stream created — ${ratePerSecond} USDC/s flowing from ${senderSCA} to ${receiverSCA} on Arc Testnet.`,
+      message: `Stream created — ${ratePerSecond} USDC/s flowing from ${senderSCA} to ${receiverSCA} on ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'}.`,
     });
   } catch (error: any) {
     console.error('Stream create error:', error);

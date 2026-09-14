@@ -15,11 +15,16 @@ import {
   NANO_BATCH_THRESHOLD_USDC,
 } from '@/src/lib/nanopayment';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
+import { resolvePlatformPayerSca } from '@/lib/config/platformDefaults';
 
 // The platform's shared default payer (same identity as settle/route.ts) —
-// reachable ONLY from the internal service key; a merchant may never name
-// it as the payer of a charge it controls.
-const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
+// TESTNET-ONLY pin lives in platformDefaults.ts (single authority,
+// explicit-or-throw on mainnet). Reachable ONLY from the internal service
+// key; a merchant may never name it as the payer of a charge it controls.
+// Resolved lazily per request (never at import).
+function defaultPayerSca(): string {
+  return resolvePlatformPayerSca();
+}
 
 async function nanoHandler(request: Request) {
   try {
@@ -63,7 +68,7 @@ async function nanoHandler(request: Request) {
       ? !!(await (prisma as any).apiKey.findUnique({ where: { key: apiKey } }))
       : false;
     const isPlatformDefaultPayer =
-      agentSCA.toLowerCase() === DEFAULT_PAYER_SCA.toLowerCase();
+      agentSCA.toLowerCase() === defaultPayerSca().toLowerCase();
     if (!controlsAgent && !(isInternalServiceCall && isPlatformDefaultPayer)) {
       return NextResponse.json(
         {

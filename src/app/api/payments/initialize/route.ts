@@ -7,6 +7,8 @@ import { resolveCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preference';
 import { resolveInitializeCaller } from '@/src/lib/middleware/withMerchantAuth';
 import { requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
+import { getNetworkConfig } from '@/lib/config/network';
+import { publicUrl } from '@/lib/publicOrigin';
 
 export async function POST(req: NextRequest) {
   try {
@@ -196,7 +198,7 @@ export async function POST(req: NextRequest) {
         amount: Number(amount),
         currency: token.symbol,
         tokenAddress: token.address,
-        chain: 'Arc Testnet v1.0',
+        chain: getNetworkConfig().name === 'mainnet' ? 'Arc v1.0' : 'Arc Testnet v1.0',
         senderEmail: resolvedSenderEmail,
         direction: direction || 'send',
         merchant: merchantName,
@@ -212,7 +214,9 @@ export async function POST(req: NextRequest) {
       success: true,
       message: 'Payment initialized successfully.',
       reference: transactionReference,
-      checkoutUrl: `https://flarehq.xyz/checkout/${transactionReference}`,
+      // Canonical public origin (fail-closed in production) — never a
+      // hardcoded domain, so the link matches the environment served.
+      checkoutUrl: publicUrl(`/checkout/${transactionReference}`),
       agent: resolvedAgent
         ? {
           name: resolvedAgent.name,

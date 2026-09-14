@@ -10,11 +10,14 @@ import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
 import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
+import { resolvePlatformPayerWalletId } from '@/lib/config/platformDefaults';
 
 // The platform agent's signing wallet — same explicit resolution as settle
-// Path B. Never used as a blanket fallback for arbitrary payers: it is only
-// bound to a schedule whose payer is the verified platform agent.
-const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
+// Path B (explicit PLATFORM_PAYER_WALLET_ID, fail-closed on mainnet; testnet
+// pin otherwise). Never used as a blanket fallback for arbitrary payers: it
+// is only bound to a schedule whose payer is the verified platform agent.
+// Resolved lazily per request (never at import) so a misconfigured mainnet
+// fails at request time, not at module load.
 
 // ── POST /api/payments/scheduled — create a new recurring payment ────────────
 async function createScheduledHandler(request: Request) {
@@ -85,8 +88,9 @@ async function createScheduledHandler(request: Request) {
     // rows — the C1-class drain. The wallet must be BOUND to the payer:
     //   - consumer                  → ConsumerAccount.circleWalletId
     //   - merchant's own wallet     → Merchant.circleWalletId
-    //   - platform agent (internal) → DEFAULT_PAYER_WALLET_ID (its signing
-    //     wallet — same explicit resolution as settle Path B, NOT a fallback)
+    //   - platform agent (internal) → resolvePlatformPayerWalletId() (its
+    //     signing wallet — same explicit resolution as settle Path B,
+    //     explicit-or-throw on mainnet, NOT a fallback)
     //   - registered agent          → AgentRegistry.circleWalletId
     //   - x402 buyer/agent EOAs     → no Circle-custodied wallet → refused
     // Chosen variant (of Opus's two): resolve correctly for agent payers at
@@ -136,7 +140,8 @@ async function createScheduledHandler(request: Request) {
         // The platform agent's signing wallet IS the platform default —
         // same explicit resolution settle/route.ts Path B uses. This is a
         // verified identity binding, not a fallback for arbitrary payers.
-        resolvedPayerWalletId = DEFAULT_PAYER_WALLET_ID;
+        // Explicit-or-throw on mainnet (never the testnet pin).
+        resolvedPayerWalletId = resolvePlatformPayerWalletId();
       } else {
         const agentRecord = await (prisma as any).agentRegistry.findFirst({
           where: { scaAddress: { equals: payerSCA, mode: 'insensitive' } },

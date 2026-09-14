@@ -8,6 +8,7 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { parseBody, SettlementPreferenceSchema } from '@/src/lib/validation';
 import { resolveMerchantSettlementPreference, resolvePreferenceUpdate } from '@/src/lib/routing/preference';
 import { getTokenByAddress, getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
+import { publicUrl } from '@/lib/publicOrigin';
 
 const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -97,7 +98,7 @@ export async function GET(req: NextRequest) {
         currency: p.currency,
         status: p.status,
         timestamp: p.timestamp,
-        checkoutUrl: `https://flarehq.xyz/checkout/${p.reference}`,
+        checkoutUrl: publicUrl(`/checkout/${p.reference}`),
       })),
     });
   } catch (error: any) {

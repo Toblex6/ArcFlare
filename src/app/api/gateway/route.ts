@@ -103,7 +103,7 @@ async function withdrawHandler(request: Request) {
       // the Gateway's settlement reference, not confirmed to be a real onchain
       // hash. Shown honestly rather than assumed to be ArcScan-resolvable.
       gatewayReference: data.transaction ?? null,
-      message: `Withdrew ${amount} USDC from Gateway balance to Payout Wallet on Arc Testnet.`,
+      message: `Withdrew ${amount} USDC from Gateway balance to Payout Wallet on ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'}.`,
     });
   } catch (error: any) {
     console.error('❌ Gateway withdraw error:', error);

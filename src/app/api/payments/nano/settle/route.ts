@@ -26,10 +26,23 @@ import {
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import type { CurrencyRef } from '@/lib/tokens/resolveCurrency';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import {
+  resolvePlatformPayerSca,
+  resolvePlatformPayerWalletId,
+} from "@/lib/config/platformDefaults";
 
 // ── Constants & Types ────────────────────────────────────────────────────────
-const DEFAULT_PAYER_SCA = '0x7a8214dad7630a7a39054e0121acdbc7a65821c9';
-const DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
+// Platform shared default payer — TESTNET-ONLY pins live in
+// src/lib/config/platformDefaults.ts (single authority). Both resolve
+// explicit-or-throw on mainnet, so mainnet can never silently match or debit
+// the testnet platform identity. Resolved lazily per request (never at
+// import) so a misconfigured mainnet fails at request time.
+function defaultPayerSca(): string {
+  return resolvePlatformPayerSca();
+}
+function defaultPayerWalletId(): string {
+  return resolvePlatformPayerWalletId();
+}
 
 class CircleTxFailedError extends Error {
   constructor(message: string) {
@@ -229,7 +242,7 @@ async function settleOnchain(
   //     Circle wallet fails closed instead of inheriting the default.
   const agentSCANormalized = agentSCA.toLowerCase();
   const isPlatformDefaultPayer =
-    agentSCANormalized === DEFAULT_PAYER_SCA.toLowerCase();
+    agentSCANormalized === defaultPayerSca().toLowerCase();
 
   let payerWalletId: string | null = null;
   if (isPlatformDefaultPayer) {
@@ -238,7 +251,7 @@ async function settleOnchain(
         `CRITICAL: refusing to debit the shared platform default wallet for payer ${agentSCA} — only the platform's internal service key may settle for the default payer.`
       );
     }
-    payerWalletId = DEFAULT_PAYER_WALLET_ID;
+    payerWalletId = defaultPayerWalletId();
   } else {
     const agentRecord = await prisma.agentRegistry.findFirst({
       where: { scaAddress: { equals: agentSCA, mode: "insensitive" } },

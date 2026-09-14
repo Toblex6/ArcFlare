@@ -219,8 +219,18 @@ export function getChainName(domain: number): string {
 }
 
 // ─── Build CCTP V2 burn message for source chain ──────────────────────────────
-// Used when initiating a cross-chain transfer from source to Arc
+// Used when initiating a cross-chain transfer from source to Arc.
+// LEGACY testnet helper (no callers in the current tree): the burnToken below
+// is USDC on Ethereum SEPOLIA. It must never be used on mainnet — fail closed
+// instead of building a Sepolia-token burn against the mainnet destination.
 export function buildCCTPV2TransferParams(recipientAddress: string, amount: bigint) {
+  // getNetworkConfig itself throws on a misconfigured mainnet (fail-closed);
+  // on a CONFIGURED mainnet the Sepolia burn token below must never be used.
+  if (getNetworkConfig().name === 'mainnet') {
+    throw new Error(
+      'buildCCTPV2TransferParams carries the Ethereum Sepolia USDC burn token and has no mainnet equivalent — refusing to build CCTP transfer params on mainnet.'
+    );
+  }
   return {
     destinationDomain: arcDomain(),
     mintRecipient: recipientAddress,

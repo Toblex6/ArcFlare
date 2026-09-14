@@ -18,6 +18,7 @@ import { prisma } from "@/lib/prisma";
 import { notify } from "@/lib/notifications";
 import { sendTelegramMessage } from "@/lib/telegram/sendTelegramMessage";
 import { beneficiaryConfirmUrl, ResolvedBeneficiary } from "@/lib/escrow/resolveBeneficiary";
+import { getNetworkConfig } from "@/lib/config/network";
 
 export async function notifyBeneficiary(input: {
   reference: string;
@@ -42,7 +43,16 @@ export async function notifyBeneficiary(input: {
   }
 
   const amountLabel = `${amount} ${currency}`;
-  const base = `You are the beneficiary of escrow ${reference} for ${amountLabel} on Arc Testnet.`;
+  // Network-aware chain label. Best-effort module: getNetworkConfig throws
+  // on a misconfigured mainnet, which must never fail the escrow creation —
+  // fall back to the testnet label in that case.
+  let chainLabel = "Arc Testnet";
+  try {
+    chainLabel = getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet";
+  } catch {
+    // keep testnet label — notification copy only, never fund-moving
+  }
+  const base = `You are the beneficiary of escrow ${reference} for ${amountLabel} on ${chainLabel}.`;
 
   try {
     switch (beneficiary.kind) {

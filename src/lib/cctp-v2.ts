@@ -34,6 +34,26 @@ import { createCircleWalletsAdapter } from '@circle-fin/adapter-circle-wallets';
 import type { BridgeResult } from '@circle-fin/bridge-kit';
 import { getArcNetworkName, getNetworkConfig } from '@/lib/config/network';
 
+// ── BridgeKit compatibility guard ────────────────────────────────────────────
+// BridgeChain is the CANONICAL source of bridging-supported chains for the
+// installed @circle-fin/bridge-kit (1.13.0 in this repo: Arc_Testnet only, NO
+// Arc mainnet member — verified 2026-09-13). Mainnet chain ids supplied via
+// env are validated against this enum so a typo or a pre-support value fails
+// fast here instead of inside kit.bridge(). NOTE: until Circle ships a
+// bridge-kit containing an Arc mainnet member, NO value can satisfy the
+// destination check below — mainnet bridging stays fail-closed by
+// construction, which is the correct posture (see .env.example).
+function assertBridgeChainMember(value: string, envVar: string): void {
+  const members = new Set<string>(Object.values(BridgeChain) as string[]);
+  if (!members.has(value)) {
+    throw new Error(
+      `${envVar}="${value}" is not a member of the installed @circle-fin/bridge-kit BridgeChain enum ` +
+        `(no Arc mainnet member exists in the installed version — mainnet bridging is unsupported until Circle ships one). ` +
+        `Verify against the installed package before setting this variable.`
+    );
+  }
+}
+
 // ── Supported source chains (where a user can bridge USDC from) ──
 // `id` matches BridgeChain enum members (what Bridge Kit expects).
 // `circleBlockchain` is Circle's own Developer-Controlled Wallets
@@ -96,6 +116,9 @@ export function getCctpSources(
         `CCTP_MAINNET_SOURCES_JSON[${i}] must carry non-empty { id, label, circleBlockchain } (got ${JSON.stringify(entry)}).`
       );
     }
+    // Fail fast on ids the installed BridgeKit cannot bridge (typos or
+    // chains without CCTPv2 support in this bridge-kit version).
+    assertBridgeChainMember(id, `CCTP_MAINNET_SOURCES_JSON[${i}].id`);
     return { id, label, testnet: false, circleBlockchain };
   });
 }
@@ -127,6 +150,10 @@ export function getCctpDestination() {
           "(expected 'Arc', UNVERIFIED). Verify against the installed @circle-fin/bridge-kit BridgeChain enum, then set CCTP_MAINNET_ARC_CHAIN_ID explicitly."
       );
     }
+    // Must be a real BridgeChain member of the INSTALLED bridge-kit, not an
+    // assumed string. (Installed 1.13.0 has no Arc mainnet member, so this
+    // throws until Circle ships one — fail-closed by construction.)
+    assertBridgeChainMember(arcChainId, 'CCTP_MAINNET_ARC_CHAIN_ID');
     return {
       id: arcChainId as 'Arc_Testnet',
       label: 'Arc Mainnet',

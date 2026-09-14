@@ -16,6 +16,10 @@ import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
+import {
+  resolvePlatformPayerWalletId as resolveDefaultPayerWalletId,
+  resolvePlatformMerchantSca as resolveDefaultMerchantSca,
+} from '@/lib/config/platformDefaults';
 
 // ── Constants & Config (authoritative network config) ────────────────────────
 // NOTE (Phase 2A): USDC_ARC is intentionally kept as the documented USDC-only
@@ -35,49 +39,9 @@ function irisApi(): string {
 // unchanged; mainnet: required ARC_MAINNET_USDC_ADDRESS, fail-closed).
 const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
-// SCA Defaults — TESTNET-ONLY legacy pins. On mainnet these MUST be supplied
-// explicitly (MERCHANT_SCA_ADDRESS / PLATFORM_PAYER_WALLET_ID): mainnet
-// silently inheriting the testnet constants below was the class of bug behind
-// the C1 drain, so resolution is fail-closed (see the resolvers). Testnet
-// behavior is byte-identical to before.
-
-const TESTNET_DEFAULT_PAYER_WALLET_ID = '58ab0223-cad0-5128-896e-a88d6f217b43';
-const TESTNET_DEFAULT_MERCHANT_SCA = '0x902C565bE31c146a79350387C1f77d6896814B58';
-
-function isMainnetSelected(): boolean {
-  try {
-    return getNetworkConfig().name === 'mainnet';
-  } catch {
-    // getNetworkConfig itself throws on mainnet-with-missing-config — which
-    // already means "do not use testnet values". Treat as mainnet so both
-    // resolvers below throw fail-closed instead of returning testnet pins.
-    return (process.env.ARC_NETWORK ?? '').trim().toLowerCase() === 'mainnet';
-  }
-}
-
-/** Explicit platform-default payer wallet. Throws on mainnet without config. */
-function resolveDefaultPayerWalletId(): string {
-  const explicit = (process.env.PLATFORM_PAYER_WALLET_ID ?? '').trim();
-  if (explicit) return explicit;
-  if (isMainnetSelected()) {
-    throw new Error(
-      'PLATFORM_PAYER_WALLET_ID is required on mainnet — refusing to debit the testnet platform-default wallet.'
-    );
-  }
-  return TESTNET_DEFAULT_PAYER_WALLET_ID;
-}
-
-/** Explicit platform-default merchant SCA. Throws on mainnet without config. */
-function resolveDefaultMerchantSca(): string {
-  const explicit = (process.env.MERCHANT_SCA_ADDRESS ?? '').trim();
-  if (explicit) return explicit;
-  if (isMainnetSelected()) {
-    throw new Error(
-      'MERCHANT_SCA_ADDRESS is required on mainnet — refusing to credit the testnet platform-default merchant.'
-    );
-  }
-  return TESTNET_DEFAULT_MERCHANT_SCA;
-}
+// Platform-default payer/merchant identities — single authority in
+// src/lib/config/platformDefaults.ts (TESTNET-ONLY pins; explicit-or-throw on
+// mainnet — the C1-drain class). Testnet behavior is byte-identical.
 
 const MESSAGE_TRANSMITTER_ABI = [
   {

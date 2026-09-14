@@ -605,16 +605,18 @@ function staticProofs() {
   ok('scheduled/create: body-supplied payerWalletId no longer accepted',
     !/^\s*payerWalletId,/m.test(createSrc));
   ok('scheduled/create: DEFAULT_PAYER_WALLET_ID only as explicit platform-agent binding',
-    /DEFAULT_PAYER_WALLET_ID/.test(createSrc) &&
-    /controlsPayer\.walletAddress\.toLowerCase\(\) === platformAgent/.test(createSrc));
+    /resolvePlatformPayerWalletId\(\)/.test(createSrc) &&
+    /controlsPayer\.walletAddress\.toLowerCase\(\) === platformAgent/.test(createSrc) &&
+    !/58ab0223-cad0-5128-896e-a88d6f217b43/.test(createSrc));
 
   // nano: the C1-class ASSIGNMENT-DEFAULT shape (Opus 5 follow-up). The
   // old `let payerWalletId = DEFAULT_PAYER_WALLET_ID` initializer with a
   // conditional override was invisible to the `|| DEFAULT` regex — check
   // for the initializer form, the either-party guard, and the identity
-  // comparison directly. The fixed code MAY still assign
-  // DEFAULT_PAYER_WALLET_ID — but only inside the internal-key-gated
-  // platform-default branch (the explicit binding, like scheduled/create).
+  // comparison directly. The fixed code MAY still resolve the platform
+  // default (now via resolvePlatformPayerWalletId(), explicit-or-throw on
+  // mainnet) — but only inside the internal-key-gated platform-default
+  // branch (the explicit binding, like scheduled/create).
   const nanoSettleSrc = fs.readFileSync(`${root}/src/app/api/payments/nano/settle/route.ts`, 'utf8');
   const nanoCreateSrc = fs.readFileSync(`${root}/src/app/api/payments/nano/route.ts`, 'utf8');
   const nanoSettleCode = stripComments(nanoSettleSrc);
@@ -622,11 +624,11 @@ function staticProofs() {
   ok('nano/settle: no `let payerWalletId = DEFAULT` initializer (assignment-default shape gone)',
     !/let payerWalletId\s*=\s*DEFAULT_PAYER_WALLET_ID/.test(nanoSettleCode));
   ok('nano/settle: DEFAULT only via internal-key-gated explicit binding',
-    /payerWalletId = DEFAULT_PAYER_WALLET_ID/.test(nanoSettleCode) &&
+    /payerWalletId = defaultPayerWalletId\(\)/.test(nanoSettleCode) &&
     /if \(!isInternalServiceCall\)/.test(nanoSettleCode) &&
     /refusing to debit the shared platform default wallet/.test(nanoSettleCode));
   ok('nano/settle: platform-default identity compared case-insensitively',
-    /agentSCANormalized === DEFAULT_PAYER_SCA\.toLowerCase\(\)/.test(nanoSettleCode));
+    /agentSCANormalized === defaultPayerSca\(\)\.toLowerCase\(\)/.test(nanoSettleCode));
   ok('nano/settle: AgentRegistry payer lookup case-insensitive',
     /scaAddress: \{ equals: agentSCA, mode: "insensitive" \}/.test(nanoSettleCode));
   ok('nano/settle: no either-party guard (merchantOwnsIt gone)',
