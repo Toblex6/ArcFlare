@@ -34,7 +34,7 @@ type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat"
 // CIRCLE/legacy = a FlareHQ-created wallet. Never expose raw walletType enums.
 function friendlyWalletKind(walletType: string | null): string {
   const t = (walletType ?? "").toUpperCase();
-  if (t === "USER_CONTROLLED") return "FlareHQ wallet · you own it (Google/email)";
+  if (t === "USER_CONTROLLED") return "Self-custody wallet (Google/email login)";
   if (t === "EXTERNAL") return "Connected wallet · you control it";
   return "FlareHQ wallet";
 }
@@ -2533,6 +2533,14 @@ const FONT_IMPORT = `
     --flow-border: #2d2015;
   }
 
+  /* The page column is centered under a max-width cap. Without this the
+     dark body shows through as side gutters ("black bars") around the
+     light column on wider viewports, reading as a floating box. Match
+     the backdrop to the active theme so the column edge disappears;
+     content layout is unchanged. Values mirror --flow-bg above. */
+  body:has(.flow-app:not([data-theme="dark"])) { background: #FFFFFF; }
+  body:has(.flow-app[data-theme="dark"]) { background: #0e0b08; }
+
   /* Desktop/tablet: the mobile-first single-column layout below still
      applies by default (nothing changes on small screens) — these rules
      only kick in once there's real horizontal space to use. */
@@ -2938,6 +2946,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: "1px solid var(--flow-border)",
     padding: "8px 4px 12px",
     marginTop: "auto",
+    // Eight items in one row overflow phone widths and get clipped (body
+    // hides x-overflow). Scroll the row instead of clipping; no overflow
+    // on wider screens so desktop is unchanged.
+    overflowX: "auto",
   },
   navItem: {
     display: "flex",
@@ -2949,6 +2961,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     color: "var(--flow-text-faint)",
     padding: "4px 8px",
+    flexShrink: 0,
   },
   navItemActive: {
     display: "flex",
@@ -2960,6 +2973,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     color: "var(--flow-text)",
     padding: "4px 8px",
+    flexShrink: 0,
   },
   navIcon: {
     fontSize: "clamp(18px, 1.8vw, 21px)",
@@ -2977,3 +2991,4 @@ const styles: Record<string, React.CSSProperties> = {
   },
   navLabel: { fontSize: "clamp(9px, 0.8vw, 11px)", fontWeight: 600 },
 };
+

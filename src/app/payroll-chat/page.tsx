@@ -78,6 +78,13 @@ const FONT_IMPORT = `
     --flow-surface-2: #241c14;
     --flow-border: #2d2015;
   }
+  /* The page column is centered under a max-width cap. Without this the
+     dark body shows through as side gutters ("black bars") around the
+     light column on wider viewports, reading as a floating box. Match
+     the backdrop to the active theme so the column edge disappears;
+     content layout is unchanged. Values mirror --flow-bg above. */
+  body:has(.flow-app:not([data-theme="dark"])) { background: #FFFFFF; }
+  body:has(.flow-app[data-theme="dark"]) { background: #0e0b08; }
   @media (min-width: 720px) {
     .flow-app { max-width: 720px !important; padding: 0 24px !important; }
   }
@@ -732,7 +739,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 12,
-    minHeight: 320,
+    // Fixed 320px floor overflowed short viewports (landscape phones,
+    // short laptop windows): page scroll + inner scroll at once. Cap the
+    // floor at 50vh so the box collapses; unchanged on normal screens.
+    minHeight: "min(320px, 50vh)",
     maxHeight: "52vh",
     overflowY: "auto",
     padding: "4px 0 12px",
@@ -745,6 +755,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   chatInput: {
     flex: 1,
+    minWidth: 0,
     padding: "12px 16px",
     borderRadius: 12,
     border: "1px solid var(--flow-border)",
@@ -793,6 +804,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: "1px solid var(--flow-border)",
     padding: "8px 4px 12px",
     marginTop: "auto",
+    // Six items in one row overflow phone widths and get clipped (body
+    // hides x-overflow). Scroll the row instead of clipping; no overflow
+    // on wider screens so desktop is unchanged.
+    overflowX: "auto",
   },
   navItem: {
     display: "flex",
@@ -804,6 +819,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     color: "var(--flow-text-faint)",
     padding: "4px 8px",
+    flexShrink: 0,
   },
   navItemActive: {
     display: "flex",
@@ -815,6 +831,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     color: "var(--flow-text)",
     padding: "4px 8px",
+    flexShrink: 0,
   },
   navIcon: {
     fontSize: "clamp(18px, 1.8vw, 21px)",
