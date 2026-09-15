@@ -10,11 +10,14 @@
 // POST /api/cctp/transfer/challenge, and finally polls
 // GET /api/cctp/transfer/status until the Arc mint lands.
 //
-// Circle credentials (userToken/encryptionKey) live in a React ref only —
-// never localStorage, never cookies, cleared on unmount and when the
-// bridge finishes. Re-auth happens at bridge time (the onboarding session
-// is long gone by then): Google redirect resumes via sessionStorage-held
-// bridge params, email OTP stays in-page via the SDK modal.
+// Circle credentials (userToken/encryptionKey) live in the shared
+// CircleSessionProvider at the consumer page level (memory-only React
+// state — never localStorage, never cookies) so Swap/Save/Bridge/etc.
+// reuse an already-valid session within the same visit instead of each
+// forcing Google/email re-auth. Re-auth happens only when the shared
+// session is actually missing or expired — expiry is detected by Circle's
+// own API signals (SDK error 155104 "userTokenExpired" or server-side
+// 401/CIRCLE_AUTH_EXPIRED), never by a client-side timer.
 //
 // Secrets discipline mirrors CircleUserWallet.tsx: only short-lived
 // device-bound tokens touch sessionStorage (for the OAuth redirect
@@ -24,6 +27,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCircleSession } from './CircleSessionContext';
 
 export interface BridgeChainOption {
   id: string;
@@ -39,12 +43,6 @@ type Phase =
   | 'continuing'
   | 'minting'
   | 'done';
-
-interface Credentials {
-  userToken: string | null;
-  encryptionKey: string | null;
-  circleUserId: string | null;
-}
 
 const PENDING_KEY = 'flarehq-circle-pending-login';
 const PENDING_BRIDGE_KEY = 'flarehq-bridge-pending';
@@ -136,38 +134,72 @@ export function UserControlledBridge({
   const [result, setResult] = useState<{ ok: boolean; message: string; explorerUrl?: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const sdkRef = useRef<any>(null);
-  const credsRef = useRef<Credentials>({ userToken: null, encryptionKey: null, circleUserId: null });
+  // Shared Circle session (page-level): reuse an already-valid login
+  // across Bridge/Swap/Save/etc. within the same visit. Only missing or
+  // Circle-API-expired sessions force re-auth — never view navigation.
+  // The per-challenge setAuthentication -> execute flow below is unchanged.
+  const { getUserToken, getEncryptionKey, setSession, clearSession, sdkRef: sharedSdkRef } =
+    useCircleSession();
   const cancelledRef = useRef(false);
   const autoResumedRef = useRef(false);
 
-  const fail = useCallback((e: any) => {
-    if (cancelledRef.current) return;
-    setError(friendlyError(e));
-    setStatus(null);
-    setBusy(false);
-    setPhase('idle');
-  }, []);
+  const fail = useCallback(
+    (e: any) => {
+      if (cancelledRef.current) return;
+      // Circle API says the token is expired: drop the shared session so
+      // the next attempt re-auths once. Covers the SDK error code
+      // (155104 / userTokenExpired mapped to USER_TOKEN_REQUIRED by the
+      // bridge route) and the server-side 401 (CIRCLE_AUTH_EXPIRED from
+      // the session-link route's listWallets call).
+      const code = String(e?.code ?? '');
+      if (
+        code === 'USER_TOKEN_REQUIRED' ||
+        code === 'CIRCLE_AUTH_EXPIRED' ||
+        code === '155104'
+      ) clearSession();
+      setError(friendlyError(e));
+      setStatus(null);
+      setBusy(false);
+      setPhase('idle');
+    },
+    [clearSession]
+  );
+
+  // Execution SDK shared at the page level: login flows assign it when they
+  // construct the SDK; a lazily constructed instance covers the case where
+  // the session was seeded elsewhere (e.g. onboarding) and this view never
+  // built one. Either way the caller still does setAuthentication per
+  // challengeId — the per-transaction challenge flow is unchanged.
+  const ensureExecutionSdk = useCallback(async () => {
+    if (sharedSdkRef.current) return sharedSdkRef.current;
+    const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk');
+    const sdk = new W3SSdk({ appSettings: { appId } }, () => {});
+    sharedSdkRef.current = sdk;
+    return sdk;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appId]);
 
   // ── Challenge execution (browser-only — the SDK is lazy-imported so it
   // is never bundled server-side) ─────────────────────────────────────────
-  const executeChallenge = useCallback(async (challengeId: string) => {
-    const sdk = sdkRef.current;
-    if (!sdk) throw new Error('Wallet SDK is not ready. Try again.');
-    const { userToken, encryptionKey } = credsRef.current;
-    if (!userToken) throw new Error('Circle sign-in expired — sign in again.');
-    sdk.setAuthentication({ userToken, encryptionKey });
-    await new Promise<void>((resolve, reject) => {
-      try {
-        sdk.execute(challengeId, (err: any) => {
-          if (err) reject(err instanceof Error ? err : new Error(String(err?.message ?? err ?? 'Challenge failed.')));
-          else resolve();
-        });
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }, []);
+  const executeChallenge = useCallback(
+    async (challengeId: string) => {
+      const userToken = getUserToken();
+      if (!userToken) throw new Error('Circle sign-in expired — sign in again.');
+      const sdk = await ensureExecutionSdk();
+      sdk.setAuthentication({ userToken, encryptionKey: getEncryptionKey() });
+      await new Promise<void>((resolve, reject) => {
+        try {
+          sdk.execute(challengeId, (err: any) => {
+            if (err) reject(err instanceof Error ? err : new Error(String(err?.message ?? err ?? 'Challenge failed.')));
+            else resolve();
+          });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    },
+    [getUserToken, getEncryptionKey, ensureExecutionSdk]
+  );
 
   const continueBridge = useCallback(
     async (userToken: string, reference: string, challengeId: string): Promise<any> => {
@@ -289,8 +321,9 @@ export function UserControlledBridge({
         setPhase('done');
         setBusy(false);
         setStatus(null);
-        // Drop Circle credentials the moment the bridge is done.
-        credsRef.current = { userToken: null, encryptionKey: null, circleUserId: null };
+        // Session intentionally retained: the shared login stays valid until
+        // Circle's API reports expiry (155104 / 401). Expiry/disconnect
+        // clears it — never completion.
         setResult({
           ok: true,
           message: `Bridged ${bridgeAmount} USDC to Arc!`,
@@ -313,11 +346,15 @@ export function UserControlledBridge({
           fail(loginError ?? new Error('Sign-in failed.'));
           return;
         }
-        credsRef.current = {
-          userToken: String(result.userToken),
+        // Publish the fresh login to the shared page-level session so every
+        // consumer feature reuses it until Circle's API reports expiry.
+        const freshToken = String(result.userToken);
+        const freshCreds = {
+          userToken: freshToken,
           encryptionKey: result.encryptionKey ? String(result.encryptionKey) : null,
           circleUserId: result.userId != null ? String(result.userId) : null,
         };
+        setSession(freshCreds);
         try {
           sessionStorage.removeItem(PENDING_KEY);
         } catch {
@@ -339,9 +376,9 @@ export function UserControlledBridge({
           }
           onFromChainChange(pending.fromChain);
           setAmount(pending.amount);
-          await runBridge(credsRef.current.userToken as string, pending.amount, pending.fromChain);
+          await runBridge(freshToken, pending.amount, pending.fromChain);
         } else if (amount && fromChain) {
-          await runBridge(credsRef.current.userToken as string, amount, fromChain);
+          await runBridge(freshToken, amount, fromChain);
         } else {
           setPhase('idle');
           setBusy(false);
@@ -350,7 +387,7 @@ export function UserControlledBridge({
       })();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fail, runBridge, fromChain, onFromChainChange]
+    [fail, runBridge, fromChain, onFromChainChange, setSession]
   );
 
   const startBridgeClick = useCallback(() => {
@@ -360,12 +397,15 @@ export function UserControlledBridge({
     }
     setError(null);
     setResult(null);
-    if (credsRef.current.userToken) {
-      void runBridge(credsRef.current.userToken, amount, fromChain);
+    // Reuse the shared session when it is still valid — re-auth only when
+    // the token is actually missing or expired, not on every navigation.
+    const existingToken = getUserToken();
+    if (existingToken) {
+      void runBridge(existingToken, amount, fromChain);
     } else {
       setPhase('auth');
     }
-  }, [fromChain, amount, runBridge]);
+  }, [fromChain, amount, runBridge, getUserToken]);
 
   const startGoogle = useCallback(async () => {
     setError(null);
@@ -381,10 +421,11 @@ export function UserControlledBridge({
         /* storage unavailable — redirect resume will fail closed below */
       }
       // Fresh SDK bound to this flow's login-complete handler (the SDK
-      // captures the callback at construct time).
+      // captures the callback at construct time). Shared at the page level
+      // so challenge execution survives view remounts.
       const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk');
       const bound = new W3SSdk({ appSettings: { appId } }, handleLoginComplete);
-      sdkRef.current = bound;
+      sharedSdkRef.current = bound;
       const deviceId: string = await bound.getDeviceId();
       const tokens = await circleProxy({ action: 'social-token', deviceId });
       try {
@@ -428,7 +469,7 @@ export function UserControlledBridge({
     try {
       const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk');
       const bound = new W3SSdk({ appSettings: { appId } }, handleLoginComplete);
-      sdkRef.current = bound;
+      sharedSdkRef.current = bound;
       const deviceId: string = await bound.getDeviceId();
       const tokens = await circleProxy({ action: 'email-token', deviceId, email: normalized });
       bound.updateConfigs({
@@ -493,7 +534,7 @@ export function UserControlledBridge({
           },
           handleLoginComplete
         );
-        sdkRef.current = bound;
+        sharedSdkRef.current = bound;
       } catch (e) {
         if (!cancelled) fail(e);
       }
@@ -504,12 +545,13 @@ export function UserControlledBridge({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appId]);
 
-  // Drop in-memory Circle credentials on unmount.
+  // The shared session outlives this view: navigating to Swap/Save/etc.
+  // unmounts the bridge but must NOT drop the login. Cleanup only cancels
+  // in-flight work; expiry/disconnect clears the session itself.
   useEffect(() => {
     cancelledRef.current = false;
     return () => {
       cancelledRef.current = true;
-      credsRef.current = { userToken: null, encryptionKey: null, circleUserId: null };
     };
   }, []);
 

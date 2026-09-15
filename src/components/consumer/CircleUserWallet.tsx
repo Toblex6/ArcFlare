@@ -15,7 +15,10 @@
 //      session cookie (server verifies the address against Circle first)
 //
 // Secrets discipline: userToken/encryptionKey live in React state only —
-// never localStorage, never cookies, cleared on unmount and after linking.
+// never localStorage, never cookies. The fresh login is also published to
+// the shared page-level CircleSessionProvider (when present) so Bridge /
+// Swap / Save etc. reuse it within the same visit instead of forcing a
+// second Google/email ceremony; the shared copy expires after ~60 min.
 // Only the OAuth-redirect bridge (deviceToken/deviceEncryptionKey, which are
 // short-lived device-bound tokens, NOT user credentials) touches
 // sessionStorage so the SDK can rehydrate after Google redirects back.
@@ -24,6 +27,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Configs } from '@circle-fin/w3s-pw-web-sdk/dist/src/types';
+import { useOptionalCircleSession } from './CircleSessionContext';
 
 type Mode = 'google' | 'email';
 type Phase =
@@ -98,6 +102,9 @@ export function CircleUserWallet({
   const [busy, setBusy] = useState(false);
 
   const sdkRef = useRef<any>(null);
+  // Shared page-level session (optional): seed it on login so later
+  // consumer features reuse this auth instead of re-prompting.
+  const sharedSession = useOptionalCircleSession();
   const stateRef = useRef<{ userToken: string | null; encryptionKey: string | null; circleUserId: string | null }>({
     userToken: null,
     encryptionKey: null,
@@ -139,7 +146,10 @@ export function CircleUserWallet({
         err.code = data?.code;
         throw err;
       }
-      // Drop Circle credentials from memory the moment the FlareHQ session exists.
+      // Drop the LOCAL Circle credentials from memory the moment the FlareHQ
+      // session exists. The shared page-level session (seeded at login)
+      // is intentionally retained for ~60 min so Bridge/Swap/Save reuse it
+      // without a second Google/email ceremony.
       stateRef.current = { userToken: null, encryptionKey: null, circleUserId: null };
       try {
         sessionStorage.removeItem(PENDING_KEY);
@@ -217,6 +227,14 @@ export function CircleUserWallet({
           encryptionKey: result.encryptionKey ? String(result.encryptionKey) : null,
           circleUserId: result.userId != null ? String(result.userId) : null,
         };
+        // Seed the shared page-level session (and SDK) so a just-onboarded
+        // user can bridge without re-authing in the same visit.
+        try {
+          sharedSession?.setSession({ ...stateRef.current, userToken: stateRef.current.userToken as string });
+          if (sharedSession && sdkRef.current) sharedSession.sdkRef.current = sdkRef.current;
+        } catch {
+          /* shared session unavailable — bridge re-auths on demand */
+        }
         try {
           await initializeAndLink(stateRef.current.userToken as string, stateRef.current.circleUserId);
         } catch (e) {
@@ -224,7 +242,7 @@ export function CircleUserWallet({
         }
       })();
     },
-    [fail, initializeAndLink]
+    [fail, initializeAndLink, sharedSession]
   );
 
   // Lazily construct the SDK (browser-only import — never bundled server-side).

@@ -47,7 +47,7 @@ function buildChallengeMessage(domain: string, address: string, nonce: string): 
 }
 
 async function issueSession(
-  account: { id: string; walletAddress: string; walletType?: string | null; circleWalletId?: string | null },
+  account: { id: string; walletAddress: string; walletType?: string | null; circleWalletId?: string | null; walletSetId?: string | null },
   extra?: { isNew?: boolean }
 ) {
   const token = await issueConsumerSessionToken(account.id, account.walletAddress);
@@ -63,8 +63,14 @@ async function issueSession(
       walletAddress: account.walletAddress,
       // EXTERNAL (bring-your-own) vs CIRCLE (FlareHQ-managed) — the UI uses
       // this to gate features that need a FlareHQ wallet (e.g. bridging).
+      // walletSetId is exposed so the browser can call
+      // signingModelForWallet({ walletType, walletSetId }) — the single
+      // authority for save/bridge UX branching — instead of comparing
+      // walletType strings inline (a CIRCLE row without walletSetId is not
+      // server-signable and must not render the automatic-save UX).
       walletType: account.walletType ?? null,
       circleWalletId: (account as any).circleWalletId ?? null,
+      walletSetId: (account as any).walletSetId ?? null,
     },
   });
 
@@ -136,6 +142,9 @@ export async function GET(req: NextRequest) {
         walletAddress: payload.walletAddress as string,
         walletType: acct?.walletType ?? null,
         circleWalletId: (acct as any)?.circleWalletId ?? null,
+        // See issueSession above: the Save view branches via
+        // signingModelForWallet({ walletType, walletSetId }).
+        walletSetId: (acct as any)?.walletSetId ?? null,
       },
     });
   } catch {

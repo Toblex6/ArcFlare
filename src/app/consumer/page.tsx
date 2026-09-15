@@ -22,9 +22,12 @@ import {
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
 import { CircleUserWallet } from "@/components/consumer/CircleUserWallet";
+import { CircleSessionProvider, useCircleSession } from "@/components/consumer/CircleSessionContext";
 import { UserControlledBridge } from "@/components/consumer/UserControlledBridge";
+import { UserControlledSave } from "@/components/consumer/UserControlledSave";
 import { explorerTxUrl } from "@/lib/config/network";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
+import { signingModelForWallet } from "@/lib/wallet/signingModel";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover" | "swap";
 
@@ -106,11 +109,17 @@ interface ActivityItem {
   outputAmountDisplay?: string;
 }
 
-export default function ConsumerApp() {
+function ConsumerAppInner() {
   // Testnet faucet is only offered on testnet; hidden on mainnet.
   const isTestnet = getNetworkConfig().name === 'testnet';
   const router = useRouter();
   const { signMessageAsync } = useSignMessage();
+  // Shared Circle user-controlled session (page level): Bridge/Swap/Save
+  // reuse an already-valid login within the same visit; re-auth only when
+  // the Circle API actually rejects the token (155104 / 401 /
+  // CIRCLE_AUTH_EXPIRED), never on view navigation. Dropped on disconnect
+  // / wallet switch (identity change).
+  const { clearSession: clearCircleSession } = useCircleSession();
   // A4: "Use this wallet" needs an ACTIVE wagmi connection before it can sign
   // the server challenge — with no extension connected, signMessageAsync used
   // to fail immediately with an unhelpful error. These hooks let onboarding
@@ -122,6 +131,7 @@ export default function ConsumerApp() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
   const [walletType, setWalletType] = useState<string | null>(null);
+  const [walletSetId, setWalletSetId] = useState<string | null>(null);
   const [justCreatedWallet, setJustCreatedWallet] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
@@ -213,6 +223,10 @@ export default function ConsumerApp() {
   // API routes (/api/consumer/email, /api/consumer/pin) are unchanged —
   // legacy accounts still enroll through the gated rows.
   const legacySecurityPanel = (walletType ?? "").toUpperCase() !== "USER_CONTROLLED";
+  // Signing-model authority for Save UX branching. Never branch on
+  // a raw walletType string — a CIRCLE row without walletSetId is not
+  // server-signable and must not render the automatic Save path.
+  const signingModel = signingModelForWallet({ walletType, walletSetId });
   const pinRef = useRef<string | null>(null);
   // Masked, in-memory PIN dialog that replaced the browser prompt for step-up.
   const { requestPin, dialog: pinDialog } = useSecurePinDialog();
@@ -426,6 +440,7 @@ export default function ConsumerApp() {
         if (data.success && data.account?.walletAddress) {
           setWalletAddress(data.account.walletAddress);
           setWalletType(data.account.walletType ?? null);
+          setWalletSetId(data.account.walletSetId ?? null);
           setView(initialViewRef.current ?? "home");
         } else {
           setView("onboarding");
@@ -606,6 +621,7 @@ export default function ConsumerApp() {
       if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
       setWalletAddress(data.account.walletAddress);
       setWalletType(data.account.walletType ?? null);
+      setWalletSetId(data.account.walletSetId ?? null);
       setView("home");
     } catch (e: any) {
       const lower = String(e?.shortMessage ?? e?.message ?? '').toLowerCase();
@@ -682,9 +698,12 @@ export default function ConsumerApp() {
       const data = await authenticateWalletAddress(address);
       setWalletAddress(data.account.walletAddress);
       setWalletType(data.account.walletType ?? null);
+      setWalletSetId(data.account.walletSetId ?? null);
       setJustCreatedWallet(false);
+      // Identity changed — a cached Circle login belongs to the previous
+      // wallet and must not be reused against the new one.
+      clearCircleSession();
       setSwitchOpen(false);
-      // Return to wherever the switch started (Flow Swap when launched
       // from there) — never onboarding, never a blank state.
       setView(switchReturnRef.current);
     } catch (e: any) {
@@ -748,8 +767,12 @@ export default function ConsumerApp() {
       if (!data.success) throw new Error(data.error || "Could not create a FlareHQ wallet right now.");
       setWalletAddress(data.account.walletAddress);
       setWalletType(data.account.walletType ?? "CIRCLE");
+      setWalletSetId(data.account.walletSetId ?? null);
       setBridgeNeedsFlareWallet(false);
       setJustCreatedWallet(true);
+      // New wallet identity — any prior Circle user-controlled login
+      // belongs to someone else; drop it so the next UC flow re-auths.
+      clearCircleSession();
     } catch (e: any) {
       setCrossResult({ success: false, error: friendlyWalletError(e) });
     } finally {
@@ -761,8 +784,11 @@ export default function ConsumerApp() {
     try {
       await fetch("/api/consumer/session", { method: "DELETE" });
     } catch { }
+    // Visit ends: drop the shared Circle login with the FlareHQ session.
+    clearCircleSession();
     setWalletAddress("");
     setWalletType(null);
+    setWalletSetId(null);
     setBridgeNeedsFlareWallet(false);
     setView("onboarding");
   };
@@ -1233,6 +1259,7 @@ export default function ConsumerApp() {
               onLinked={(account) => {
                 setWalletAddress(account.walletAddress);
                 setWalletType(account.walletType ?? "USER_CONTROLLED");
+                setWalletSetId((account as any).walletSetId ?? null);
                 setCircleOpen(null);
                 // Faucet banner only for genuinely new wallets — returning
                 // users land straight in the app.
@@ -2991,4 +3018,19 @@ const styles: Record<string, React.CSSProperties> = {
   },
   navLabel: { fontSize: "clamp(9px, 0.8vw, 11px)", fontWeight: 600 },
 };
+
+// Shared Circle user-controlled session at the consumer page level: the
+// provider sits ABOVE the view state so navigating between Home / Send /
+// Save / Bridge / Swap never drops the login. Re-auth is required only
+// when the Circle API actually rejects the token (155104 / 401 /
+// CIRCLE_AUTH_EXPIRED), with clears on disconnect / wallet switch.
+// Consumer-side only; the per-transaction Circle challenge flow
+// (setAuthentication -> execute) is unchanged.
+export default function ConsumerApp() {
+  return (
+    <CircleSessionProvider>
+      <ConsumerAppInner />
+    </CircleSessionProvider>
+  );
+}
 

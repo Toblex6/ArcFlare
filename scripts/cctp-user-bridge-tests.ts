@@ -45,6 +45,7 @@ const bridge = read("src/lib/circle/userBridge.ts");
 const model = read("src/lib/wallet/signingModel.ts");
 const enc = read("src/lib/circle/cctpChallenge.ts");
 const panel = read("src/components/consumer/UserControlledBridge.tsx");
+const sessionCtx = read("src/components/consumer/CircleSessionContext.tsx");
 const consumerPage = read("src/app/consumer/page.tsx");
 const gateway = read("src/lib/x402.ts");
 
@@ -206,8 +207,13 @@ ok("server-only guard intact", helper.includes('typeof window !== "undefined"'),
 console.log("\n[6] frontend");
 ok("bridge executes via setAuthentication+execute", panel.includes("setAuthentication") && panel.includes(".execute("), "");
 ok("bridge re-auths at bridge time", panel.includes("social-token") && panel.includes("email-token"), "");
-ok("bridge creds memory-only", panel.includes("credsRef") && !/localStorage\.setItem\([^)]*(userToken|encryptionKey)/i.test(panel), "");
-ok("bridge clears creds on unmount/done", panel.includes("userToken: null, encryptionKey: null"), "");
+ok("bridge reuses the shared page-level session", panel.includes("useCircleSession") && panel.includes("getUserToken()"), "");
+ok("bridge holds no local session (no per-view re-auth)", !panel.includes("credsRef"), "local credsRef still present");
+ok("bridge retains the session on done/unmount", !/credsRef\.current = \{ userToken: null/.test(panel), "session still cleared");
+ok("shared session is memory-only", !/localStorage\.setItem\([^)]*(userToken|encryptionKey)/i.test(panel + sessionCtx) && !/localStorage\.getItem\([^)]*(userToken|encryptionKey)/i.test(panel + sessionCtx), "credential persisted!");
+ok("shared session has no client-side timer", !sessionCtx.includes("CIRCLE_SESSION_TTL_MS") && !sessionCtx.includes("isFresh") && !sessionCtx.includes("acquiredAt"), "TTL-based expiry still present");
+ok("shared session expiry is API-reactive", sessionCtx.includes("clearSession") && panel.includes("CIRCLE_AUTH_EXPIRED") && panel.includes("155104"), "no Circle expiry signals");
+ok("page provides the shared session", consumerPage.includes("CircleSessionProvider") && consumerPage.includes("ConsumerAppInner"), "");
 ok("bridge lazy-imports the SDK", panel.includes("await import('@circle-fin/w3s-pw-web-sdk')"), "");
 ok("bridge never logs userToken", !/console\.(log|error)\([^)]*userToken/i.test(panel), "");
 ok("stopgap copy preserved", panel.includes("Bridging support for your wallet type is being added - check back soon"), "");
