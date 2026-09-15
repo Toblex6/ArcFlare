@@ -21,25 +21,44 @@ import {
   getAppropriateAction,
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
-import { CircleUserWallet } from "@/components/consumer/CircleUserWallet";
-import { CircleSessionProvider, useCircleSession } from "@/components/consumer/CircleSessionContext";
-import { UserControlledBridge } from "@/components/consumer/UserControlledBridge";
-import { UserControlledSave } from "@/components/consumer/UserControlledSave";
 import { explorerTxUrl } from "@/lib/config/network";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
 import { signingModelForWallet } from "@/lib/wallet/signingModel";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover" | "swap";
 
-// Customer-facing wallet identity: which wallet is signed in and who holds
-// its keys. USER_CONTROLLED = Circle user wallet the user owns (Google /
-// email); EXTERNAL = a wallet the user connected and controls themselves;
-// CIRCLE/legacy = a FlareHQ-created wallet. Never expose raw walletType enums.
+// Customer-facing wallet identity: only two consumer wallet modes exist.
+// CIRCLE = FlareHQ wallet (backend-controlled; ordinary in-app UX).
+// EXTERNAL = a wallet the user connected and controls themselves (the user
+// signs in their browser wallet). Never expose raw walletType enums, and
+// never claim the FlareHQ wallet is self-custody.
 function friendlyWalletKind(walletType: string | null): string {
   const t = (walletType ?? "").toUpperCase();
-  if (t === "USER_CONTROLLED") return "Self-custody wallet (Google/email login)";
   if (t === "EXTERNAL") return "Connected wallet · you control it";
   return "FlareHQ wallet";
+}
+
+/** Honest product copy for backend wallet capability codes. Raw server
+ *  messages stay in collapsible technical surfaces; these headlines are
+ *  what ordinary consumers read. */
+function friendlyCapabilityError(code: string | undefined, fallback: string): string {
+  const c = (code ?? "").toUpperCase();
+  if (c === "EXTERNAL_REQUIRES_BROWSER_SIGNATURE") {
+    return "Your connected wallet remains controlled by you — FlareHQ cannot move funds from it. No funds moved.";
+  }
+  if (c === "EXTERNAL_WALLET") {
+    return "This needs a FlareHQ wallet. Your connected wallet stays yours — create a free FlareHQ wallet with your email to use this feature.";
+  }
+  if (c === "CIRCLE_WALLET_UNBOUND") {
+    return "Your FlareHQ wallet needs attention before it can move money — no funds moved. Try again later or contact support.";
+  }
+  if (c === "BRIDGE_SOURCE_UNSUPPORTED") {
+    return "Bridging from that chain is not supported for this wallet yet — fund your FlareHQ wallet on Arc first.";
+  }
+  if (c === "WALLET_UNSUPPORTED") {
+    return "This wallet type is no longer supported. Connect a wallet or continue with email to get a FlareHQ wallet.";
+  }
+  return fallback;
 }
 
 interface ActionResult {
@@ -114,12 +133,10 @@ function ConsumerAppInner() {
   const isTestnet = getNetworkConfig().name === 'testnet';
   const router = useRouter();
   const { signMessageAsync } = useSignMessage();
-  // Shared Circle user-controlled session (page level): Bridge/Swap/Save
-  // reuse an already-valid login within the same visit; re-auth only when
-  // the Circle API actually rejects the token (155104 / 401 /
-  // CIRCLE_AUTH_EXPIRED), never on view navigation. Dropped on disconnect
-  // / wallet switch (identity change).
-  const { clearSession: clearCircleSession } = useCircleSession();
+  // Consumer auth is the backend consumer_token session (+ walletType /
+  // circleWalletId / mode / canServerSign from /api/consumer/session and
+  // /api/consumer/email-auth). There is no second client-side wallet
+  // authority — view navigation never restarts authentication.
   // A4: "Use this wallet" needs an ACTIVE wagmi connection before it can sign
   // the server challenge — with no extension connected, signMessageAsync used
   // to fail immediately with an unhelpful error. These hooks let onboarding
@@ -172,7 +189,6 @@ function ConsumerAppInner() {
   const [confirmFlareOpen, setConfirmFlareOpen] = useState(false);
   // ── Email OTP resend cooldowns (Part 4, seconds remaining) ──
   const [emailCooldown, setEmailCooldown] = useState(0);
-  const [recoverCooldown, setRecoverCooldown] = useState(0);
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [frequency, setFrequency] = useState("7");
@@ -217,15 +233,12 @@ function ConsumerAppInner() {
     maskedEmail: string | null;
     hasPin: boolean;
   } | null>(null);
-  // Recovery-email + payment-PIN rows belong to the OLD custodial wallet
-  // model: Circle handles security/recovery natively for user-controlled
-  // (Google/email) wallets, so those rows would be confusing there. Render
-  // them ONLY for everything else — the legacy custodial 'CIRCLE' accounts
-  // (and any unknown/EXTERNAL value) keep the full panel; the wallet-kind +
-  // address row above stays visible for everyone. The enrollment logic and
-  // API routes (/api/consumer/email, /api/consumer/pin) are unchanged —
-  // legacy accounts still enroll through the gated rows.
-  const legacySecurityPanel = (walletType ?? "").toUpperCase() !== "USER_CONTROLLED";
+  // Recovery-email + payment-PIN rows apply to every wallet mode: the
+  // FlareHQ wallet uses them for recovery and step-up authorization, and
+  // connected wallets keep the same panel so the security surface stays
+  // coherent. The enrollment logic and API routes (/api/consumer/email,
+  // /api/consumer/pin) are unchanged.
+  const legacySecurityPanel = true;
   // Signing-model authority for Save UX branching. Never branch on
   // a raw walletType string — a CIRCLE row without circleWalletId is not
   // server-signable and must not render the automatic Save path.
@@ -244,22 +257,35 @@ function ConsumerAppInner() {
   const [pinConfirm, setPinConfirm] = useState("");
   const [pinBusy, setPinBusy] = useState(false);
   const [pinMsg, setPinMsg] = useState<string | null>(null);
-  // Onboarding recovery (second device): email → code → session.
-  // (Legacy recovery for instant/Flow-created wallets. Circle
-  // user-controlled wallets recover through the same Google/email identity
-  // in the FlareHQ-wallet panel above — no code needed.)
-  const [showRecover, setShowRecover] = useState(false);
-  const [recoverEmail, setRecoverEmail] = useState("");
-  const [recoverCode, setRecoverCode] = useState("");
-  const [recoverStep, setRecoverStep] = useState<"enter" | "code">("enter");
-  const [recoverBusy, setRecoverBusy] = useState(false);
-  const [recoverMsg, setRecoverMsg] = useState<string | null>(null);
-  // ── Circle user-controlled wallet onboarding (Google / email OTP) ──
-  // Primary FlareHQ-wallet path: Circle's Web SDK authenticates the user and
-  // creates a wallet they own; the session link lands in this app normally.
-  // The legacy instant (developer-controlled) creation stays for backwards
-  // compatibility; external-wallet connect is unchanged.
-  const [circleOpen, setCircleOpen] = useState<null | "google" | "email">(null);
+  // ── Email onboarding (backend email-auth flow) ──
+  // Continue with email → request OTP → enter OTP → the server resolves the
+  // existing ConsumerAccount OR creates the Circle-managed SCA for a new
+  // consumer, then issues the consumer_token session and Flow opens. The
+  // frontend never touches Circle's Web SDK and there is no Google OAuth
+  // flow here. A returning email resolves to the SAME wallet.
+  const [emailAuthOpen, setEmailAuthOpen] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginCode, setLoginCode] = useState("");
+  const [loginStep, setLoginStep] = useState<"enter" | "code">("enter");
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginMsg, setLoginMsg] = useState<string | null>(null);
+  const [loginCooldown, setLoginCooldown] = useState(0);
+  // Backend wallet capability for the active session (mode + canServerSign
+  // from /api/consumer/session and email-auth responses). Read where
+  // helpful for honest feature gating — never a second authority.
+  const [walletMode, setWalletMode] = useState<string | null>(null);
+  const [canServerSign, setCanServerSign] = useState(false);
+  const applySessionAccount = (account: any, isNew?: boolean) => {
+    setWalletAddress(account.walletAddress);
+    setWalletType(account.walletType ?? null);
+    setCircleWalletId(account.circleWalletId ?? null);
+    setWalletMode(account.mode ?? null);
+    setCanServerSign(!!account.canServerSign);
+    // Hiring/FlareHQ-wallet features key off the bound Circle wallet id.
+    if (account.circleWalletId) setConsumerWalletId(account.circleWalletId);
+    else setConsumerWalletId(null);
+    if (typeof isNew === "boolean") setJustCreatedWallet(isNew);
+  };
 
   // ── Savings plans (scheduled self-transfers) ──
   const [savingsPlans, setSavingsPlans] = useState<SavingsPlan[]>([]);
@@ -436,14 +462,14 @@ function ConsumerAppInner() {
   }, [view, sendCurrency, walletAddress]);
 
   // ── Check for existing session ──
+  // The authenticated consumer session survives navigation between Send /
+  // Swap / Bridge / Save / Request / History — no view change re-prompts.
   useEffect(() => {
     fetch("/api/consumer/session")
       .then((r) => r.json())
       .then((data) => {
         if (data.success && data.account?.walletAddress) {
-          setWalletAddress(data.account.walletAddress);
-          setWalletType(data.account.walletType ?? null);
-          setCircleWalletId(data.account.circleWalletId ?? null);
+          applySessionAccount(data.account);
           setView(initialViewRef.current ?? "home");
         } else {
           setView("onboarding");
@@ -451,7 +477,76 @@ function ConsumerAppInner() {
       })
       .catch(() => setView("onboarding"))
       .finally(() => setCheckingSession(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Email login (backend email-auth flow) ──
+  const requestLoginCode = async () => {
+    const email = loginEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLoginMsg("Enter a valid email address first.");
+      return;
+    }
+    setLoginBusy(true);
+    setLoginMsg(null);
+    try {
+      const res = await fetch("/api/consumer/email-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      await res.json().catch(() => ({}));
+      // Always generic (anti-enumeration): a code is on its way when the
+      // address can receive one. Codes expire after a few minutes.
+      setLoginStep("code");
+      setLoginMsg("Check your inbox for the sign-in code (and spam/junk). It expires in a few minutes.");
+      setLoginCooldown(30);
+    } catch {
+      setLoginMsg("Could not request a code. Check your connection and try again.");
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const confirmLoginCode = async () => {
+    const email = loginEmail.trim().toLowerCase();
+    const code = loginCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      setLoginMsg("Enter the 6-digit code from your email.");
+      return;
+    }
+    setLoginBusy(true);
+    setLoginMsg(null);
+    try {
+      const res = await fetch("/api/consumer/email-auth", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success || !data?.account?.walletAddress) {
+        const raw = String(data?.error || "That code did not verify.");
+        setLoginMsg(
+          /invalid|expired/i.test(raw)
+            ? `${raw} Codes expire after a few minutes and can be used only once — request a new code below if needed.`
+            : raw
+        );
+        return;
+      }
+      // Session cookie is set server-side; the SAME wallet resolves for a
+      // returning email — never a second wallet-creation panel.
+      applySessionAccount(data.account, data.isNew === true);
+      setEmailAuthOpen(false);
+      setLoginCode("");
+      setLoginStep("enter");
+      setOnboardingError(null);
+      setView("home");
+    } catch {
+      setLoginMsg("Could not verify the code. Check your connection and try again.");
+    } finally {
+      setLoginBusy(false);
+    }
+  };
 
   // ── Fetch supported source chains ──
   useEffect(() => {
@@ -551,7 +646,7 @@ function ConsumerAppInner() {
       return;
     }
     if (!consumerWalletId) {
-      setHireResult({ success: false, error: "Hiring needs a FlareHQ wallet. Create one with Google or email, or connect a wallet that already has one." });
+      setHireResult({ success: false, error: "Hiring needs a FlareHQ wallet. Create one with email, or connect a wallet that already has one." });
       return;
     }
     if (!isServiceable(cardData.status ?? selectedAgent.status)) {
@@ -588,7 +683,7 @@ function ConsumerAppInner() {
       setOnboardingError(
         hasInjectedProvider()
           ? "Connect your wallet extension first — pick it below, then this connection continues."
-          : "No wallet extension detected. Install one below or from ethereum.org/en/wallets — or use “Create your FlareHQ wallet”, which needs no extension."
+          : "No wallet extension detected. Pick one below, or continue with email instead — no extension needed."
       );
       return;
     }
@@ -622,9 +717,7 @@ function ConsumerAppInner() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
-      setWalletAddress(data.account.walletAddress);
-      setWalletType(data.account.walletType ?? null);
-      setCircleWalletId(data.account.circleWalletId ?? null);
+      applySessionAccount(data.account);
       setView("home");
     } catch (e: any) {
       const lower = String(e?.shortMessage ?? e?.message ?? '').toLowerCase();
@@ -654,13 +747,13 @@ function ConsumerAppInner() {
 
   // ── OTP resend cooldown ticker (Part 4) ──
   useEffect(() => {
-    if (emailCooldown <= 0 && recoverCooldown <= 0) return;
+    if (emailCooldown <= 0 && loginCooldown <= 0) return;
     const t = setTimeout(() => {
       setEmailCooldown((s) => Math.max(0, s - 1));
-      setRecoverCooldown((s) => Math.max(0, s - 1));
+      setLoginCooldown((s) => Math.max(0, s - 1));
     }, 1000);
     return () => clearTimeout(t);
-  }, [emailCooldown, recoverCooldown]);
+  }, [emailCooldown, loginCooldown]);
 
   // ── Wallet switch: challenge → sign → replace session (Part 1) ──
   // Same nonce/signature ownership challenge as connectExisting — the ONLY
@@ -699,13 +792,10 @@ function ConsumerAppInner() {
     setSwitchError(null);
     try {
       const data = await authenticateWalletAddress(address);
-      setWalletAddress(data.account.walletAddress);
-      setWalletType(data.account.walletType ?? null);
-      setCircleWalletId(data.account.circleWalletId ?? null);
+      // Explicit switch only: the previous session is replaced exactly
+      // here, after the new wallet proved ownership — never silently.
+      applySessionAccount(data.account);
       setJustCreatedWallet(false);
-      // Identity changed — a cached Circle login belongs to the previous
-      // wallet and must not be reused against the new one.
-      clearCircleSession();
       setSwitchOpen(false);
       // from there) — never onboarding, never a blank state.
       setView(switchReturnRef.current);
@@ -753,10 +843,10 @@ function ConsumerAppInner() {
   };
 
   // ── Bridge upgrade flow: give an external-wallet user a FlareHQ wallet ──
-  // POST {} provisions a brand-new Circle-managed wallet and reissues the
-  // session against it. The user's connected wallet still works for sending/
-  // requesting; the FlareHQ wallet is what the bridge can actually move
-  // funds from (Circle signs on it).
+  // POST {} provisions a brand-new Circle-managed SCA wallet and reissues
+  // the session against it (explicit user-confirmed replacement only —
+  // never silent). The user's connected wallet still works for sending/
+  // requesting; the FlareHQ wallet is what the bridge can move funds from.
   const createFlareHQWallet = async () => {
     setCreatingFlareWallet(true);
     setCrossResult(null);
@@ -768,14 +858,8 @@ function ConsumerAppInner() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Could not create a FlareHQ wallet right now.");
-      setWalletAddress(data.account.walletAddress);
-      setWalletType(data.account.walletType ?? "CIRCLE");
-      setCircleWalletId(data.account.circleWalletId ?? null);
+      applySessionAccount(data.account, true);
       setBridgeNeedsFlareWallet(false);
-      setJustCreatedWallet(true);
-      // New wallet identity — any prior Circle user-controlled login
-      // belongs to someone else; drop it so the next UC flow re-auths.
-      clearCircleSession();
     } catch (e: any) {
       setCrossResult({ success: false, error: friendlyWalletError(e) });
     } finally {
@@ -787,11 +871,11 @@ function ConsumerAppInner() {
     try {
       await fetch("/api/consumer/session", { method: "DELETE" });
     } catch { }
-    // Visit ends: drop the shared Circle login with the FlareHQ session.
-    clearCircleSession();
     setWalletAddress("");
     setWalletType(null);
     setCircleWalletId(null);
+    setWalletMode(null);
+    setCanServerSign(false);
     setBridgeNeedsFlareWallet(false);
     setView("onboarding");
   };
@@ -844,8 +928,9 @@ function ConsumerAppInner() {
       // Wallet-upgrade signal (bridge needs a FlareHQ wallet) is caller
       // UX, not a failure — return it for the caller to handle.
       if (data?.code === "EXTERNAL_WALLET") return data;
-      // Attach the server code/status so challenge-flow callers (CCTP
-      // user-controlled bridge) can branch on typed codes — message-only
+      // Attach the server code/status so callers can branch on typed
+      // capability codes (EXTERNAL_*, CIRCLE_WALLET_UNBOUND,
+      // BRIDGE_SOURCE_UNSUPPORTED, WALLET_UNSUPPORTED) — message-only
       // callers are unaffected.
       const err = new Error(data?.error || `Request failed (${res.status})`) as any;
       err.code = data?.code;
@@ -855,15 +940,12 @@ function ConsumerAppInner() {
     return data;
   };
 
-  // ── CCTP user-controlled bridge POST helper ──
-  // Routes to the initiation vs continue endpoint; PIN step-up headers come
-  // from protectedFetch. Typed server codes ride on the thrown error.
-  const bridgeAuthPost = async (route: "transfer" | "challenge", body: Record<string, unknown>) => {
-    const url = route === "challenge" ? "/api/cctp/transfer/challenge" : "/api/cctp/transfer";
-    return protectedFetch(url, { method: "POST" }, body);
-  };
-
   // ── Action Handlers ──
+  // CIRCLE (FlareHQ wallet): ordinary in-app execution — the server moves
+  // the funds, no browser popup. EXTERNAL (connected wallet): the backend
+  // answers with typed capability codes; those are rendered as honest
+  // product copy (the server cannot sign for a wallet it does not
+  // control), never as raw errors.
   const handleSend = async () => {
     setLoading(true);
     setResult(null);
@@ -874,7 +956,7 @@ function ConsumerAppInner() {
 
       setResult({ success: true, message: `Sent ${amount} ${sendCurrency} to ${recipient}.`, txHash: settleData.arcTxHash, explorerUrl: settleData.explorerUrl });
     } catch (e: any) {
-      setResult({ success: false, error: e.message });
+      setResult({ success: false, error: friendlyCapabilityError(e?.code, e.message) });
     } finally {
       setLoading(false);
     }
@@ -888,7 +970,7 @@ function ConsumerAppInner() {
       setResult({ success: true, message: `Saving ${amount} USDC every ${frequency} day(s).`, reference: data.scheduledPayment?.reference });
       refreshSavings();
     } catch (e: any) {
-      setResult({ success: false, error: e.message });
+      setResult({ success: false, error: friendlyCapabilityError(e?.code, e.message) });
     } finally {
       setLoading(false);
     }
@@ -1012,7 +1094,11 @@ function ConsumerAppInner() {
         error: "Still waiting after 10 minutes. It may still complete — check the source transaction on the explorer. Note: Arc is a newer CCTP destination, so attestation can take longer than usual.",
       });
     } catch (e: any) {
-      setCrossResult({ success: false, error: e.message });
+      // Backend capability codes become product-level explanations — never
+      // raw internals. BRIDGE_SOURCE_UNSUPPORTED is an honest product
+      // state (Arc-only provisioning); CIRCLE_WALLET_UNBOUND is
+      // recoverable account state.
+      setCrossResult({ success: false, error: friendlyCapabilityError(e?.code, e.message) });
     } finally {
       setCrossLoading(false);
     }
@@ -1071,7 +1157,7 @@ function ConsumerAppInner() {
       setEmailMsg(
         "Code requested — check your inbox (and spam/junk). Codes expire after 10 minutes and can be used once. " +
         "If no code arrives within a few minutes, this email may already be linked to another FlareHQ wallet — " +
-        "recover that wallet from the sign-in screen or try a different email."
+        "sign out and continue with that email from the sign-in screen, or try a different email."
       );
       setEmailCooldown(30);
     } catch (e: any) {
@@ -1153,56 +1239,6 @@ function ConsumerAppInner() {
     }
   };
 
-  const requestRecoverCode = async () => {
-    if (!recoverEmail.trim()) {
-      setRecoverMsg("Enter your recovery email first.");
-      return;
-    }
-    setRecoverBusy(true);
-    setRecoverMsg(null);
-    try {
-      const res = await fetch("/api/consumer/recover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: recoverEmail.trim() }),
-      });
-      await res.json();
-      // Always generic — the response never reveals registration state.
-      setRecoverStep("code");
-      setRecoverMsg("If this email is attached to a wallet, a code is on its way (10 minutes, one use). Check spam/junk too.");
-      setRecoverCooldown(30);
-    } catch {
-      setRecoverMsg("Could not request a code. Try again.");
-    } finally {
-      setRecoverBusy(false);
-    }
-  };
-
-  const confirmRecoverCode = async () => {
-    setRecoverBusy(true);
-    setRecoverMsg(null);
-    try {
-      const res = await fetch("/api/consumer/recover", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: recoverEmail.trim(), code: recoverCode.trim() }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not verify the code.");
-      // Session cookie is now set — reload into the wallet.
-      window.location.reload();
-    } catch (e: any) {
-      const raw = String(e?.message ?? '');
-      setRecoverMsg(
-        /invalid|expired/i.test(raw)
-          ? `${raw} Codes expire after 10 minutes and can be used only once — request a new code if needed.`
-          : raw
-      );
-    } finally {
-      setRecoverBusy(false);
-    }
-  };
-
   // ── Onboarding view ──
   if (checkingSession) {
     return (
@@ -1232,53 +1268,106 @@ function ConsumerAppInner() {
           </div>
           <h1 style={styles.onboardingTitle}>Welcome to FlareHQ</h1>
           <p style={styles.onboardingSub}>
-            Create a free FlareHQ wallet with Google or email — you own it, secured by Circle — or connect a wallet you already have. No signup form.
+            Use Flow with a FlareHQ wallet or connect your own.
           </p>
-          {/* ── Primary: Circle user-controlled FlareHQ wallet (Google/email).
-              Authenticates via Circle's Web SDK, creates/reuses the user's
-              own Circle wallet, then links the existing consumer session. */}
-          {!circleOpen ? (
+          {/* ── Primary: FlareHQ wallet via email. The backend email-auth
+              flow (OTP) resolves the existing wallet for a returning email
+              or creates the Circle-managed SCA for a new one — no browser
+              wallet, no second wallet-creation panel after login. */}
+          {!emailAuthOpen ? (
             <>
               <button
                 style={styles.primaryButton}
                 disabled={creatingWallet || isConnecting}
-                onClick={() => { setCircleOpen("google"); setOnboardingError(null); }}
-              >
-                Continue with Google
-              </button>
-              <button
-                style={{ ...styles.secondaryButton, marginTop: 8 } as React.CSSProperties}
-                disabled={creatingWallet || isConnecting}
-                onClick={() => { setCircleOpen("email"); setOnboardingError(null); }}
+                onClick={() => { setEmailAuthOpen(true); setOnboardingError(null); setLoginMsg(null); }}
               >
                 Continue with email
               </button>
               <div style={styles.orDivider}><span>or</span></div>
             </>
           ) : (
-            <CircleUserWallet
-              initialMode={circleOpen}
-              onClose={() => setCircleOpen(null)}
-              onLinked={(account) => {
-                setWalletAddress(account.walletAddress);
-                setWalletType(account.walletType ?? "USER_CONTROLLED");
-                setCircleWalletId((account as any).circleWalletId ?? null);
-                setCircleOpen(null);
-                // Faucet banner only for genuinely new wallets — returning
-                // users land straight in the app.
-                setJustCreatedWallet(account.isNew);
-                setView("home");
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 340,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                marginTop: 12,
+                border: "1px solid var(--flow-border, var(--border))",
+                borderRadius: 14,
+                padding: 16,
+                background: "var(--flow-surface, var(--surface))",
+                boxSizing: "border-box",
               }}
-            />
+              aria-label="Continue with email"
+            >
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>FlareHQ wallet</p>
+              {loginStep === "enter" ? (
+                <>
+                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                    Enter your email — we will send a sign-in code. New here? Your FlareHQ wallet is created automatically.
+                  </p>
+                  <input
+                    style={styles.input}
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    inputMode="email"
+                    autoComplete="email"
+                    aria-label="Email address"
+                  />
+                  <button style={styles.primaryButton} disabled={loginBusy} onClick={requestLoginCode}>
+                    {loginBusy ? "Sending…" : "Send sign-in code"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                    Enter the 6-digit code sent to {loginEmail.trim() || "your email"}.
+                  </p>
+                  <input
+                    style={styles.input}
+                    value={loginCode}
+                    onChange={(e) => setLoginCode(e.target.value)}
+                    placeholder="6-digit code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    aria-label="Sign-in code"
+                  />
+                  <button style={styles.primaryButton} disabled={loginBusy} onClick={confirmLoginCode}>
+                    {loginBusy ? "Verifying…" : "Verify & continue"}
+                  </button>
+                  <button
+                    style={styles.secondaryButton}
+                    onClick={requestLoginCode}
+                    disabled={loginBusy || loginCooldown > 0}
+                  >
+                    {loginCooldown > 0 ? `Resend code in ${loginCooldown}s` : "Resend code"}
+                  </button>
+                  <button
+                    style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}
+                    onClick={() => { setLoginStep("enter"); setLoginCode(""); setLoginMsg(null); }}
+                  >
+                    Use a different email
+                  </button>
+                </>
+              )}
+              {loginMsg && <p style={{ margin: 0, fontSize: 13, color: "#3F7A57" }}>{loginMsg}</p>}
+              <button
+                style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}
+                onClick={() => { setEmailAuthOpen(false); setLoginMsg(null); }}
+              >
+                Back
+              </button>
+            </div>
           )}
-          <button style={styles.secondaryButton} disabled={creatingWallet || isConnecting || !!circleOpen} onClick={connectExisting}>
+          <button style={styles.secondaryButton} disabled={creatingWallet || isConnecting || emailAuthOpen} onClick={connectExisting}>
             {isConnecting ? "Connecting..." : "Connect a wallet"}
           </button>
-          {/* Legacy instant (developer-controlled) wallet creation stays
-              available via POST /api/consumer/session {} (Path B) for
-              backwards compatibility and the bridge-upgrade flow — it is
-              intentionally not a primary onboarding button. Onboarding offers
-              exactly: Google, email, Connect a wallet. */}
+          {/* Onboarding offers exactly: Continue with email, Connect a
+              wallet. No Google flow, no Circle SDK ceremony, no duplicate
+              wallet-creation panel. */}
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
 
           {/* A4: connector picker — appears only when "Use this wallet" is
@@ -1302,15 +1391,46 @@ function ConsumerAppInner() {
                 Connect a wallet
               </p>
               {(() => {
+                // Real connector detection result (EIP-6963 injected
+                // providers + configured WalletConnect) — never faked.
                 const pickers = dedupeConnectors(connectors);
                 if (pickers.length === 0) {
                   return (
-                    <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>
-                      No wallet found.{" "}
-                      <a href="https://ethereum.org/en/wallets/" target="_blank" rel="noopener noreferrer" style={{ color: "var(--primary)" }}>
-                        Get a wallet ↗
-                      </a>
-                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>No wallet found</p>
+                      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                        You don&apos;t have a browser wallet available right now.
+                        Create a free FlareHQ wallet with your email instead.
+                      </p>
+                      <button
+                        style={styles.primaryButton}
+                        onClick={() => {
+                          setConnectPickerOpen(false);
+                          resumeConnectRef.current = false;
+                          setOnboardingError(null);
+                          setEmailAuthOpen(true);
+                          setLoginMsg(null);
+                        }}
+                      >
+                        Continue with email
+                      </button>
+                      <button
+                        style={styles.secondaryButton}
+                        onClick={() => {
+                          // Re-read live detection: close and let the user
+                          // retry once a wallet is installed and detected.
+                          setConnectPickerOpen(false);
+                          resumeConnectRef.current = false;
+                          setOnboardingError(
+                            hasInjectedProvider()
+                              ? "Still checking — install or unlock your wallet extension, then tap “Connect a wallet” again."
+                              : "No wallet extension detected yet — install one, then tap “Connect a wallet” again, or continue with email."
+                          );
+                        }}
+                      >
+                        Try connecting again
+                      </button>
+                    </div>
                   );
                 }
                 return pickers.map((c) => (
@@ -1353,7 +1473,7 @@ function ConsumerAppInner() {
             </div>
           )}
 
-          <p style={styles.footnote}>Built on Arc · Your money is always yours</p>
+          <p style={styles.footnote}>Built on Arc · Settled in USDC or EURC</p>
         </div>
       </main>
     );
@@ -1454,6 +1574,20 @@ function ConsumerAppInner() {
               <p style={styles.heroSub}>Send to anyone. Save without thinking. Get paid in seconds.</p>
             </section>
 
+            {/* Recoverable account state from the backend session
+                (mode/canServerSign): a FlareHQ wallet missing its signing
+                identity cannot move money — say so plainly, move nothing. */}
+            {(walletType ?? "").toUpperCase() === "CIRCLE" && (!canServerSign || !circleWalletId) && (
+              <section style={styles.faucetBanner}>
+                <div>
+                  <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 14 }}>Your FlareHQ wallet needs attention</p>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--flow-text-muted)" }}>
+                    Money-moving features are paused until it is repaired — no funds moved. Try again later or contact support.
+                  </p>
+                </div>
+              </section>
+            )}
+
             {isTestnet && justCreatedWallet && (
               <section style={styles.faucetBanner}>
                 <div>
@@ -1514,14 +1648,10 @@ function ConsumerAppInner() {
             </section>
 
             {/* ── Wallet security panel (Stage 2 / B4) — a security panel, not
-                a marketing settings page. Shows the three states explicitly
-                and flips each ⚠ to ✓ once configured. The recovery-email and
-                payment-PIN rows (+ their forms) render ONLY for non-
-                USER_CONTROLLED wallets: Circle handles security/recovery
-                natively for user-controlled (Google/email) wallets. The
-                wallet-kind row shows for everyone. Underlying enrollment
-                logic and API routes are untouched (legacy CIRCLE accounts
-                still need them). */}
+                a marketing settings page. Shows the states explicitly and
+                flips each ⚠ to ✓ once configured. The wallet-kind row
+                shows for everyone (FlareHQ wallet vs connected wallet);
+                recovery-email + payment-PIN enrollment is unchanged. */}
             <section style={styles.securityCard} aria-label="Wallet security">
               <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "var(--flow-text-muted)" }}>Wallet security</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1583,7 +1713,7 @@ function ConsumerAppInner() {
                         </button>
                         <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)", lineHeight: 1.5 }}>
                           No code? Check spam/junk, then resend. If it never arrives, this email may
-                          already belong to another wallet — sign out and use “Recover with email”
+                          already belong to another wallet — sign out and continue with that email
                           on the sign-in screen to get back into it.
                         </p>
                       </>
@@ -1848,6 +1978,29 @@ function ConsumerAppInner() {
               <span style={styles.flowDot} />
             </div>
 
+            {/* Save honesty: automatic scheduled saving runs on the
+                FlareHQ wallet (the server executes each cycle). A
+                connected wallet stays in the user's control, so FlareHQ
+                cannot debit it on a schedule — automatic Save is
+                unavailable for it. */}
+            {view === "save" && (walletType ?? "").toUpperCase() === "EXTERNAL" && !result && (
+              <div style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
+                <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14 }}>Automatic saving isn&apos;t available for this wallet</p>
+                <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--flow-text-muted)" }}>
+                  Your connected wallet remains controlled by you — FlareHQ can&apos;t move funds from it on a schedule.
+                  Create a FlareHQ wallet with your email to save automatically.
+                </p>
+              </div>
+            )}
+            {view === "send" && (walletType ?? "").toUpperCase() === "EXTERNAL" && !result && (
+              <div style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
+                <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--flow-text-muted)" }}>
+                  Your connected wallet remains controlled by you — FlareHQ can&apos;t send from it automatically.
+                  One-tap sending needs a FlareHQ wallet.
+                </p>
+              </div>
+            )}
+
             {!result && (
               <div style={styles.form}>
                 {view === "send" && (
@@ -1915,9 +2068,18 @@ function ConsumerAppInner() {
                     </div>
                   </div>
                 )}
-                <button style={styles.submitButton} disabled={loading || !amount} onClick={submitHandlers[view]}>
+                <button
+                  style={styles.submitButton}
+                  disabled={loading || !amount || (view === "save" && (walletType ?? "").toUpperCase() === "EXTERNAL")}
+                  onClick={submitHandlers[view]}
+                >
                   {loading ? "Working on it..." : view === "send" ? "Send now" : view === "save" ? "Start saving" : "Create request"}
                 </button>
+                {view === "save" && (walletType ?? "").toUpperCase() === "EXTERNAL" && (
+                  <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--flow-text-faint)", textAlign: "center" }}>
+                    Automatic saving needs a FlareHQ wallet.
+                  </p>
+                )}
               </div>
             )}
 
@@ -1960,23 +2122,14 @@ function ConsumerAppInner() {
               <span style={styles.flowDot} />
             </div>
 
-            {(walletType ?? "").toUpperCase() === "USER_CONTROLLED" ? (
-              <UserControlledBridge
-                chains={chains}
-                fromChain={fromChain}
-                onFromChainChange={(id) => {
-                  setCrossAmount("");
-                  setFromChain(id);
-                }}
-                toChain={toChain}
-                walletAddress={walletAddress}
-                authPost={bridgeAuthPost}
-                chainBalance={chainBalance}
-                chainBalanceLoading={chainBalanceLoading}
-                chainBalanceError={chainBalanceError}
-                onRetryBalance={() => setChainBalanceTick((t) => t + 1)}
-              />
-            ) : (walletType === "EXTERNAL" || bridgeNeedsFlareWallet) && !crossResult ? (
+            {/* Bridge uses the backend capability result: CIRCLE wallets run
+                the backend-controlled bridge flow below (ordinary
+                progress/status UI, no second ceremony). EXTERNAL wallets
+                cannot be bridged from automatically — the upgrade card
+                explains why. BRIDGE_SOURCE_UNSUPPORTED and
+                CIRCLE_WALLET_UNBOUND arrive as typed backend codes and are
+                rendered as product copy, never raw errors. */}
+            {(walletType === "EXTERNAL" || bridgeNeedsFlareWallet) && !crossResult ? (
               <div style={styles.flareWalletCard}>
                 <p style={styles.flareWalletIcon}>👛</p>
                 <p style={styles.flareWalletTitle}>Bridging needs a FlareHQ wallet</p>
@@ -2115,14 +2268,19 @@ function ConsumerAppInner() {
           </section>
         )}
 
-        {/* ── Flow Swap view (self-custody USDC↔EURC on Arc) ── */}
+        {/* ── Flow Swap view (USDC↔EURC on Arc) ──
+            CIRCLE = in-app server execution from the FlareHQ wallet;
+            EXTERNAL = browser-wallet signing. PIN step-up rides on
+            protectedFetch so an enrolled payment PIN is asked once. */}
         {view === "swap" && (
           <FlowSwapView
             walletAddress={walletAddress}
             walletType={walletType}
+            circleWalletId={circleWalletId}
             onSwitchWallet={openWalletSwitch}
             onStayManaged={() => goTo("home")}
             onSwapVerified={refreshActivity}
+            authedPost={(url, body) => protectedFetch(url, { method: "POST" }, body)}
           />
         )}
 
@@ -3022,18 +3180,9 @@ const styles: Record<string, React.CSSProperties> = {
   navLabel: { fontSize: "clamp(9px, 0.8vw, 11px)", fontWeight: 600 },
 };
 
-// Shared Circle user-controlled session at the consumer page level: the
-// provider sits ABOVE the view state so navigating between Home / Send /
-// Save / Bridge / Swap never drops the login. Re-auth is required only
-// when the Circle API actually rejects the token (155104 / 401 /
-// CIRCLE_AUTH_EXPIRED), with clears on disconnect / wallet switch.
-// Consumer-side only; the per-transaction Circle challenge flow
-// (setAuthentication -> execute) is unchanged.
+// Consumer auth is the backend consumer_token session — view navigation
+// between Home / Send / Save / Bridge / Swap never restarts it.
 export default function ConsumerApp() {
-  return (
-    <CircleSessionProvider>
-      <ConsumerAppInner />
-    </CircleSessionProvider>
-  );
+  return <ConsumerAppInner />;
 }
 

@@ -1,22 +1,26 @@
 // src/components/swap/FlowSwapView.tsx
 //
 // Flow Swap — consumer-facing same-chain USDC↔EURC swap inside /consumer.
+// Two wallet modes, one quote backend:
 //
-// Self-custody flow (the browser wallet signs everything; the server never
-// signs and never sees keys):
-//
-//   enter amount → quote (POST /api/swap/quote) → confirm → sign each
-//   server-provided step (approvals, optional wrap, swap) → wait for mining
-//   → register (POST /api/swap/execute-intent) → verify on-chain
-//   (POST /api/swap/verify) → [USDC-output only] receive step
+//   CIRCLE (FlareHQ wallet): ordinary in-app swap. Enter amount → quote
+//   (POST /api/swap/quote) → confirm → the server executes from the
+//   consumer's own Circle developer-controlled SCA (POST /api/swap/execute)
+//   → verified success. No browser wallet popup, no second authentication
+//   ceremony — the authenticated consumer session (+ payment PIN where
+//   enrolled) is sufficient.
+//   EXTERNAL (connected wallet): the browser wallet signs everything; the
+//   server never signs and never sees keys. Enter amount → quote → confirm
+//   → sign each server-provided step (approvals, optional wrap, swap) →
+//   wait for mining → register (POST /api/swap/execute-intent) → verify
+//   on-chain (POST /api/swap/verify) → [USDC-output only] receive step
 //   (POST /api/swap/unwrap → sign withdraw → POST /api/swap/verify-unwrap)
 //   → verified success.
 //
 // The UnitFlow pools settle the USDC leg in WUSDC, so a swap INTO USDC
 // credits WUSDC first; the receive step burns exactly the verified proceeds
-// into native USDC in the user's own wallet (unsigned server-built
-// WUSDC.withdraw, never server-signed). The user experiences EURC → USDC —
-// WUSDC is never presented as the result.
+// into native USDC in the user's own wallet. The user experiences
+// EURC → USDC — WUSDC is never presented as the result.
 //
 // Success is shown ONLY after server verification. The verified
 // actualOutput is authoritative — the pre-execution quote is never presented
@@ -26,11 +30,12 @@
 // - No client-controlled payer or recipient: the server derives both from
 //   the authenticated session; the UI sends no addresses and renders no
 //   address inputs.
-// - No private keys, no server-side signing, no Tower execution, no
-//   cross-chain path, no tokens beyond USDC/EURC.
+// - No private keys, no Tower execution, no cross-chain path, no tokens
+//   beyond USDC/EURC.
 // - No pool/router/fee-tier/calldata internals are displayed. The execution
 //   venue label (from the backend quote) and the informational Tower
-//   rate-discovery candidate are shown as secondary provenance only.
+//   rate-discovery candidate are shown as secondary provenance only —
+//   derived from the backend response, never hardcoded.
 
 'use client';
 
@@ -100,17 +105,28 @@ function fetchWithTimeout(url: string, init: RequestInit, ms: number) {
 export function FlowSwapView({
   walletAddress,
   walletType,
+  circleWalletId,
   onSwitchWallet,
   onStayManaged,
   onSwapVerified,
+  authedPost,
 }: {
   walletAddress: string;
   walletType: string | null;
+  /** Circle developer-controlled wallet id (CIRCLE only; null for EXTERNAL). */
+  circleWalletId?: string | null;
   onSwitchWallet?: () => void;
   /** Optional: leave the managed wallet in place and go back (e.g. Home). */
   onStayManaged?: () => void;
   /** Called once per verified swap so the parent can refresh activity. */
   onSwapVerified?: () => void;
+  /**
+   * PIN-aware POST helper wired by the parent (step-up headers). Used for
+   * the CIRCLE server-execution call so an enrolled payment PIN is
+   * requested exactly once per session instead of failing the swap.
+   * Falls back to plain fetch when absent.
+   */
+  authedPost?: (url: string, body: unknown) => Promise<any>;
 }) {
   const [inputSymbol, setInputSymbol] = useState<SwapSymbol>('USDC');
   const [outputSymbol, setOutputSymbol] = useState<SwapSymbol>('EURC');
@@ -143,9 +159,16 @@ export function FlowSwapView({
   const sessionLive = walletAddress.trim() !== '';
   const walletsMatch =
     isConnected && !!connectedAddress && connectedAddress.toLowerCase() === walletAddress.trim().toLowerCase();
-  // Flow Swap is self-custody: the browser wallet must control the session
-  // wallet. FlareHQ-managed (Circle) session wallets cannot sign here.
-  const sessionIsSelfCustody = (walletType ?? '').toUpperCase() === 'EXTERNAL';
+  // Two wallet modes: CIRCLE = FlareHQ wallet (the server executes from the
+  // consumer's own Circle developer-controlled SCA — no browser signing);
+  // EXTERNAL = connected wallet (the browser signs every step). Anything
+  // else fails closed below.
+  const sessionIsExternal = (walletType ?? '').toUpperCase() === 'EXTERNAL';
+  const sessionIsCircle = (walletType ?? '').toUpperCase() === 'CIRCLE';
+  // A CIRCLE row without its Circle signing binding cannot be
+  // server-executed — recoverable account state, never a guessed wallet.
+  const circleUnbound = sessionIsCircle && !circleWalletId;
+  const canSwapHere = sessionIsExternal || (sessionIsCircle && !circleUnbound);
   const wrongNetwork = isConnected && chainId !== ARC_CHAIN_ID;
 
   const balances = useSwapBalances(sessionLive);
@@ -617,6 +640,129 @@ export function FlowSwapView({
     }
   };
 
+  // ── CIRCLE execution: the server swaps from the consumer's own FlareHQ
+  // wallet (Circle developer-controlled SCA) and returns the verified
+  // result. No browser wallet, no popup — ordinary in-app progress until
+  // the verified receipt lands. Backend typed codes are surfaced honestly:
+  // EXTERNAL_* never occurs here; CIRCLE_WALLET_UNBOUND is recoverable
+  // account state; expired quotes re-quote instead of failing.
+  const [circleBusy, setCircleBusy] = useState(false);
+  const handleCircleConfirm = async () => {
+    if (circleBusy || confirmBusyRef.current) return;
+    const live = quote.quote;
+    if (!live || quote.status !== 'quoted' || quote.secondsLeft <= 0) {
+      quote.refresh();
+      setFlowError('That quote expired before it could be used. Getting a fresh quote — confirm again once it arrives.');
+      setFlowRawError(null);
+      return;
+    }
+    if (insufficientBalance) {
+      setFlowError(`Insufficient ${inputSymbol} balance for this swap. Lower the amount and try again.`);
+      setFlowRawError(null);
+      setFlow('failed');
+      return;
+    }
+    setFlowError(null);
+    setFlowRawError(null);
+    setVerified(null);
+    setMinedExecHash(null);
+    setMinedWrapHash(null);
+    setMinedUnwrapHash(null);
+    setLastIntentId(live.intentId);
+    setLastOutputSymbol(live.output.symbol);
+    confirmBusyRef.current = true;
+    setCircleBusy(true);
+    setSteps([{ key: 'server-swap', label: 'Swapping in your FlareHQ wallet', status: 'active', hash: null }]);
+    setFlow('executing');
+    try {
+      const post = authedPost
+        ? (body: unknown) => authedPost('/api/swap/execute', body)
+        : async (body: unknown) => {
+            const res = await fetchWithTimeout(
+              '/api/swap/execute',
+              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+              300000
+            );
+            const data = (await res.json().catch(() => null)) as any;
+            if (!res.ok || !data || data.success !== true) {
+              const err = new Error(data?.error || 'Swap execution failed.') as any;
+              err.code = data?.code;
+              throw err;
+            }
+            return data;
+          };
+      const data = (await post({ intentId: live.intentId, quoteHash: live.quoteHash })) as {
+        success?: boolean;
+        error?: string;
+        code?: string;
+        intentId?: string;
+        status?: string;
+        alreadySettled?: boolean;
+        input?: { symbol: string; amount: string };
+        output?: { symbol: string; actual: string };
+        executionTxHash?: string | null;
+        wrapTxHash?: string | null;
+        unwrapTxHash?: string | null;
+      };
+      markStep('server-swap', { status: 'done', hash: data.executionTxHash ?? null });
+      if (data.executionTxHash) setMinedExecHash(data.executionTxHash);
+      if (data.wrapTxHash) setMinedWrapHash(data.wrapTxHash);
+      if (data.unwrapTxHash) setMinedUnwrapHash(data.unwrapTxHash);
+      // The server verified every step on-chain before responding — its
+      // actuals are authoritative, never the pre-execution quote.
+      setVerified({
+        actualInput: String(data.input?.amount ?? live.input.amount),
+        actualOutput: String(data.output?.actual ?? '0'),
+        inputSymbol: live.input.symbol,
+        outputSymbol: live.output.symbol,
+        executionTxHash: data.executionTxHash ?? null,
+        wrapTxHash: data.wrapTxHash ?? null,
+        unwrapTxHash: data.unwrapTxHash ?? null,
+        alreadySettled: !!data.alreadySettled,
+      });
+      setFlow('verified');
+      balances.refresh();
+      onSwapVerified?.();
+    } catch (err: unknown) {
+      const code = (err as any)?.code ? String((err as any).code) : '';
+      const raw = err instanceof Error ? err.message : String(err ?? '');
+      if (code === 'CIRCLE_WALLET_UNBOUND') {
+        setFlowError('Your FlareHQ wallet needs attention before it can swap — no funds moved. Try again later or contact support.');
+      } else if (code === 'EXTERNAL_REQUIRES_BROWSER_SIGNATURE') {
+        setFlowError('This wallet signs in the browser — connect it below and confirm again.');
+      } else if (code === 'STEP_UP_REQUIRED' || code === 'STEP_UP_FAILED') {
+        setFlowError('Your payment PIN is required for this swap. Try again and enter it when asked.');
+      } else if (code === 'WALLET_UNSUPPORTED') {
+        setFlowError('This wallet type is no longer supported for swaps.');
+      } else {
+        const { headline } = friendlySwapError(raw);
+        setFlowError(headline);
+      }
+      setFlowRawError(raw || null);
+      setFlow('failed');
+    } finally {
+      confirmBusyRef.current = false;
+      setCircleBusy(false);
+    }
+  };
+
+  const circleConfirmDisabled =
+    flow !== 'form' ||
+    quote.status !== 'quoted' ||
+    quote.secondsLeft <= 0 ||
+    inputBaseUnits === null ||
+    insufficientBalance ||
+    circleBusy;
+
+  const circleConfirmHint =
+    insufficientBalance
+      ? `Amount exceeds your available ${inputSymbol} balance.`
+      : quote.status === 'error' || quote.status === 'expired'
+        ? 'Get a fresh quote to continue.'
+        : quote.status !== 'quoted'
+          ? 'Enter an amount to get a quote.'
+          : null;
+
   const connectWith = async (connectorUid: string) => {
     setConnectError(null);
     try {
@@ -653,7 +799,11 @@ export function FlowSwapView({
   return (
     <section style={styles.card}>
       <h2 style={styles.title}>Swap</h2>
-      <p style={styles.sub}>Swap USDC and EURC directly on Arc. You stay in control — every step is signed in your wallet.</p>
+      <p style={styles.sub}>
+        {sessionIsCircle
+          ? 'Swap USDC and EURC right inside your FlareHQ wallet — no wallet popups.'
+          : 'Swap USDC and EURC directly on Arc. Approve each step in your connected wallet.'}
+      </p>
       <div style={styles.line}>
         <span style={styles.dot} />
         <span style={styles.stroke} />
@@ -666,32 +816,32 @@ export function FlowSwapView({
           <p style={styles.boxText}>Sign in to use Flow Swap.</p>
         </div>
       )}
-      {sessionLive && !sessionIsSelfCustody && (
-        <div style={styles.noticeBox}>
-          <p style={styles.boxTitle}>Use a wallet you control</p>
+      {sessionLive && sessionIsCircle && circleUnbound && (
+        <div style={styles.errorBox}>
+          <p style={styles.boxTitle}>Your FlareHQ wallet needs attention</p>
           <p style={styles.boxText}>
-            Flow Swap requires a wallet that can approve transactions in your browser.
-            Your FlareHQ wallet ({shortAddress(walletAddress)}) remains available for FlareHQ-managed features.
+            This wallet is missing its signing identity, so swaps are unavailable right now.
+            No funds moved. Try again later or contact support.
           </p>
-          {onSwitchWallet && (
-            <button style={styles.secondaryButton} onClick={onSwitchWallet}>
-              Connect another wallet
-            </button>
-          )}
-          {onStayManaged && (
-            <button
-              style={{ ...styles.secondaryButton, marginTop: 8, border: '1px solid var(--flow-border)', color: 'var(--flow-text-muted)' }}
-              onClick={onStayManaged}
-            >
-              Keep using FlareHQ wallet
-            </button>
-          )}
-          <p style={styles.underText}>Connecting another wallet keeps this session — nothing is signed out.</p>
+        </div>
+      )}
+      {sessionLive && !sessionIsCircle && !sessionIsExternal && (
+        <div style={styles.errorBox}>
+          <p style={styles.boxText}>This wallet type is no longer supported for swaps.</p>
         </div>
       )}
 
-      {sessionLive && sessionIsSelfCustody && (
+      {sessionLive && canSwapHere && (
         <>
+          {sessionIsCircle && (
+            <div style={styles.walletRow}>
+              <span style={styles.walletLabel}>Swapping with</span>
+              <span style={styles.walletAddr}>{shortAddress(walletAddress)}</span>
+              <span style={styles.matchOk}>FlareHQ wallet · no wallet approval needed</span>
+            </div>
+          )}
+          {sessionIsExternal && (
+          <>
           {/* ── Wallet consistency (never silently substitute) ── */}
           <div style={styles.walletRow}>
             <span style={styles.walletLabel}>Swapping with</span>
@@ -764,6 +914,8 @@ export function FlowSwapView({
                 Switch to Arc Testnet
               </button>
             </div>
+          )}
+          </>
           )}
 
           {/* ── Balances (both tokens, parallel) ── */}
@@ -966,10 +1118,21 @@ export function FlowSwapView({
                 </div>
               )}
 
-              <button style={styles.submitButton} disabled={confirmDisabled} onClick={() => void handleConfirm()}>
-                Confirm swap
-              </button>
-              {confirmHint && <p style={styles.hint}>{confirmHint}</p>}
+              {sessionIsCircle ? (
+                <>
+                  <button style={styles.submitButton} disabled={circleConfirmDisabled} onClick={() => void handleCircleConfirm()}>
+                    {circleBusy ? 'Swapping…' : 'Confirm swap'}
+                  </button>
+                  {circleConfirmHint && flow === 'form' && <p style={styles.hint}>{circleConfirmHint}</p>}
+                </>
+              ) : (
+                <>
+                  <button style={styles.submitButton} disabled={confirmDisabled} onClick={() => void handleConfirm()}>
+                    Confirm swap
+                  </button>
+                  {confirmHint && <p style={styles.hint}>{confirmHint}</p>}
+                </>
+              )}
             </>
           )}
 
@@ -977,7 +1140,7 @@ export function FlowSwapView({
           {(flow === 'executing' || flow === 'mined' || flow === 'verifying') && (
             <div style={styles.progressBox}>
               <p style={styles.boxTitle}>
-                {flow === 'executing' && (isSending ? 'Check your wallet…' : 'Swapping…')}
+                {flow === 'executing' && (sessionIsCircle ? 'Swapping in your FlareHQ wallet…' : isSending ? 'Check your wallet…' : 'Swapping…')}
                 {flow === 'mined' && 'Transaction mined — verifying…'}
                 {flow === 'verifying' && 'Swap submitted — verifying on-chain…'}
               </p>
@@ -1051,7 +1214,7 @@ export function FlowSwapView({
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  card: { paddingTop: 16 },
+  card: { paddingTop: 16, width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden' },
   title: { fontFamily: "'Fraunces', serif", fontSize: 'clamp(22px, 4vw, 26px)', fontWeight: 500, margin: '0 0 8px' },
   sub: { color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: '0 0 20px', lineHeight: 1.5 },
   line: { display: 'flex', alignItems: 'center', gap: 0, marginBottom: 20 },
@@ -1078,7 +1241,7 @@ const styles: Record<string, React.CSSProperties> = {
   swapBox: { background: 'var(--flow-surface)', border: '1px solid var(--flow-border)', borderRadius: 18, padding: 16, marginBottom: 12 },
   field: { display: 'flex', flexDirection: 'column', gap: 6 },
   label: { fontSize: 13, fontWeight: 600, color: 'var(--flow-text-muted)' },
-  amountRow: { display: 'flex', gap: 8 },
+  amountRow: { display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 },
   amountInput: { flex: 1, minWidth: 0, padding: '12px 14px', borderRadius: 12, border: '1px solid var(--flow-border)', background: 'var(--flow-bg)', fontSize: 16, color: 'var(--flow-text)', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' },
   tokenSelect: { padding: '12px 10px', borderRadius: 12, border: '1px solid var(--flow-border)', background: 'var(--flow-surface-2)', fontSize: 14, fontWeight: 700, color: 'var(--flow-text)', cursor: 'pointer', fontFamily: 'inherit' },
   outputPreview: { flex: 1, minWidth: 0, padding: '12px 14px', borderRadius: 12, border: '1px solid var(--flow-border)', background: 'var(--flow-surface-2)', fontSize: 16, fontWeight: 600, display: 'flex', alignItems: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
