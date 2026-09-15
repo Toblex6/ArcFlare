@@ -52,9 +52,18 @@ test('schema: no existing AgentRegistry fields are dropped or changed', () => {
   ]) {
     assert.ok(agentRegistryBlock.includes(field), `existing field must be unchanged: ${field}`);
   }
-  // No second copy of the new fields leaked onto another model (e.g. ConsumerAccount).
+  // walletSetId is agent-scoped only: the consumer wallet model carries no
+  // wallet-set binding (consumer restoration dropped ConsumerAccount.walletSetId).
   const walletSetIdCount = (schema.match(/^\s*walletSetId\s+String\?/gm) || []).length;
-  assert.equal(walletSetIdCount, 2, 'exactly two nullable walletSetId decls expected (AgentRegistry + ConsumerAccount)');
+  assert.equal(walletSetIdCount, 1, 'exactly one nullable walletSetId decl expected (AgentRegistry only)');
+  const consumerBlock = schema.slice(
+    schema.indexOf('model ConsumerAccount {'),
+    schema.indexOf('model ConsumerEmailOtp {') !== -1
+      ? schema.indexOf('model ConsumerEmailOtp {')
+      : schema.indexOf('model ConsumerAccount {') + 4000
+  );
+  assert.ok(!/^\s*walletSetId\s/m.test(consumerBlock), 'ConsumerAccount must not carry walletSetId');
+  assert.ok(!/^\s*circleUserId\s/m.test(consumerBlock), 'ConsumerAccount must not carry circleUserId');
 });
 
 test('route: deploy persists walletSetId + validatorSca from authoritative flow values', () => {

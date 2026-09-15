@@ -37,17 +37,21 @@ export async function sendVerificationEmail(email: string, businessName: string,
   }
 }
 
-export async function sendConsumerOtpEmail(email: string, code: string, purpose: "attach" | "change" | "recover") {
+export async function sendConsumerOtpEmail(email: string, code: string, purpose: "attach" | "change" | "recover" | "login") {
   const title =
     purpose === "recover"
       ? "Recover your FlareHQ wallet"
-      : purpose === "change"
-        ? "Confirm your new FlareHQ recovery email"
-        : "Confirm your FlareHQ recovery email";
+      : purpose === "login"
+        ? "Sign in to FlareHQ"
+        : purpose === "change"
+          ? "Confirm your new FlareHQ recovery email"
+          : "Confirm your FlareHQ recovery email";
   const intro =
     purpose === "recover"
       ? "Use the code below to sign back in to your FlareHQ consumer wallet on this device."
-      : "Use the code below to attach this email as the recovery method for your FlareHQ wallet.";
+      : purpose === "login"
+        ? "Use the code below to sign in to FlareHQ. New here? This same code creates your FlareHQ wallet."
+        : "Use the code below to attach this email as the recovery method for your FlareHQ wallet.";
   // NOTE: the raw code exists ONLY in this email body — it is never
   // persisted (only its hash), never returned by any API, never logged.
   const { error } = await resend.emails.send({

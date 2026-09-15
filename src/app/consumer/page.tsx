@@ -131,7 +131,10 @@ function ConsumerAppInner() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
   const [walletType, setWalletType] = useState<string | null>(null);
-  const [walletSetId, setWalletSetId] = useState<string | null>(null);
+  // Circle developer-controlled binding for the active session (CIRCLE
+  // only; null for EXTERNAL). Feeds signingModelForWallet alongside
+  // walletType — the single authority for Save/bridge UX branching.
+  const [circleWalletId, setCircleWalletId] = useState<string | null>(null);
   const [justCreatedWallet, setJustCreatedWallet] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
@@ -224,9 +227,9 @@ function ConsumerAppInner() {
   // legacy accounts still enroll through the gated rows.
   const legacySecurityPanel = (walletType ?? "").toUpperCase() !== "USER_CONTROLLED";
   // Signing-model authority for Save UX branching. Never branch on
-  // a raw walletType string — a CIRCLE row without walletSetId is not
+  // a raw walletType string — a CIRCLE row without circleWalletId is not
   // server-signable and must not render the automatic Save path.
-  const signingModel = signingModelForWallet({ walletType, walletSetId });
+  const signingModel = signingModelForWallet({ walletType, circleWalletId });
   const pinRef = useRef<string | null>(null);
   // Masked, in-memory PIN dialog that replaced the browser prompt for step-up.
   const { requestPin, dialog: pinDialog } = useSecurePinDialog();
@@ -440,7 +443,7 @@ function ConsumerAppInner() {
         if (data.success && data.account?.walletAddress) {
           setWalletAddress(data.account.walletAddress);
           setWalletType(data.account.walletType ?? null);
-          setWalletSetId(data.account.walletSetId ?? null);
+          setCircleWalletId(data.account.circleWalletId ?? null);
           setView(initialViewRef.current ?? "home");
         } else {
           setView("onboarding");
@@ -621,7 +624,7 @@ function ConsumerAppInner() {
       if (!data.success) throw new Error(data.error || "Could not connect that wallet.");
       setWalletAddress(data.account.walletAddress);
       setWalletType(data.account.walletType ?? null);
-      setWalletSetId(data.account.walletSetId ?? null);
+      setCircleWalletId(data.account.circleWalletId ?? null);
       setView("home");
     } catch (e: any) {
       const lower = String(e?.shortMessage ?? e?.message ?? '').toLowerCase();
@@ -698,7 +701,7 @@ function ConsumerAppInner() {
       const data = await authenticateWalletAddress(address);
       setWalletAddress(data.account.walletAddress);
       setWalletType(data.account.walletType ?? null);
-      setWalletSetId(data.account.walletSetId ?? null);
+      setCircleWalletId(data.account.circleWalletId ?? null);
       setJustCreatedWallet(false);
       // Identity changed — a cached Circle login belongs to the previous
       // wallet and must not be reused against the new one.
@@ -767,7 +770,7 @@ function ConsumerAppInner() {
       if (!data.success) throw new Error(data.error || "Could not create a FlareHQ wallet right now.");
       setWalletAddress(data.account.walletAddress);
       setWalletType(data.account.walletType ?? "CIRCLE");
-      setWalletSetId(data.account.walletSetId ?? null);
+      setCircleWalletId(data.account.circleWalletId ?? null);
       setBridgeNeedsFlareWallet(false);
       setJustCreatedWallet(true);
       // New wallet identity — any prior Circle user-controlled login
@@ -788,7 +791,7 @@ function ConsumerAppInner() {
     clearCircleSession();
     setWalletAddress("");
     setWalletType(null);
-    setWalletSetId(null);
+    setCircleWalletId(null);
     setBridgeNeedsFlareWallet(false);
     setView("onboarding");
   };
@@ -1259,7 +1262,7 @@ function ConsumerAppInner() {
               onLinked={(account) => {
                 setWalletAddress(account.walletAddress);
                 setWalletType(account.walletType ?? "USER_CONTROLLED");
-                setWalletSetId((account as any).walletSetId ?? null);
+                setCircleWalletId((account as any).circleWalletId ?? null);
                 setCircleOpen(null);
                 // Faucet banner only for genuinely new wallets — returning
                 // users land straight in the app.

@@ -1,7 +1,9 @@
 // src/lib/auth/consumerOtp.ts
 //
 // Short-lived single-use email OTPs for consumer recovery flows
-// (EMAIL_ATTACH / EMAIL_CHANGE / RECOVERY).
+// (EMAIL_ATTACH / EMAIL_CHANGE / RECOVERY) and passwordless email login
+// (EMAIL_LOGIN — first-time and returning consumers sign in with an email
+// code; the verified address resolves to exactly one ConsumerAccount).
 //
 // Security properties:
 //   - The raw 6-digit code is NEVER persisted (only its SHA-256 hash), NEVER
@@ -18,7 +20,7 @@ import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { generateVerificationCode } from "@/lib/email";
 
-export type ConsumerOtpPurpose = "EMAIL_ATTACH" | "EMAIL_CHANGE" | "RECOVERY";
+export type ConsumerOtpPurpose = "EMAIL_ATTACH" | "EMAIL_CHANGE" | "RECOVERY" | "EMAIL_LOGIN";
 
 export const CONSUMER_OTP_TTL_MS = 10 * 60_000;
 export const MAX_CONSUMER_OTP_ATTEMPTS = 5;

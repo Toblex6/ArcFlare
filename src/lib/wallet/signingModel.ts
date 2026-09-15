@@ -6,32 +6,26 @@
 //
 // Models:
 //   - 'server-signed'            CIRCLE developer-controlled wallet
-//     (walletSetId present): the FlareHQ server signs via CIRCLE_API_KEY +
-//     CIRCLE_ENTITY_SECRET. Full automation (bridge, scheduled saves).
-//   - 'user-controlled-challenge' USER_CONTROLLED Circle wallet (SCA, owned
-//     by the end user): the server orchestrates (builds calldata, creates
-//     Circle challenges via REST) and the BROWSER executes each challenge
-//     through @circle-fin/w3s-pw-web-sdk (setAuthentication -> execute).
-//     Nothing is automatic — every signature needs the user in the loop.
+//     (circleWalletId present): the FlareHQ server signs via CIRCLE_API_KEY
+//     + CIRCLE_ENTITY_SECRET. Full automation (bridge, scheduled saves).
 //   - 'external-eoa'             EXTERNAL bring-your-own wallet: the user
 //     signs with their own provider (wagmi). FlareHQ never touches keys.
 //   - 'unsupported'              anything else (null row, unknown type,
-//     CIRCLE row missing its walletSetId binding): fail closed.
+//     legacy USER_CONTROLLED rows from the retired Circle user-controlled
+//     architecture, CIRCLE row missing its circleWalletId binding):
+//     fail closed.
 //
-// Merchant reuse: merchant flows that branch on custody should call
-// signingModelForWallet() rather than comparing walletType strings — the
-// string alone cannot distinguish a server-signable CIRCLE row (walletSetId
-// present) from a broken one (walletSetId missing, e.g. legacy rows).
+// The canonical consumer-facing view of this lives in
+// src/lib/auth/consumerWallet.ts (resolveConsumerWallet /
+// getAuthenticatedConsumer) — CIRCLE -> server-controlled signing,
+// EXTERNAL -> browser/user signing. This module stays as the low-level
+// pure mapping for Save/bridge UX branching.
 
-export type SigningModel =
-  | "server-signed"
-  | "user-controlled-challenge"
-  | "external-eoa"
-  | "unsupported";
+export type SigningModel = "server-signed" | "external-eoa" | "unsupported";
 
 export interface WalletCustodyBinding {
   walletType?: string | null;
-  walletSetId?: string | null;
+  circleWalletId?: string | null;
 }
 
 function normalizeType(walletType: unknown): string {
@@ -47,21 +41,13 @@ export function signingModelForWallet(
   if (!account) return "unsupported";
   const t = normalizeType(account.walletType);
   if (t === "CIRCLE") {
-    // A CIRCLE row is only server-signable when its wallet-set binding is
-    // present. Legacy/partial rows without walletSetId must NOT be treated
+    // A CIRCLE row is only server-signable when its Circle wallet binding
+    // is present. Partial rows without circleWalletId must NOT be treated
     // as server wallets (there is nothing to sign with).
-    return account.walletSetId ? "server-signed" : "unsupported";
+    return account.circleWalletId ? "server-signed" : "unsupported";
   }
-  if (t === "USER_CONTROLLED") return "user-controlled-challenge";
   if (t === "EXTERNAL") return "external-eoa";
   return "unsupported";
-}
-
-// True when a signature requires a browser-executed Circle challenge
-// (user-controlled wallets). Callers use this to demand a per-request
-// userToken and to route through the challenge endpoints.
-export function requiresClientChallenge(model: SigningModel): boolean {
-  return model === "user-controlled-challenge";
 }
 
 // True when the FlareHQ server holds signing authority (developer-
@@ -71,11 +57,8 @@ export function canSignServerSide(model: SigningModel): boolean {
 }
 
 // True when the wallet can participate in CCTP bridging at all:
-// server-signed bridges automatically; user-controlled bridges via
-// browser-executed burn challenges (destination mint needs no wallet
-// signature — Circle's relayer completes it, so only the source-chain
-// approve + depositForBurn need signing). External EOAs cannot be bridged
-// from by the server, and unsupported rows fail closed.
+// server-signed wallets bridge automatically. External EOAs cannot be
+// bridged from by the server, and unsupported rows fail closed.
 export function bridgeEnabled(model: SigningModel): boolean {
-  return model === "server-signed" || model === "user-controlled-challenge";
+  return model === "server-signed";
 }

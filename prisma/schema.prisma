@@ -271,23 +271,18 @@ model ConsumerAccount {
   id               String   @id @default(uuid())
   walletAddress    String   @unique
   // Custody model for this row:
-  //   "CIRCLE"          — legacy developer-controlled Circle wallet (server
-  //                       signs via CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET).
-  //   "EXTERNAL"        — bring-your-own wallet (browser/wagmi signs; the
-  //                       server never signs and never sees keys).
-  //   "USER_CONTROLLED" — Circle user-controlled wallet (Google / email OTP
-  //                       via the Circle Web SDK; the user signs Circle
-  //                       challenges — the server never holds key material and
-  //                       cannot sign on this wallet's behalf).
-  walletType       String   @default("CIRCLE") // "CIRCLE" | "EXTERNAL" | "USER_CONTROLLED"
-  circleWalletId   String?
-  // Circle user-controlled user id (the `userId` Circle returns alongside
-  // the userToken after Google/email authentication). @unique so a returning
-  // Google/email identity resolves to its existing row instead of creating
-  // a duplicate. Null for legacy CIRCLE/EXTERNAL rows.
-  circleUserId     String?  @unique
-  walletSetId      String? // needed to provision this same SCA address on additional chains (e.g. for bridging)
-  email            String?  @unique // optional — recovery/notifications only, never required
+  //   "CIRCLE"   — Circle developer-controlled SCA created by FlareHQ (the
+  //                server signs via CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET
+  //                against circleWalletId). Server-controlled signing.
+  //   "EXTERNAL" — bring-your-own wallet (browser/wagmi signs; the server
+  //                never signs and never sees keys). Browser/user signing.
+  // There are no other modes. The retired Circle user-controlled
+  // architecture (USER_CONTROLLED value, circleUserId column, walletSetId
+  // column, per-request Circle userTokens) is gone: do not reintroduce
+  // any of them into this model.
+  walletType       String   @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
+  circleWalletId   String? // Circle developer-controlled wallet id (CIRCLE only; the server signs with it)
+  email            String?  @unique // verified sign-in + recovery address (see emailVerifiedAt)
   emailVerifiedAt  DateTime? // set when the address is proven via OTP (attach/change/recover); recovery requires non-null
   pinHash          String? // bcrypt hash of the 4–6 digit step-up PIN; null = step-up not enrolled (bootstrap grace)
   pinFailedAttempts Int     @default(0) // consecutive wrong-PIN attempts; reset on success
