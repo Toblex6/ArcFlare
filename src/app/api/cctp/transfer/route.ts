@@ -6,6 +6,7 @@ import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { requireConsumerStepUp } from "@/lib/auth/consumerStepUp";
 import { getNetworkConfig } from "@/lib/config/network";
 import { prisma } from "@/src/lib/prisma";
+import { resolveConsumerWallet } from "@/src/lib/auth/consumerWallet";
 import {
   bridgeEnabled,
   signingModelForWallet,
@@ -54,6 +55,33 @@ export async function POST(req: NextRequest) {
     const account = await (prisma as any).consumerAccount.findUnique({
       where: { walletAddress: consumerWalletAddress },
     });
+
+    // Canonical consumer wallet model first: legacy/unknown custody fails
+    // closed here (403) — it never reaches the signing decision below.
+    const wallet = resolveConsumerWallet(account);
+    if (!wallet) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'WALLET_UNSUPPORTED',
+          error: "This wallet type is no longer supported for bridging.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // CIRCLE rows with no bound signing identity fail closed with a
+    // recoverable state — never invented wallets, never shared ones.
+    if (wallet.mode === 'CIRCLE' && !wallet.canServerSign) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'CIRCLE_WALLET_UNBOUND',
+          error: "This FlareHQ wallet has no bound signing identity — bridging is unavailable until it is repaired.",
+        },
+        { status: 400 }
+      );
+    }
 
     // Signing model decides HOW this wallet bridges — never a raw
     // walletType string comparison. Only server-signed (CIRCLE

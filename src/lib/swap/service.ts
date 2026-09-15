@@ -695,7 +695,7 @@ export async function recheckExecutionConsumerTx(
 }
 
 /** In-transaction cross-table wrap single-consumption recheck. */
-async function recheckWrapConsumerTx(
+export async function recheckWrapConsumerTx(
   db: any,
   wrapTxHash: string,
   self: { kind: 'flow'; id: string } | { kind: 'checkout'; paymentLogId: string }

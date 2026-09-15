@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
 import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
+import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import { resolvePlatformPayerWalletId } from '@/lib/config/platformDefaults';
 
@@ -103,27 +104,50 @@ async function createScheduledHandler(request: Request) {
         where: { walletAddress: payerSCA },
       });
 
-      if (consumerAccount?.walletType === 'EXTERNAL') {
+      // Canonical consumer wallet resolver (single feature signing rule):
+      // CIRCLE rows with a bound signing identity schedule automatic
+      // server-executed debits; EXTERNAL wallets can never be auto-debited;
+      // legacy/unknown custody fails closed. No new USER_CONTROLLED rows can
+      // ever be created, and legacy ones stay safe here.
+      const wallet = resolveConsumerWallet(consumerAccount);
+      if (!wallet) {
         return NextResponse.json(
           {
             success: false,
-            error: `Wallet ${payerSCA} is an external (non-custodial) wallet — ArcFlare does not hold its private key, so it can't be debited automatically on a schedule. Recurring "Save" currently only works with a Flow-created (Circle-custodied) wallet.`,
+            code: 'WALLET_UNSUPPORTED',
+            error: `Wallet ${payerSCA} uses a retired wallet type — recurring payments cannot be scheduled for it.`,
+          },
+          { status: 403 }
+        );
+      }
+
+      if (wallet.mode === 'EXTERNAL') {
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'EXTERNAL_WALLET',
+            error: `Wallet ${payerSCA} is an external (non-custodial) wallet — ArcFlare does not hold its private key, so it can't be debited automatically on a schedule. Recurring "Save" currently only works with a CIRCLE (FlareHQ-managed) wallet.`,
           },
           { status: 400 }
         );
       }
 
-      if (consumerAccount?.walletType === 'USER_CONTROLLED') {
+      if (!wallet.canServerSign || !wallet.circleWalletId) {
+        // CIRCLE row with no bound signing identity: fail closed at
+        // CREATION with a recoverable state — never persist a schedule that
+        // can only pay by falling back to a shared wallet, and never invent
+        // a replacement wallet for it.
         return NextResponse.json(
           {
             success: false,
-            error: `Wallet ${payerSCA} is a Circle user-controlled wallet (Google/email login) — only its owner can sign for it through Circle, so it can't be debited automatically on a schedule. Recurring "Save" currently only works with a Flow-created (Circle-custodied) wallet.`,
+            code: 'CIRCLE_WALLET_UNBOUND',
+            error: `Payer ${payerSCA} has no bound signing identity — refusing to persist a recurring payment that cannot pay. Repair the wallet binding first.`,
           },
           { status: 400 }
         );
       }
 
-      resolvedPayerWalletId = consumerAccount?.circleWalletId || undefined;
+      resolvedPayerWalletId = wallet.circleWalletId;
     } else if (controlsPayer.type === 'merchant') {
       const merchant = await (prisma as any).merchant.findUnique({
         where: { id: controlsPayer.id },

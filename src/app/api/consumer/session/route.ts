@@ -34,6 +34,7 @@ import { randomBytes } from 'crypto';
 import { createAccountWallet } from '@/src/lib/circle/client';
 import { requireJwtSecret, tryJwtSecret } from '@/src/lib/auth/secrets';
 import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
+import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 
 const NONCE_COOKIE = 'consumer_connect_nonce';
 
@@ -58,6 +59,13 @@ async function issueSession(
 ) {
   const token = await issueConsumerSessionToken(account.id, account.walletAddress);
 
+  // Canonical wallet view (mode + server-signing capability): lets callers
+  // distinguish a fully-bound CIRCLE wallet from one whose signing identity
+  // is missing (recoverable state — server-controlled features fail closed
+  // with CIRCLE_WALLET_UNBOUND instead of guessing). Legacy/unknown custody
+  // resolves to nulls here, never to a guessed mode.
+  const wallet = resolveConsumerWallet(account);
+
   const res = NextResponse.json({
     success: true,
     // isNew is true only when this request created the account row (used by
@@ -71,6 +79,8 @@ async function issueSession(
       // this to gate features that need a FlareHQ wallet (e.g. bridging).
       walletType: account.walletType ?? null,
       circleWalletId: (account as any).circleWalletId ?? null,
+      mode: wallet?.mode ?? null,
+      canServerSign: wallet?.canServerSign ?? false,
     },
   });
 
@@ -135,6 +145,9 @@ export async function GET(req: NextRequest) {
     const acct = await prisma.consumerAccount.findUnique({
       where: { id: payload.consumerId as string },
     });
+    // Same canonical wallet view as issueSession (recoverable state for
+    // unbound CIRCLE rows; nulls for legacy/unknown custody).
+    const wallet = resolveConsumerWallet(acct as any);
     return NextResponse.json({
       success: true,
       account: {
@@ -142,6 +155,8 @@ export async function GET(req: NextRequest) {
         walletAddress: payload.walletAddress as string,
         walletType: acct?.walletType ?? null,
         circleWalletId: (acct as any)?.circleWalletId ?? null,
+        mode: wallet?.mode ?? null,
+        canServerSign: wallet?.canServerSign ?? false,
       },
     });
   } catch {

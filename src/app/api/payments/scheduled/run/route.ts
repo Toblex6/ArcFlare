@@ -4,6 +4,7 @@ import { withApiKey } from '@/lib/middleware/withApiKey';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { resolveRowCurrency } from '@/lib/tokens/resolveCurrency';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { resolveConsumerWallet } from "@/src/lib/auth/consumerWallet";
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -42,6 +43,29 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
     throw new Error(
       `Scheduled payment ${scheduled.reference} has no resolved payer wallet (payerWalletId is null) — refusing to execute against a shared default.`
     );
+  }
+  // Consumer binding revalidation at EXECUTION time: the stored payerWalletId
+  // must still be exactly the signing identity the payer's CURRENT
+  // ConsumerAccount row binds (CIRCLE + bound). A row whose account changed
+  // custody since creation (or a legacy/stale row that predates the binding
+  // rule) fails closed here instead of debiting a wallet the account no
+  // longer unambiguously maps to. Non-consumer payers (merchant / agent /
+  // platform schedules) are untouched by this check.
+  const payerAccount = await (prisma as any).consumerAccount
+    .findUnique({ where: { walletAddress: scheduled.payerSCA } })
+    .catch(() => null);
+  if (payerAccount) {
+    const wallet = resolveConsumerWallet(payerAccount);
+    if (!wallet || wallet.mode !== 'CIRCLE' || !wallet.canServerSign) {
+      throw new Error(
+        `Scheduled payment ${scheduled.reference} payer ${scheduled.payerSCA} is not a server-signable CIRCLE wallet — refusing to execute.`
+      );
+    }
+    if (wallet.circleWalletId !== scheduled.payerWalletId) {
+      throw new Error(
+        `Scheduled payment ${scheduled.reference} payer wallet binding changed since creation — refusing to execute against a stale wallet id.`
+      );
+    }
   }
   // Phase 2C: resolve THIS row's canonical token — the transfer moves exactly
   // this token. Historical rows with NULL tokenAddress resolve to USDC, so

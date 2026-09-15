@@ -127,6 +127,7 @@ const REQUIRED_CALLERS = [
   "src/app/api/payments/initialize/route.ts",
   "src/app/api/payments/settle/route.ts",
   "src/app/api/payments/scheduled/route.ts",
+  "src/app/api/swap/execute/route.ts",
   "src/app/api/jobs/route.ts",
   "src/app/api/jobs/fund/route.ts",
   "src/app/api/jobs/[jobId]/fund/route.ts",
@@ -181,7 +182,7 @@ async function main() {
       (f === "src/app/api/agents/[id]/treasury/credit/route.ts"); // merchant-401 inner: consumer-unreachable
     if (!(direct || delegated)) { callersOk = false; console.log(`    MISSING: ${f}`); }
   }
-  ok("all 34 inventory files reference the canonical step-up module (or documented delegate)", callersOk);
+  ok("all 35 inventory files reference the canonical step-up module (or documented delegate)", callersOk);
   const agentPaySrc = fs.readFileSync(path.join(ROOT, "src/lib/agents/agentPay.ts"), "utf8");
   ok("agentPay lib cores gated (executeAgentToAgentPayment + setAgentPolicy)", (agentPaySrc.match(/requireConsumerStepUpForActor/g) ?? []).length >= 2);
   const payrollSrc = fs.readFileSync(path.join(ROOT, "src/lib/payroll/payrollExecution.ts"), "utf8");

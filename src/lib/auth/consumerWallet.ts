@@ -49,6 +49,77 @@ export interface AuthenticatedConsumer {
   wallet: ConsumerWallet;
 }
 
+// ─── Single feature signing rule ─────────────────────────────────────────────
+// Every consumer money-moving feature (send / swap / bridge / save /
+// scheduled) decides HOW it signs through this rule only — never through a
+// scattered walletType string comparison in each route:
+//
+//   CIRCLE (+ circleWalletId bound)  -> the server signs (developer-
+//      controlled SCA via CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET). The normal
+//      authenticated consumer_token session (+ step-up PIN where enrolled)
+//      is sufficient. No browser popup, no second authentication ceremony.
+//   EXTERNAL                         -> the browser/user signs. The backend
+//      must never pretend it can sign; unattended operations fail clearly.
+//   anything else                    -> fail closed (legacy rows from the
+//      retired architecture, CIRCLE rows missing their binding).
+//
+// There is no third signing model.
+
+// Typed failure for the rule above. Routes map this to an explicit 4xx
+// response (code + message) instead of a generic 500 — the caller learns
+// WHY the operation cannot proceed and what to do instead.
+export class ConsumerFeatureError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "ConsumerFeatureError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export interface ServerSigningBinding {
+  /** On-chain address of the consumer's Circle SCA (the payer). */
+  walletAddress: string;
+  /** Circle developer-controlled wallet id the server signs with. */
+  circleWalletId: string;
+}
+
+// Enforce the rule for a server-executed feature step. Returns the binding
+// the server must sign with. Throws ConsumerFeatureError otherwise:
+//   EXTERNAL            -> 409 EXTERNAL_REQUIRES_BROWSER_SIGNATURE (the user
+//                          must sign in the browser; the server cannot).
+//   CIRCLE w/o binding  -> 400 CIRCLE_WALLET_UNBOUND (fail closed with a
+//                          recoverable state — the row exists but nothing can
+//                          sign for it; never invent a replacement wallet).
+export function requireServerSigning(
+  wallet: ConsumerWallet | null | undefined
+): ServerSigningBinding {
+  if (!wallet) {
+    throw new ConsumerFeatureError(
+      403,
+      "WALLET_UNSUPPORTED",
+      "This wallet type is no longer supported for payments."
+    );
+  }
+  if (wallet.mode === "EXTERNAL") {
+    throw new ConsumerFeatureError(
+      409,
+      "EXTERNAL_REQUIRES_BROWSER_SIGNATURE",
+      "This wallet is user-controlled — it must sign the transaction itself in the browser. The server cannot sign for it."
+    );
+  }
+  if (!wallet.canServerSign || !wallet.circleWalletId) {
+    throw new ConsumerFeatureError(
+      400,
+      "CIRCLE_WALLET_UNBOUND",
+      "This FlareHQ wallet has no bound signing identity — server-controlled operations are unavailable until it is repaired. No funds moved."
+    );
+  }
+  return { walletAddress: wallet.walletAddress, circleWalletId: wallet.circleWalletId };
+}
+
 // Pure mapping: stored ConsumerAccount row -> canonical wallet view.
 // Never throws — unknown shapes resolve to null (fail closed).
 export function resolveConsumerWallet(

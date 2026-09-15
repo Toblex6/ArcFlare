@@ -11,6 +11,10 @@ const arcTestnet = getArcChain();
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveConsumerSession } from '@/lib/middleware/withConsumerAuth';
 import { requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
+import {
+  ConsumerFeatureError,
+  resolveConsumerWallet,
+} from '@/src/lib/auth/consumerWallet';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
@@ -423,7 +427,13 @@ async function mergedSettleHandler(request: NextRequest) {
     // Resolve which Circle wallet actually signs for this address.
     // Order of precedence:
     //   1. ConsumerAccount — where Flow's "created wallet" consumers are
-    //      registered with their real per-user circleWalletId.
+    //      registered with their real per-user circleWalletId. Custody is
+    //      read through the canonical consumer wallet resolver (single
+    //      feature signing rule): CIRCLE rows with a bound signing identity
+    //      debit server-side; EXTERNAL wallets must sign and submit the
+    //      transfer themselves in the browser (then confirm it via
+    //      /api/payments/verify-onchain); legacy/unknown custody and CIRCLE
+    //      rows with no bound identity fail closed — never a shared wallet.
     //   2. AgentRegistry — AI-agent (M2M) wallets, a separate feature.
     //   3. Platform default — ONLY for the platform's own agent
     //      (AGENT_OWNER_WALLET_ADDRESS): that agent IS the platform default
@@ -438,28 +448,40 @@ async function mergedSettleHandler(request: NextRequest) {
     });
 
     if (consumerAccount) {
-      if (consumerAccount.walletType === 'EXTERNAL') {
+      const wallet = resolveConsumerWallet(consumerAccount);
+      if (!wallet) {
+        // Legacy/unknown custody (e.g. a retired USER_CONTROLLED row): the
+        // server holds no signing authority for it, so it can never be
+        // debited here — fail closed rather than falling back anywhere.
+        throw new ConsumerFeatureError(
+          403,
+          'WALLET_UNSUPPORTED',
+          `Wallet ${payerSCA} uses a retired wallet type — it cannot be debited server-side.`
+        );
+      }
+      if (wallet.mode === 'EXTERNAL') {
         // This is a bring-your-own wallet. We never held its key, so there
-        // is no Circle wallet ID to sign with — this can only be settled by
-        // having the wallet sign the transaction itself client-side (not
-        // yet implemented), not by any server-side fallback.
-        throw new Error(
-          `Wallet ${payerSCA} is an external (non-custodial) wallet — ArcFlare does not hold its private key and cannot sign transactions on its behalf. This wallet must sign and submit the transfer itself.`
+        // is no Circle wallet ID to sign with — the wallet must sign and
+        // submit the transfer itself in the browser, then confirm it via
+        // POST /api/payments/verify-onchain (the non-custodial checkout
+        // path), not by any server-side fallback.
+        throw new ConsumerFeatureError(
+          409,
+          'EXTERNAL_REQUIRES_BROWSER_SIGNATURE',
+          `Wallet ${payerSCA} is an external (non-custodial) wallet — ArcFlare does not hold its private key and cannot sign transactions on its behalf. Sign and submit the transfer from the wallet itself, then confirm it via POST /api/payments/verify-onchain.`
         );
       }
-      if (consumerAccount.walletType === 'USER_CONTROLLED') {
-        // Circle user-controlled wallet (Google / email OTP). The user —
-        // not the server — holds the signing key via Circle's Web SDK, so
-        // the developer-controlled Circle client cannot sign for it. It
-        // must sign and submit the transfer itself through Circle; the
-        // server must never fall back to debiting a shared wallet instead.
-        throw new Error(
-          `Wallet ${payerSCA} is a Circle user-controlled wallet (Google/email login) — only its owner can sign for it through Circle. ArcFlare cannot debit it server-side.`
+      if (!wallet.canServerSign || !wallet.circleWalletId) {
+        // CIRCLE row with no bound signing identity: nothing exists to sign
+        // with. Fail closed with a recoverable state — never invent or
+        // silently create a replacement wallet, never debit a shared one.
+        throw new ConsumerFeatureError(
+          400,
+          'CIRCLE_WALLET_UNBOUND',
+          `Wallet ${payerSCA} has no bound signing identity — server-controlled operations are unavailable until it is repaired. No funds moved.`
         );
       }
-      if (consumerAccount.circleWalletId) {
-        payerWalletId = consumerAccount.circleWalletId;
-      }
+      payerWalletId = wallet.circleWalletId;
     } else {
       const agentRecord = await (prisma as any).agentRegistry.findFirst({
         where: { scaAddress: payerSCA },
@@ -633,6 +655,15 @@ async function mergedSettleHandler(request: NextRequest) {
           data: updateData,
         })
         .catch(() => { });
+    }
+    // Canonical consumer wallet-model rejections fail closed with explicit
+    // codes (never a generic 500): the caller learns why the payer cannot
+    // be debited and what to do instead. Row bookkeeping above still runs.
+    if (error instanceof ConsumerFeatureError) {
+      return NextResponse.json(
+        { success: false, code: error.code, error: error.message },
+        { status: error.status }
+      );
     }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

@@ -35,6 +35,7 @@ export type ConsumerStepUpAction =
   | "consumer.send"
   | "consumer.request"
   | "consumer.save"
+  | "consumer.swap"
   | "consumer.bridge"
   | "consumer.withdraw"
   | "consumer.job-fund"

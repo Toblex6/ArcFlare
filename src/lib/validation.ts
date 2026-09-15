@@ -124,6 +124,20 @@ export const SwapUnwrapVerifySchema = z
   })
   .refine((d) => d.intentId || d.quoteHash, 'intentId or quoteHash is required.');
 
+// ── POST /api/swap/execute (server-executed CIRCLE swap) ───────────────────
+// CIRCLE consumers only: the client names a live intent (from POST
+// /api/swap/quote) and the server broadcasts every step from the consumer's
+// own Circle SCA, then verifies on-chain. Amounts, tokens, pools, calldata,
+// and recipients are all server-resolved from the stored intent binding —
+// the locator is the only client input. EXTERNAL wallets keep the
+// browser-signing flow (quote → sign → execute-intent → verify).
+export const SwapServerExecuteSchema = z
+  .object({
+    intentId: z.string().uuid().optional(),
+    quoteHash: txHash.optional(),
+  })
+  .refine((d) => d.intentId || d.quoteHash, 'intentId or quoteHash is required.');
+
 // ── /api/merchant/me (PATCH settlement preference) ───────────────────────────
 // Routing v1: merchants choose the default settlement token for FUTURE
 // invoices. Symbol, address, or both (both must agree). Persisted value is
