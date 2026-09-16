@@ -72,20 +72,12 @@ interface ActionResult {
 
 const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "home", label: "Home", icon: "🏠" },
-  { id: "discover", label: "Discover", icon: "🔍" },
   { id: "send", label: "Send", icon: "💸" },
   { id: "save", label: "Save", icon: "🐷" },
   { id: "request", label: "Request", icon: "📥" },
   { id: "crosschain", label: "Bridge", icon: "🌉" },
   { id: "swap", label: "Swap", icon: "🔄" },
-  { id: "payroll-chat", label: "Payroll", icon: "💬" },
 ];
-
-interface ChainOption {
-  id: string;
-  label: string;
-  testnet: boolean;
-}
 
 // A saving plan = a scheduled self-transfer (payer == receiver). Rows the
 // caller controls that pay OTHER people (e.g. payroll schedules) are not
@@ -197,13 +189,12 @@ function ConsumerAppInner() {
   const [walletMenuOpen, setWalletMenuOpen] = useState(false);
   const [addressCopied, setAddressCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [bridgeAddrCopied, setBridgeAddrCopied] = useState(false);
 
   // ── Cross‑chain state ──
-  const [chains, setChains] = useState<ChainOption[]>([]);
-  const [fromChain, setFromChain] = useState<string>("");
-  const [toChain] = useState<string>("Arc_Testnet");
-  const [crossAmount, setCrossAmount] = useState("");
-  const [crossLoading, setCrossLoading] = useState(false);
+  // The FlareHQ wallet lives on Arc; source-chain bridging is not currently
+  // available in Flow, so there is no source-chain picker and no per-chain
+  // balance polling here. crossResult surfaces upgrade-flow outcomes only.
   const [crossResult, setCrossResult] = useState<ActionResult | null>(null);
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceCurrency, setBalanceCurrency] = useState<"USDC" | "EURC">("USDC");
@@ -215,10 +206,6 @@ function ConsumerAppInner() {
   const [requestCurrency, setRequestCurrency] = useState<"USDC" | "EURC">("USDC");
   const [sendBalance, setSendBalance] = useState<string | null>(null);
   const [sendBalanceLoading, setSendBalanceLoading] = useState(false);
-  const [chainBalance, setChainBalance] = useState<string | null>(null);
-  const [chainBalanceLoading, setChainBalanceLoading] = useState(false);
-  const [chainBalanceError, setChainBalanceError] = useState<string | null>(null);
-  const [chainBalanceTick, setChainBalanceTick] = useState(0);
   const [bridgeNeedsFlareWallet, setBridgeNeedsFlareWallet] = useState(false);
   const [creatingFlareWallet, setCreatingFlareWallet] = useState(false);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
@@ -407,39 +394,6 @@ function ConsumerAppInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, walletAddress]);
 
-  // ── Source-chain balance for the bridge view (per selected chain) ──
-  useEffect(() => {
-    if (view !== "crosschain" || !fromChain || !walletAddress) return;
-    let cancelled = false;
-    setChainBalanceLoading(true);
-    setChainBalanceError(null);
-    fetch(`/api/cctp/transfer/balance?fromChain=${encodeURIComponent(fromChain)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data.success) setChainBalance(data.balance);
-        else if (data.code === "EXTERNAL_WALLET") {
-          setBridgeNeedsFlareWallet(true);
-          setChainBalance(null);
-          setChainBalanceError(null);
-        } else {
-          setChainBalance(null);
-          setChainBalanceError(data.error || "Could not load balance for this chain.");
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setChainBalance(null);
-        setChainBalanceError("Could not load balance for this chain.");
-      })
-      .finally(() => {
-        if (!cancelled) setChainBalanceLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [view, fromChain, walletAddress, chainBalanceTick]);
-
   // ── Send-form balance in the SELECTED token (never a wrong-token balance) ──
   useEffect(() => {
     if (view !== "send" || !walletAddress) return;
@@ -547,22 +501,6 @@ function ConsumerAppInner() {
       setLoginBusy(false);
     }
   };
-
-  // ── Fetch supported source chains ──
-  useEffect(() => {
-    fetch("/api/cctp/transfer")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) {
-          const sourceChains = data.sourceChains || [];
-          setChains(sourceChains);
-          if (sourceChains.length > 0) {
-            setFromChain(sourceChains[0].id);
-          }
-        }
-      })
-      .catch(console.error);
-  }, []);
 
   // ── Consumer discovery: load consumer walletId for hiring + discovery fetching ──
   useEffect(() => {
@@ -887,7 +825,6 @@ function ConsumerAppInner() {
     setSendCurrency("USDC");
     setRequestCurrency("USDC");
     setSendBalance(null);
-    setCrossAmount("");
     setCrossResult(null);
   };
 
@@ -1025,84 +962,6 @@ function ConsumerAppInner() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // ── Cross‑chain transfer ──
-  const handleCrossChain = async () => {
-    if (!fromChain || !crossAmount) {
-      setCrossResult({ success: false, error: "Please fill in all fields." });
-      return;
-    }
-    setCrossLoading(true);
-    setCrossResult(null);
-    try {
-      const data = await protectedFetch("/api/cctp/transfer", { method: "POST" }, {
-        fromChain,
-        toChain,
-        amount: crossAmount,
-        recipient: walletAddress,
-      });
-      if (data.code === "EXTERNAL_WALLET") {
-        setBridgeNeedsFlareWallet(true);
-        throw new Error(data.error || "Transfer failed.");
-      }
-
-      // The whole bridge (burn -> attestation -> mint) runs in the
-      // background from here — poll instead of waiting on one open
-      // request, since Circle's attestation for Arc can take a while.
-      setCrossResult({
-        success: true,
-        message: `Starting bridge from ${fromChain}...`,
-      });
-
-      const { reference } = data;
-      const maxAttempts = 60; // ~10 minutes at 10s intervals
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        await new Promise((r) => setTimeout(r, 10_000));
-        const statusRes = await fetch(`/api/cctp/transfer/status?reference=${reference}`);
-        const statusData = await statusRes.json();
-        if (!statusData.success) continue; // transient — keep polling
-
-        if (statusData.state === "success") {
-          setCrossResult({
-            success: true,
-            message: `Bridged ${crossAmount} USDC from ${fromChain} to Arc!`,
-            explorerUrl: statusData.destinationExplorerUrl,
-          });
-          setChainBalanceTick((t) => t + 1);
-          return;
-        }
-        if (statusData.state === "error") {
-          setCrossResult({ success: false, error: statusData.error || "Bridge transfer failed." });
-          return;
-        }
-        // 'submitting' (burn not confirmed yet) or 'pending' (burn confirmed,
-        // waiting on attestation + mint) — keep polling, show whatever link
-        // is available so far.
-        setCrossResult({
-          success: true,
-          message:
-            statusData.state === "submitting"
-              ? `Confirming burn on ${fromChain}...`
-              : `Burn confirmed on ${fromChain}. Waiting for Circle's attestation and mint — this can take a few minutes...`,
-          explorerUrl: statusData.sourceExplorerUrl,
-        });
-      }
-
-      setCrossResult({
-        success: false,
-        error: "Still waiting after 10 minutes. It may still complete — check the source transaction on the explorer. Note: Arc is a newer CCTP destination, so attestation can take longer than usual.",
-      });
-    } catch (e: any) {
-      // Backend capability codes become product-level explanations — never
-      // raw internals. BRIDGE_SOURCE_UNSUPPORTED is an honest product
-      // state (Arc-only provisioning); CIRCLE_WALLET_UNBOUND is
-      // recoverable account state.
-      setCrossResult({ success: false, error: friendlyCapabilityError(e?.code, e.message) });
-    } finally {
-      setCrossLoading(false);
-    }
-
   };
 
   const submitHandlers: Record<string, () => void> = { send: handleSend, save: handleSave, request: handleRequest };
@@ -1289,7 +1148,8 @@ function ConsumerAppInner() {
             <div
               style={{
                 width: "100%",
-                maxWidth: 340,
+                maxWidth: 440,
+                marginInline: "auto",
                 display: "flex",
                 flexDirection: "column",
                 gap: 10,
@@ -1379,7 +1239,8 @@ function ConsumerAppInner() {
               style={{
                 marginTop: 16,
                 width: "100%",
-                maxWidth: 340,
+                maxWidth: 440,
+                marginInline: "auto",
                 border: "1px solid var(--flow-border, var(--border))",
                 borderRadius: 14,
                 padding: 16,
@@ -1610,41 +1471,63 @@ function ConsumerAppInner() {
               </section>
             )}
 
-            <section style={styles.balanceCard}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <p style={{ margin: "0 0 4px", fontSize: 12, color: "var(--flow-text-faint)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+            <section style={styles.balanceCard} aria-label="Wallet balance">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)", textTransform: "uppercase", letterSpacing: 0.5 }}>
                   Balance
                 </p>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {(["USDC", "EURC"] as const).map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => {
-                        setBalanceCurrency(c);
-                        setBalance(null);
-                        refreshBalance(c);
-                      }}
-                      disabled={balanceLoading}
-                      aria-label={`Show ${c} balance`}
-                      style={{
-                        padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, cursor: "pointer",
-                        border: balanceCurrency === c ? "1px solid var(--flow-text)" : "1px solid var(--flow-border)",
-                        background: balanceCurrency === c ? "var(--flow-text)" : "transparent",
-                        color: balanceCurrency === c ? "var(--flow-surface)" : "var(--flow-text-muted)",
-                      }}
-                    >
-                      {c}
-                    </button>
-                  ))}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <div role="group" aria-label="Balance currency" style={{ display: "flex", gap: 6, background: "rgba(255,255,255,0.08)", borderRadius: 14, padding: 3 }}>
+                    {(["USDC", "EURC"] as const).map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => {
+                          setBalanceCurrency(c);
+                          setBalance(null);
+                          refreshBalance(c);
+                        }}
+                        disabled={balanceLoading}
+                        aria-label={`Show ${c} balance`}
+                        aria-pressed={balanceCurrency === c}
+                        title={`Show ${c} balance`}
+                        style={{
+                          padding: "3px 10px", borderRadius: 11, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                          border: "none",
+                          background: balanceCurrency === c ? "#FBF8F3" : "transparent",
+                          color: balanceCurrency === c ? "#1C1B19" : "rgba(251,248,243,0.65)",
+                        }}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => refreshBalance()}
+                    disabled={balanceLoading}
+                    aria-label="Refresh balance"
+                    title="Refresh balance"
+                    style={{
+                      background: "rgba(255,255,255,0.1)", color: "#FBF8F3",
+                      border: "none", borderRadius: 8, fontSize: 14, lineHeight: 1,
+                      padding: "6px 10px", cursor: balanceLoading ? "default" : "pointer",
+                      opacity: balanceLoading ? 0.6 : 1, flexShrink: 0,
+                    }}
+                  >
+                    {balanceLoading ? "…" : "↻"}
+                  </button>
                 </div>
               </div>
-              <p style={{ margin: 0, fontSize: "clamp(28px, 5vw, 36px)", fontWeight: 700, fontFamily: "'Fraunces', serif" }}>
+              <p
+                style={{ margin: "8px 0 0", fontSize: "clamp(28px, 5vw, 36px)", fontWeight: 700, fontFamily: "'Fraunces', serif" }}
+                aria-live="polite"
+                aria-label={`Balance: ${balance !== null ? parseFloat(balance).toFixed(2) : "unavailable"} ${balanceCurrency}`}
+              >
                 {balanceLoading ? "..." : balance !== null ? `${parseFloat(balance).toFixed(2)}` : "—"}
-                <span style={{ fontSize: 16, fontWeight: 500, color: "var(--flow-text-faint)", marginLeft: 6 }}>{balanceCurrency}</span>
+                <span style={{ fontSize: 16, fontWeight: 500, color: "rgba(251,248,243,0.6)", marginLeft: 6 }}>{balanceCurrency}</span>
               </p>
-              <button style={styles.refreshBalanceButton} onClick={() => refreshBalance()} disabled={balanceLoading}>
-                {balanceLoading ? "Refreshing..." : "↻ Refresh"}
-              </button>
+              <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(251,248,243,0.6)" }}>
+                {balanceCurrency} balance · settles on Arc
+              </p>
             </section>
 
             {/* ── Wallet security panel (Stage 2 / B4) — a security panel, not
@@ -1726,7 +1609,10 @@ function ConsumerAppInner() {
                     {security?.hasPin ? "✓" : "⚠"}
                   </span>
                   <span style={styles.securityLabel}>
-                    {security?.hasPin ? "Payment PIN set" : "Step-up not set"}
+                    Payment PIN{" "}
+                    <span style={{ fontWeight: 400, color: "var(--flow-text-faint)" }}>
+                      {security?.hasPin ? "· Set" : "· Not set"}
+                    </span>
                   </span>
                   {!security?.hasPin && (
                     <button
@@ -1737,6 +1623,11 @@ function ConsumerAppInner() {
                     </button>
                   )}
                 </div>
+                {!security?.hasPin && (
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--flow-text-faint)", lineHeight: 1.5, paddingLeft: 24 }}>
+                    Adds extra protection to payments and other money-moving actions.
+                  </p>
+                )}
                 {showPinForm && !security?.hasPin && (
                   <div style={styles.securityForm}>
                     <input
@@ -2114,7 +2005,7 @@ function ConsumerAppInner() {
           <section style={styles.flowCard}>
             <h2 style={styles.flowTitle}>Bridge to Arc</h2>
             <p style={{ color: "var(--flow-text-faint)", fontSize: "clamp(13px, 1.2vw, 15px)", marginBottom: 20 }}>
-              Send USDC from any supported chain directly to your Arc wallet.
+              Your FlareHQ wallet is currently on Arc.
             </p>
             <div style={styles.flowLine}>
               <span style={styles.flowDot} />
@@ -2122,21 +2013,22 @@ function ConsumerAppInner() {
               <span style={styles.flowDot} />
             </div>
 
-            {/* Bridge uses the backend capability result: CIRCLE wallets run
-                the backend-controlled bridge flow below (ordinary
-                progress/status UI, no second ceremony). EXTERNAL wallets
-                cannot be bridged from automatically — the upgrade card
-                explains why. BRIDGE_SOURCE_UNSUPPORTED and
-                CIRCLE_WALLET_UNBOUND arrive as typed backend codes and are
-                rendered as product copy, never raw errors. */}
+            {/* Bridge posture: the FlareHQ wallet is provisioned on Arc and
+                the backend deterministically refuses non-Arc sources for it
+                (BRIDGE_SOURCE_UNSUPPORTED), while connected wallets cannot be
+                bridged from automatically (EXTERNAL_WALLET). Flow therefore
+                offers no source-chain picker here — only the honest Arc
+                position plus the fund-on-Arc alternative. Destination stays
+                Arc; no multi-chain destination selection exists. */}
             {(walletType === "EXTERNAL" || bridgeNeedsFlareWallet) && !crossResult ? (
               <div style={styles.flareWalletCard}>
                 <p style={styles.flareWalletIcon}>👛</p>
                 <p style={styles.flareWalletTitle}>Bridging needs a FlareHQ wallet</p>
                 <p style={styles.flareWalletText}>
-                  You connected your own wallet — great for holding funds, but FlareHQ
-                  can't sign bridge transactions from it. Create a free FlareHQ-managed
-                  wallet and you can bridge USDC from any supported chain in one tap.
+                  You connected your own wallet — FlareHQ can&apos;t move funds from it.
+                  Your FlareHQ wallet lives on Arc, and bridging from another chain
+                  isn&apos;t currently available in Flow. Create a free FlareHQ wallet
+                  to hold and use funds on Arc.
                   Your connected wallet keeps working everywhere else.
                 </p>
                 <button
@@ -2158,96 +2050,37 @@ function ConsumerAppInner() {
             ) : (
               <>
             {!crossResult && (
-              <div style={styles.form}>
-                <div style={styles.field}>
-                  <label style={styles.label}>Source Chain</label>
-                  <div style={styles.selectWrap}>
-                    <select
-                      value={fromChain}
-                      onChange={(e) => {
-                        setCrossAmount("");
-                        setFromChain(e.target.value);
-                      }}
-                      style={styles.select}
-                      aria-label="Select the chain to bridge from"
-                    >
-                      {chains.length === 0 && <option value="">Loading chains…</option>}
-                      {chains.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.label} {c.testnet ? "(testnet)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <span style={styles.selectChevron} aria-hidden="true">▾</span>
-                  </div>
-                  <div style={styles.chainBalanceRow}>
-                    {chainBalanceLoading ? (
-                      <span style={styles.chainBalanceText}>Checking balance…</span>
-                    ) : chainBalanceError ? (
-                      <>
-                        <span style={styles.chainBalanceErrorText}>{chainBalanceError}</span>
-                        <button style={styles.chainBalanceRetry} onClick={() => setChainBalanceTick((t) => t + 1)}>Retry</button>
-                      </>
-                    ) : (
-                      <>
-                        <span style={styles.chainBalanceText}>
-                          Available: <strong>{chainBalance !== null ? `${parseFloat(chainBalance).toFixed(2)} USDC` : "—"}</strong>
-                        </span>
-                        <button
-                          style={styles.maxButton}
-                          disabled={!chainBalance || parseFloat(chainBalance) <= 0}
-                          onClick={() => setCrossAmount(String(parseFloat(chainBalance!)))}
-                        >
-                          Max
-                        </button>
-                      </>
-                    )}
-                  </div>
+              <div style={styles.flareWalletCard}>
+                <p style={styles.flareWalletIcon}>🌉</p>
+                <p style={styles.flareWalletTitle}>Fund your wallet on Arc</p>
+                <p style={styles.flareWalletText}>
+                  Bridging from another chain requires an external wallet with funds
+                  on that chain — that flow isn&apos;t currently available in Flow.
+                  To get funds in, send USDC directly to your FlareHQ wallet on Arc.
+                </p>
+                <div style={styles.linkRow}>
+                  <div style={styles.linkBox}>{walletAddress}</div>
+                  <button
+                    style={styles.copyLinkButton}
+                    onClick={() => {
+                      navigator.clipboard.writeText(walletAddress);
+                      setBridgeAddrCopied(true);
+                      setTimeout(() => setBridgeAddrCopied(false), 1500);
+                    }}
+                  >
+                    {bridgeAddrCopied ? "✓ Copied" : "📋 Copy"}
+                  </button>
                 </div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Destination Chain</label>
-                  <input
-                    style={{ ...styles.input, background: "var(--flow-surface-2)", cursor: "not-allowed" }}
-                    value="Arc Testnet"
-                    disabled
-                  />
-                  <input type="hidden" value="arc" />
-                </div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Amount (USDC)</label>
-                  <input
-                    style={styles.input}
-                    type="number"
-                    value={crossAmount}
-                    onChange={(e) => setCrossAmount(e.target.value)}
-                    placeholder="0.00"
-                  />
-                </div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Arriving in</label>
-                  <div style={{ ...styles.input, background: "var(--flow-surface-2)", display: "flex", alignItems: "center", fontFamily: "monospace", fontSize: "clamp(11px, 1vw, 13px)" }}>
-                    Your wallet ({walletAddress.slice(0, 6)}...{walletAddress.slice(-4)})
-                  </div>
-                </div>
-                <button
-                  style={styles.submitButton}
-                  disabled={
-                    crossLoading ||
-                    !crossAmount ||
-                    !fromChain ||
-                    chains.length === 0 ||
-                    (chainBalance !== null && parseFloat(crossAmount) > parseFloat(chainBalance))
-                  }
-                  onClick={handleCrossChain}
-                >
-                  {crossLoading
-                    ? "Processing..."
-                    : chains.length === 0
-                      ? "Loading chains..."
-                      : chainBalance !== null && parseFloat(crossAmount || "0") > parseFloat(chainBalance)
-                        ? "Amount exceeds available balance"
-                        : "Bridge to Arc"}
-                </button>
+                {isTestnet && (
+                  <a
+                    href="https://faucet.circle.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ ...styles.faucetCardLink, display: "inline-block", marginTop: 4 }}
+                  >
+                    Get free test USDC ↗
+                  </a>
+                )}
               </div>
             )}
 
@@ -2676,7 +2509,7 @@ function ConsumerAppInner() {
       )}
 
       {/* ── Bottom Nav ── */}
-      <nav style={styles.bottomNav}>
+      <nav style={styles.bottomNav} className="flow-bottom-nav" aria-label="Flow wallet navigation">
         {NAV_ITEMS.map((item) => (
           <button
             key={item.id}
@@ -2732,8 +2565,7 @@ const FONT_IMPORT = `
   /* Desktop/tablet: the mobile-first single-column layout below still
      applies by default (nothing changes on small screens) — these rules
      only kick in once there's real horizontal space to use. */
-  @media (min-width: 720px) {
-    .flow-app {
+  @media (min-width: 720px) {    .flow-app {
       max-width: 720px !important;
       padding: 0 24px !important;
     }
@@ -2746,6 +2578,20 @@ const FONT_IMPORT = `
     .flow-actions-grid {
       grid-template-columns: repeat(2, 1fr) !important;
       gap: 16px !important;
+    }
+  }
+
+  /* Narrow viewports / large zoom: space-around combined with horizontal
+     overflow clips edge items (the old "Payrc"/"C" fragments), so the bottom
+     nav aligns from the start and scrolls instead — every item stays
+     reachable, none is hidden or clipped. */
+  @media (max-width: 560px) {
+    .flow-bottom-nav {
+      justify-content: flex-start !important;
+    }
+    .flow-bottom-nav button {
+      flex: 1 0 auto !important;
+      min-width: 54px !important;
     }
   }
 `;
@@ -2823,11 +2669,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   balanceCard: {
     background: "#1C1B19", color: "#FBF8F3", borderRadius: 18, padding: "20px 22px",
-    margin: "0 0 16px", position: "relative",
-  },
-  refreshBalanceButton: {
-    position: "absolute", top: 18, right: 20, background: "rgba(255,255,255,0.1)", color: "#FBF8F3",
-    border: "none", borderRadius: 8, fontSize: 12, padding: "6px 10px", cursor: "pointer",
+    margin: "0 0 16px",
   },
   faucetCard: {
     display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
@@ -2960,59 +2802,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--flow-text-muted)",
     margin: "0 0 18px",
   },
-  selectWrap: { position: "relative", width: "100%" },
-  select: {
-    padding: "12px 40px 12px 14px",
-    borderRadius: 12,
-    border: "1px solid var(--flow-border)",
-    background: "var(--flow-surface)",
-    fontSize: "clamp(14px, 1.5vw, 16px)",
-    color: "var(--flow-text)",
-    outline: "none",
-    fontFamily: "inherit",
-    boxSizing: "border-box",
-    width: "100%",
-    appearance: "none" as const,
-    WebkitAppearance: "none" as const,
-    cursor: "pointer",
-  },
-  selectChevron: {
-    position: "absolute",
-    right: 14,
-    top: "50%",
-    transform: "translateY(-50%)",
-    fontSize: 14,
-    color: "var(--flow-text-muted)",
-    pointerEvents: "none" as const,
-  },
-  chainBalanceRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    marginTop: 4,
-  },
-  chainBalanceText: { fontSize: "clamp(12px, 1.1vw, 13px)", color: "var(--flow-text-muted)" },
-  chainBalanceErrorText: { fontSize: "clamp(12px, 1.1vw, 13px)", color: "#C0563A" },
-  chainBalanceRetry: {
-    background: "none",
-    border: "none",
-    color: "#E8714A",
-    fontSize: "clamp(12px, 1.1vw, 13px)",
-    fontWeight: 600,
-    cursor: "pointer",
-    padding: 0,
-  },
-  maxButton: {
-    background: "var(--flow-surface-2)",
-    border: "1px solid var(--flow-border)",
-    borderRadius: 8,
-    fontSize: "clamp(11px, 1vw, 12px)",
-    fontWeight: 700,
-    color: "var(--flow-text)",
-    padding: "4px 10px",
-    cursor: "pointer",
-  },
   submitButton: {
     marginTop: 8,
     padding: "14px 0",
@@ -3130,14 +2919,17 @@ const styles: Record<string, React.CSSProperties> = {
     bottom: 0,
     display: "flex",
     justifyContent: "space-around",
+    gap: 2,
     background: "var(--flow-surface)",
     borderTop: "1px solid var(--flow-border)",
     padding: "8px 4px 12px",
     marginTop: "auto",
-    // Eight items in one row overflow phone widths and get clipped (body
-    // hides x-overflow). Scroll the row instead of clipping; no overflow
-    // on wider screens so desktop is unchanged.
+    // Six core items fit phone widths side by side; on very narrow
+    // viewports or large zoom the row scrolls instead of clipping labels
+    // (space-around + overflow can clip flex items, so narrow screens switch
+    // to flex-start via .flow-bottom-nav below). No item is ever hidden.
     overflowX: "auto",
+    flexWrap: "nowrap",
   },
   navItem: {
     display: "flex",
@@ -3149,6 +2941,8 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     color: "var(--flow-text-faint)",
     padding: "4px 8px",
+    flex: "1 0 auto",
+    minWidth: 52,
     flexShrink: 0,
   },
   navItemActive: {
@@ -3161,6 +2955,8 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     color: "var(--flow-text)",
     padding: "4px 8px",
+    flex: "1 0 auto",
+    minWidth: 52,
     flexShrink: 0,
   },
   navIcon: {
@@ -3177,7 +2973,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 12,
     background: "rgba(92, 122, 92, 0.16)",
   },
-  navLabel: { fontSize: "clamp(9px, 0.8vw, 11px)", fontWeight: 600 },
+  navLabel: { fontSize: "clamp(9px, 0.8vw, 11px)", fontWeight: 600, whiteSpace: "nowrap" as const },
 };
 
 // Consumer auth is the backend consumer_token session — view navigation
