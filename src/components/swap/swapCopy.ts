@@ -146,6 +146,12 @@ export function friendlySwapError(raw: string | null | undefined): {
   if (lower.includes('ownership could not be verified') || lower.includes('sign in required')) {
     return { headline: 'Your session expired. Sign in again to continue.', raw: msg };
   }
+  if (
+    lower.includes('unitflow-v3') &&
+    (lower.includes('is disabled') || lower.includes('disabled') || lower.includes('opt-in flag'))
+  ) {
+    return { headline: 'Swaps are temporarily unavailable. Please try again shortly.', raw: msg };
+  }
   if (lower.includes('no live v3 pool') || lower.includes('cannot cover this') || lower.includes('unavailable')) {
     return { headline: 'No swap route is available for this amount right now. Try a smaller amount or try again shortly.', raw: msg };
   }
