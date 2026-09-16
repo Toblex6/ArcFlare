@@ -43,7 +43,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useAccount,
   useChainId,
-  useConnect,
   usePublicClient,
   useSendTransaction,
   useSwitchChain,
@@ -53,10 +52,9 @@ import { getNetworkConfig, explorerTxUrl } from '@/lib/config/network';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import {
-  dedupeConnectors,
   friendlyConnectorLabel,
-  withTimeout,
 } from '@/lib/wallet/walletLabels';
+import { useGuardedConnect } from '@/hooks/useGuardedConnect';
 import { useSwapBalances } from './useSwapBalances';
 import { useSwapQuote, type SwapQuoteView } from './useSwapQuote';
 import {
@@ -150,7 +148,8 @@ export function FlowSwapView({
 
   // ── Wallet plumbing (existing wagmi infrastructure, no second system) ──
   const { address: connectedAddress, isConnected, connector: activeConnector } = useAccount();
-  const { connectors, connectAsync, isPending: isConnecting } = useConnect();
+  // Guarded connect: synchronous ref lock suppresses double-fire re-entry.
+  const { connectors, connectAsync: guardedConnectAsync, isConnecting, dedupedConnectors } = useGuardedConnect();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID });
@@ -763,12 +762,15 @@ export function FlowSwapView({
           ? 'Enter an amount to get a quote.'
           : null;
 
+  // Guarded by useGuardedConnect's synchronous ref lock: a second tap
+  // before re-render no-ops inside guardedConnectAsync instead of opening
+  // a second WalletConnect session. Error behavior unchanged.
   const connectWith = async (connectorUid: string) => {
     setConnectError(null);
     try {
       const target = connectors.find((c) => c.uid === connectorUid);
       if (!target) throw new Error('Wallet connector unavailable.');
-      await withTimeout(connectAsync({ connector: target }), 45000, 'Wallet connection timed out');
+      await guardedConnectAsync(target);
     } catch (err: unknown) {
       setConnectError(friendlyWalletError(err));
     }
@@ -858,7 +860,7 @@ export function FlowSwapView({
                   : `Connected wallet ${shortAddress(connectedAddress)} is not the wallet you signed in with (${shortAddress(walletAddress)}). Reconnect the matching wallet.`}
               </p>
               {(() => {
-                const pickers = dedupeConnectors(connectors);
+                const pickers = dedupedConnectors;
                 if (pickers.length === 0) {
                   return (
                     <p style={{ ...styles.boxText, marginTop: 8 }}>

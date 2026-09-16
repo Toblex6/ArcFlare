@@ -22,13 +22,14 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useDisconnect, useWriteContract, useChainId, useSwitchChain } from 'wagmi';
 import { parseUnits, keccak256, toBytes } from 'viem';
 import { USDC_CONTRACT, USDC_DECIMALS } from '@/lib/wallet/erc20';
 import { arcTestnet } from '@/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
+import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
+import { useGuardedConnect } from '@/hooks/useGuardedConnect';
 import { explorerTxUrl } from "@/lib/config/network";
 
 // Minimal ABIs — approve from the ERC-20 surface Checkout uses, createEscrow
@@ -89,7 +90,8 @@ export default function EscrowPayPage() {
   const [explorerUrl, setExplorerUrl] = useState<string | null>(null);
 
   const { address, isConnected, connector: activeConnector } = useAccount();
-  const { connectors, connect, connectAsync, isPending: isConnecting } = useConnect();
+  // Guarded connect: synchronous ref lock suppresses double-fire re-entry.
+  const { connectWithFallback: guardedConnect, isConnecting, dedupedConnectors } = useGuardedConnect();
   const { disconnect } = useDisconnect();
   const { writeContractAsync } = useWriteContract();
   const chainId = useChainId();
@@ -232,13 +234,16 @@ export default function EscrowPayPage() {
                 const isMobile = isMobileViewport();
                 const hasProvider = hasInjectedProvider();
                 const showInjected = !(isMobile && !hasProvider);
-                const deduped = dedupeConnectors(connectors);
+                const deduped = dedupedConnectors;
                 const injected = deduped.filter((c) => c.type === 'injected');
                 const wc = deduped.find((c) => c.type === 'walletConnect');
                 const others = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
-                const doConnect = async (c: (typeof connectors)[number]) => {
+                // Guarded by useGuardedConnect's synchronous ref lock: a
+                // second tap before re-render no-ops instead of opening a
+                // second WalletConnect session.
+                const doConnect = async (c: { uid: string }) => {
                   setConnectError(null);
-                  try { await (connectAsync ? connectAsync({ connector: c }) : connect({ connector: c })); }
+                  try { await guardedConnect(c); }
                   catch (e: any) { setConnectError(friendlyWalletError(e)); }
                 };
                 return (

@@ -4,11 +4,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { useAccount, useConnect, useSignMessage } from "wagmi";
+import { useAccount, useSignMessage } from "wagmi";
 import type { Address } from "viem";
 import { getNetworkConfig } from "@/lib/config/network";
 import { friendlyWalletError } from "@/lib/wallet/walletErrors";
-import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, withTimeout } from "@/lib/wallet/walletLabels";
+import { friendlyConnectorLabel, hasInjectedProvider } from "@/lib/wallet/walletLabels";
+import { useGuardedConnect } from "@/hooks/useGuardedConnect";
 import {
   buildDiscoveryParams,
   isServiceable,
@@ -135,7 +136,11 @@ function ConsumerAppInner() {
   // detect "nothing connected" and open the connector picker instead (same
   // connectors configured in providers.tsx via src/lib/wagmi.ts).
   const { address: connectedAddress, isConnected } = useAccount();
-  const { connectors, connectAsync, isPending: isConnecting } = useConnect();
+  // Guarded connect: synchronous ref lock suppresses double-fire re-entry
+  // (a second tap before re-render no-ops instead of opening a second
+  // WalletConnect session). Post-connect challenge/sign/redirect logic in
+  // switchViaConnector and the picker is unchanged.
+  const { connectAsync: guardedConnectAsync, isConnecting, dedupedConnectors } = useGuardedConnect();
   const [view, setView] = useState<View>("home");
   const [checkingSession, setCheckingSession] = useState(true);
   const [walletAddress, setWalletAddress] = useState("");
@@ -759,11 +764,14 @@ function ConsumerAppInner() {
     setSwitchError(null);
     setSwitchBusy(true);
     try {
-      const target = connectors.find((c) => c.uid === connectorUid);
+      const target = dedupedConnectors.find((c) => c.uid === connectorUid);
       if (!target) throw new Error('Wallet connector unavailable.');
-      const result = await withTimeout(connectAsync({ connector: target }), 45000, 'Wallet connection timed out').catch((e) => {
+      const result = await guardedConnectAsync(target).catch((e) => {
         throw e;
       });
+      // Suppressed double-fire (another attempt already in flight) — its
+      // continuation owns the post-connect challenge work; do nothing here.
+      if (!result) return;
       const picked = (result as unknown as { accounts?: string[] })?.accounts?.[0] ?? connectedAddress;
       if (!picked) throw new Error('Wallet connected, but no address was exposed. Try again.');
       await completeWalletSwitch(picked);
@@ -1254,7 +1262,7 @@ function ConsumerAppInner() {
               {(() => {
                 // Real connector detection result (EIP-6963 injected
                 // providers + configured WalletConnect) — never faked.
-                const pickers = dedupeConnectors(connectors);
+                const pickers = dedupedConnectors;
                 if (pickers.length === 0) {
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1299,7 +1307,10 @@ function ConsumerAppInner() {
                     key={c.uid}
                     disabled={isConnecting}
                     onClick={() => {
-                      withTimeout(connectAsync({ connector: c }), 45000, "Wallet connection timed out").catch((e) =>
+                      // Guarded: a second tap before re-render no-ops inside
+                      // guardedConnectAsync instead of opening a second
+                      // WalletConnect session.
+                      guardedConnectAsync(c).catch((e) =>
                         setOnboardingError(friendlyWalletError(e))
                       );
                     }}
@@ -2425,7 +2436,7 @@ function ConsumerAppInner() {
                 </button>
               )}
               {(() => {
-                const pickers = dedupeConnectors(connectors);
+                const pickers = dedupedConnectors;
                 if (pickers.length === 0) {
                   return (
                     <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>

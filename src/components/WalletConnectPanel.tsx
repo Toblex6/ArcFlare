@@ -8,11 +8,12 @@
 // /api/merchant/wallet/connect — only after the wallet proves control.
 
 import React, { useEffect, useState, useRef } from 'react';
-import { useAccount, useConnect, useDisconnect, useSignMessage, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useDisconnect, useSignMessage, useChainId, useSwitchChain } from 'wagmi';
 import { arcTestnet } from '@/lib/wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
+import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
+import { useGuardedConnect } from '@/hooks/useGuardedConnect';
 
 interface WalletConnectPanelProps {
   onConnected?: (result: { walletProvider: string; walletAddress: string }) => void;
@@ -31,18 +32,25 @@ function guessWalletKind(connectorName: string): string {
   return 'METAMASK';
 }
 
-const CONNECT_TIMEOUT_MS = 45000;
-
 export default function WalletConnectPanel({ onConnected }: WalletConnectPanelProps) {
   const { address, isConnected, connector: activeConnector } = useAccount();
-  const { connectors, connectAsync, isPending: isConnecting, error: connectError } = useConnect();
+  // Guarded connect: a synchronous ref lock (checked+set in the same tick)
+  // suppresses double-fire re-entry that React state alone cannot catch.
+  const {
+    connectAsync: guardedConnectAsync,
+    connecting: guardConnecting,
+    isConnecting,
+    error: guardError,
+    injectedConnectors,
+    walletConnectConnector,
+    otherConnectors,
+  } = useGuardedConnect();
   const { disconnect } = useDisconnect();
   const { signMessageAsync, isPending: isSigning } = useSignMessage();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
 
   const [linking, setLinking] = useState(false);
-  const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [networkMismatch, setNetworkMismatch] = useState(false);
@@ -56,28 +64,21 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
   }, []);
 
   useEffect(() => {
-    if (connectError) setError(friendlyWalletError(connectError));
-  }, [connectError]);
-
-  const deduped = dedupeConnectors(connectors);
-  const injectedConnectors = deduped.filter((c) => c.type === 'injected');
-  const walletConnectConnector = deduped.find((c) => c.type === 'walletConnect');
-  const otherConnectors = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
+    if (guardError) setError(guardError);
+  }, [guardError]);
 
   const isMobile = mounted ? isMobileViewport() : false;
   const hasProvider = mounted ? hasInjectedProvider() : false;
   const showInjected = !(isMobile && !hasProvider);
 
-  const handleConnect = async (connector: (typeof connectors)[number]) => {
+  // Guarded by useGuardedConnect's synchronous ref lock: a second tap
+  // before re-render no-ops inside guardedConnectAsync instead of opening
+  // a second WalletConnect session. Error behavior unchanged.
+  const handleConnect = (connector: { uid: string }) => {
     setError(null);
-    setConnecting(true);
-    try {
-      await withTimeout(connectAsync({ connector }), CONNECT_TIMEOUT_MS, 'Wallet connection timed out');
-    } catch (err: any) {
+    void guardedConnectAsync(connector).catch((err: unknown) => {
       setError(friendlyWalletError(err));
-    } finally {
-      setConnecting(false);
-    }
+    });
   };
 
   const handleLinkWallet = async () => {
@@ -141,7 +142,7 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
     }
   };
 
-  const busy = connecting || isConnecting || isSigning || linking;
+  const busy = guardConnecting || isConnecting || isSigning || linking;
   const pageUrl = pageUrlRef.current || (typeof window !== 'undefined' ? window.location.href : '');
 
   return (

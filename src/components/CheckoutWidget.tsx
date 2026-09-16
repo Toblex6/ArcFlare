@@ -27,7 +27,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { useAccount, useConnect, useDisconnect, useWriteContract, useChainId, useSwitchChain, useReadContract } from 'wagmi';
+import { useAccount, useDisconnect, useWriteContract, useChainId, useSwitchChain, useReadContract } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import { erc20TransferAbi } from '@/src/lib/wallet/erc20';
 // Phase 2B: token metadata comes ONLY from the client-safe layer (which
@@ -55,7 +55,8 @@ import { erc20ApproveAbi, paymentRouterRouteAbi } from '@/src/components/checkou
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { getNetworkConfig } from '@/lib/config/network';
-import { dedupeConnectors, friendlyConnectorLabel, hasInjectedProvider, isMobileViewport, withTimeout } from '@/lib/wallet/walletLabels';
+import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
+import { useGuardedConnect } from '@/hooks/useGuardedConnect';
 
 // The testnet faucet link is only shown on testnet; hidden on mainnet.
 const IS_TESTNET = getNetworkConfig().name === 'testnet';
@@ -145,8 +146,6 @@ const CCTP_SOURCE_DOMAINS = [
     { domain: 7, label: 'Polygon' },
 ];
 
-const CONNECT_TIMEOUT_MS = 45000;
-
 // Minimal balanceOf fragment for the payer-balance display. Read-only, no
 // signing — the transfer itself still uses erc20TransferAbi above.
 const erc20BalanceAbi = [
@@ -160,7 +159,10 @@ const erc20BalanceAbi = [
 ] as const;
 
 function friendlyConnectError(err: unknown): string {
-    return friendlyWalletError(err);
+    // The guarded-connect hook already maps its `error` to friendly copy —
+    // don't re-map an already-friendly string (that would collapse specific
+    // copy into the generic fallback). Raw errors still map as before.
+    return typeof err === 'string' ? err : friendlyWalletError(err);
 }
 
 interface CheckoutWidgetProps {
@@ -187,14 +189,15 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const [cctpError, setCctpError] = useState<string | null>(null);
 
     const { address, isConnected, connector: activeConnector } = useAccount();
-    const { connectors, connect, connectAsync, error: connectError, isPending: isConnecting, reset: resetConnect } = useConnect();
+    // Guarded connect: synchronous ref lock suppresses double-fire re-entry.
+    const { connectWithFallback: guardedConnectWithFallback, error: connectError, isConnecting, reset: resetConnect, dedupedConnectors, connecting: guardConnecting } = useGuardedConnect();
     const { disconnect } = useDisconnect();
     const { writeContractAsync } = useWriteContract();
     const chainId = useChainId();
     const { switchChainAsync } = useSwitchChain();
     const [networkMismatch, setNetworkMismatch] = useState(false);
     const [showTechnical, setShowTechnical] = useState(false);
-    const [connecting, setConnecting] = useState(false);
+    const connecting = guardConnecting;
     const [switching, setSwitching] = useState(false);
 
     // ── Phase 2B: invoice token identity (authoritative, never converted) ──
@@ -781,22 +784,21 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 const hasProvider = hasInjectedProvider();
                                 const isMobile = isMobileViewport();
                                 const showInjected = !(isMobile && !hasProvider);
-                                const deduped = dedupeConnectors(connectors);
+                                const deduped = dedupedConnectors;
                                 const injectedConnectors = deduped.filter((c) => c.type === 'injected');
                                 const walletConnectConnector = deduped.find((c) => c.type === 'walletConnect');
                                 const otherConnectors = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
 
-                                const attemptConnect = async (c: (typeof connectors)[number]) => {
+                                // Guarded by useGuardedConnect's synchronous ref lock:
+                                // a second tap before re-render no-ops inside
+                                // guardedConnectAsync instead of opening a
+                                // second WalletConnect session.
+                                const attemptConnect = async (c: { uid: string }) => {
                                     resetConnect();
-                                    if (connectAsync) {
-                                        try {
-                                            setConnecting(true);
-                                            await withTimeout(connectAsync({ connector: c }), CONNECT_TIMEOUT_MS, 'Wallet connection timed out');
-                                        } catch (err: any) {
-                                            // friendly error handled via connectError + catch
-                                        } finally { setConnecting(false); }
-                                    } else {
-                                        connect({ connector: c });
+                                    try {
+                                        await guardedConnectWithFallback(c);
+                                    } catch (err: any) {
+                                        // friendly error handled via connectError + catch
                                     }
                                 };
 
