@@ -78,6 +78,7 @@ const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "request", label: "Request", icon: "📥" },
   { id: "crosschain", label: "Bridge", icon: "🌉" },
   { id: "swap", label: "Swap", icon: "🔄" },
+  { id: "payroll-chat", label: "Payroll", icon: "💼" },
 ];
 
 // A saving plan = a scheduled self-transfer (payer == receiver). Rows the
@@ -1694,7 +1695,7 @@ function ConsumerAppInner() {
               <button style={styles.actionCard} onClick={() => goTo("swap")}>
                 <span style={styles.actionIconBadge}><span style={styles.actionIcon}>🔄</span></span>
                 <span style={styles.actionLabel}>Swap tokens</span>
-                <span style={styles.actionSub}>Swap USDC and EURC on Arc</span>
+                <span style={styles.actionSub}>Swap USDC, EURC, and cirBTC on Arc</span>
               </button>
               <button style={styles.actionCard} onClick={() => goTo("payroll-chat")}>
                 <span style={styles.actionIconBadge}><span style={styles.actionIcon}>💬</span></span>
@@ -2112,7 +2113,7 @@ function ConsumerAppInner() {
           </section>
         )}
 
-        {/* ── Flow Swap view (USDC↔EURC on Arc) ──
+        {/* ── Flow Swap view (USDC↔EURC↔cirBTC on Arc) ──
             CIRCLE = in-app server execution from the FlareHQ wallet;
             EXTERNAL = browser-wallet signing. PIN step-up rides on
             protectedFetch so an enrolled payment PIN is asked once. */}
@@ -2935,7 +2936,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: "1px solid var(--flow-border)",
     padding: "8px 4px 12px",
     marginTop: "auto",
-    // Six core items fit phone widths side by side; on very narrow
+    // Seven core items fit phone widths side by side; on very narrow
     // viewports or large zoom the row scrolls instead of clipping labels
     // (space-around + overflow can clip flex items, so narrow screens switch
     // to flex-start via .flow-bottom-nav below). No item is ever hidden.
@@ -2988,7 +2989,7 @@ const styles: Record<string, React.CSSProperties> = {
 };
 
 // Consumer auth is the backend consumer_token session — view navigation
-// between Home / Send / Save / Bridge / Swap never restarts it.
+// between Home / Send / Save / Bridge / Swap / Payroll never restarts it.
 export default function ConsumerApp() {
   return <ConsumerAppInner />;
 }

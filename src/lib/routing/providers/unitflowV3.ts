@@ -193,29 +193,33 @@ function isZeroAddress(a: string): boolean {
   return a.toLowerCase() === UNITFLOW_ZERO_ADDRESS;
 }
 
-/** Swap-leg view: what UnitFlow actually settles (WUSDC 18-dec vs EURC 6-dec). */
+/** Swap-leg view: what UnitFlow actually settles (WUSDC 18-dec vs EURC 6-dec vs cirBTC 8-dec). */
 export interface UnitFlowSwapLeg {
-  symbol: 'USDC' | 'EURC';
-  /** Address used inside the V3 path (WUSDC for the USDC leg). */
+  symbol: 'USDC' | 'EURC' | 'CIRBTC';
+  /** Address used inside the V3 path (WUSDC for the USDC leg, spot token otherwise). */
   swapAddress: string;
-  /** Decimals of the swap token (18 for WUSDC, 6 for EURC). */
+  /** Decimals of the swap token (18 for WUSDC, 6 for EURC, 8 for cirBTC). */
   swapDecimals: number;
 }
 
 export function unitFlowSwapLeg(
-  symbol: 'USDC' | 'EURC',
+  symbol: 'USDC' | 'EURC' | 'CIRBTC',
   deployment: UnitFlowV3Deployment
 ): UnitFlowSwapLeg {
   if (symbol === 'USDC') {
     return { symbol, swapAddress: deployment.wusdc, swapDecimals: 18 };
   }
+  if (symbol === 'CIRBTC') {
+    // cirBTC pools settle the spot 8-dec token directly (no wrapped variant).
+    return { symbol, swapAddress: getTokenBySymbol('CIRBTC').address, swapDecimals: 8 };
+  }
   return { symbol, swapAddress: getTokenBySymbol('EURC').address, swapDecimals: 6 };
 }
 
-/** Canonical 6-dec base units -> swap-leg units (USDC leg rescales 6 -> 18). */
-export function toSwapUnits(symbol: 'USDC' | 'EURC', canonical6: bigint): bigint {
-  if (canonical6 <= 0n) throw routingError(400, '[unitflow-v3] input amount must be positive.');
-  return symbol === 'USDC' ? canonical6 * UNITFLOW_6_TO_18_SCALE : canonical6;
+/** Canonical base units -> swap-leg units (USDC leg rescales 6 -> 18; EURC/cirBTC legs are identity). */
+export function toSwapUnits(symbol: 'USDC' | 'EURC' | 'CIRBTC', canonical: bigint): bigint {
+  if (canonical <= 0n) throw routingError(400, '[unitflow-v3] input amount must be positive.');
+  return symbol === 'USDC' ? canonical * UNITFLOW_6_TO_18_SCALE : canonical;
 }
 
 /**
@@ -226,7 +230,7 @@ export function toSwapUnits(symbol: 'USDC' | 'EURC', canonical6: bigint): bigint
 export function unitFlowMinOut(
   quotedSwap: bigint,
   slippageBps: number,
-  outputSymbol: 'USDC' | 'EURC',
+  outputSymbol: 'USDC' | 'EURC' | 'CIRBTC',
   outputSwapDecimals: number
 ): bigint {
   const base = ROUTING_OUT_FEE_BUFFER[outputSymbol];
@@ -236,9 +240,9 @@ export function unitFlowMinOut(
 
 // ─── buildExecution() ────────────────────────────────────────────────────────
 export interface UnitFlowV3BuildInput {
-  inputSymbol: 'USDC' | 'EURC';
-  outputSymbol: 'USDC' | 'EURC';
-  /** Exact input in canonical Arc base units (6-decimal integer). */
+  inputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
+  outputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
+  /** Exact input in canonical Arc base units (token-native precision). */
   inputAmount: bigint;
   /** Frozen merchant recipient — server-resolved, never client-supplied. */
   merchantSCA: string;
@@ -283,11 +287,11 @@ export interface UnitFlowV3ExecutionEnvelope extends UnsignedExecution {
   readonly pool: string;
   /** Live-validated fee tier bound to this execution. */
   readonly fee: number;
-  readonly inputSymbol: 'USDC' | 'EURC';
-  readonly outputSymbol: 'USDC' | 'EURC';
+  readonly inputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
+  readonly outputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
   readonly tokenInSwap: string;
   readonly tokenOutSwap: string;
-  /** Echo of the requested exact input (canonical 6-dec units). */
+  /** Echo of the requested exact input (canonical base units, token-native precision). */
   readonly inputAmountCanonical: bigint;
   /** Exact swap input (swap-leg units; 18-dec on the USDC leg). */
   readonly amountInSwap: bigint;
@@ -318,7 +322,10 @@ async function resolveFeeTier(
   tokenInSwap: string,
   tokenOutSwap: string,
   amountInSwap: bigint,
-  preferredFee: number
+  preferredFee: number,
+  outputSymbol: 'USDC' | 'EURC' | 'CIRBTC',
+  outputSwapDecimals: number,
+  slippageBps: number
 ): Promise<{ fee: number; pool: string; quoted: bigint }> {
   const ordered = [preferredFee, ...UNITFLOW_V3_ALLOWED_FEES.filter((f) => f !== preferredFee)];
   let lastErr: unknown = null;
@@ -354,6 +361,15 @@ async function resolveFeeTier(
         })
       )) as bigint;
       if (quoted <= 0n) continue;
+      // A tier whose quote cannot cover the slippage floor is not a valid
+      // tier for this size (dust-liquidity pools quote positive-but-dust and
+      // would bind an unexecutable minOut) — try the next tier instead.
+      try {
+        unitFlowMinOut(quoted, slippageBps, outputSymbol, outputSwapDecimals);
+      } catch (e) {
+        lastErr = e;
+        continue;
+      }
       return { fee, pool, quoted };
     } catch (e) {
       lastErr = e;
@@ -378,11 +394,11 @@ export async function buildUnitFlowV3Execution(
 ): Promise<UnitFlowV3ExecutionEnvelope> {
   if (!input || typeof input !== 'object') throw routingError(400, '[unitflow-v3] build input malformed.');
   const { inputSymbol, outputSymbol, inputAmount } = input;
-  if (inputSymbol !== 'USDC' && inputSymbol !== 'EURC') {
-    throw routingError(400, '[unitflow-v3] inputSymbol must be USDC or EURC.');
+  if (inputSymbol !== 'USDC' && inputSymbol !== 'EURC' && inputSymbol !== 'CIRBTC') {
+    throw routingError(400, '[unitflow-v3] inputSymbol must be USDC, EURC, or CIRBTC.');
   }
-  if (outputSymbol !== 'USDC' && outputSymbol !== 'EURC') {
-    throw routingError(400, '[unitflow-v3] outputSymbol must be USDC or EURC.');
+  if (outputSymbol !== 'USDC' && outputSymbol !== 'EURC' && outputSymbol !== 'CIRBTC') {
+    throw routingError(400, '[unitflow-v3] outputSymbol must be USDC, EURC, or CIRBTC.');
   }
   if (inputSymbol === outputSymbol) throw routingError(400, '[unitflow-v3] input/output must differ.');
   if (typeof inputAmount !== 'bigint' || inputAmount <= 0n) {
@@ -434,7 +450,10 @@ export async function buildUnitFlowV3Execution(
     inLeg.swapAddress,
     outLeg.swapAddress,
     amountInSwap,
-    preferredFee
+    preferredFee,
+    outputSymbol,
+    outLeg.swapDecimals,
+    slippageBps
   );
   const minOutSwap = unitFlowMinOut(quoted, slippageBps, outputSymbol, outLeg.swapDecimals);
 

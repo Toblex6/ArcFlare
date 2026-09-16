@@ -125,7 +125,7 @@ async function main() {
 
   // ── Phase 1: registry + resolver (durable) ──────────────────────────────
   console.log("\n[Phase 1] registry — supported token table");
-  ok("registry defines exactly USDC + EURC at 6 decimals", Object.keys(SUPPORTED_TOKENS).sort().join(",") === "EURC,USDC" && SUPPORTED_TOKENS.USDC.decimals === 6 && SUPPORTED_TOKENS.EURC.decimals === 6);
+  ok("registry defines USDC + EURC at 6 decimals plus cirBTC at 8 decimals", Object.keys(SUPPORTED_TOKENS).sort().join(",") === "CIRBTC,EURC,USDC" && SUPPORTED_TOKENS.USDC.decimals === 6 && SUPPORTED_TOKENS.EURC.decimals === 6 && SUPPORTED_TOKENS.CIRBTC.decimals === 8 && SUPPORTED_TOKENS.CIRBTC.address.toLowerCase() === "0xf0c4a4ce82a5746abaad9425360ab04fbba432bf");
   ok("USDC and EURC have distinct canonical addresses", USDC !== EURC);
   ok("tokenAddressFor('USDC') / ('EURC') canonical", tokenAddressFor("USDC") === USDC && tokenAddressFor("EURC") === EURC);
   const tokensSrc = read("src/lib/tokens/supportedTokens.ts");

@@ -48,6 +48,11 @@ export function resolveCurrency(ref: {
     if (!byAddress) {
       throw new Error(`unsupported token address: ${addr}`);
     }
+    // Payment scope is USDC/EURC only — other registry tokens (e.g. cirBTC,
+    // swap/balance scope) are rejected here, never coerced into a payment.
+    if (!isSymbolSupported(byAddress.symbol)) {
+      throw new Error(`unsupported token address for payments: ${addr} (payment scope is USDC/EURC)`);
+    }
     const symbol = normalizeSymbol(ref?.currency);
     if (symbol && symbol !== byAddress.symbol) {
       throw new Error(
@@ -63,7 +68,8 @@ export function resolveCurrency(ref: {
   if (!isSymbolSupported(symbol)) {
     throw new Error(`unsupported token symbol: "${ref?.currency ?? ''}"`);
   }
-  return getTokenBySymbol(symbol);
+  const token = getTokenBySymbol(symbol);
+  return { symbol, address: token.address, decimals: token.decimals };
 }
 
 /**

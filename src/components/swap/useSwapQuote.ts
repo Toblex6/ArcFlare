@@ -19,7 +19,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatSwapLeg, friendlySwapError, type SwapSymbol } from './swapCopy';
+import { canonicalDecimals, displaySymbol, formatSwapLeg, friendlySwapError, type SwapSymbol } from './swapCopy';
 
 export interface SwapUnsignedTx {
   to: string;
@@ -97,13 +97,13 @@ function toViewModel(data: Record<string, unknown>): SwapQuoteView {
   if (!Number.isFinite(expiresAtMs)) throw new Error('Quote is missing an expiry.');
   const quotedDisplay = formatSwapLeg(output.quoted, output.symbol as SwapSymbol);
   const minOutDisplay = formatSwapLeg(output.minOut, output.symbol as SwapSymbol);
-  let rateDisplay = `1 ${input.symbol} ≈ ? ${output.symbol}`;
+  let rateDisplay = `1 ${displaySymbol(input.symbol as SwapSymbol)} ≈ ? ${displaySymbol(output.symbol as SwapSymbol)}`;
   const inNum = Number(input.amountDisplay);
   const outNum = Number(quotedDisplay);
   if (Number.isFinite(inNum) && Number.isFinite(outNum) && inNum > 0) {
     const rate = outNum / inNum;
     const formatted = rate >= 100 ? rate.toFixed(2) : rate >= 1 ? rate.toFixed(4) : rate.toPrecision(4);
-    rateDisplay = `1 ${input.symbol} ≈ ${formatted} ${output.symbol}`;
+    rateDisplay = `1 ${displaySymbol(input.symbol as SwapSymbol)} ≈ ${formatted} ${displaySymbol(output.symbol as SwapSymbol)}`;
   }
   const venueId = typeof data.venueId === 'string' && data.venueId.trim() !== '' ? data.venueId : null;
   const deploymentName = typeof data.deploymentName === 'string' && data.deploymentName.trim() !== '' ? data.deploymentName : null;
@@ -144,7 +144,10 @@ export function useSwapQuote(
 
   const amountKey = amount.trim();
   const pairValid = inputSymbol !== outputSymbol;
-  const amountLooksValid = /^\d+(\.\d{1,6})?$/.test(amountKey) && parseFloat(amountKey) > 0;
+  // Token-native precision: up to 6 decimals for USDC/EURC, 8 for cirBTC.
+  const inputDecimals = canonicalDecimals(inputSymbol);
+  const amountLooksValid =
+    new RegExp(`^\\d+(\\.\\d{1,${inputDecimals}})?$`).test(amountKey) && parseFloat(amountKey) > 0;
 
   const fetchQuote = useCallback(
     async (opts?: { refreshing?: boolean }) => {

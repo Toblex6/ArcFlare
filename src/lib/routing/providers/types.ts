@@ -19,10 +19,10 @@ export const KNOWN_VENUE_IDS: readonly SwapVenueId[] = ['canonical', 'tower', 'u
 /** Server-resolved quote request for a provider (symbols only, never addresses). */
 export interface QuoteContext {
   /** Pay-in symbol, e.g. 'USDC'. */
-  inputSymbol: 'USDC' | 'EURC';
+  inputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
   /** Settlement symbol, e.g. 'EURC'. */
-  outputSymbol: 'USDC' | 'EURC';
-  /** Exact input in canonical Arc base units (6-decimal integer). */
+  outputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
+  /** Exact input in canonical Arc base units (token-native precision: 6-decimal stables, 8-decimal cirBTC). */
   inputAmount: bigint;
   /** Slippage tolerance in basis points (provider hint only). */
   slippageBps?: number;
@@ -30,9 +30,9 @@ export interface QuoteContext {
 
 /** Canonical token view — always resolved server-side, never from provider claims. */
 export interface ProviderTokenView {
-  symbol: 'USDC' | 'EURC';
+  symbol: 'USDC' | 'EURC' | 'CIRBTC';
   address: string;
-  /** Canonical Arc decimals. USDC and EURC are both 6 on Arc. */
+  /** Canonical Arc decimals (6 for USDC/EURC, 8 for cirBTC). */
   decimals: number;
 }
 

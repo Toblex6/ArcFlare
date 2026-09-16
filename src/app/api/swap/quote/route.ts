@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { parseBody, SwapQuoteSchema } from '@/src/lib/validation';
+import { getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
 import {
   assertSwapSymbol,
   parseCanonicalAmount,
@@ -32,7 +33,8 @@ export async function POST(req: NextRequest) {
 
     const inputSymbol = assertSwapSymbol(data.inputSymbol);
     const outputSymbol = assertSwapSymbol(data.outputSymbol);
-    const inputAmount = parseCanonicalAmount(data.amount);
+    // Token-native precision: 6 for USDC/EURC, 8 for cirBTC (never a global 6).
+    const inputAmount = parseCanonicalAmount(data.amount, getTokenBySymbol(inputSymbol).decimals);
 
     const { view, tower } = await requestFlowSwapQuote({
       ownerWallet: wallet,
@@ -55,6 +57,6 @@ export async function GET() {
   return NextResponse.json({
     success: true,
     status: 'ready',
-    message: 'Flow Swap quoting is active (Arc USDC↔EURC, UnitFlow execution).',
+    message: 'Flow Swap quoting is active (Arc USDC↔EURC↔cirBTC, UnitFlow execution).',
   });
 }

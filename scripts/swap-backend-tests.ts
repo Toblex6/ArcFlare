@@ -49,6 +49,8 @@ import {
   unwrapAmountSwapForIntent,
 } from '@/src/lib/swap/service';
 import { getUnitFlowV3Deployment } from '@/src/lib/config/unitflow';
+import { getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
+import { normalizeProviderQuote } from '@/src/lib/routing/providers/normalize';
 import { PROVIDER_NOT_IMPLEMENTED } from '@/src/lib/routing/providers/types';
 import { TowerProvider } from '@/src/lib/routing/providers/tower';
 import {
@@ -59,6 +61,8 @@ import {
   buildWusdcWithdrawTx,
   computeUnitFlowExecutionIdentity,
   decodeWusdcWithdraw,
+  toSwapUnits,
+  unitFlowSwapLeg,
   verifyUnitFlowExecution,
 } from '@/src/lib/routing/providers/unitflowV3';
 
@@ -179,6 +183,66 @@ async function sectionA() {
   expectThrow('zero amount rejected', () => parseCanonicalAmount('0'), 'greater than 0', 400);
   expectThrow('7-decimal amount rejected', () => parseCanonicalAmount('1.1234567'), 'positive number', 400);
 
+  console.log('── A1b: cirBTC token support (pure) ───────────────────────────');
+  ok('CIRBTC symbol accepted', assertSwapSymbol('cirbtc') === 'CIRBTC');
+  const cir = getTokenBySymbol('CIRBTC');
+  ok(
+    'cirBTC registry: pinned address + 8 decimals',
+    cir.decimals === 8 && cir.address.toLowerCase() === '0xf0c4a4ce82a5746abaad9425360ab04fbba432bf'
+  );
+  ok("parse cirBTC '0.00000001' → 1n", parseCanonicalAmount('0.00000001', cir.decimals) === 1n);
+  expectThrow('9-decimal cirBTC rejected', () => parseCanonicalAmount('1.123456789', cir.decimals), 'up to 8 decimals', 400);
+  expectThrow('7-decimal USDC still rejected', () => parseCanonicalAmount('1.1234567', 6), 'up to 6 decimals', 400);
+  ok('toSwapUnits cirBTC identity', toSwapUnits('CIRBTC', 1000n) === 1000n);
+  ok('toSwapUnits EURC identity', toSwapUnits('EURC', 1000n) === 1000n);
+  ok('canonicalFromSwapUnits cirBTC identity', canonicalFromSwapUnits('CIRBTC', 1000n) === 1000n);
+  ok('canonicalFromSwapUnits EURC identity', canonicalFromSwapUnits('EURC', 1000n) === 1000n);
+  ok('canonicalFromSwapUnits USDC rescales /1e12', canonicalFromSwapUnits('USDC', 1_000_000_000_000_000_000n) === 1_000_000n);
+  expectThrow('USDC misaligned swap units rejected', () => canonicalFromSwapUnits('USDC', 1001n), '1e12-aligned', 503);
+  const cirLeg = unitFlowSwapLeg('CIRBTC', getUnitFlowV3Deployment());
+  ok(
+    'cirBTC swap leg: spot address + 8 decimals',
+    cirLeg.swapAddress.toLowerCase() === cir.address.toLowerCase() && cirLeg.swapDecimals === 8
+  );
+  const usdcAddr = getTokenBySymbol('USDC').address;
+  const cirQuote = normalizeProviderQuote({
+    venueId: 'tower',
+    inputToken: usdcAddr,
+    outputToken: cir.address,
+    inputAmount: '1000000',
+    outputAmount: '285',
+  });
+  ok(
+    'normalize accepts USDC→cirBTC with per-token decimals',
+    cirQuote.inputToken.decimals === 6 && cirQuote.outputToken.decimals === 8 && cirQuote.quotedOutputAmount === 285n
+  );
+  expectThrow(
+    'normalize rejects wrong decimals claim on cirBTC leg',
+    () => normalizeProviderQuote({
+      venueId: 'tower',
+      inputToken: usdcAddr,
+      outputToken: cir.address,
+      inputAmount: '1000000',
+      outputAmount: '285',
+      outputDecimals: 6,
+    }),
+    'decimals mismatch',
+    400
+  );
+  expectThrow(
+    'normalize still rejects wrong decimals claim on stable leg',
+    () => normalizeProviderQuote({
+      venueId: 'tower',
+      inputToken: usdcAddr,
+      outputToken: cir.address,
+      inputAmount: '1000000',
+      outputAmount: '285',
+      inputDecimals: 18,
+    }),
+    'decimals mismatch',
+    400
+  );
+
   console.log('── A2: provider dispatch (pure) ──────────────────────────────');
   ok('checkout defaults to canonical', resolveCheckoutVenueId(undefined) === 'canonical');
   ok("checkout 'canonical' explicit", resolveCheckoutVenueId('canonical') === 'canonical');
@@ -193,6 +257,24 @@ async function sectionA() {
     'checkout unitflow selected when flag on',
     resolveCheckoutVenueId('unitflow-v3', { ROUTING_PROVIDER_UNITFLOW_V3_ENABLED: '1' }) === 'unitflow-v3'
   );
+  // Checkout v1 scope stays USDC→EURC: cirBTC cannot enter the checkout
+  // conversion path (rejected before any RPC/DB — pure gate).
+  try {
+    await requestCheckoutUnitFlowQuote(
+      {
+        payment: { reference: 'cir-scope-probe', currency: 'EURC' },
+        payTokenSymbol: 'CIRBTC',
+        env: { ROUTING_PROVIDER_UNITFLOW_V3_ENABLED: '1' },
+      } as any
+    );
+    ok('checkout unitflow rejects CIRBTC scope', false, 'did NOT throw');
+  } catch (e: any) {
+    ok(
+      'checkout unitflow rejects CIRBTC scope',
+      String(e?.message ?? '').includes('USDC→EURC only') && e?.status === 400,
+      String(e?.message ?? e).slice(0, 140)
+    );
+  }
   expectThrow('flow venue fails closed when flag off', () => resolveFlowVenueId({}), 'disabled', 403);
   ok(
     "flow venue is unitflow-v3 when enabled",
@@ -408,13 +490,16 @@ async function sectionA() {
     read('src/components/swap/FlowSwapView.tsx').includes('/api/swap/verify-unwrap')
   );
   ok(
-    'Max truncates to 6 decimals (never an invalid amount)',
-    read('src/components/swap/FlowSwapView.tsx').includes('truncateToSixDecimals(b)')
+    'Max truncates at the token precision (never an invalid amount)',
+    read('src/components/swap/FlowSwapView.tsx').includes('truncateToDecimals(normalized, inputDecimals)')
   );
-  const { truncateToSixDecimals } = await import('@/src/components/swap/swapCopy');
+  const { truncateToSixDecimals, truncateToDecimals, normalizeBalanceString } = await import('@/src/components/swap/swapCopy');
   ok('truncate keeps exact 6-dec input', truncateToSixDecimals('2.000001') === '2.000001');
   ok('truncate cuts float dust without rounding up', truncateToSixDecimals('12.340000000001') === '12.34');
   ok('truncate keeps integers', truncateToSixDecimals('7') === '7');
+  ok('truncateToDecimals respects 8-dec cirBTC precision', truncateToDecimals('0.000000019', 8) === '0.00000001');
+  ok('normalizeBalanceString handles exponent-form dust', normalizeBalanceString('1e-8', 8) === '0.00000001');
+  ok('normalizeBalanceString keeps stable balances exact', normalizeBalanceString('21.487666', 6) === '21.487666');
   const { SwapUnwrapSchema, SwapUnwrapVerifySchema } = await import('@/src/lib/validation');
   ok('unwrap schema requires an intent locator', !SwapUnwrapSchema.safeParse({}).success);
   ok('unwrap schema accepts intentId', SwapUnwrapSchema.safeParse({ intentId: '123e4567-e89b-12d3-a456-426614174000' }).success);

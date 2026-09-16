@@ -1,14 +1,16 @@
 // src/components/swap/swapCopy.ts
 //
 // Pure, dependency-free presentation helpers for Flow Swap (consumer
-// self-custody USDC↔EURC on Arc).
+// self-custody USDC↔EURC↔cirBTC on Arc).
 //
 // Rules:
 // - Display formatting only — never prices, never converts, never guesses.
 //   Every amount shown is formatted from a server-computed exact integer.
-// - Swap-leg units (what the quoter settles in) differ from canonical
-//   display units on the USDC leg (WUSDC is 18-dec; EURC is 6-dec). The two
-//   helpers below keep that conversion in exactly one place.
+// - Precision is PER TOKEN, resolved from the canonical registry
+//   (supportedTokens.ts — the single token table): USDC/EURC 6 decimals,
+//   cirBTC 8 decimals. Nothing here hardcodes 6 globally.
+// - Swap-leg units (what the quoter settles in) equal canonical units on
+//   every leg except USDC (WUSDC is 18-dec; EURC is 6-dec; cirBTC is 8-dec).
 // - Never surface pool addresses, router internals, fee-tier numbers, or
 //   calldata — those stay server-side. Execution/rate-discovery VENUE labels
 //   (e.g. UnitFlow, Tower) are the deliberate exception: FlowSwapView shows
@@ -16,26 +18,42 @@
 //   from the backend quote response, never hardcoded.
 
 import { formatUnits, parseUnits } from 'viem';
+import { getTokenBySymbol } from '@/lib/tokens/supportedTokens';
 
-export type SwapSymbol = 'USDC' | 'EURC';
+export type SwapSymbol = 'USDC' | 'EURC' | 'CIRBTC';
 
-export const SWAP_SYMBOLS: readonly SwapSymbol[] = ['USDC', 'EURC'] as const;
+export const SWAP_SYMBOLS: readonly SwapSymbol[] = ['USDC', 'EURC', 'CIRBTC'] as const;
 
-/** Swap-leg decimals: WUSDC-denominated USDC leg is 18-dec, EURC is 6-dec. */
-export function swapLegDecimals(symbol: SwapSymbol): number {
-  return symbol === 'USDC' ? 18 : 6;
+/** On-chain display label: cirBTC keeps its canonical camelCase brand. */
+export function displaySymbol(symbol: SwapSymbol): string {
+  return symbol === 'CIRBTC' ? 'cirBTC' : symbol;
 }
 
-/** Canonical display decimals for both USDC and EURC on Arc. */
+/** Canonical display decimals for a swap symbol (6 for USDC/EURC, 8 for cirBTC). */
+export function canonicalDecimals(symbol: SwapSymbol): number {
+  return getTokenBySymbol(symbol).decimals;
+}
+
+/** Swap-leg decimals: WUSDC-denominated USDC leg is 18-dec, EURC 6-dec, cirBTC 8-dec. */
+export function swapLegDecimals(symbol: SwapSymbol): number {
+  return symbol === 'USDC' ? 18 : canonicalDecimals(symbol);
+}
+
+/** Canonical display decimals for the USDC/EURC stable pair (legacy default). */
 export const CANONICAL_DECIMALS = 6;
 
-/** Format a canonical 6-dec base-unit integer for display. */
+/** Format a canonical base-unit integer for display (token-native precision). */
 export function formatCanonical(baseUnits: string | bigint, decimals = CANONICAL_DECIMALS): string {
   try {
     return formatUnits(BigInt(baseUnits), decimals);
   } catch {
     return '—';
   }
+}
+
+/** Format a canonical base-unit integer for a specific swap symbol. */
+export function formatCanonicalFor(baseUnits: string | bigint, symbol: SwapSymbol): string {
+  return formatCanonical(baseUnits, canonicalDecimals(symbol));
 }
 
 /** Format a swap-leg integer (18-dec on the USDC leg, 6-dec EURC). */
@@ -56,25 +74,48 @@ export function formatCountdown(totalSeconds: number): string {
 }
 
 /**
- * Truncate a decimal string to at most 6 decimals (no rounding-up, so the
- * result never exceeds the source balance). Used by Max: balance strings
- * from the API are floats-as-strings and can carry more than 6 decimals,
- * which would otherwise produce an amount the form itself rejects.
+ * Truncate a decimal string to at most `decimals` places (no rounding-up, so
+ * the result never exceeds the source balance). Used by Max: balance strings
+ * from the API are floats-as-strings and can carry more precision than the
+ * field accepts, which would otherwise produce an amount the form rejects.
  */
-export function truncateToSixDecimals(raw: string): string {
+export function truncateToDecimals(raw: string, decimals: number): string {
   const s = raw.trim();
   const m = /^(\d+)(?:\.(\d*))?$/.exec(s);
   if (!m) return s;
-  const frac = (m[2] ?? '').slice(0, 6).replace(/0+$/, '');
+  const frac = (m[2] ?? '').slice(0, decimals).replace(/0+$/, '');
   return frac === '' ? m[1]! : `${m[1]}.${frac}`;
 }
 
-/** Strict decimal string → canonical 6-dec base units, or null when invalid. */
-export function parseAmountToBaseUnits(raw: string): bigint | null {
+/**
+ * Truncate a decimal string to at most 6 decimals (legacy stable-pair
+ * default — prefer truncateToDecimals with the token's decimals).
+ */
+export function truncateToSixDecimals(raw: string): string {
+  return truncateToDecimals(raw, 6);
+}
+
+/**
+ * Normalize a float-as-string balance from the API into an exact decimal
+ * string with at most `decimals` places (floor — never overstates). Handles
+ * exponent-form floats ("1e-8") that plain decimal parsing would reject.
+ */
+export function normalizeBalanceString(raw: string, decimals: number): string | null {
+  const n = Number((raw ?? '').trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  const floored = Math.floor(n * 10 ** decimals) / 10 ** decimals;
+  // toFixed first: String(1e-8) is exponent-form ("1e-8"), which no decimal
+  // parser accepts — toFixed always yields plain decimal notation.
+  return truncateToDecimals(floored.toFixed(decimals), decimals) || '0';
+}
+
+/** Strict decimal string → canonical base units for a symbol, or null when invalid. */
+export function parseAmountToBaseUnits(raw: string, symbol: SwapSymbol = 'USDC'): bigint | null {
+  const decimals = canonicalDecimals(symbol);
   const s = raw.trim();
-  if (!/^\d+(\.\d{1,6})?$/.test(s)) return null;
+  if (!new RegExp(`^\\d+(\\.\\d{1,${decimals}})?$`).test(s)) return null;
   try {
-    const v = parseUnits(s, CANONICAL_DECIMALS);
+    const v = parseUnits(s, decimals);
     return v > 0n ? v : null;
   } catch {
     return null;
@@ -82,14 +123,15 @@ export function parseAmountToBaseUnits(raw: string): bigint | null {
 }
 
 /** Validate the amount field for inline form errors (null = valid). */
-export function validateSwapAmount(raw: string): string | null {
+export function validateSwapAmount(raw: string, symbol: SwapSymbol = 'USDC'): string | null {
+  const decimals = canonicalDecimals(symbol);
   const s = raw.trim();
   if (s === '') return null; // empty = idle, not an error
-  if (!/^\d+(\.\d{1,6})?$/.test(s)) {
-    return 'Enter a positive number with up to 6 decimals.';
+  if (!new RegExp(`^\\d+(\\.\\d{1,${decimals}})?$`).test(s)) {
+    return `Enter a positive number with up to ${decimals} decimals.`;
   }
   try {
-    if (parseUnits(s, CANONICAL_DECIMALS) <= 0n) return 'Amount must be greater than 0.';
+    if (parseUnits(s, decimals) <= 0n) return 'Amount must be greater than 0.';
   } catch {
     return 'That amount could not be read — check the number and try again.';
   }
@@ -140,6 +182,24 @@ export function friendlySwapError(raw: string | null | undefined): {
   if (lower.includes('expired')) {
     return { headline: 'This quote expired. Getting a fresh quote to continue.', raw: msg };
   }
+  if (lower.includes('no live v3 pool') || lower.includes('cannot cover this') || lower.includes('pool cannot cover') || lower.includes('no swap route') || lower.includes('no route')) {
+    return { headline: 'No route is currently available for this pair.', raw: msg };
+  }
+  if (lower.includes('below minout') || lower.includes('minimum received') || lower.includes('slippage') || lower.includes('amountoutminimum')) {
+    return { headline: 'The market moved past your price protection, so the swap was stopped. No output was credited — try again with a fresh quote.', raw: msg };
+  }
+  if (lower.includes('insufficient')) {
+    return { headline: 'Insufficient balance for this swap. Lower the amount and try again.', raw: msg };
+  }
+  if (lower.includes('payment pin') || lower.includes('step-up') || lower.includes('step_up')) {
+    return { headline: 'Your payment PIN is required for this swap. Try again and enter it when asked.', raw: msg };
+  }
+  if (lower.includes('unbound') || lower.includes('signing identity') || lower.includes('no signing identity')) {
+    return { headline: 'Your FlareHQ wallet needs attention before it can swap — no funds moved. Try again later or contact support.', raw: msg };
+  }
+  if (lower.includes('browser signature') || lower.includes('browser-signing') || lower.includes('approval required')) {
+    return { headline: 'This wallet signs in the browser — approve the request in your connected wallet to continue.', raw: msg };
+  }
   if (lower.includes('different wallet') || lower.includes('does not match the authenticated wallet')) {
     return { headline: 'The connected wallet does not match your signed-in wallet. Reconnect the same wallet and try again.', raw: msg };
   }
@@ -152,14 +212,17 @@ export function friendlySwapError(raw: string | null | undefined): {
   ) {
     return { headline: 'Swaps are temporarily unavailable. Please try again shortly.', raw: msg };
   }
-  if (lower.includes('no live v3 pool') || lower.includes('cannot cover this') || lower.includes('unavailable')) {
+  if (lower.includes('provider temporarily') || lower.includes('temporarily unavailable') || lower.includes('could not reach the swap service')) {
+    return { headline: 'The swap provider is temporarily unavailable. Please try again shortly.', raw: msg };
+  }
+  if (lower.includes('unavailable') || lower.includes('could not load') || lower.includes('quote failed')) {
     return { headline: 'No swap route is available for this amount right now. Try a smaller amount or try again shortly.', raw: msg };
   }
   if (lower.includes('amount must be') || lower.includes('positive number') || lower.includes('greater than 0')) {
     return { headline: 'Enter a valid amount greater than 0 (up to 6 decimals).', raw: msg };
   }
-  if (lower.includes('unsupported swap token') || lower.includes('usdc and eurc only')) {
-    return { headline: 'Flow Swap supports USDC and EURC only.', raw: msg };
+  if (lower.includes('unsupported swap token') || lower.includes('and eurc only') || lower.includes('eurc, and')) {
+    return { headline: 'Flow Swap supports USDC, EURC, and cirBTC.', raw: msg };
   }
   if (lower.includes('same-token') || lower.includes('must differ')) {
     return { headline: 'Pick two different tokens to swap between.', raw: msg };

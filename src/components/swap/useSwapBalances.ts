@@ -1,15 +1,16 @@
 // src/components/swap/useSwapBalances.ts
 //
-// Parallel USDC + EURC balance hook for Flow Swap. Reuses the existing
-// GET /api/consumer/balance?currency= endpoint — no new balance backend.
+// Parallel USDC + EURC + cirBTC balance hook for Flow Swap. Reuses the
+// existing GET /api/consumer/balance?currency= endpoint — no new balance
+// backend (the route already resolves every supported token canonically).
 
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { SwapSymbol } from './swapCopy';
+import { SWAP_SYMBOLS, type SwapSymbol } from './swapCopy';
 
 export interface SwapBalances {
-  /** Canonical 6-dec display strings keyed by symbol (null = not loaded). */
+  /** Display strings keyed by symbol (null = not loaded). */
   balances: Record<SwapSymbol, string | null>;
   loading: boolean;
   error: string | null;
@@ -17,8 +18,11 @@ export interface SwapBalances {
 }
 
 export function useSwapBalances(sessionActive: boolean): SwapBalances {
-  const [usdc, setUsdc] = useState<string | null>(null);
-  const [eurc, setEurc] = useState<string | null>(null);
+  const [values, setValues] = useState<Record<SwapSymbol, string | null>>({
+    USDC: null,
+    EURC: null,
+    CIRBTC: null,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -27,8 +31,7 @@ export function useSwapBalances(sessionActive: boolean): SwapBalances {
 
   useEffect(() => {
     if (!sessionActive) {
-      setUsdc(null);
-      setEurc(null);
+      setValues({ USDC: null, EURC: null, CIRBTC: null });
       setLoading(false);
       setError(null);
       return;
@@ -44,11 +47,14 @@ export function useSwapBalances(sessionActive: boolean): SwapBalances {
       }
       return typeof data.balance === 'string' ? data.balance : String(data.balance ?? '');
     };
-    Promise.all([load('USDC'), load('EURC')])
-      .then(([u, e]) => {
+    Promise.all(SWAP_SYMBOLS.map((s) => load(s)))
+      .then((loaded) => {
         if (cancelled) return;
-        setUsdc(u);
-        setEurc(e);
+        const next = { USDC: null, EURC: null, CIRBTC: null } as Record<SwapSymbol, string | null>;
+        SWAP_SYMBOLS.forEach((s, i) => {
+          next[s] = loaded[i] ?? null;
+        });
+        setValues(next);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -62,5 +68,5 @@ export function useSwapBalances(sessionActive: boolean): SwapBalances {
     };
   }, [sessionActive, tick]);
 
-  return { balances: { USDC: usdc, EURC: eurc }, loading, error, refresh };
+  return { balances: values, loading, error, refresh };
 }

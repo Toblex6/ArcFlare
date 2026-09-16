@@ -119,9 +119,9 @@ export async function listTowerDexes(
 }
 
 export interface TowerQuoteRequest {
-  inputSymbol: 'USDC' | 'EURC';
-  outputSymbol: 'USDC' | 'EURC';
-  /** Exact input in canonical Arc base units. */
+  inputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
+  outputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
+  /** Exact input in canonical Arc base units (token-native precision). */
   inputAmount: bigint;
   slippageBps?: number;
 }

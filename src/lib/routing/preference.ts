@@ -6,7 +6,6 @@
 // invoices only — existing PaymentLog rows are frozen at creation and are
 // never mutated by a preference change.
 
-import { getTokenBySymbol } from '../tokens/supportedTokens';
 import { resolveCurrency } from '../tokens/resolveCurrency';
 import type { CurrencyRef } from '../tokens/resolveCurrency';
 
@@ -16,7 +15,7 @@ export function resolveMerchantSettlementPreference(merchant: {
   settlementTokenAddress?: string | null;
 }): CurrencyRef {
   const pref = merchant?.settlementTokenAddress?.trim();
-  if (!pref) return getTokenBySymbol('USDC');
+  if (!pref) return resolveCurrency({ currency: 'USDC' });
   const resolved = resolveCurrency({ tokenAddress: pref });
   return { symbol: resolved.symbol, address: resolved.address, decimals: resolved.decimals };
 }

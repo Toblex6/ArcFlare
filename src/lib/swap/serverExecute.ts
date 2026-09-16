@@ -39,6 +39,7 @@ import { getCircleClient } from "@/src/lib/circle/client";
 import { getNetworkConfig } from "@/src/lib/config/network";
 import { getRoutingPublicClient, readWithRetry, routingError } from "@/src/lib/routing/canonical";
 import { getUnitFlowV3Deployment } from "@/src/lib/config/unitflow";
+import { getTokenBySymbol } from "@/src/lib/tokens/supportedTokens";
 import {
   assertIntentLive,
   loadFlowIntent,
@@ -166,12 +167,21 @@ async function submitEnvelopeStep(args: {
   return waitForCircleTxHash(client, txId, args.label);
 }
 
-function display6(v: string): string {
+function displayAmount(v: string, decimals: number): string {
   try {
-    const s = BigInt(v).toString().padStart(7, "0");
-    return `${s.slice(0, -6)}.${s.slice(-6)}`.replace(/^0+(?=\d)/, "") || "0.000000";
+    const s = BigInt(v).toString().padStart(decimals + 1, "0");
+    return `${s.slice(0, -decimals)}.${s.slice(-decimals)}`.replace(/^0+(?=\d)/, "") || `0.${"0".repeat(decimals)}`;
   } catch {
     return v;
+  }
+}
+
+/** Canonical decimals for a stored intent symbol (fail-closed default 6 never overstates). */
+function tokenDecimalsFor(symbol: string): number {
+  try {
+    return getTokenBySymbol(symbol.trim().toUpperCase() as "USDC" | "EURC" | "CIRBTC").decimals;
+  } catch {
+    return 6;
   }
 }
 
@@ -207,6 +217,7 @@ export async function executeFlowSwapAsServer(req: ServerSwapRequest): Promise<S
     });
     const needsUnwrap =
       String(row.outputSymbol).toUpperCase() === "USDC" && recovered.intent.status === "EXECUTED";
+    const inputDecimals = tokenDecimalsFor(String(row.inputSymbol));
     return {
       intentId: recovered.intent.id,
       status: recovered.intent.status,
@@ -214,7 +225,7 @@ export async function executeFlowSwapAsServer(req: ServerSwapRequest): Promise<S
       input: {
         symbol: String(row.inputSymbol),
         amount: String(row.inputAmount),
-        amountDisplay: display6(String(row.inputAmount)),
+        amountDisplay: displayAmount(String(row.inputAmount), inputDecimals),
       },
       output: { symbol: String(row.outputSymbol), actual: recovered.actualOutput },
       executionTxHash: recovered.intent.executionTxHash ?? String(row.executionTxHash),
@@ -355,7 +366,7 @@ export async function executeFlowSwapAsServer(req: ServerSwapRequest): Promise<S
     input: {
       symbol: String(row.inputSymbol),
       amount: String(row.inputAmount),
-      amountDisplay: display6(String(row.inputAmount)),
+      amountDisplay: displayAmount(String(row.inputAmount), tokenDecimalsFor(String(row.inputSymbol))),
     },
     output: { symbol: String(row.outputSymbol), actual: finalOutput },
     executionTxHash: verified.intent.executionTxHash ?? executionTxHash,

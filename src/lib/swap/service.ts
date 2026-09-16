@@ -1,7 +1,7 @@
 // src/lib/swap/service.ts
 //
 // Shared swap/conversion application service — the backend layer jointly
-// supporting Flow Swap (self-custody USDC↔EURC) and merchant-checkout
+// supporting Flow Swap (self-custody USDC↔EURC↔cirBTC) and merchant-checkout
 // conversion (customer pays X, merchant is settled Y).
 //
 // Architecture:
@@ -85,7 +85,7 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-export const SWAP_SYMBOLS = ['USDC', 'EURC'] as const;
+export const SWAP_SYMBOLS = ['USDC', 'EURC', 'CIRBTC'] as const;
 export type SwapSymbol = (typeof SWAP_SYMBOLS)[number];
 
 /** Checkout UnitFlow v1 scope: USDC in → EURC out only (see header). */
@@ -95,7 +95,6 @@ export const CHECKOUT_UNITFLOW_OUTPUT: SwapSymbol = 'EURC';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
 const TXHASH_RE = /^0x[a-fA-F0-9]{64}$/;
-const DECIMAL_AMOUNT_RE = /^\d+(\.\d{1,6})?$/;
 
 /** Max input-search iterations when sizing a UnitFlow checkout quote. */
 const CHECKOUT_INPUT_SEARCH_MAX = 15;
@@ -104,8 +103,8 @@ const CHECKOUT_INPUT_SEARCH_MAX = 15;
 
 export function assertSwapSymbol(v: unknown): SwapSymbol {
   const s = String(v ?? '').trim().toUpperCase();
-  if (s !== 'USDC' && s !== 'EURC') {
-    throw routingError(400, `Unsupported swap token: "${String(v ?? '')}". v1 swaps USDC and EURC only.`);
+  if (s !== 'USDC' && s !== 'EURC' && s !== 'CIRBTC') {
+    throw routingError(400, `Unsupported swap token: "${String(v ?? '')}". Flow Swap supports USDC, EURC, and CIRBTC.`);
   }
   return s;
 }
@@ -116,13 +115,17 @@ export function assertDistinctPair(input: SwapSymbol, output: SwapSymbol): void 
   }
 }
 
-/** Strict decimal string → canonical 6-dec base units (never float math). */
-export function parseCanonicalAmount(raw: unknown): bigint {
-  const s = String(raw ?? '').trim();
-  if (!DECIMAL_AMOUNT_RE.test(s)) {
-    throw routingError(400, `Amount must be a positive number with up to 6 decimals (got "${String(raw ?? '')}").`);
+/** Strict decimal string → canonical base units (token-native precision, never float math). */
+export function parseCanonicalAmount(raw: unknown, decimals = 6): bigint {
+  if (!Number.isInteger(decimals) || decimals <= 0 || decimals > 18) {
+    throw routingError(400, 'Token precision is misconfigured — refusing to parse the amount.');
   }
-  const v = parseUnits(s, 6);
+  const s = String(raw ?? '').trim();
+  const re = new RegExp(`^\\d+(\\.\\d{1,${decimals}})?$`);
+  if (!re.test(s)) {
+    throw routingError(400, `Amount must be a positive number with up to ${decimals} decimals (got "${String(raw ?? '')}").`);
+  }
+  const v = parseUnits(s, decimals);
   if (v <= 0n) throw routingError(400, 'Amount must be greater than 0.');
   return v;
 }
@@ -252,10 +255,10 @@ export function swapIdempotencyKey(prefix: 'flowswap' | 'quote', id: string, quo
   return `${prefix}-${id}-${quoteHash.slice(2, 18)}`;
 }
 
-/** Swap-leg units → canonical 6-dec units (exact; USDC leg rescales /1e12). */
+/** Swap-leg units → canonical base units (exact; USDC leg rescales /1e12, EURC/cirBTC legs are identity). */
 export function canonicalFromSwapUnits(symbol: SwapSymbol, amountSwap: bigint): bigint {
   if (amountSwap <= 0n) throw routingError(400, 'Swap amount must be positive.');
-  if (symbol === 'EURC') return amountSwap;
+  if (symbol !== 'USDC') return amountSwap;
   if (amountSwap % UNITFLOW_6_TO_18_SCALE !== 0n) {
     throw routingError(503, '[unitflow-v3] USDC-leg amount is not 1e12-aligned — refusing to rescale.');
   }
@@ -542,11 +545,11 @@ export async function requestFlowSwapQuote(
 function intentToView(row: any, envelope: UnitFlowV3ExecutionEnvelope): FlowQuoteView {
   const inputToken = getTokenBySymbol(row.inputSymbol as SwapSymbol);
   const outputToken = getTokenBySymbol(row.outputSymbol as SwapSymbol);
-  const display = (v: string) => {
+  const display = (v: string, decimals: number) => {
     try {
       const b = BigInt(v);
-      const s = b.toString().padStart(7, '0');
-      return `${s.slice(0, -6)}.${s.slice(-6)}`.replace(/^0+(?=\d)/, '') || '0.000000';
+      const s = b.toString().padStart(decimals + 1, '0');
+      return `${s.slice(0, -decimals)}.${s.slice(-decimals)}`.replace(/^0+(?=\d)/, '') || `0.${'0'.repeat(decimals)}`;
     } catch {
       return v;
     }
@@ -558,7 +561,7 @@ function intentToView(row: any, envelope: UnitFlowV3ExecutionEnvelope): FlowQuot
     executionIdentity: row.executionIdentity,
     venueId: 'unitflow-v3',
     deploymentName: row.deploymentName,
-    input: { symbol: row.inputSymbol, address: inputToken.address, amount: row.inputAmount, amountDisplay: display(row.inputAmount) },
+    input: { symbol: row.inputSymbol, address: inputToken.address, amount: row.inputAmount, amountDisplay: display(row.inputAmount, inputToken.decimals) },
     output: {
       symbol: row.outputSymbol,
       address: outputToken.address,

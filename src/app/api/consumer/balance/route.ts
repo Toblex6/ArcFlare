@@ -11,14 +11,14 @@ export async function GET(req: NextRequest) {
         }
 
         // Multicurrency Phase 2B: the caller names which supported token
-        // balance it needs (?currency=USDC|EURC, default USDC for legacy
-        // callers). Unsupported symbols are rejected — never silently
+        // balance it needs (?currency=USDC|EURC|CIRBTC, default USDC for
+        // legacy callers). Unsupported symbols are rejected — never silently
         // substituted with the other token's balance.
         const { searchParams } = new URL(req.url);
         const requested = (searchParams.get("currency") ?? "USDC").trim().toUpperCase();
-        if (requested !== "USDC" && requested !== "EURC") {
+        if (requested !== "USDC" && requested !== "EURC" && requested !== "CIRBTC") {
             return NextResponse.json(
-                { success: false, error: `Unsupported currency: "${requested}". Supported: USDC, EURC.` },
+                { success: false, error: `Unsupported currency: "${requested}". Supported: USDC, EURC, CIRBTC.` },
                 { status: 400 }
             );
         }

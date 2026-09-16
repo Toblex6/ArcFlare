@@ -11,12 +11,17 @@
  * calling name()/symbol()/decimals() directly on each contract:
  *   - USDC (ERC-20 interface of the native gas token): 0x3600…0000, 6 decimals
  *   - EURC: 0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a, 6 decimals
+ * cirBTC VERIFIED the same way on 2026-09-16 (name="Circle Wrapped
+ * Bitcoin", symbol="cirBTC", decimals=8):
+ *   - cirBTC: 0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF, 8 decimals
  */
 
 import { getNetworkConfig } from "@/lib/config/network";
 
+export type SupportedSymbol = "USDC" | "EURC" | "CIRBTC";
+
 export interface SupportedToken {
-  symbol: "USDC" | "EURC";
+  symbol: SupportedSymbol;
   address: string;
   decimals: number;
 }
@@ -32,17 +37,27 @@ export const SUPPORTED_TOKENS: Record<string, SupportedToken> = {
     address: "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a", // verified on-chain: name=EURC symbol=EURC decimals=6
     decimals: 6,
   },
+  CIRBTC: {
+    symbol: "CIRBTC",
+    address: "0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF", // verified on-chain 2026-09-16: name="Circle Wrapped Bitcoin" symbol=cirBTC decimals=8
+    decimals: 8, // 8-decimal base units (satoshis of BTC) — never 6, never 18
+  },
 };
 
 /**
  * Environment-selected address for a supported symbol. Testnet returns the
  * pinned table values above (unchanged); mainnet returns the required
  * ARC_MAINNET_USDC_ADDRESS / ARC_MAINNET_EURC_ADDRESS inputs (fail-closed
- * when absent — never testnet values).
+ * when absent — never testnet values). cirBTC is Arc Testnet only in this
+ * release: mainnet selection refuses fail-closed rather than inheriting the
+ * testnet address.
  */
-function addressFor(symbol: "USDC" | "EURC"): string {
+function addressFor(symbol: SupportedSymbol): string {
   const net = getNetworkConfig();
   if (net.name === "mainnet") {
+    if (symbol === "CIRBTC") {
+      throw new Error("cirBTC is not configured for mainnet — Arc Testnet only in this release");
+    }
     return symbol === "USDC" ? net.usdcAddress : net.eurcAddress;
   }
   const token = SUPPORTED_TOKENS[symbol];
@@ -52,7 +67,7 @@ function addressFor(symbol: "USDC" | "EURC"): string {
 
 const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-export function getTokenBySymbol(symbol: "USDC" | "EURC"): SupportedToken {
+export function getTokenBySymbol(symbol: SupportedSymbol): SupportedToken {
   const token = SUPPORTED_TOKENS[symbol];
   if (!token) throw new Error(`unsupported token: ${symbol}`);
   const address = addressFor(symbol);
@@ -66,7 +81,7 @@ export function getTokenByAddress(address: string): SupportedToken | undefined {
   const normalized = address.toLowerCase();
   // Match the environment-selected addresses first (mainnet-aware), then the
   // pinned testnet table.
-  for (const symbol of ["USDC", "EURC"] as const) {
+  for (const symbol of ["USDC", "EURC", "CIRBTC"] as const) {
     if (addressFor(symbol).toLowerCase() === normalized) {
       return { ...SUPPORTED_TOKENS[symbol]!, address: addressFor(symbol) };
     }

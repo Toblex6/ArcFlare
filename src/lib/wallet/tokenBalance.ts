@@ -10,13 +10,15 @@
 
 import { ethers } from 'ethers';
 import { resolveCurrency } from '@/src/lib/tokens/resolveCurrency';
+import { getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
+import type { SupportedSymbol } from '@/src/lib/tokens/supportedTokens';
 import { getNetworkConfig } from "@/lib/config/network";
 
 const ERC20_BALANCE_ABI = ['function balanceOf(address owner) view returns (uint256)'];
 
 export interface TokenBalance {
   balance: number;
-  currency: 'USDC' | 'EURC';
+  currency: SupportedSymbol;
   address: string;
   decimals: number;
   walletAddress: string;
@@ -34,12 +36,17 @@ function rpcUrl(): string {
  * Read a wallet's balance in the requested supported token.
  * `currency` defaults to USDC (legacy callers); unsupported symbols throw
  * (400 upstream) instead of silently returning a wrong-token balance.
+ * USDC/EURC resolve through the payment currency resolver (unchanged);
+ * CIRBTC resolves directly from the canonical registry (swap/balance scope
+ * only — payment paths stay USDC/EURC via resolveCurrency).
  */
 export async function getTokenBalance(
   walletAddress: string,
   currency?: string | null
 ): Promise<TokenBalance> {
-  const token = resolveCurrency({ currency: currency ?? 'USDC' });
+  const requested = (currency ?? 'USDC').trim().toUpperCase();
+  const token =
+    requested === 'CIRBTC' ? getTokenBySymbol('CIRBTC') : resolveCurrency({ currency: currency ?? 'USDC' });
   const provider = new ethers.JsonRpcProvider(rpcUrl());
   const contract = new ethers.Contract(token.address, ERC20_BALANCE_ABI, provider);
   const raw = await contract.balanceOf(walletAddress);

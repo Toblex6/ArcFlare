@@ -75,9 +75,12 @@ export const QuoteSchema = z.object({
 // fees, recipients, payers, and unsigned-tx construction are all
 // server-resolved via the shared swap service (src/lib/swap/service.ts).
 const swapSymbol = z.string().min(1).max(16);
+// Coarse gate (up to 8 decimals covers cirBTC); the swap service enforces
+// the exact per-token precision (6 for USDC/EURC, 8 for cirBTC) and rejects
+// anything coarser with a typed error.
 const swapAmount = z
   .string()
-  .regex(/^\d+(\.\d{1,6})?$/, 'Amount must be a positive number with up to 6 decimals')
+  .regex(/^\d+(\.\d{1,8})?$/, 'Amount must be a positive number with up to 8 decimals')
   .refine((v) => parseFloat(v) > 0, 'Amount must be greater than 0');
 const txHash = z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a valid 0x transaction hash');
 

@@ -1,6 +1,6 @@
 // src/components/swap/FlowSwapView.tsx
 //
-// Flow Swap — consumer-facing same-chain USDC↔EURC swap inside /consumer.
+// Flow Swap — consumer-facing same-chain USDC↔EURC↔cirBTC swap inside /consumer.
 // Two wallet modes, one quote backend:
 //
 //   CIRCLE (FlareHQ wallet): ordinary in-app swap. Enter amount → quote
@@ -20,7 +20,12 @@
 // The UnitFlow pools settle the USDC leg in WUSDC, so a swap INTO USDC
 // credits WUSDC first; the receive step burns exactly the verified proceeds
 // into native USDC in the user's own wallet. The user experiences
-// EURC → USDC — WUSDC is never presented as the result.
+// EURC → USDC — WUSDC is never presented as the result. cirBTC legs settle
+// the spot 8-dec token directly (no wrap/unwrap step either direction).
+//
+// The Swap card stays one surface through the whole lifecycle —
+// idle → quote → confirm → swapping → completed — updating inline. There is
+// no separate status page and no redirect at any point.
 //
 // Success is shown ONLY after server verification. The verified
 // actualOutput is authoritative — the pre-execution quote is never presented
@@ -31,11 +36,13 @@
 //   the authenticated session; the UI sends no addresses and renders no
 //   address inputs.
 // - No private keys, no Tower execution, no cross-chain path, no tokens
-//   beyond USDC/EURC.
+//   beyond USDC/EURC/cirBTC.
 // - No pool/router/fee-tier/calldata internals are displayed. The execution
 //   venue label (from the backend quote) and the informational Tower
 //   rate-discovery candidate are shown as secondary provenance only —
-//   derived from the backend response, never hardcoded.
+//   derived from the backend response, never hardcoded. Tower is named only
+//   when the backend actually consulted it; otherwise the route line names
+//   the executor alone.
 
 'use client';
 
@@ -58,15 +65,19 @@ import { useGuardedConnect } from '@/hooks/useGuardedConnect';
 import { useSwapBalances } from './useSwapBalances';
 import { useSwapQuote, type SwapQuoteView } from './useSwapQuote';
 import {
-  formatCanonical,
+  canonicalDecimals,
+  displaySymbol,
+  formatCanonicalFor,
   formatCountdown,
   friendlySwapError,
   friendlySwapWalletError,
   friendlyVenueLabel,
+  normalizeBalanceString,
   parseAmountToBaseUnits,
   shortAddress,
   shortHash,
-  truncateToSixDecimals,
+  SWAP_SYMBOLS,
+  truncateToDecimals,
   validateSwapAmount,
   type SwapSymbol,
 } from './swapCopy';
@@ -205,30 +216,33 @@ export function FlowSwapView({
     return hash;
   };
 
-  const amountError = validateSwapAmount(amount);
-  const inputBaseUnits = useMemo(() => parseAmountToBaseUnits(amount), [amount]);
+  const inputDecimals = canonicalDecimals(inputSymbol);
+  const amountError = validateSwapAmount(amount, inputSymbol);
+  const inputBaseUnits = useMemo(() => parseAmountToBaseUnits(amount, inputSymbol), [amount, inputSymbol]);
   const inputBalanceBase = useMemo(() => {
     const b = balances.balances[inputSymbol];
     if (b === null) return null;
-    try {
-      const [whole, frac = ''] = b.split('.');
-      const padded = (frac + '000000').slice(0, 6);
-      return BigInt(`${whole === '' ? '0' : whole}${padded}`);
-    } catch {
-      return null;
-    }
-  }, [balances.balances, inputSymbol]);
+    // Balances arrive as float-as-string display values — normalize to an
+    // exact decimal form at the token's precision before comparing.
+    const normalized = normalizeBalanceString(b, inputDecimals);
+    if (normalized === null) return null;
+    return parseAmountToBaseUnits(normalized, inputSymbol);
+  }, [balances.balances, inputSymbol, inputDecimals]);
   const insufficientBalance =
     inputBaseUnits !== null && inputBalanceBase !== null && inputBaseUnits > inputBalanceBase;
+
+  /** First listed symbol that is not `next` — keeps the two sides distinct. */
+  const fallbackSymbol = (next: SwapSymbol): SwapSymbol =>
+    SWAP_SYMBOLS.find((s) => s !== next) ?? 'USDC';
 
   const pickSymbol = (side: 'in' | 'out', next: SwapSymbol) => {
     if (flow !== 'form') return;
     if (side === 'in') {
       setInputSymbol(next);
-      if (next === outputSymbol) setOutputSymbol(next === 'USDC' ? 'EURC' : 'USDC');
+      if (next === outputSymbol) setOutputSymbol(fallbackSymbol(next));
     } else {
       setOutputSymbol(next);
-      if (next === inputSymbol) setInputSymbol(next === 'USDC' ? 'EURC' : 'USDC');
+      if (next === inputSymbol) setInputSymbol(fallbackSymbol(next));
     }
   };
 
@@ -240,9 +254,12 @@ export function FlowSwapView({
 
   const maxAmount = () => {
     const b = balances.balances[inputSymbol];
-    // Truncate (never round up): raw balance strings can carry more than 6
-    // decimals, which the amount field itself would reject.
-    if (b !== null) setAmount(truncateToSixDecimals(b));
+    if (b === null) return;
+    // Truncate (never round up) at the token's own precision: raw balance
+    // strings are floats-as-strings and can carry more decimals than the
+    // amount field accepts.
+    const normalized = normalizeBalanceString(b, inputDecimals);
+    if (normalized !== null) setAmount(truncateToDecimals(normalized, inputDecimals));
   };
 
   const resetAfterSuccess = () => {
@@ -290,7 +307,7 @@ export function FlowSwapView({
     }
     if (insufficientBalance) {
       setFlowError(
-        `Insufficient ${inputSymbol} balance for this swap. Lower the amount and try again.`
+        `Insufficient ${displaySymbol(inputSymbol)} balance for this swap. Lower the amount and try again.`
       );
       setFlowRawError(null);
       setFlow('failed');
@@ -656,7 +673,7 @@ export function FlowSwapView({
       return;
     }
     if (insufficientBalance) {
-      setFlowError(`Insufficient ${inputSymbol} balance for this swap. Lower the amount and try again.`);
+      setFlowError(`Insufficient ${displaySymbol(inputSymbol)} balance for this swap. Lower the amount and try again.`);
       setFlowRawError(null);
       setFlow('failed');
       return;
@@ -671,7 +688,7 @@ export function FlowSwapView({
     setLastOutputSymbol(live.output.symbol);
     confirmBusyRef.current = true;
     setCircleBusy(true);
-    setSteps([{ key: 'server-swap', label: 'Swapping in your FlareHQ wallet', status: 'active', hash: null }]);
+    setSteps([{ key: 'server-swap', label: 'Swap', status: 'active', hash: null }]);
     setFlow('executing');
     try {
       const post = authedPost
@@ -755,7 +772,7 @@ export function FlowSwapView({
 
   const circleConfirmHint =
     insufficientBalance
-      ? `Amount exceeds your available ${inputSymbol} balance.`
+      ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
       : quote.status === 'error' || quote.status === 'expired'
         ? 'Get a fresh quote to continue.'
         : quote.status !== 'quoted'
@@ -791,7 +808,7 @@ export function FlowSwapView({
     : wrongNetwork
       ? 'Switch to Arc Testnet to continue.'
       : insufficientBalance
-        ? `Amount exceeds your available ${inputSymbol} balance.`
+        ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
         : quote.status === 'error' || quote.status === 'expired'
           ? 'Get a fresh quote to continue.'
           : quote.status !== 'quoted'
@@ -803,8 +820,8 @@ export function FlowSwapView({
       <h2 style={styles.title}>Swap</h2>
       <p style={styles.sub}>
         {sessionIsCircle
-          ? 'Swap USDC and EURC right inside your FlareHQ wallet — no wallet popups.'
-          : 'Swap USDC and EURC directly on Arc. Approve each step in your connected wallet.'}
+          ? 'Swap USDC, EURC, and cirBTC inside your FlareHQ wallet.'
+          : 'Swap USDC, EURC, and cirBTC directly on Arc. Approve each step in your connected wallet.'}
       </p>
       <div style={styles.line}>
         <span style={styles.dot} />
@@ -836,22 +853,17 @@ export function FlowSwapView({
       {sessionLive && canSwapHere && (
         <>
           {sessionIsCircle && (
-            <div style={styles.walletRow}>
-              <span style={styles.walletLabel}>Swapping with</span>
-              <span style={styles.walletAddr}>{shortAddress(walletAddress)}</span>
-              <span style={styles.matchOk}>FlareHQ wallet · no wallet approval needed</span>
-            </div>
+            <p style={styles.walletLine}>Using your FlareHQ wallet · No wallet approval required</p>
           )}
           {sessionIsExternal && (
           <>
           {/* ── Wallet consistency (never silently substitute) ── */}
-          <div style={styles.walletRow}>
-            <span style={styles.walletLabel}>Swapping with</span>
-            <span style={styles.walletAddr}>{shortAddress(walletAddress)}</span>
+          <p style={styles.walletLine}>
+            Using your connected wallet · Approval required{' '}
             <span style={walletsMatch ? styles.matchOk : styles.matchWarn}>
-              {walletsMatch ? '✓ connected wallet matches' : '⚠ connected wallet differs'}
+              {walletsMatch ? '✓' : '⚠'}
             </span>
-          </div>
+          </p>
           {!walletsMatch && (
             <div style={styles.noticeBox}>
               <p style={styles.boxText}>
@@ -920,14 +932,14 @@ export function FlowSwapView({
           </>
           )}
 
-          {/* ── Balances (both tokens, parallel) ── */}
+          {/* ── Balances (all supported tokens, parallel) ── */}
           <div style={styles.balanceRow}>
-            {(['USDC', 'EURC'] as SwapSymbol[]).map((s) => {
+            {SWAP_SYMBOLS.map((s) => {
               const v = balances.balances[s];
               const failed = !balances.loading && v === null && balances.error !== null;
               return (
                 <div key={s} style={styles.balanceChip}>
-                  <span style={styles.balanceSym}>{s}</span>
+                  <span style={styles.balanceSym}>{displaySymbol(s)}</span>
                   <span
                     style={styles.balanceVal}
                     title={
@@ -984,13 +996,14 @@ export function FlowSwapView({
                     >
                       <option value="USDC">USDC</option>
                       <option value="EURC">EURC</option>
+                      <option value="CIRBTC">cirBTC</option>
                     </select>
                   </div>
                   <div style={styles.underRow}>
                     <span style={styles.underText}>
                       Available:{' '}
                       <strong>
-                        {balances.loading ? '…' : balances.balances[inputSymbol] !== null ? `${balances.balances[inputSymbol]} ${inputSymbol}` : '—'}
+                        {balances.loading ? '…' : balances.balances[inputSymbol] !== null ? `${balances.balances[inputSymbol]} ${displaySymbol(inputSymbol)}` : '—'}
                       </strong>
                     </span>
                     <button style={styles.miniButton} onClick={maxAmount} disabled={flow !== 'form' || balances.loading}>
@@ -999,7 +1012,7 @@ export function FlowSwapView({
                   </div>
                   {amountError && amount.trim() !== '' && <p style={styles.inlineError}>{amountError}</p>}
                   {insufficientBalance && (
-                    <p style={styles.inlineError}>Amount exceeds your available {inputSymbol} balance.</p>
+                    <p style={styles.inlineError}>Amount exceeds your available {displaySymbol(inputSymbol)} balance.</p>
                   )}
                 </div>
 
@@ -1012,7 +1025,7 @@ export function FlowSwapView({
                   <div style={styles.amountRow}>
                     <div style={styles.outputPreview} aria-live="polite">
                       {quote.status === 'quoted' && quote.quote
-                        ? `${quote.quote.quotedDisplay} ${outputSymbol}`
+                        ? `${quote.quote.quotedDisplay} ${displaySymbol(outputSymbol)}`
                         : quote.status === 'loading'
                           ? 'Getting quote…'
                           : '—'}
@@ -1026,6 +1039,7 @@ export function FlowSwapView({
                     >
                       <option value="USDC">USDC</option>
                       <option value="EURC">EURC</option>
+                      <option value="CIRBTC">cirBTC</option>
                     </select>
                   </div>
                 </div>
@@ -1041,7 +1055,13 @@ export function FlowSwapView({
                   <div style={styles.quoteRow}>
                     <span style={styles.quoteLabel}>Minimum received</span>
                     <span style={styles.quoteVal}>
-                      {quote.quote.minOutDisplay} {outputSymbol}
+                      {quote.quote.minOutDisplay} {displaySymbol(outputSymbol)}
+                    </span>
+                  </div>
+                  <div style={styles.quoteRow}>
+                    <span style={styles.quoteLabel}>Route</span>
+                    <span style={styles.quoteVal}>
+                      {quote.quote.venueId ? `Execution via ${friendlyVenueLabel(quote.quote.venueId)}` : '—'}
                     </span>
                   </div>
                   <div style={styles.quoteRow}>
@@ -1050,18 +1070,17 @@ export function FlowSwapView({
                       {quote.refreshing ? 'Refreshing…' : formatCountdown(quote.secondsLeft)}
                     </span>
                   </div>
-                  {/* Routing provenance (secondary): who executes this quote,
-                      plus the informational Tower rate-discovery candidate
-                      when the backend consulted it. Tower never executes. */}
-                  {quote.quote.venueId && (
+                  {/* Routing provenance (secondary): Tower is named ONLY when
+                      the backend actually consulted it for this quote.
+                      Otherwise the Route row above names the executor alone. */}
+                  {quote.quote.tower?.consulted && quote.quote.tower.available ? (
                     <p style={styles.routeNote}>
-                      Route selected · Execution via {friendlyVenueLabel(quote.quote.venueId)}
+                      Rate comparison via {friendlyVenueLabel('tower')} · Execution via{' '}
+                      {friendlyVenueLabel(quote.quote.venueId ?? 'unitflow-v3')}
                     </p>
-                  )}
-                  {quote.quote.tower?.consulted && quote.quote.tower.available && (
+                  ) : (
                     <p style={styles.routeNote}>
-                      Rate comparison via {friendlyVenueLabel('tower')} — info only, execution stays
-                      with {friendlyVenueLabel(quote.quote.venueId ?? 'unitflow-v3')}.
+                      Route selected · Execution via {friendlyVenueLabel(quote.quote.venueId ?? 'unitflow-v3')}
                     </p>
                   )}
                   <button style={styles.linkButton} onClick={quote.refresh} disabled={quote.refreshing}>
@@ -1138,11 +1157,18 @@ export function FlowSwapView({
             </>
           )}
 
-          {/* ── Execution / verification progress ── */}
+          {/* ── Execution / verification progress (same card, updated inline) ── */}
           {(flow === 'executing' || flow === 'mined' || flow === 'verifying') && (
             <div style={styles.progressBox}>
+              {quote.quote && (
+                <p style={styles.swapSummary} aria-live="polite">
+                  {quote.quote.input.amountDisplay} {displaySymbol(quote.quote.input.symbol)}
+                  {' → '}
+                  {quote.quote.quotedDisplay} {displaySymbol(quote.quote.output.symbol)}
+                </p>
+              )}
               <p style={styles.boxTitle}>
-                {flow === 'executing' && (sessionIsCircle ? 'Swapping in your FlareHQ wallet…' : isSending ? 'Check your wallet…' : 'Swapping…')}
+                {flow === 'executing' && (sessionIsCircle ? 'Swapping…' : isSending ? 'Check your wallet…' : 'Swapping…')}
                 {flow === 'mined' && 'Transaction mined — verifying…'}
                 {flow === 'verifying' && 'Swap submitted — verifying on-chain…'}
               </p>
@@ -1173,8 +1199,8 @@ export function FlowSwapView({
               <p style={styles.successIcon}>✓</p>
               <p style={styles.boxTitle}>Swap completed</p>
               <p style={styles.boxText}>
-                Received <strong>{formatCanonical(verified.actualOutput)} {verified.outputSymbol}</strong>
-                {' '}for {formatCanonical(verified.actualInput)} {verified.inputSymbol}.
+                Received <strong>{formatCanonicalFor(verified.actualOutput, verified.outputSymbol)} {displaySymbol(verified.outputSymbol)}</strong>
+                {' '}for {formatCanonicalFor(verified.actualInput, verified.inputSymbol)} {displaySymbol(verified.inputSymbol)}.
               </p>
               {verified.alreadySettled && (
                 <p style={styles.underText}>This swap was already verified — showing the recorded result.</p>
@@ -1225,6 +1251,8 @@ const styles: Record<string, React.CSSProperties> = {
   walletRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 },
   walletLabel: { color: 'var(--flow-text-faint)' },
   walletAddr: { fontFamily: 'monospace', fontWeight: 700 },
+  walletLine: { fontSize: 12, color: 'var(--flow-text-faint)', margin: '0 0 12px' },
+  swapSummary: { margin: '0 0 6px', fontSize: 15, fontWeight: 700 },
   matchOk: { color: '#3F7A57', fontWeight: 600 },
   matchWarn: { color: '#B07A2A', fontWeight: 600 },
   noticeBox: { background: 'var(--flow-surface)', border: '1px solid var(--flow-border)', borderRadius: 14, padding: '14px 16px', marginBottom: 12 },

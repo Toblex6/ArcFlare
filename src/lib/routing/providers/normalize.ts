@@ -7,8 +7,9 @@
 //   utilities (network-aware: testnet pins, mainnet env inputs). Provider
 //   symbols are never trusted; provider addresses must match a supported
 //   token or the quote is rejected.
-// - USDC and EURC are BOTH 6 decimals on Arc. Any provider-returned decimals
-//   claim that disagrees with the canonical 6 is REJECTED with a typed
+// - Canonical decimals are PER TOKEN (USDC/EURC 6, cirBTC 8 — see
+//   supportedTokens.ts). Any provider-returned decimals claim that disagrees
+//   with that token's canonical decimals is REJECTED with a typed
 //   error — never silently converted or coerced.
 // - Unknown venues are rejected with a typed error.
 // - Pure function: no RPC, no DB, no wallet, no execution.
@@ -17,7 +18,7 @@ import { getTokenByAddress } from '../../tokens/supportedTokens';
 import { routingError } from '../canonical';
 import { KNOWN_VENUE_IDS, type NormalizedProviderQuote, type SwapVenueId } from './types';
 
-/** Canonical Arc decimals for the v1 pair (both 6 — never provider-supplied). */
+/** Canonical Arc decimals for the v1 stable pair (USDC/EURC — never provider-supplied). */
 export const CANONICAL_STABLE_DECIMALS = 6;
 
 /** Untrusted raw provider quote fields (everything here is suspect). */
@@ -57,16 +58,16 @@ function toOptionalBigint(label: string, v: string | bigint | null | undefined):
   return toBigint(label, v);
 }
 
-/** Assert an untrusted provider decimals claim equals the canonical value. */
-function assertDecimalsClaim(label: string, claimed: number | string | null | undefined): void {
+/** Assert an untrusted provider decimals claim equals the token's canonical value. */
+function assertDecimalsClaim(label: string, claimed: number | string | null | undefined, canonical: number): void {
   if (claimed === null || claimed === undefined || (typeof claimed === 'string' && claimed.trim() === '')) {
     return; // no claim made — canonical resolution below is authoritative
   }
   const n = typeof claimed === 'number' ? claimed : Number(String(claimed).trim());
-  if (!Number.isInteger(n) || n !== CANONICAL_STABLE_DECIMALS) {
+  if (!Number.isInteger(n) || n !== canonical) {
     throw routingError(
       400,
-      `Provider quote ${label} decimals mismatch: claimed "${String(claimed)}", canonical is ${CANONICAL_STABLE_DECIMALS}. Rejected — no silent conversion.`
+      `Provider quote ${label} decimals mismatch: claimed "${String(claimed)}", canonical is ${canonical}. Rejected — no silent conversion.`
     );
   }
 }
@@ -91,14 +92,15 @@ export function normalizeProviderQuote(raw: RawProviderQuote): NormalizedProvide
   const outToken = outAddr ? getTokenByAddress(outAddr) : undefined;
   if (!inToken) throw routingError(400, `Provider quote input token is not a supported ArcFlare token: "${inAddr}".`);
   if (!outToken) throw routingError(400, `Provider quote output token is not a supported ArcFlare token: "${outAddr}".`);
-  if (inToken.decimals !== CANONICAL_STABLE_DECIMALS || outToken.decimals !== CANONICAL_STABLE_DECIMALS) {
+  if (!Number.isInteger(inToken.decimals) || inToken.decimals <= 0 || !Number.isInteger(outToken.decimals) || outToken.decimals <= 0) {
     // Defensive: canonical config drift must fail closed, never normalize.
-    throw routingError(503, 'Canonical token decimals are not 6 — refusing to normalize provider output.');
+    throw routingError(503, 'Canonical token decimals are misconfigured — refusing to normalize provider output.');
   }
 
-  // Provider decimals claims are untrusted: reject anything != 6.
-  assertDecimalsClaim('input', raw.inputDecimals);
-  assertDecimalsClaim('output', raw.outputDecimals);
+  // Provider decimals claims are untrusted: reject anything != the token's
+  // canonical decimals (6 for USDC/EURC, 8 for cirBTC).
+  assertDecimalsClaim('input', raw.inputDecimals, inToken.decimals);
+  assertDecimalsClaim('output', raw.outputDecimals, outToken.decimals);
 
   const inputAmount = toBigint('inputAmount', raw.inputAmount);
   const quotedOutputAmount = toBigint('outputAmount', raw.outputAmount);
@@ -106,8 +108,8 @@ export function normalizeProviderQuote(raw: RawProviderQuote): NormalizedProvide
 
   return {
     venueId: raw.venueId,
-    inputToken: { symbol: inToken.symbol, address: inToken.address, decimals: CANONICAL_STABLE_DECIMALS },
-    outputToken: { symbol: outToken.symbol, address: outToken.address, decimals: CANONICAL_STABLE_DECIMALS },
+    inputToken: { symbol: inToken.symbol, address: inToken.address, decimals: inToken.decimals },
+    outputToken: { symbol: outToken.symbol, address: outToken.address, decimals: outToken.decimals },
     inputAmount,
     quotedOutputAmount,
     ...(minOutputAmount !== undefined ? { minOutputAmount } : {}),

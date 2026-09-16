@@ -17,9 +17,12 @@ export const ROUTING_MAX_OUTPUT_BASE = 1_000_000000n; // absolute cap: 1000.00 (
 // Testnet via scripts/router-e2e.ts: EURC legs are fee-free (merchant credit
 // == pool quote exactly); USDC merchant credit ran ~0.0034 below quote across
 // the pool→router→merchant legs. Buffers sit above the measurements.
-export const ROUTING_OUT_FEE_BUFFER: Record<'USDC' | 'EURC', bigint> = {
+// cirBTC has no measured leg yet (no mainnet history in this release):
+// 10 sats is a conservative unmeasured default — re-verify on mainnet.
+export const ROUTING_OUT_FEE_BUFFER: Record<'USDC' | 'EURC' | 'CIRBTC', bigint> = {
   USDC: 5000n, // 0.005
   EURC: 1000n, // 0.001 (conservative; measured 0)
+  CIRBTC: 10n, // 10 satoshis (8-dec base units; unmeasured default)
 };
 
 // ── Typed routing error (carries the HTTP status for the route wrapper) ─────
