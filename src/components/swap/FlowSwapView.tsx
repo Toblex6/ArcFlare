@@ -803,6 +803,11 @@ export function FlowSwapView({
     wrongNetwork ||
     isSending;
 
+  // Execution lock: the normal Swap form stays visible through
+  // executing/mined/verifying with its inputs disabled, and an inline status
+  // area appears underneath. Only the verified receipt replaces the form.
+  const formLocked = flow !== 'form';
+
   const confirmHint = !walletsMatch
     ? 'Connect the matching wallet to continue.'
     : wrongNetwork
@@ -970,8 +975,11 @@ export function FlowSwapView({
             </div>
           )}
 
-          {/* ── Swap form ── */}
-          {(flow === 'form' || flow === 'failed') && (
+          {/* ── Swap form: stays visible through the whole lifecycle except
+              the verified receipt. During executing/mined/verifying every
+              input locks and an inline status area appears below the form;
+              the form is never replaced by a separate progress page. ── */}
+          {flow !== 'verified' && (
             <>
               <div style={styles.swapBox}>
                 <div style={styles.field}>
@@ -1083,7 +1091,7 @@ export function FlowSwapView({
                       Route selected · Execution via {friendlyVenueLabel(quote.quote.venueId ?? 'unitflow-v3')}
                     </p>
                   )}
-                  <button style={styles.linkButton} onClick={quote.refresh} disabled={quote.refreshing}>
+                  <button style={styles.linkButton} onClick={quote.refresh} disabled={quote.refreshing || formLocked}>
                     {quote.refreshing ? 'Refreshing quote…' : 'Refresh quote'}
                   </button>
                 </div>
@@ -1142,55 +1150,49 @@ export function FlowSwapView({
               {sessionIsCircle ? (
                 <>
                   <button style={styles.submitButton} disabled={circleConfirmDisabled} onClick={() => void handleCircleConfirm()}>
-                    {circleBusy ? 'Swapping…' : 'Confirm swap'}
+                    {formLocked || circleBusy ? 'Swapping…' : 'Confirm swap'}
                   </button>
                   {circleConfirmHint && flow === 'form' && <p style={styles.hint}>{circleConfirmHint}</p>}
                 </>
               ) : (
                 <>
                   <button style={styles.submitButton} disabled={confirmDisabled} onClick={() => void handleConfirm()}>
-                    Confirm swap
+                    {formLocked ? 'Swapping…' : 'Confirm swap'}
                   </button>
-                  {confirmHint && <p style={styles.hint}>{confirmHint}</p>}
+                  {confirmHint && flow === 'form' && <p style={styles.hint}>{confirmHint}</p>}
                 </>
               )}
-            </>
-          )}
 
-          {/* ── Execution / verification progress (same card, updated inline) ── */}
-          {(flow === 'executing' || flow === 'mined' || flow === 'verifying') && (
-            <div style={styles.progressBox}>
-              {quote.quote && (
-                <p style={styles.swapSummary} aria-live="polite">
-                  {quote.quote.input.amountDisplay} {displaySymbol(quote.quote.input.symbol)}
-                  {' → '}
-                  {quote.quote.quotedDisplay} {displaySymbol(quote.quote.output.symbol)}
-                </p>
-              )}
-              <p style={styles.boxTitle}>
-                {flow === 'executing' && (sessionIsCircle ? 'Swapping…' : isSending ? 'Check your wallet…' : 'Swapping…')}
-                {flow === 'mined' && 'Transaction mined — verifying…'}
-                {flow === 'verifying' && 'Swap submitted — verifying on-chain…'}
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
-                {steps.map((s) => (
-                  <div key={s.key} style={styles.stepRow}>
-                    <span style={s.status === 'done' ? styles.stepDone : s.status === 'active' ? styles.stepActive : styles.stepPending}>
-                      {s.status === 'done' ? '✓' : s.status === 'active' ? '…' : '○'}
-                    </span>
-                    <span style={styles.stepLabel}>{s.label}</span>
-                    {s.hash && (
-                      <a href={explorerTxUrl(s.hash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
-                        {shortHash(s.hash)} ↗
-                      </a>
-                    )}
+              {/* ── Inline execution / verification status (below the ordinary
+                  form — never a replacement page, never a redirect) ── */}
+              {(flow === 'executing' || flow === 'mined' || flow === 'verifying') && (
+                <div style={styles.progressBox} aria-live="polite">
+                  <p style={styles.boxTitle}>
+                    {flow === 'executing' && (sessionIsCircle ? 'Swapping…' : isSending ? 'Check your wallet…' : 'Swapping…')}
+                    {flow === 'mined' && 'Transaction mined — verifying…'}
+                    {flow === 'verifying' && 'Swap submitted — verifying on-chain…'}
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+                    {steps.map((s) => (
+                      <div key={s.key} style={styles.stepRow}>
+                        <span style={s.status === 'done' ? styles.stepDone : s.status === 'active' ? styles.stepActive : styles.stepPending}>
+                          {s.status === 'done' ? '✓' : s.status === 'active' ? '…' : '○'}
+                        </span>
+                        <span style={styles.stepLabel}>{s.label}</span>
+                        {s.hash && (
+                          <a href={explorerTxUrl(s.hash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                            {shortHash(s.hash)} ↗
+                          </a>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              {flow === 'verifying' && (
-                <p style={styles.underText}>Your transaction is mined. The server is now confirming the swap on-chain — success is shown only after that check passes.</p>
+                  {flow === 'verifying' && (
+                    <p style={styles.underText}>Your transaction is mined. The server is now confirming the swap on-chain — success is shown only after that check passes.</p>
+                  )}
+                </div>
               )}
-            </div>
+            </>
           )}
 
           {/* ── Verified success (authoritative actuals only) ── */}
@@ -1252,7 +1254,6 @@ const styles: Record<string, React.CSSProperties> = {
   walletLabel: { color: 'var(--flow-text-faint)' },
   walletAddr: { fontFamily: 'monospace', fontWeight: 700 },
   walletLine: { fontSize: 12, color: 'var(--flow-text-faint)', margin: '0 0 12px' },
-  swapSummary: { margin: '0 0 6px', fontSize: 15, fontWeight: 700 },
   matchOk: { color: '#3F7A57', fontWeight: 600 },
   matchWarn: { color: '#B07A2A', fontWeight: 600 },
   noticeBox: { background: 'var(--flow-surface)', border: '1px solid var(--flow-border)', borderRadius: 14, padding: '14px 16px', marginBottom: 12 },
