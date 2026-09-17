@@ -85,14 +85,15 @@ ok("connect flow does not read a typed address", !/trimmed\.startsWith|onboardin
 
 // ── 4. WalletConnect / connector path ───────────────────────────────────
 console.log("\n[4] WalletConnect / connector path");
-ok("uses wagmi useConnect", consumerSrc.includes("useConnect"), "");
+ok("uses wagmi useConnect via the guarded hook", consumerSrc.includes("useGuardedConnect"), "");
 ok("uses connectAsync", consumerSrc.includes("connectAsync"), "");
 ok("reads connected account address", consumerSrc.includes("address: connectedAddress") && consumerSrc.includes("useAccount()"), "");
-ok("connector picker dedupes connectors", consumerSrc.includes("dedupeConnectors(connectors)"), "");
+ok("connector picker dedupes connectors (via useGuardedConnect)", consumerSrc.includes("dedupedConnectors"), "");
 ok("sign challenge binds connected address", consumerSrc.includes("account: address as Address"), "");
 ok("connect flow opens picker when nothing connected", consumerSrc.includes("setConnectPickerOpen(true)") && consumerSrc.includes("hasInjectedProvider()"), "");
 ok("no redundant onboarding create-button", !consumerSrc.includes("onClick={createNewWallet}"), "redundant button present");
-ok("bridge-upgrade create-wallet path preserved", consumerSrc.includes("Create a FlareHQ wallet") && consumerSrc.includes("createFlareHQWallet"), "");
+ok("external bridge onboarding is email-only (invariant: no direct CIRCLE creation from an external wallet)",
+  consumerSrc.includes("Continue with email") && !consumerSrc.includes("createFlareHQWallet") && consumerSrc.includes("startBridgeEmailOnboarding"), "");
 
 // ── 5. Public marketplace stays public ──────────────────────────────────
 console.log("\n[5] Public marketplace remains public");

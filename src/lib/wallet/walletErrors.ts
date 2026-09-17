@@ -181,7 +181,7 @@ export function mapBridgeError(
     lower.includes('user cancelled') ||
     lower.includes('action rejected')
   ) {
-    return { kind: 'USER_REJECTED', message: 'Bridge approval was cancelled.' };
+    return { kind: 'USER_REJECTED', message: 'USDC approval was cancelled.' };
   }
 
   // 2. Wallet is on the wrong chain / chain changed mid-flow.
@@ -239,7 +239,7 @@ export function mapBridgeError(
   // claim they didn't when a transaction may have confirmed.
   return {
     kind: 'BRIDGE_FAILED',
-    message: 'Bridge could not be completed. Your wallet was not charged unless a transaction was confirmed.',
+    message: 'Bridge transaction was not completed. No USDC left your wallet unless a transaction was confirmed.',
   };
 }
 

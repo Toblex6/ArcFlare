@@ -117,7 +117,7 @@ async function main() {
   ok("format round-trips", formatBridgeBaseUnits(10_000_000n) === "10" && formatBridgeBaseUnits(1n) === "0.000001");
 
   // ── 3. Bridge error copy (no raw internals) ────────────────────────────
-  ok("rejection copy", mapBridgeError(new Error("User rejected the request."), { sourceLabel: "Arbitrum Sepolia" }).message === "Bridge approval was cancelled.");
+  ok("rejection copy", mapBridgeError(new Error("User rejected the request."), { sourceLabel: "Arbitrum Sepolia" }).message === "USDC approval was cancelled.");
   ok("wrong-chain copy names the source",
     mapBridgeError(new Error("The current chain of the wallet does not match the target chain"), { sourceLabel: "Base Sepolia" }).message === "Switch your wallet to Base Sepolia to continue.");
   ok("insufficient copy names chain+USDC",
@@ -158,6 +158,13 @@ async function main() {
   ok("UI: Arc_Testnet destination literal", ui.includes("'Arc_Testnet'"));
   ok("UI: chain switch happens before BridgeKit invocation",
     ui.indexOf("ensureOnSourceChain()") < ui.indexOf(".bridge({"));
+  // INVARIANT: the bridge UI never provisions a wallet — the unbound case
+  // enters the EXISTING email onboarding flow via the page-owned callback.
+  ok("UI: offers email onboarding, never direct wallet creation",
+    ui.includes("Continue with email") &&
+    ui.includes("onContinueWithEmail") &&
+    !ui.includes("Create a FlareHQ wallet") &&
+    !/createAccountWallet|api\/consumer\/session/i.test(ui), "");
   for (const p of [
     "src/app/api/cctp/transfer/external/intent/route.ts",
     "src/app/api/cctp/transfer/external/verify/route.ts",
@@ -168,11 +175,16 @@ async function main() {
     ok(`${p}: creates no wallet`, !/consumerAccount\.create|createAccountWallet/i.test(s));
   }
   const sessionRoute = src("src/app/api/consumer/session/route.ts");
-  ok("session upgrade links (not replaces) the external row",
-    sessionRoute.includes("linkedCircleAddress") && sessionRoute.includes("linkingExternalId"));
-  ok("session upgrade never overwrites an existing link",
-    sessionRoute.includes("!(prior as any)?.linkedCircleAddress"));
-  ok("session upgrade still provisions Arc-only via createAccountWallet",
+  // INVARIANT: a FlareHQ CIRCLE wallet is never provisioned from a connected
+  // EXTERNAL session — Path B refuses with EMAIL_VERIFICATION_REQUIRED and
+  // the only creation path is email-auth (OTP). The bridge destination link
+  // is written on the SIGNATURE-VERIFIED external connect instead (never from
+  // client input), and only when unset.
+  ok("session refuses CIRCLE provisioning from an EXTERNAL session",
+    sessionRoute.includes("EMAIL_VERIFICATION_REQUIRED"));
+  ok("signature-verified external connect links (never replaces/overwrites) the bridge destination",
+    sessionRoute.includes("linkedCircleAddress") && sessionRoute.includes("!(account as any)?.linkedCircleAddress"));
+  ok("fresh-user provisioning unchanged (Arc-only via createAccountWallet)",
     sessionRoute.includes("createAccountWallet(`consumer_${Date.now()}`)"));
   const consumerSrc = src("src/app/consumer/page.tsx");
   ok("consumer page renders ExternalBridge for EXTERNAL", consumerSrc.includes("<ExternalBridge"));

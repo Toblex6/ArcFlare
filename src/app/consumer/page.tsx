@@ -183,10 +183,20 @@ function ConsumerAppInner() {
   const [switchBusy, setSwitchBusy] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const switchReturnRef = useRef<View>("home");
-  // ── Bridge upgrade confirmation (Part 10) ──
-  // Creating a FlareHQ wallet silently replaced an external session; now it
-  // requires explicit confirmation first.
-  const [confirmFlareOpen, setConfirmFlareOpen] = useState(false);
+  // ── Bridge → email onboarding return path ──
+  // When an EXTERNAL bridge user has no linked FlareHQ wallet, the ONLY
+  // supported creation path is the existing email-auth flow (OTP → verified
+  // consumer identity → create/retrieve CIRCLE wallet). These states carry
+  // the user into that flow and back to the Bridge view with context intact
+  // (the bridge component stays mounted — no new onboarding panel).
+  const [bridgeEmailOpen, setBridgeEmailOpen] = useState(false);
+  const [bridgeEmailNote, setBridgeEmailNote] = useState<string | null>(null);
+  const [bridgeReconnectHint, setBridgeReconnectHint] = useState(false);
+  // Set only when "Continue with email" is invoked FROM the bridge; holds the
+  // EXTERNAL wallet address the user must return to (never trusted for the
+  // bridge destination itself — the destination is always re-resolved
+  // server-side from the stored link).
+  const bridgeEmailReturnRef = useRef<{ prevWalletAddress: string } | null>(null);
   // ── Email OTP resend cooldowns (Part 4, seconds remaining) ──
   const [emailCooldown, setEmailCooldown] = useState(0);
   const [recipient, setRecipient] = useState("");
@@ -214,8 +224,6 @@ function ConsumerAppInner() {
   const [requestCurrency, setRequestCurrency] = useState<"USDC" | "EURC">("USDC");
   const [sendBalance, setSendBalance] = useState<string | null>(null);
   const [sendBalanceLoading, setSendBalanceLoading] = useState(false);
-  const [bridgeNeedsFlareWallet, setBridgeNeedsFlareWallet] = useState(false);
-  const [creatingFlareWallet, setCreatingFlareWallet] = useState(false);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
 
   // ── Wallet security (Stage 2: recovery email + payment-PIN step-up) ──
@@ -499,6 +507,15 @@ function ConsumerAppInner() {
       }
       // Session cookie is set server-side; the SAME wallet resolves for a
       // returning email — never a second wallet-creation panel.
+      if (bridgeEmailOpen) {
+        // Opened from the Bridge screen: complete the invariant path —
+        // verified consumer identity → CIRCLE wallet → return to Bridge
+        // with the external wallet re-verified (signature challenge).
+        await completeBridgeEmailOnboarding(data);
+        setLoginCode("");
+        setLoginStep("enter");
+        return;
+      }
       applySessionAccount(data.account, data.isNew === true);
       setEmailAuthOpen(false);
       setLoginCode("");
@@ -793,30 +810,192 @@ function ConsumerAppInner() {
     }
   };
 
-  // ── Bridge upgrade flow: give an external-wallet user a FlareHQ wallet ──
-  // POST {} provisions a brand-new Circle-managed SCA wallet and reissues
-  // the session against it (explicit user-confirmed replacement only —
-  // never silent). The user's connected wallet still works for sending/
-  // requesting; the FlareHQ wallet is what the bridge can move funds from.
-  const createFlareHQWallet = async () => {
-    setCreatingFlareWallet(true);
-    setCrossResult(null);
-    try {
-      const res = await fetch("/api/consumer/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Could not create a FlareHQ wallet right now.");
-      applySessionAccount(data.account, true);
-      setBridgeNeedsFlareWallet(false);
-    } catch (e: any) {
-      setCrossResult({ success: false, error: friendlyWalletError(e) });
-    } finally {
-      setCreatingFlareWallet(false);
-    }
+  // ── Bridge → email onboarding (the ONLY wallet-creation path) ──
+  // INVARIANT: a FlareHQ CIRCLE wallet is NEVER provisioned directly from a
+  // connected EXTERNAL wallet. "Continue with email" enters the EXISTING
+  // email-auth flow (OTP → verified consumer identity → create/retrieve the
+  // CIRCLE wallet server-side), then returns the user to the Bridge view —
+  // the destination link is re-resolved server-side, never trusted from here.
+  const startBridgeEmailOnboarding = () => {
+    // Preserve bridge context: the bridge component stays mounted, so the
+    // selected source chain, connected external wallet, and amount survive
+    // automatically; only the email form overlays it.
+    bridgeEmailReturnRef.current = { prevWalletAddress: walletAddress };
+    setBridgeReconnectHint(false);
+    setBridgeEmailNote(null);
+    setLoginStep('enter');
+    setLoginCode('');
+    setLoginMsg(null);
+    setBridgeEmailOpen(true);
   };
+
+  const cancelBridgeEmailOnboarding = () => {
+    setBridgeEmailOpen(false);
+    setBridgeEmailNote(null);
+    setBridgeReconnectHint(false);
+    setLoginCode('');
+    setLoginStep('enter');
+    setLoginMsg(null);
+    bridgeEmailReturnRef.current = null;
+  };
+
+  const completeBridgeEmailOnboarding = async (data: any) => {
+    // data.account is the email-verified session account. For a NEW consumer
+    // it is the freshly created CIRCLE wallet; for a returning email it is
+    // the SAME existing wallet (the server resolves-or-creates — never a
+    // second wallet for one email).
+    const prev = bridgeEmailReturnRef.current;
+    // Returning-email case: the row may already be the EXTERNAL wallet the
+    // user came from — nothing to switch back to.
+    const cameFromExternal = !!prev && prev.prevWalletAddress !== data.account.walletAddress;
+    if (cameFromExternal) {
+      // Switch the session BACK to the external wallet so the bridge can
+      // continue exactly where it left off. The signature challenge proves
+      // the same external wallet is still controlled by this browser.
+      try {
+        const challengeRes = await fetch(
+          `/api/consumer/session?nonce=1&address=${prev!.prevWalletAddress}`
+        );
+        const challengeData = await challengeRes.json();
+        if (!challengeData.success || !challengeData.message) {
+          throw new Error(challengeData.error || 'Could not return to your wallet.');
+        }
+        const signature = await signMessageAsync({
+          message: challengeData.message,
+          account: prev!.prevWalletAddress as Address,
+        });
+        const res = await fetch('/api/consumer/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            walletAddress: prev!.prevWalletAddress,
+            message: challengeData.message,
+            signature,
+          }),
+        });
+        const switchData = await res.json();
+        if (!switchData.success) throw new Error(switchData.error || 'Could not return to your wallet.');
+        // The server records the bridge-destination link (CIRCLE wallet this
+        // session just created/verified ← proven external wallet) when unset.
+        applySessionAccount(switchData.account);
+        setJustCreatedWallet(false);
+      } catch (e: any) {
+        // The CIRCLE wallet exists and the email is verified, but the user
+        // did not complete the signature to return. Keep the CIRCLE session
+        // active and tell them exactly how to finish: reconnect the external
+        // wallet — reconnecting records the link server-side and returns to
+        // Bridge.
+        applySessionAccount(data.account, data.isNew === true);
+        setBridgeEmailOpen(false);
+        setView('crosschain');
+        // Surface the ACTUAL reason (cancelled signature, wallet unavailable)
+        // in the reconnect card — never a generic failure claim.
+        setBridgeEmailNote(friendlyWalletError(e));
+        setBridgeReconnectHint(true);
+        return;
+      }
+    } else {
+      applySessionAccount(data.account, data.isNew === true);
+    }
+    setBridgeEmailOpen(false);
+    setBridgeEmailNote(null);
+    setBridgeReconnectHint(false);
+    bridgeEmailReturnRef.current = null;
+    // Return to the Bridge view: the destination now resolves to the
+    // verified FlareHQ wallet (server-side), and the form state is intact.
+    setView('crosschain');
+  };
+
+  // ── The ONE email-OTP form (shared surface) ──
+  // Rendered inline on the onboarding screen and inside the bridge overlay.
+  // Same state, same handlers, same endpoints — never a second panel.
+  const emailAuthFormCard = (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 440,
+        marginInline: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        marginTop: 12,
+        border: "1px solid var(--flow-border, var(--border))",
+        borderRadius: 14,
+        padding: 16,
+        background: "var(--flow-surface, var(--surface))",
+        boxSizing: "border-box",
+      }}
+      aria-label="Continue with email"
+    >
+      <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>FlareHQ wallet</p>
+      {bridgeEmailOpen && (
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+          Verify your email to create your free FlareHQ wallet to receive bridged funds.
+          Your bridge (source chain, wallet, and amount) is kept and you return to it after.
+        </p>
+      )}
+      {loginStep === "enter" ? (
+        <>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+            Enter your email — we will send a sign-in code. New here? Your FlareHQ wallet is created automatically.
+          </p>
+          <input
+            style={styles.input}
+            value={loginEmail}
+            onChange={(e) => setLoginEmail(e.target.value)}
+            placeholder="you@example.com"
+            inputMode="email"
+            autoComplete="email"
+            aria-label="Email address"
+          />
+          <button style={styles.primaryButton} disabled={loginBusy} onClick={requestLoginCode}>
+            {loginBusy ? "Sending…" : "Send sign-in code"}
+          </button>
+        </>
+      ) : (
+        <>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+            Enter the 6-digit code sent to {loginEmail.trim() || "your email"}.
+          </p>
+          <input
+            style={styles.input}
+            value={loginCode}
+            onChange={(e) => setLoginCode(e.target.value)}
+            placeholder="6-digit code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            aria-label="Sign-in code"
+          />
+          <button style={styles.primaryButton} disabled={loginBusy} onClick={confirmLoginCode}>
+            {loginBusy ? "Verifying…" : "Verify & continue"}
+          </button>
+          <button
+            style={styles.secondaryButton}
+            onClick={requestLoginCode}
+            disabled={loginBusy || loginCooldown > 0}
+          >
+            {loginCooldown > 0 ? `Resend code in ${loginCooldown}s` : "Resend code"}
+          </button>
+          <button
+            style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}
+            onClick={() => { setLoginStep("enter"); setLoginCode(""); setLoginMsg(null); }}
+          >
+            Use a different email
+          </button>
+        </>
+      )}
+      {loginMsg && <p style={{ margin: 0, fontSize: 13, color: "#3F7A57" }}>{loginMsg}</p>}
+      <button
+        style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}
+        onClick={() => {
+          if (bridgeEmailOpen) cancelBridgeEmailOnboarding();
+          else { setEmailAuthOpen(false); setLoginMsg(null); }
+        }}
+      >
+        Back
+      </button>
+    </div>
+  );
 
   const disconnectWallet = async () => {
     try {
@@ -827,7 +1006,7 @@ function ConsumerAppInner() {
     setCircleWalletId(null);
     setWalletMode(null);
     setCanServerSign(false);
-    setBridgeNeedsFlareWallet(false);
+    setBridgeReconnectHint(false);
     setView("onboarding");
   };
 
@@ -1150,7 +1329,7 @@ function ConsumerAppInner() {
               while the connect-wallet picker is closed, and the connect UI
               renders only while the email form is closed — exactly one entry
               surface is ever visible. */}
-          {!connectPickerOpen && (!emailAuthOpen ? (
+          {!connectPickerOpen && !emailAuthOpen && !bridgeEmailOpen && (
             <>
               <button
                 style={styles.primaryButton}
@@ -1161,84 +1340,16 @@ function ConsumerAppInner() {
               </button>
               <div style={styles.orDivider}><span>or</span></div>
             </>
-          ) : (
-            <div
-              style={{
-                width: "100%",
-                maxWidth: 440,
-                marginInline: "auto",
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-                marginTop: 12,
-                border: "1px solid var(--flow-border, var(--border))",
-                borderRadius: 14,
-                padding: 16,
-                background: "var(--flow-surface, var(--surface))",
-                boxSizing: "border-box",
-              }}
-              aria-label="Continue with email"
-            >
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 800 }}>FlareHQ wallet</p>
-              {loginStep === "enter" ? (
-                <>
-                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
-                    Enter your email — we will send a sign-in code. New here? Your FlareHQ wallet is created automatically.
-                  </p>
-                  <input
-                    style={styles.input}
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    inputMode="email"
-                    autoComplete="email"
-                    aria-label="Email address"
-                  />
-                  <button style={styles.primaryButton} disabled={loginBusy} onClick={requestLoginCode}>
-                    {loginBusy ? "Sending…" : "Send sign-in code"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
-                    Enter the 6-digit code sent to {loginEmail.trim() || "your email"}.
-                  </p>
-                  <input
-                    style={styles.input}
-                    value={loginCode}
-                    onChange={(e) => setLoginCode(e.target.value)}
-                    placeholder="6-digit code"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    aria-label="Sign-in code"
-                  />
-                  <button style={styles.primaryButton} disabled={loginBusy} onClick={confirmLoginCode}>
-                    {loginBusy ? "Verifying…" : "Verify & continue"}
-                  </button>
-                  <button
-                    style={styles.secondaryButton}
-                    onClick={requestLoginCode}
-                    disabled={loginBusy || loginCooldown > 0}
-                  >
-                    {loginCooldown > 0 ? `Resend code in ${loginCooldown}s` : "Resend code"}
-                  </button>
-                  <button
-                    style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}
-                    onClick={() => { setLoginStep("enter"); setLoginCode(""); setLoginMsg(null); }}
-                  >
-                    Use a different email
-                  </button>
-                </>
-              )}
-              {loginMsg && <p style={{ margin: 0, fontSize: 13, color: "#3F7A57" }}>{loginMsg}</p>}
-              <button
-                style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: 0 }}
-                onClick={() => { setEmailAuthOpen(false); setLoginMsg(null); }}
-              >
-                Back
-              </button>
-            </div>
-          ))}
+          )}
+          {/*
+            SHARED email-OTP form — the ONE email onboarding surface. Rendered
+            from the onboarding screen (emailAuthOpen) or as an overlay over
+            the Bridge screen (bridgeEmailOpen). Never a second onboarding
+            panel: both entry points drive the same /api/consumer/email-auth
+            flow; the bridge entry returns to the Bridge view after
+            verification (completeBridgeEmailOnboarding).
+          */}
+          {(emailAuthOpen || bridgeEmailOpen) && emailAuthFormCard}
           {!emailAuthOpen && !connectPickerOpen && (
           <button style={styles.secondaryButton} disabled={creatingWallet || isConnecting} onClick={connectExisting}>
             {isConnecting ? "Connecting..." : "Connect a wallet"}
@@ -2057,41 +2168,37 @@ function ConsumerAppInner() {
               <ExternalBridge
                 sessionAddress={walletAddress}
                 onBridgeCompleted={refreshActivity}
-                onRequestFlareWallet={() => {
-                  // Never silently replace an external session — confirm first.
-                  setConfirmFlareOpen(true);
-                }}
-                creatingFlareWallet={creatingFlareWallet}
+                onContinueWithEmail={startBridgeEmailOnboarding}
               />
-            ) : bridgeNeedsFlareWallet && !crossResult ? (
+            ) : (
+              <>
+            {bridgeReconnectHint && !crossResult && (
               <div style={styles.flareWalletCard}>
-                <p style={styles.flareWalletIcon}>👛</p>
-                <p style={styles.flareWalletTitle}>Bridging needs a FlareHQ wallet</p>
+                <p style={styles.flareWalletIcon}>✅</p>
+                <p style={styles.flareWalletTitle}>Your FlareHQ wallet is ready</p>
                 <p style={styles.flareWalletText}>
-                  You connected your own wallet — FlareHQ can&apos;t move funds from it.
-                  Your FlareHQ wallet lives on Arc, and bridging from another chain
-                  isn&apos;t currently available in Flow. Create a free FlareHQ wallet
-                  to hold and use funds on Arc.
-                  Your connected wallet keeps working everywhere else.
+                  Bridged USDC will land in your FlareHQ wallet on Arc
+                  {" "}{walletAddress.slice(0, 6)}…{walletAddress.slice(-4)}. Reconnect your own wallet to
+                  continue the bridge from the source chain — reconnecting links
+                  this FlareHQ wallet as the destination (server-verified).
                 </p>
                 <button
                   style={styles.submitButton}
-                  disabled={creatingFlareWallet}
                   onClick={() => {
-                    // Part 10: never silently replace an active external-wallet
-                    // session — confirm first.
-                    if ((walletType ?? '').toUpperCase() === 'EXTERNAL') {
-                      setConfirmFlareOpen(true);
-                    } else {
-                      createFlareHQWallet();
-                    }
+                    // The EXISTING wallet switch flow (picker + signature
+                    // challenge) — reconnecting the external wallet records
+                    // the bridge-destination link server-side and returns to
+                    // this Bridge view.
+                    openWalletSwitch();
                   }}
                 >
-                  {creatingFlareWallet ? "Creating your wallet..." : "Create a FlareHQ wallet"}
+                  Reconnect your wallet
                 </button>
+                {bridgeEmailNote && (
+                  <p style={{ margin: "8px 0 0", fontSize: 12, color: "#C0563A" }}>{bridgeEmailNote}</p>
+                )}
               </div>
-            ) : (
-              <>
+            )}
             {!crossResult && (
               <div style={styles.flareWalletCard}>
                 <p style={styles.flareWalletIcon}>🌉</p>
@@ -2511,43 +2618,25 @@ function ConsumerAppInner() {
         </div>
       )}
 
-      {/* ── FlareHQ-wallet confirmation (Part 10): external → managed is an
-          explicit session replacement, never a silent one. */}
-      {confirmFlareOpen && (
+      {/* ── Bridge → email onboarding overlay ──
+          INVARIANT: this is the ONLY wallet-creation entry from the Bridge
+          screen. It renders the SAME email-OTP form (emailAuthFormCard) used
+          on the onboarding screen — no second onboarding panel, no direct
+          wallet-creation call. The CIRCLE wallet is created/retrieved only
+          after OTP verification by /api/consumer/email-auth, and on success
+          the user returns to the Bridge view with the external wallet
+          re-verified (signature challenge) and the destination link recorded
+          server-side. */}
+      {bridgeEmailOpen && (
         <div
           style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
-          onClick={() => { if (!creatingFlareWallet) setConfirmFlareOpen(false); }}
+          onClick={cancelBridgeEmailOnboarding}
         >
           <div
-            style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 16, width: "100%", maxWidth: 440, boxShadow: "0 12px 40px rgba(0,0,0,0.25)", padding: 20 }}
+            style={{ background: "var(--flow-surface)", border: "1px solid var(--flow-border)", borderRadius: 16, width: "100%", maxWidth: 480, boxShadow: "0 12px 40px rgba(0,0,0,0.25)", padding: 20, maxHeight: "90vh", overflowY: "auto" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>Switch to a FlareHQ wallet?</h3>
-            <div style={{ fontSize: 13, color: "var(--flow-text-muted)", lineHeight: 1.55, display: "flex", flexDirection: "column" as const, gap: 8 }}>
-              <p style={{ margin: 0 }}>
-                A new FlareHQ-managed wallet session will become active so bridging can proceed.
-              </p>
-              <p style={{ margin: 0 }}>
-                Your current external wallet stays yours — reconnect it anytime with “Connect a wallet”.
-                Activity tied to your current wallet does not transfer to the new one.
-              </p>
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              <button
-                style={{ ...styles.secondaryButton, marginTop: 0, flex: 1 } as React.CSSProperties}
-                disabled={creatingFlareWallet}
-                onClick={() => setConfirmFlareOpen(false)}
-              >
-                Keep my wallet
-              </button>
-              <button
-                style={{ ...styles.submitButton, marginTop: 0, flex: 1 } as React.CSSProperties}
-                disabled={creatingFlareWallet}
-                onClick={() => { setConfirmFlareOpen(false); void createFlareHQWallet(); }}
-              >
-                {creatingFlareWallet ? "Creating…" : "Create FlareHQ wallet"}
-              </button>
-            </div>
+            {emailAuthFormCard}
           </div>
         </div>
       )}

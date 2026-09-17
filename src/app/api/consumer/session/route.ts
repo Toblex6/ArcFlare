@@ -22,8 +22,11 @@
 //   2. POST /api/consumer/session with { walletAddress, message, signature }
 //      -> viem verifyMessage against the nonce cookie, then a session JWT.
 //
-// Creating a brand-new Circle-managed wallet (empty body) is unchanged:
-// the address comes from Circle's own response, never from the client.
+// Creating a brand-new Circle-managed wallet (empty body) is unchanged for
+// callers WITHOUT an EXTERNAL session; a caller holding an EXTERNAL session
+// is refused (EMAIL_VERIFICATION_REQUIRED) — a FlareHQ wallet is never
+// provisioned from a connected external wallet without email verification.
+// The address comes from Circle's own response, never from the client.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
@@ -241,6 +244,40 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // ── Bridge-destination link (best-effort, never authoritative client
+      // input) ── If the browser was signed in as a FlareHQ CIRCLE wallet
+      // (e.g. the wallet this user just created through email verification)
+      // and this proven-controlled EXTERNAL wallet has no destination link
+      // yet, record the link so the EXTERNAL bridge resolves its destination
+      // server-side. Safety: the caller just proved ownership of `walletAddress`
+      // by signature, the link is written ONLY when unset (an existing link is
+      // never overwritten) and points at the CIRCLE row the same browser
+      // session already held — no client-supplied destination is ever trusted.
+      try {
+        const priorAddress = await resolveConsumerSession(req).catch(() => null);
+        if (priorAddress) {
+          const prior = await prisma.consumerAccount
+            .findUnique({ where: { walletAddress: priorAddress } })
+            .catch(() => null);
+          const priorWallet = resolveConsumerWallet(prior as any);
+          if (
+            prior &&
+            priorWallet?.mode === 'CIRCLE' &&
+            prior.id !== account.id &&
+            !(account as any)?.linkedCircleAddress
+          ) {
+            await prisma.consumerAccount
+              .update({
+                where: { id: account.id },
+                data: { linkedCircleAddress: prior.walletAddress },
+              })
+              .catch(() => {});
+          }
+        }
+      } catch {
+        // Linking must never block wallet connection.
+      }
+
       const response = await issueSession(account);
       response.cookies.delete(NONCE_COOKIE);
       return response;
@@ -248,13 +285,13 @@ export async function POST(req: NextRequest) {
 
     // ── Path B: create a brand new Circle-managed wallet ────────────────
     // The address comes from Circle's own response, never from the client.
-    // When the caller already holds an EXTERNAL session, the new CIRCLE
-    // wallet is recorded on that EXTERNAL row's linkedCircleAddress (kept
-    // only when unset — an existing link is never silently overwritten), so
-    // a later return to the external wallet can bridge INTO this FlareHQ
-    // wallet via the server-resolved destination. Fresh users (no session)
-    // simply get the new wallet + session.
-    let linkingExternalId: string | null = null;
+    // INVARIANT (wallet-creation onboarding): a FlareHQ CIRCLE wallet may
+    // NEVER be provisioned directly from a connected EXTERNAL wallet. The
+    // only supported creation path is Email → OTP → verified consumer
+    // identity → create/retrieve CIRCLE wallet (POST/PUT
+    // /api/consumer/email-auth). An EXTERNAL session asking Path B to
+    // provision therefore fails closed here — no Circle call, no link write,
+    // no session replacement.
     try {
       const priorAddress = await resolveConsumerSession(req).catch(() => null);
       if (priorAddress) {
@@ -262,13 +299,21 @@ export async function POST(req: NextRequest) {
           .findUnique({ where: { walletAddress: priorAddress } })
           .catch(() => null);
         const priorWallet = resolveConsumerWallet(prior as any);
-        if (priorWallet?.mode === 'EXTERNAL' && !(prior as any)?.linkedCircleAddress) {
-          linkingExternalId = (prior as any).id;
+        if (priorWallet?.mode === 'EXTERNAL') {
+          return NextResponse.json(
+            {
+              success: false,
+              code: 'EMAIL_VERIFICATION_REQUIRED',
+              error:
+                'Verify your email to create a FlareHQ wallet. From the bridge, use "Continue with email" — a wallet is never created directly from a connected external wallet.',
+            },
+            { status: 403 }
+          );
         }
       }
     } catch {
-      // Best-effort only — linking must never block wallet creation.
-      linkingExternalId = null;
+      // Best-effort only — the invariant check must never throw out of Path B
+      // for callers without a resolvable session.
     }
     const wallet = await createAccountWallet(`consumer_${Date.now()}`);
 
@@ -279,18 +324,6 @@ export async function POST(req: NextRequest) {
         circleWalletId: wallet.walletId,
       },
     });
-
-    if (linkingExternalId) {
-      // The new CIRCLE wallet is Arc-provisioned by construction
-      // (createAccountWallet pins the chain to the network config) — this
-      // records the destination link, nothing more.
-      await prisma.consumerAccount
-        .update({
-          where: { id: linkingExternalId },
-          data: { linkedCircleAddress: wallet.address },
-        })
-        .catch(() => {});
-    }
 
     return issueSession(account);
   } catch (error: any) {

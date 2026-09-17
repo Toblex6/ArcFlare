@@ -82,6 +82,17 @@ interface KitStep {
   txHash?: string;
 }
 
+// ── Development-safe stage diagnostics ───────────────────────────────────────
+// The observable A–L failure trail (source chain, external address, balance,
+// destination, intent, BridgeKit init, approval/burn hashes, attestation, Arc
+// mint, completion) as a single console.debug trail in non-production builds
+// only. Never rendered to the user, never sent anywhere, never in prod logs —
+// it exists so a real-browser failure can be pinned to its exact stage.
+const BRIDGE_DIAG_ENABLED = process.env.NODE_ENV !== 'production';
+function bridgeDiag(stage: string, data: unknown): void {
+  if (BRIDGE_DIAG_ENABLED) console.debug(`[external-bridge:diag] ${stage}`, data);
+}
+
 function stepOf(result: any, name: 'Approve' | 'Burn' | 'Mint'): KitStep | null {
   const steps: KitStep[] = Array.isArray(result?.steps) ? result.steps : [];
   return steps.find((s) => s?.name === name) ?? null;
@@ -92,16 +103,20 @@ export interface ExternalBridgeProps {
   sessionAddress: string;
   /** Refresh Recent Activity after a verified completion. */
   onBridgeCompleted: () => void;
-  /** Open the "create a FlareHQ wallet" confirmation (page owns it). */
-  onRequestFlareWallet: () => void;
-  creatingFlareWallet: boolean;
+  /**
+   * Enter the EXISTING email onboarding flow (OTP → verified consumer identity
+   * → FlareHQ CIRCLE wallet). INVARIANT: this bridge NEVER provisions a
+   * FlareHQ wallet directly — there is no wallet-creation call from here, and
+   * the CIRCLE wallet is created/retrieved only after email verification by
+   * /api/consumer/email-auth (the page owns the flow and returns to Bridge).
+   */
+  onContinueWithEmail: () => void;
 }
 
 export default function ExternalBridge({
   sessionAddress,
   onBridgeCompleted,
-  onRequestFlareWallet,
-  creatingFlareWallet,
+  onContinueWithEmail,
 }: ExternalBridgeProps) {
   const sources = useMemo(() => getBridgeSourceChains(), []);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? 'Arbitrum_Sepolia');
@@ -171,6 +186,7 @@ export default function ExternalBridge({
         if (cancelled) return;
         if (d?.success && d.destination) {
           setDestination(d.destination);
+          bridgeDiag('D. FlareHQ CIRCLE destination', d.destination);
         } else if (d?.code === 'CIRCLE_WALLET_UNBOUND') {
           setDestination(null);
           setDestUnbound(d.error ?? 'No FlareHQ wallet is linked yet.');
@@ -217,7 +233,14 @@ export default function ExternalBridge({
         args: [connectedAddress as `0x${string}`],
       })
       .then((v) => {
-        if (!cancelled) setBalanceUnits(v as bigint);
+        if (!cancelled) {
+          setBalanceUnits(v as bigint);
+          bridgeDiag('C. source USDC balance', {
+            chain: source.id,
+            address: connectedAddress,
+            baseUnits: (v as bigint).toString(),
+          });
+        }
       })
       .catch((e) => {
         console.error('[external-bridge] balance read failed:', e);
@@ -235,7 +258,14 @@ export default function ExternalBridge({
   const validationMsg = !validation.ok ? amountCopy(validation.error, source.label) : '';
 
   const formBlocked =
-    phase !== 'form' || !walletsMatch || !validation.ok || balanceLoading || destLoading;
+    phase !== 'form' ||
+    !walletsMatch ||
+    !validation.ok ||
+    balanceLoading ||
+    destLoading ||
+    // No linked destination: the wallet-creation path is email onboarding
+    // (the unbound card), never a spend that the server would reject.
+    (!!destUnbound && !destination);
 
   async function getProvider(): Promise<any> {
     try {
@@ -338,7 +368,7 @@ export default function ExternalBridge({
   ): Promise<void> {
     if (!burnTxHash) {
       throw new Error(
-        'Bridge could not be completed. Your wallet was not charged unless a transaction was confirmed.'
+        'Bridge transaction was not completed. No USDC left your wallet unless a transaction was confirmed.'
       );
     }
     setStageNote('Verifying the source transaction…');
@@ -346,6 +376,7 @@ export default function ExternalBridge({
       reference: intentReference,
       burnTxHash,
     });
+    bridgeDiag('I. verify response (server burn proof)', { ok: v?.success, code: v?.code, reason: v?.reason, error: v?.error });
     if (!v?.success) {
       throw new Error(v?.error ?? 'Bridge could not be completed.');
     }
@@ -361,6 +392,7 @@ export default function ExternalBridge({
       reference: intentReference,
       mintTxHash,
     });
+    bridgeDiag('K–L. complete response (server mint proof)', { ok: c?.success, code: c?.code, reason: c?.reason, error: c?.error });
     if (!c?.success) {
       // Distinguish retryable (mint not yet visible) from terminal.
       if (c?.code === 'MINT_NOT_VERIFIED' && (c?.reason === 'NOT_FOUND' || c?.reason === 'RPC_UNAVAILABLE')) {
@@ -374,9 +406,14 @@ export default function ExternalBridge({
       sourceLabel: c.sourceLabel ?? source.label,
       destination: c.destination,
       burnTxHash: stepOf(resumeRef.current?.result, 'Burn')?.txHash ?? burnTxHash,
-      mintTxHash,
+      mintTxHash: mintTxHash,
       sourceExplorerUrl: c.sourceExplorerUrl ?? null,
       destinationExplorerUrl: c.destinationExplorerUrl ?? null,
+    });
+    bridgeDiag('L. completion (server-verified)', {
+      destination: c.destination,
+      actual: c.actualAmountDisplay ?? c.actualAmount ?? null,
+      mintTxHash,
     });
     setPhase('receipt');
     onBridgeCompleted();
@@ -406,6 +443,7 @@ export default function ExternalBridge({
       },
       amount: amount.trim(),
     });
+    bridgeDiag('G–I. kit result (approval/burn hashes + step states)', result);
     resumeRef.current = { result, intentReference };
     markStepsFromResult(result);
 
@@ -418,6 +456,12 @@ export default function ExternalBridge({
           new Error('Bridge could not be completed. Your burn was submitted — resume below to finish the mint (no new transaction will be created).'),
           { resumeOnly: true }
         );
+      }
+      if (burn?.state === 'error') {
+        // The burn step itself failed (e.g. rejected at the burn prompt):
+        // per the bridge lifecycle this is a failed burn — never restart it
+        // automatically; the intent stays PENDING for safe retry.
+        throw new Error('Bridge transaction was not completed.');
       }
       throw new Error(friendlyBridgeError(result?.error ?? result, { sourceLabel: source.label }));
     }
@@ -448,6 +492,7 @@ export default function ExternalBridge({
     setStage('mint', 'done');
     const burnHash = stepOf(settled, 'Burn')?.txHash;
     const mintHash = stepOf(settled, 'Mint')?.txHash;
+    bridgeDiag('J–K. attestation + Arc mint hash', { burnHash, mintHash });
     await verifyAndComplete(intentReference, burnHash, mintHash);
   }
 
@@ -481,6 +526,8 @@ export default function ExternalBridge({
     setPhase('working');
     setStages([]);
     setReceipt(null);
+    bridgeDiag('A. source chain selected', source.id);
+    bridgeDiag('B. connected EXTERNAL address', connectedAddress);
 
     try {
       await ensureOnSourceChain();
@@ -511,6 +558,11 @@ export default function ExternalBridge({
         throw new Error(intent?.error ?? 'Could not start the bridge. Please try again.');
       }
       const intentReference = intent.reference as string;
+      bridgeDiag('E. bridge intent created', {
+        reference: intentReference,
+        destination: intent.destination,
+        amount: intent.amount,
+      });
       // Server echo consistency: the intent must name THIS wallet as source
       // and the previewed destination (never a substituted address).
       if (
@@ -534,6 +586,11 @@ export default function ExternalBridge({
       // (source adapter + ForwarderDestination + useForwarder) is the
       // documented browser-wallet pattern.
       const kit: any = new (BridgeKit as any)();
+      bridgeDiag('F. BridgeKit initialized', {
+        chain: source.id,
+        chainId: source.chainId,
+        usdc: source.usdcAddress,
+      });
 
       await runBridgeFlow(intentReference, kit, adapter);
     } catch (e: any) {
@@ -749,15 +806,23 @@ export default function ExternalBridge({
             )}
           </div>
 
-          {destUnbound && !destination && (
+          {phase === 'form' && destUnbound && !destination && (
             <div style={styles.unboundCard}>
               <p style={styles.unboundText}>
-                Bridged funds need a FlareHQ wallet on Arc to land in. Create your free FlareHQ
-                wallet below — you&apos;ll switch to it for a moment, then switch back to this
-                wallet to bridge. Your linked FlareHQ wallet stays the destination.
+                Create your free FlareHQ wallet with email to receive bridged funds. Use an email
+                that is not already tied to this wallet.
               </p>
-              <button style={styles.submitButton} disabled={creatingFlareWallet} onClick={onRequestFlareWallet}>
-                {creatingFlareWallet ? 'Creating your wallet…' : 'Create a FlareHQ wallet'}
+              <button
+                style={styles.submitButton}
+                onClick={() => {
+                  // Enter the EXISTING email onboarding flow (OTP → verified
+                  // consumer identity → FlareHQ CIRCLE wallet). This bridge
+                  // never provisions a wallet itself — the page owns the flow
+                  // and returns to Bridge when it completes.
+                  onContinueWithEmail();
+                }}
+              >
+                Continue with email
               </button>
             </div>
           )}
