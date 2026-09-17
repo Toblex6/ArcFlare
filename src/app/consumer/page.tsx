@@ -25,6 +25,7 @@ import { useSecurePinDialog } from "@/components/SecurePinDialog";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { explorerTxUrl } from "@/lib/config/network";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
+import ExternalBridge from "@/components/bridge/ExternalBridge";
 import { signingModelForWallet } from "@/lib/wallet/signingModel";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover" | "swap";
@@ -2037,7 +2038,9 @@ function ConsumerAppInner() {
           <section style={styles.flowCard}>
             <h2 style={styles.flowTitle}>Bridge to Arc</h2>
             <p style={{ color: "var(--flow-text-faint)", fontSize: "clamp(13px, 1.2vw, 15px)", marginBottom: 20 }}>
-              Your FlareHQ wallet is currently on Arc.
+              {walletType === "EXTERNAL"
+                ? "Bring USDC from another chain to your FlareHQ wallet."
+                : "Your FlareHQ wallet is on Arc."}
             </p>
             <div style={styles.flowLine}>
               <span style={styles.flowDot} />
@@ -2045,14 +2048,22 @@ function ConsumerAppInner() {
               <span style={styles.flowDot} />
             </div>
 
-            {/* Bridge posture: the FlareHQ wallet is provisioned on Arc and
-                the backend deterministically refuses non-Arc sources for it
-                (BRIDGE_SOURCE_UNSUPPORTED), while connected wallets cannot be
-                bridged from automatically (EXTERNAL_WALLET). Flow therefore
-                offers no source-chain picker here — only the honest Arc
-                position plus the fund-on-Arc alternative. Destination stays
-                Arc; no multi-chain destination selection exists. */}
-            {(walletType === "EXTERNAL" || bridgeNeedsFlareWallet) && !crossResult ? (
+            {/* Bridge posture: CIRCLE wallets are provisioned on Arc only
+                (Arc funding UX below — no source-chain balances are
+                pretended). EXTERNAL wallets bridge cross-chain through the
+                browser-signed BridgeKit flow (source selector + real
+                source-chain balances + server-resolved Arc destination). */}
+            {walletType === "EXTERNAL" && !crossResult ? (
+              <ExternalBridge
+                sessionAddress={walletAddress}
+                onBridgeCompleted={refreshActivity}
+                onRequestFlareWallet={() => {
+                  // Never silently replace an external session — confirm first.
+                  setConfirmFlareOpen(true);
+                }}
+                creatingFlareWallet={creatingFlareWallet}
+              />
+            ) : bridgeNeedsFlareWallet && !crossResult ? (
               <div style={styles.flareWalletCard}>
                 <p style={styles.flareWalletIcon}>👛</p>
                 <p style={styles.flareWalletTitle}>Bridging needs a FlareHQ wallet</p>
@@ -2086,9 +2097,9 @@ function ConsumerAppInner() {
                 <p style={styles.flareWalletIcon}>🌉</p>
                 <p style={styles.flareWalletTitle}>Fund your wallet on Arc</p>
                 <p style={styles.flareWalletText}>
-                  Bridging from another chain requires an external wallet with funds
-                  on that chain — that flow isn&apos;t currently available in Flow.
-                  To get funds in, send USDC directly to your FlareHQ wallet on Arc.
+                  Your FlareHQ wallet is on Arc. To get funds in, send USDC directly
+                  to your FlareHQ wallet on Arc. Funds from another chain can be
+                  bridged using an external wallet.
                 </p>
                 <div style={styles.linkRow}>
                   <div style={styles.linkBox}>{walletAddress}</div>

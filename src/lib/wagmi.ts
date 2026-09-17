@@ -3,6 +3,11 @@ import { createConfig, http } from 'wagmi';
 import { injected, walletConnect } from 'wagmi/connectors';
 
 import { defineChain } from 'viem';
+// Testnet source chains for the EXTERNAL Bridge flow (balance reads + wallet
+// switching). Imported from viem's own chain registry — the SUPPORTED SET
+// (which of these the Bridge UI offers) lives in the canonical
+// src/lib/bridge/sourceChains.ts, never in this connector list.
+import { arbitrumSepolia, baseSepolia, optimismSepolia, sepolia, polygonAmoy } from 'viem/chains';
 
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
 
@@ -71,7 +76,12 @@ if (typeof window !== 'undefined' && !walletConnectProjectId) {
 const isBrowser = typeof window !== 'undefined';
 
 export const config = createConfig({
-  chains: [arcTestnet],
+  // Arc is first (default chain for Swap/checkout/Send). The Sepolia/Amoy
+  // entries exist so EXTERNAL Bridge wallets can switch to a supported
+  // source chain and read USDC balances there — they do NOT make those
+  // chains payment chains. The Bridge UI only offers the canonical
+  // supported set from src/lib/bridge/sourceChains.ts.
+  chains: [arcTestnet, arbitrumSepolia, baseSepolia, optimismSepolia, sepolia, polygonAmoy],
 
   connectors: [
     // EIP-6963 multi-wallet discovery enabled by default in wagmi 3.x's
@@ -103,6 +113,11 @@ export const config = createConfig({
 
   transports: {
     [arcTestnet.id]: http(),
+    [arbitrumSepolia.id]: http(),
+    [baseSepolia.id]: http(),
+    [optimismSepolia.id]: http(),
+    [sepolia.id]: http(),
+    [polygonAmoy.id]: http(),
   },
 
   // Tells wagmi itself to be careful about browser-only APIs (localStorage

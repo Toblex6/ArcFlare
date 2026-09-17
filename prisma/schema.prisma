@@ -282,6 +282,13 @@ model ConsumerAccount {
   // any of them into this model.
   walletType       String   @default("CIRCLE") // "CIRCLE" | "EXTERNAL"
   circleWalletId   String? // Circle developer-controlled wallet id (CIRCLE only; the server signs with it)
+  // Explicit EXTERNAL bridge-destination link (EXTERNAL rows only): the
+  // FlareHQ CIRCLE walletAddress on Arc that this wallet's external bridges
+  // pay. Set ONLY by the server when it provisions that CIRCLE wallet from
+  // the EXTERNAL session (POST /api/consumer/flare-wallet) — never
+  // browser-writable, never a wallet-set binding (this is NOT walletSetId:
+  // no wallet-set id is stored anywhere in the consumer model).
+  linkedCircleAddress String?
   email            String?  @unique // verified sign-in + recovery address (see emailVerifiedAt)
   emailVerifiedAt  DateTime? // set when the address is proven via OTP (attach/change/recover); recovery requires non-null
   pinHash          String? // bcrypt hash of the 4–6 digit step-up PIN; null = step-up not enrolled (bootstrap grace)
@@ -768,6 +775,37 @@ model FlowSwapIntent {
   @@index([ownerWallet])
   @@index([status])
   @@map("flow_swap_intents")
+}
+
+// ── EXTERNAL Bridge intents (browser-signed CCTP via BridgeKit) ─────────────
+// Self-custody record for EXTERNAL-wallet USDC bridges into the consumer's
+// own FlareHQ CIRCLE wallet on Arc. The server never signs or broadcasts
+// here: it issues the intent (server-resolved destination), then verifies
+// the browser-submitted burn/mint transactions against on-chain receipts
+// before advancing state. Only COMPLETED intents appear in activity.
+// Statuses: PENDING (intent issued) | BURN_CONFIRMED (source burn verified)
+// | COMPLETED (destination mint verified) | FAILED (terminal, see error).
+
+model FlowBridgeIntent {
+  id              String   @id @default(uuid())
+  sourceWallet    String // EXTERNAL session wallet that signed the burn (== owner)
+  destination     String // server-resolved CIRCLE wallet on Arc (never browser-supplied)
+  sourceChain     String // BridgeKit BridgeChain id, e.g. 'Arbitrum_Sepolia'
+  amount          String // exact input, canonical 6-dec base units (bigint string)
+  burnTxHash      String?  @unique // source-chain burn tx (set on BURN_CONFIRMED)
+  mintTxHash      String?  @unique // Arc destination mint tx (set on COMPLETED)
+  actualAmount    String? // measured destination credit, canonical units (set on COMPLETED)
+  destinationBound Boolean @default(false) // true when the burn receipt's DepositForBurn provably names destination+domain
+  status          String   @default("PENDING") // PENDING | BURN_CONFIRMED | COMPLETED | FAILED
+  error           String? // terminal failure detail (FAILED only)
+  expiresAt       DateTime // intents expire uncompleted; expired intents are never completable
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([sourceWallet])
+  @@index([destination])
+  @@index([status])
+  @@map("flow_bridge_intents")
 }
 
 // ── Build 3: Economic Ledger + Treasury ────────────────────────────────────

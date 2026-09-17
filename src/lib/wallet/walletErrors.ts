@@ -148,3 +148,101 @@ export function friendlyWalletError(err: unknown): string {
 export function isUserRejection(err: unknown): boolean {
   return mapWalletError(err).kind === 'USER_REJECTED';
 }
+
+// ─── Bridge-specific copy ────────────────────────────────────────────────────
+// Same contract as mapWalletError (raw error logged for debugging, friendly
+// copy returned), but with the EXTERNAL Bridge lifecycle wording: source
+// chain names are parameterized because the bridge switches AWAY from Arc.
+// No component may render raw viem/provider/BridgeKit text.
+
+export type BridgeErrorKind =
+  | 'WRONG_CHAIN'
+  | 'USER_REJECTED'
+  | 'INSUFFICIENT_BALANCE'
+  | 'UNSUPPORTED_SOURCE'
+  | 'WALLET_DISCONNECTED'
+  | 'BRIDGE_FAILED';
+
+export function mapBridgeError(
+  err: unknown,
+  opts?: { sourceLabel?: string }
+): { kind: BridgeErrorKind; message: string } {
+  const raw = String((err as any)?.shortMessage ?? (err as any)?.message ?? err ?? '');
+  const lower = raw.toLowerCase();
+  if (raw) console.error('[bridge-error]', stripVersions(raw), err);
+  const label = opts?.sourceLabel ?? 'the source chain';
+
+  // 1. User cancelled a wallet confirmation (approve or burn).
+  if (
+    lower.includes('user rejected') ||
+    lower.includes('user denied') ||
+    lower.includes('rejected the request') ||
+    lower.includes('request rejected') ||
+    lower.includes('user cancelled') ||
+    lower.includes('action rejected')
+  ) {
+    return { kind: 'USER_REJECTED', message: 'Bridge approval was cancelled.' };
+  }
+
+  // 2. Wallet is on the wrong chain / chain changed mid-flow.
+  if (
+    lower.includes('does not match the target chain') ||
+    lower.includes('current chain of the wallet') ||
+    lower.includes('target chain for the transaction') ||
+    lower.includes('chain mismatch') ||
+    lower.includes('chain id mismatch') ||
+    lower.includes('wrong chain') ||
+    lower.includes('switch chain') ||
+    lower.includes('switch your wallet')
+  ) {
+    return { kind: 'WRONG_CHAIN', message: `Switch your wallet to ${label} to continue.` };
+  }
+
+  // 3. Not enough USDC (or gas) for the bridge.
+  if (
+    lower.includes('insufficient') ||
+    lower.includes('outoffunds') ||
+    lower.includes('out of funds') ||
+    lower.includes('gas required exceeds allowance') ||
+    lower.includes('not enough usdc') ||
+    lower.includes('exceeds balance')
+  ) {
+    return {
+      kind: 'INSUFFICIENT_BALANCE',
+      message: `Your connected wallet does not have enough USDC on ${label}.`,
+    };
+  }
+
+  // 4. Unsupported source chain.
+  if (
+    lower.includes('unsupported source') ||
+    lower.includes('not currently supported') ||
+    lower.includes('unsupported chain') ||
+    lower.includes('unsupported network')
+  ) {
+    return { kind: 'UNSUPPORTED_SOURCE', message: 'This source chain is not currently supported.' };
+  }
+
+  // 5. Wallet disconnected / no provider.
+  if (
+    lower.includes('disconnected') ||
+    lower.includes('provider not found') ||
+    lower.includes('no provider') ||
+    lower.includes('no ethereum provider') ||
+    lower.includes('connector not found') ||
+    lower.includes("couldn't find a wallet")
+  ) {
+    return { kind: 'WALLET_DISCONNECTED', message: 'Reconnect your wallet to continue.' };
+  }
+
+  // 6. BridgeKit/attestation/relayer failure — never claim funds moved, never
+  // claim they didn't when a transaction may have confirmed.
+  return {
+    kind: 'BRIDGE_FAILED',
+    message: 'Bridge could not be completed. Your wallet was not charged unless a transaction was confirmed.',
+  };
+}
+
+export function friendlyBridgeError(err: unknown, opts?: { sourceLabel?: string }): string {
+  return mapBridgeError(err, opts).message;
+}

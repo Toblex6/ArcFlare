@@ -94,7 +94,41 @@ export async function GET(req: NextRequest) {
             outputAmountDisplay: toDisplay(s.actualOutputAmount ?? s.minOutputSwap),
         }));
 
-        const merged = [...activity, ...swapActivity].sort(
+        // ── EXTERNAL Bridge history (additive read-model, PaymentLog untouched) ──
+        // FlowBridgeIntent is a dedicated self-custody bridge record — never
+        // a payment ledger row. Only COMPLETED intents appear here (the mint
+        // was proven on Arc by POST /api/cctp/transfer/external/complete),
+        // with the server-verified actual credit and the Arc mint explorer
+        // link. The 'bridge:' reference prefix keeps keys distinct from
+        // payment references (no duplicate entries).
+        const bridges = await (prisma as any).flowBridgeIntent.findMany({
+            where: { sourceWallet: walletAddress, status: "COMPLETED" },
+            orderBy: { updatedAt: "desc" },
+            take: 20,
+        }).catch(() => []);
+        const bridgeActivity = (bridges as any[]).map((b) => ({
+            kind: "bridge",
+            reference: `bridge:${b.id}`,
+            amount: Number(BigInt(b.actualAmount ?? b.amount ?? "0")) / 1e6,
+            currency: "USDC",
+            status: "COMPLETED",
+            rawStatus: "COMPLETED",
+            displayStatus: "COMPLETED",
+            isExpired: false,
+            expiresAt: null,
+            timestamp: b.updatedAt,
+            direction: "out",
+            counterparty: b.destination,
+            explorerUrl: b.mintTxHash ? `${explorerTxUrl(b.mintTxHash)}` : null,
+            token: null,
+            inputSymbol: "USDC",
+            outputSymbol: "USDC",
+            inputAmountDisplay: toDisplay(b.amount),
+            outputAmountDisplay: toDisplay(b.actualAmount ?? b.amount),
+            sourceChain: b.sourceChain,
+        }));
+
+        const merged = [...activity, ...swapActivity, ...bridgeActivity].sort(
             (a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         ).slice(0, 20);
 

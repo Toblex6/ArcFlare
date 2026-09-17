@@ -35,6 +35,7 @@ import { createAccountWallet } from '@/src/lib/circle/client';
 import { requireJwtSecret, tryJwtSecret } from '@/src/lib/auth/secrets';
 import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
+import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 
 const NONCE_COOKIE = 'consumer_connect_nonce';
 
@@ -246,6 +247,29 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Path B: create a brand new Circle-managed wallet ────────────────
+    // The address comes from Circle's own response, never from the client.
+    // When the caller already holds an EXTERNAL session, the new CIRCLE
+    // wallet is recorded on that EXTERNAL row's linkedCircleAddress (kept
+    // only when unset — an existing link is never silently overwritten), so
+    // a later return to the external wallet can bridge INTO this FlareHQ
+    // wallet via the server-resolved destination. Fresh users (no session)
+    // simply get the new wallet + session.
+    let linkingExternalId: string | null = null;
+    try {
+      const priorAddress = await resolveConsumerSession(req).catch(() => null);
+      if (priorAddress) {
+        const prior = await prisma.consumerAccount
+          .findUnique({ where: { walletAddress: priorAddress } })
+          .catch(() => null);
+        const priorWallet = resolveConsumerWallet(prior as any);
+        if (priorWallet?.mode === 'EXTERNAL' && !(prior as any)?.linkedCircleAddress) {
+          linkingExternalId = (prior as any).id;
+        }
+      }
+    } catch {
+      // Best-effort only — linking must never block wallet creation.
+      linkingExternalId = null;
+    }
     const wallet = await createAccountWallet(`consumer_${Date.now()}`);
 
     const account = await prisma.consumerAccount.create({
@@ -255,6 +279,18 @@ export async function POST(req: NextRequest) {
         circleWalletId: wallet.walletId,
       },
     });
+
+    if (linkingExternalId) {
+      // The new CIRCLE wallet is Arc-provisioned by construction
+      // (createAccountWallet pins the chain to the network config) — this
+      // records the destination link, nothing more.
+      await prisma.consumerAccount
+        .update({
+          where: { id: linkingExternalId },
+          data: { linkedCircleAddress: wallet.address },
+        })
+        .catch(() => {});
+    }
 
     return issueSession(account);
   } catch (error: any) {

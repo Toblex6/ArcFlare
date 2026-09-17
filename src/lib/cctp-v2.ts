@@ -33,6 +33,11 @@ import { BridgeKit, BridgeChain } from '@circle-fin/bridge-kit';
 import { createCircleWalletsAdapter } from '@circle-fin/adapter-circle-wallets';
 import type { BridgeResult } from '@circle-fin/bridge-kit';
 import { getArcNetworkName, getNetworkConfig } from '@/lib/config/network';
+// Canonical EXTERNAL Bridge source table (single authority for the supported
+// set, labels, and BridgeKit ids). The CIRCLE server-signed path below keeps
+// its own { id, label, testnet, circleBlockchain } view derived from it —
+// the values are mapped, never re-declared.
+import { getBridgeSourceChains } from '@/lib/bridge/sourceChains';
 
 // ── BridgeKit compatibility guard ────────────────────────────────────────────
 // BridgeChain is the CANONICAL source of bridging-supported chains for the
@@ -55,20 +60,25 @@ function assertBridgeChainMember(value: string, envVar: string): void {
 }
 
 // ── Supported source chains (where a user can bridge USDC from) ──
-// `id` matches BridgeChain enum members (what Bridge Kit expects).
-// `circleBlockchain` is Circle's own Developer-Controlled Wallets
-// identifier for the same chain (a different naming scheme) — needed to
-// provision a consumer's wallet there before they can bridge from it.
+// Derived from the canonical EXTERNAL Bridge table
+// (src/lib/bridge/sourceChains.ts) — the supported SET, labels, and
+// BridgeKit ids live there. `circleBlockchain` (Circle's own
+// Developer-Controlled Wallets identifier for the same chain) is carried
+// along because the CIRCLE server-signed path keys source provisioning off
+// it; `testnet` marks the Sepolia/Amoy TESTNET set.
 //
 // TESTNET set (Sepolia/Amoy). Mainnet overrides come from
 // CCTP_MAINNET_SOURCES_JSON — see getCctpSources().
-const TESTNET_SOURCE_CHAINS = [
-  { id: 'Arbitrum_Sepolia', label: 'Arbitrum Sepolia', testnet: true, circleBlockchain: 'ARB-SEPOLIA' },
-  { id: 'Base_Sepolia', label: 'Base Sepolia', testnet: true, circleBlockchain: 'BASE-SEPOLIA' },
-  { id: 'Optimism_Sepolia', label: 'Optimism Sepolia', testnet: true, circleBlockchain: 'OP-SEPOLIA' },
-  { id: 'Ethereum_Sepolia', label: 'Ethereum Sepolia', testnet: true, circleBlockchain: 'ETH-SEPOLIA' },
-  { id: 'Polygon_Amoy_Testnet', label: 'Polygon Amoy', testnet: true, circleBlockchain: 'MATIC-AMOY' },
-] as const;
+function buildTestnetSourceChains() {
+  return getBridgeSourceChains().map((s) => ({
+    id: s.id,
+    label: s.label,
+    testnet: true as const,
+    circleBlockchain: s.circleBlockchain,
+  }));
+}
+
+const TESTNET_SOURCE_CHAINS = buildTestnetSourceChains();
 
 export interface CctpSourceChain {
   id: string;
