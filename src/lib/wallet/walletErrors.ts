@@ -100,6 +100,25 @@ export function mapWalletError(err: unknown): { kind: WalletErrorKind; message: 
     };
   }
 
+  // 5b. Wallet on the wrong chain (viem chain-mismatch, e.g. "The current
+  // chain of the wallet (id: 42161) does not match the target chain for the
+  // transaction"). Every transaction-building surface must switch to Arc
+  // Testnet BEFORE sending; this mapping is the safety net for a chain
+  // change between the switch and the send. The raw chain-id text is never
+  // surfaced — the user gets the same switch prompt as the proactive path.
+  if (
+    lower.includes('does not match the target chain') ||
+    lower.includes('current chain of the wallet') ||
+    lower.includes('target chain for the transaction') ||
+    lower.includes('chain mismatch') ||
+    lower.includes('chain id mismatch')
+  ) {
+    return {
+      kind: 'UNSUPPORTED_NETWORK',
+      message: 'Please switch your wallet to Arc Testnet to continue.',
+    };
+  }
+
   // 6. Not enough funds / gas allowance to complete the send. Note: a funds
   // failure can also surface AFTER a broadcast (the chain reverted the tx),
   // so we must NOT claim "no changes were made" here.

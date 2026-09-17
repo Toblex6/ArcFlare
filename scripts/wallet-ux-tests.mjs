@@ -282,6 +282,77 @@ ok('dedupe keys by id+type+name when uid missing', (() => {
     ok('wagmi.ts metadata keeps window.location.origin behavior', src.includes('window.location.origin'));
     ok('wagmi.ts warns explicitly when the project ID is missing', src.includes('NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not set'));
   }
+
+  // --- Prompt 8: chain-mismatch safety net (raw viem text never surfaces) ---
+  {
+    const RAW_MISMATCH = 'The current chain of the wallet (id: 42161) does not match the target chain for the transaction (id: 5042002 – Arc Testnet).';
+    const mapped = mapWalletError(RAW_MISMATCH);
+    ok('viem chain-mismatch -> UNSUPPORTED_NETWORK (never raw)', mapped.kind === 'UNSUPPORTED_NETWORK', `got ${mapped.kind}`);
+    ok('viem chain-mismatch -> Arc Testnet switch copy', mapped.message === 'Please switch your wallet to Arc Testnet to continue.', `got "${mapped.message}"`);
+    ok('chain-mismatch copy leaks no chain ids or package names', !/42161|5042002|viem|wagmi/i.test(mapped.message));
+    const { friendlySwapWalletError } = await import('../src/components/swap/swapCopy.ts');
+    const swapCopy = friendlySwapWalletError(new Error(RAW_MISMATCH));
+    ok('swap wallet error maps chain-mismatch to switch copy', swapCopy === 'Please switch your wallet to Arc Testnet to continue.', `got "${swapCopy}"`);
+    const rej = await ensureArcNetwork({ chainId: 1, switchChainAsync: async () => { throw new Error('User rejected the request.'); } });
+    ok('switch rejection -> friendly copy, no raw chain text', rej.ok === false && /cancelled|try again/i.test(rej.message) && !/42161|5042002/i.test(rej.message));
+  }
+
+  // --- Prompt 8 §5: "Browser Wallet false timeout" isolation check ---
+  // wagmi v3's injected connector throws ProviderNotFoundError immediately
+  // when no provider exists — the mapper must resolve that to the immediate
+  // WALLET_NOT_FOUND copy, never a 45s timeout hang. (Proves the false
+  // timeout is not reproducible at this layer independently of relay state.)
+  {
+    const mapped = mapWalletError(Object.assign(new Error('Provider not found.'), { name: 'ProviderNotFoundError' }));
+    ok('missing injected provider -> immediate WALLET_NOT_FOUND (no timeout path)', mapped.kind === 'WALLET_NOT_FOUND', `got ${mapped.kind}`);
+    ok('missing-provider copy steers to install/WalletConnect', /couldn't find a wallet/i.test(mapped.message));
+  }
+
+  // --- Prompt 8 static proofs: panel scoping, chain enforcement, picker ---
+  {
+    const { readFileSync: readSrc } = await import('node:fs');
+    const { fileURLToPath: toPath } = await import('node:url');
+    const herePath = toPath(import.meta.url);
+    const srcUrl = (p) => new URL(p, `file://${herePath.replaceAll('\\', '/')}`);
+    const consumer = readSrc(srcUrl('../src/app/consumer/page.tsx'), 'utf8');
+    const swap = readSrc(srcUrl('../src/components/swap/FlowSwapView.tsx'), 'utf8');
+    const pending = readSrc(srcUrl('../src/components/PendingSignaturesPanel.tsx'), 'utf8');
+    const logo = readSrc(srcUrl('../src/components/ConnectorLogo.tsx'), 'utf8');
+
+    // §1: recovery-email + PIN rows render for CIRCLE wallets only
+    ok('security panel gates recovery/PIN rows on CIRCLE walletType', /showCircleSecurityRows\s*=\s*\(walletType \?\? ""\)\.toUpperCase\(\) === "CIRCLE"/.test(consumer));
+    ok('security rows render only behind the CIRCLE gate', /\{showCircleSecurityRows && \(\s*<>\s*<div style=\{styles\.securityRow\}>/.test(consumer));
+    ok('EXTERNAL wallets get a self-custody line instead of recovery/PIN', consumer.includes('Self-custody · recovery and approvals live in your wallet app'));
+    ok('no unconditional legacy security panel remains', !/legacySecurityPanel/.test(consumer));
+    ok('recovery/PIN rows sit inside the CIRCLE gate, self-custody line outside', (() => {
+      const idxGate = consumer.indexOf('{showCircleSecurityRows && (');
+      const idxRecovery = consumer.indexOf('Add email recovery');
+      const idxPin = consumer.indexOf('Set payment PIN');
+      const idxSelfCustody = consumer.indexOf('Self-custody · recovery');
+      return idxGate !== -1 && idxRecovery > idxGate && idxPin > idxGate && idxSelfCustody !== -1 && idxSelfCustody < idxGate;
+    })());
+
+    // §2: chain enforcement at every connected-wallet tx site
+    const confirmDisabledBlock = (swap.match(/const confirmDisabled =[\s\S]*?;/) ?? [''])[0];
+    ok('swap Confirm NOT blocked on wrong network (auto-switch on tap)', confirmDisabledBlock.length > 0 && !confirmDisabledBlock.includes('wrongNetwork'), confirmDisabledBlock.slice(0, 160));
+    ok('swap switches chain BEFORE any tx send', (() => {
+      const hcIdx = swap.indexOf('const handleConfirm');
+      const ensureIdx = swap.indexOf('await ensureArcNetwork', hcIdx);
+      const sendIdx = swap.indexOf('await sendAndMine', hcIdx);
+      return hcIdx !== -1 && ensureIdx !== -1 && sendIdx !== -1 && ensureIdx < sendIdx;
+    })());
+    ok('swap shows a Switch-to-Arc step while switching', swap.includes("markStep('network'") && swap.includes("label: 'Switch to Arc Testnet'"));
+    ok('pending-signatures panel proactively switches (ensureArcNetwork)', pending.includes('ensureArcNetwork') && pending.includes('switchChainAsync'));
+    ok('pending-signatures panel no longer errors without attempting a switch', !pending.includes('Switch networks and try again'));
+
+    // §3: picker UX (logos + mutual exclusivity; no-wallet message untouched)
+    ok('onboarding + switch pickers render EIP-6963 wallet logos', consumer.includes('<ConnectorLogo c={c} />'));
+    ok('swap mismatch picker renders wallet logos', swap.includes('<ConnectorLogo c={c} />'));
+    ok('connector logo renders the announced icon as-is', logo.includes('.icon') && logo.includes('<img'));
+    ok('connector logo stays text-only when no icon is announced', logo.includes('return null'));
+    ok('email UI and connect UI mutually exclusive on entry screen', consumer.includes('{!connectPickerOpen && (!emailAuthOpen ? (') && consumer.includes('{!emailAuthOpen && !connectPickerOpen && (') && consumer.includes('{connectPickerOpen && !emailAuthOpen && ('));
+    ok('no-wallet message and its trigger condition unchanged', consumer.includes('No wallet found') && consumer.includes('have a browser wallet available right now') && /if \(pickers\.length === 0\)/.test(consumer));
+  }
 } finally {
   console.error = origConsoleError;
 }

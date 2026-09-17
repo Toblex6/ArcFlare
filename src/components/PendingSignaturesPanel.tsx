@@ -15,7 +15,8 @@
 // "Sign & Approve" — only "Approve & broadcast transaction in your wallet".
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAccount, useChainId, useWriteContract } from 'wagmi';
+import { useAccount, useChainId, useSwitchChain, useWriteContract } from 'wagmi';
+import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 
 interface TransactionIntent {
@@ -76,8 +77,9 @@ function coerceArgs(args: unknown[]): unknown[] {
 }
 
 export default function PendingSignaturesPanel() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector: activeConnector } = useAccount();
   const { writeContractAsync, isPending: isBroadcasting } = useWriteContract();
+  const { switchChainAsync } = useSwitchChain();
   const chainId = useChainId();
 
   const [requests, setRequests] = useState<SignRequest[]>([]);
@@ -117,12 +119,31 @@ export default function PendingSignaturesPanel() {
       setError(`Your connected wallet (${address}) is not the wallet this action is bound to (${intent.from}). Connect the correct wallet.`);
       return;
     }
+    // Chain enforcement before building the transaction: when the wallet is
+    // on the wrong chain, proactively request the switch to the intent's
+    // chain (Arc Testnet) and — on success — fall through to the broadcast
+    // automatically with no manual retry. A rejected switch surfaces
+    // friendly copy (never raw chain-id text) and broadcasts nothing.
     if (chainId !== intent.chainId) {
-      setError(`This action must be broadcast on Arc Testnet (chain ${intent.chainId}). Switch networks and try again.`);
-      return;
+      setBroadcastId(req.id);
+      setError('Switching your wallet to Arc Testnet…');
+      const getProvider = async () => {
+        try {
+          return await (activeConnector as unknown as { getProvider?: () => Promise<unknown> })?.getProvider?.();
+        } catch {
+          return null;
+        }
+      };
+      const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider });
+      if (!net.ok) {
+        setError(net.message);
+        setBroadcastId(null);
+        return;
+      }
+    } else {
+      setBroadcastId(req.id);
+      setError(null);
     }
-    setBroadcastId(req.id);
-    setError(null);
     // Full server payload stays out of the UI — developer console only.
     console.debug('[PendingSignaturesPanel] broadcasting request', req.id, req.payload);
     try {

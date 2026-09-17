@@ -61,6 +61,8 @@ export interface GuardedConnector {
   id?: string;
   type?: string;
   name?: string;
+  /** EIP-6963 announced wallet icon (wagmi v3 exposes it; may be absent). */
+  icon?: string;
 }
 
 // ---------------------------------------------------------------------------

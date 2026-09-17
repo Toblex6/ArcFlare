@@ -22,6 +22,7 @@ import {
   getAppropriateAction,
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
+import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { explorerTxUrl } from "@/lib/config/network";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
 import { signingModelForWallet } from "@/lib/wallet/signingModel";
@@ -226,12 +227,14 @@ function ConsumerAppInner() {
     maskedEmail: string | null;
     hasPin: boolean;
   } | null>(null);
-  // Recovery-email + payment-PIN rows apply to every wallet mode: the
-  // FlareHQ wallet uses them for recovery and step-up authorization, and
-  // connected wallets keep the same panel so the security surface stays
-  // coherent. The enrollment logic and API routes (/api/consumer/email,
-  // /api/consumer/pin) are unchanged.
-  const legacySecurityPanel = true;
+  // Recovery-email + payment-PIN rows are FlareHQ/Circle-managed-wallet
+  // concepts: the server can only attach recovery and enforce a PIN on
+  // wallets it custodies. They render for CIRCLE wallets only, reusing the
+  // same walletType gate as the rest of this file. EXTERNAL (self-custody)
+  // wallets keep the wallet-kind row ("Connected wallet · you control it")
+  // plus a self-custody line — FlareHQ has no ability to add recovery or a
+  // PIN to a wallet it doesn't hold.
+  const showCircleSecurityRows = (walletType ?? "").toUpperCase() === "CIRCLE";
   // Signing-model authority for Save UX branching. Never branch on
   // a raw walletType string — a CIRCLE row without circleWalletId is not
   // server-signable and must not render the automatic Save path.
@@ -1141,13 +1144,17 @@ function ConsumerAppInner() {
           {/* ── Primary: FlareHQ wallet via email. The backend email-auth
               flow (OTP) resolves the existing wallet for a returning email
               or creates the Circle-managed SCA for a new one — no browser
-              wallet, no second wallet-creation panel after login. */}
-          {!emailAuthOpen ? (
+              wallet, no second wallet-creation panel after login.
+              Mutual exclusivity: the email UI (button or form) renders only
+              while the connect-wallet picker is closed, and the connect UI
+              renders only while the email form is closed — exactly one entry
+              surface is ever visible. */}
+          {!connectPickerOpen && (!emailAuthOpen ? (
             <>
               <button
                 style={styles.primaryButton}
                 disabled={creatingWallet || isConnecting}
-                onClick={() => { setEmailAuthOpen(true); setOnboardingError(null); setLoginMsg(null); }}
+                onClick={() => { setConnectPickerOpen(false); resumeConnectRef.current = false; setEmailAuthOpen(true); setOnboardingError(null); setLoginMsg(null); }}
               >
                 Continue with email
               </button>
@@ -1230,10 +1237,12 @@ function ConsumerAppInner() {
                 Back
               </button>
             </div>
-          )}
-          <button style={styles.secondaryButton} disabled={creatingWallet || isConnecting || emailAuthOpen} onClick={connectExisting}>
+          ))}
+          {!emailAuthOpen && !connectPickerOpen && (
+          <button style={styles.secondaryButton} disabled={creatingWallet || isConnecting} onClick={connectExisting}>
             {isConnecting ? "Connecting..." : "Connect a wallet"}
           </button>
+          )}
           {/* Onboarding offers exactly: Continue with email, Connect a
               wallet. No Google flow, no Circle SDK ceremony, no duplicate
               wallet-creation panel. */}
@@ -1242,8 +1251,9 @@ function ConsumerAppInner() {
           {/* A4: connector picker — appears only when "Use this wallet" is
               tapped without an active wallet connection. Uses the same wagmi
               connectors configured in providers.tsx (EIP-6963 injected
-              discovery on desktop, WalletConnect QR where configured). */}
-          {connectPickerOpen && (
+              discovery on desktop, WalletConnect QR where configured).
+              Hidden while the email form is open (mutual exclusivity). */}
+          {connectPickerOpen && !emailAuthOpen && (
             <div
               style={{
                 marginTop: 16,
@@ -1332,6 +1342,7 @@ function ConsumerAppInner() {
                       boxSizing: "border-box",
                     }}
                   >
+                    <ConnectorLogo c={c} />
                     {friendlyConnectorLabel(c)}
                     <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-secondary)" }}>→</span>
                   </button>
@@ -1546,7 +1557,10 @@ function ConsumerAppInner() {
                 a marketing settings page. Shows the states explicitly and
                 flips each ⚠ to ✓ once configured. The wallet-kind row
                 shows for everyone (FlareHQ wallet vs connected wallet);
-                recovery-email + payment-PIN enrollment is unchanged. */}
+                recovery-email + payment-PIN rows render for FlareHQ (CIRCLE)
+                wallets only — connected wallets see the self-custody line
+                instead, since FlareHQ cannot add recovery or a PIN to a
+                wallet it doesn't custody. */}
             <section style={styles.securityCard} aria-label="Wallet security">
               <p style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, color: "var(--flow-text-muted)" }}>Wallet security</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1555,7 +1569,13 @@ function ConsumerAppInner() {
                   <span style={styles.securityLabel}>{friendlyWalletKind(walletType)}</span>
                   <span style={styles.securityAddr}>{walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : ""}</span>
                 </div>
-                {legacySecurityPanel && (
+                {!showCircleSecurityRows && (
+                  <div style={styles.securityRow}>
+                    <span style={styles.securityOk}>✓</span>
+                    <span style={styles.securityLabel}>Self-custody · recovery and approvals live in your wallet app</span>
+                  </div>
+                )}
+                {showCircleSecurityRows && (
                   <>
                     <div style={styles.securityRow}>
                       <span style={security?.hasRecoveryEmail ? styles.securityOk : styles.securityWarn}>
@@ -2462,6 +2482,7 @@ function ConsumerAppInner() {
                       boxSizing: "border-box",
                     }}
                   >
+                    <ConnectorLogo c={c} />
                     {switchBusy || isConnecting ? "Connecting…" : friendlyConnectorLabel(c)}
                     <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--flow-text-faint)" }}>→</span>
                   </button>

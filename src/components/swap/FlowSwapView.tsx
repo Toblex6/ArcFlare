@@ -62,6 +62,7 @@ import {
   friendlyConnectorLabel,
 } from '@/lib/wallet/walletLabels';
 import { useGuardedConnect } from '@/hooks/useGuardedConnect';
+import { ConnectorLogo } from '@/components/ConnectorLogo';
 import { useSwapBalances } from './useSwapBalances';
 import { useSwapQuote, type SwapQuoteView } from './useSwapQuote';
 import {
@@ -325,6 +326,13 @@ export function FlowSwapView({
     setFlow('executing');
 
     const initialSteps: ExecStepState[] = [
+      // Wrong-chain start: the switch is the first visible step, so tapping
+      // Confirm on another chain shows "Switch to Arc Testnet" progress and
+      // then proceeds automatically — never a manual retry, never a silent
+      // failure after the fact.
+      ...(chainId !== ARC_CHAIN_ID
+        ? [{ key: 'network', label: 'Switch to Arc Testnet', status: 'pending' as const, hash: null as string | null }]
+        : []),
       ...live.unsigned.approvals.map((a, i) => ({
         key: `approve-${i}`,
         label: `Approve ${inputSymbol}`,
@@ -340,7 +348,11 @@ export function FlowSwapView({
 
     try {
       // Network safety first (existing ensureArcNetwork, never silent).
+      // Tapping Confirm on the wrong chain switches automatically and then
+      // proceeds with the swap — no manual retry needed. A rejected switch
+      // surfaces friendly copy (never the raw viem chain-mismatch text).
       if (chainId !== ARC_CHAIN_ID) {
+        markStep('network', { status: 'active' });
         const providerGetter = async () => {
           try {
             return await (activeConnector as unknown as { getProvider?: () => Promise<unknown> })?.getProvider?.();
@@ -350,6 +362,7 @@ export function FlowSwapView({
         };
         const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter });
         if (!net.ok) throw new Error(net.message);
+        markStep('network', { status: 'done' });
       }
       if (!publicClient) throw new Error('Swap service unavailable — reconnect your wallet and try again.');
 
@@ -793,6 +806,10 @@ export function FlowSwapView({
     }
   };
 
+  // Confirm stays enabled on the wrong network: tapping it runs the
+  // automatic Arc Testnet switch inside handleConfirm and then proceeds
+  // with the swap (no manual retry). Blocking the button would force the
+  // manual switch-button round-trip instead.
   const confirmDisabled =
     flow !== 'form' ||
     quote.status !== 'quoted' ||
@@ -800,7 +817,6 @@ export function FlowSwapView({
     inputBaseUnits === null ||
     insufficientBalance ||
     !walletsMatch ||
-    wrongNetwork ||
     isSending;
 
   // Execution lock: the normal Swap form stays visible through
@@ -811,7 +827,7 @@ export function FlowSwapView({
   const confirmHint = !walletsMatch
     ? 'Connect the matching wallet to continue.'
     : wrongNetwork
-      ? 'Switch to Arc Testnet to continue.'
+      ? 'Switch to Arc Testnet to continue — confirming switches your wallet automatically.'
       : insufficientBalance
         ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
         : quote.status === 'error' || quote.status === 'expired'
@@ -894,10 +910,11 @@ export function FlowSwapView({
                     {pickers.map((c) => (
                       <button
                         key={c.uid}
-                        style={styles.secondaryButton}
+                        style={{ ...styles.secondaryButton, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 } as React.CSSProperties}
                         disabled={isConnecting}
                         onClick={() => void connectWith(c.uid)}
                       >
+                        <ConnectorLogo c={c} />
                         {isConnecting ? 'Connecting…' : `Connect ${friendlyConnectorLabel(c)}`}
                       </button>
                     ))}
