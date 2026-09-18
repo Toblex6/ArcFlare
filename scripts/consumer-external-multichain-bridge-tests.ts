@@ -179,11 +179,23 @@ async function main() {
   // EXTERNAL session — Path B refuses with EMAIL_VERIFICATION_REQUIRED and
   // the only creation path is email-auth (OTP). The bridge destination link
   // is written on the SIGNATURE-VERIFIED external connect instead (never from
-  // client input), and only when unset.
+  // client input), and only when it is unset OR unusable.
   ok("session refuses CIRCLE provisioning from an EXTERNAL session",
     sessionRoute.includes("EMAIL_VERIFICATION_REQUIRED"));
-  ok("signature-verified external connect links (never replaces/overwrites) the bridge destination",
-    sessionRoute.includes("linkedCircleAddress") && sessionRoute.includes("!(account as any)?.linkedCircleAddress"));
+  ok("signature-verified external connect links the bridge destination",
+    sessionRoute.includes("linkedCircleAddress") &&
+    sessionRoute.includes("resolveExternalBridgeDestination") &&
+    sessionRoute.includes("data: { linkedCircleAddress: prior.walletAddress }"));
+  // A USABLE link is never replaced; usability is decided by the destination
+  // resolver (single authority), and a resolver failure is treated as usable
+  // so an uncertain read can never repoint a live destination. An unset or
+  // DANGLING link is (re)written — otherwise email onboarding could never
+  // clear CIRCLE_WALLET_UNBOUND.
+  ok("bridge destination link is written only when unset or unusable",
+    sessionRoute.includes("const linkUsable") &&
+    sessionRoute.includes("!linkUsable"));
+  ok("resolver failure never repoints the destination (fails closed as usable)",
+    /resolveExternalBridgeDestination\(account\)[\s\S]{0,120}?catch\(\(\) => true\)/.test(sessionRoute));
   ok("fresh-user provisioning unchanged (Arc-only via createAccountWallet)",
     sessionRoute.includes("createAccountWallet(`consumer_${Date.now()}`)"));
   const consumerSrc = src("src/app/consumer/page.tsx");

@@ -35,6 +35,7 @@ import { jwtVerify } from 'jose';
 import { isAddress, verifyMessage } from 'viem';
 import { randomBytes } from 'crypto';
 import { createAccountWallet } from '@/src/lib/circle/client';
+import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
 import { requireJwtSecret, tryJwtSecret } from '@/src/lib/auth/secrets';
 import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
@@ -247,12 +248,20 @@ export async function POST(req: NextRequest) {
       // ── Bridge-destination link (best-effort, never authoritative client
       // input) ── If the browser was signed in as a FlareHQ CIRCLE wallet
       // (e.g. the wallet this user just created through email verification)
-      // and this proven-controlled EXTERNAL wallet has no destination link
-      // yet, record the link so the EXTERNAL bridge resolves its destination
+      // and this proven-controlled EXTERNAL wallet has no usable destination
+      // link, record the link so the EXTERNAL bridge resolves its destination
       // server-side. Safety: the caller just proved ownership of `walletAddress`
-      // by signature, the link is written ONLY when unset (an existing link is
-      // never overwritten) and points at the CIRCLE row the same browser
-      // session already held — no client-supplied destination is ever trusted.
+      // by signature, the written value is ALWAYS the CIRCLE row the same
+      // browser session already held (no client-supplied destination is ever
+      // trusted), and a USABLE link is never replaced.
+      //
+      // "Usable" is decided by the destination resolver — the single authority
+      // for that rule — rather than by a second copy of its validity checks
+      // here. That matters for correctness, not just DRY: the previous
+      // link-when-unset-only rule could never repair a DANGLING link (one
+      // pointing at a row that is gone or is not a CIRCLE wallet), so email
+      // onboarding would loop forever between OTP and the recoverable
+      // CIRCLE_WALLET_UNBOUND gate and the user could never bridge.
       try {
         const priorAddress = await resolveConsumerSession(req).catch(() => null);
         if (priorAddress) {
@@ -260,18 +269,35 @@ export async function POST(req: NextRequest) {
             .findUnique({ where: { walletAddress: priorAddress } })
             .catch(() => null);
           const priorWallet = resolveConsumerWallet(prior as any);
+          // Unset -> not usable (write). Dangling -> not usable (repair).
+          // Usable -> never replaced. A resolver FAILURE resolves to true so
+          // an uncertain read can never repoint a live destination.
+          const linkUsable = !!(account as any)?.linkedCircleAddress
+            ? await resolveExternalBridgeDestination(account)
+                .then((d) => d.ok)
+                .catch(() => true)
+            : false;
           if (
             prior &&
             priorWallet?.mode === 'CIRCLE' &&
             prior.id !== account.id &&
-            !(account as any)?.linkedCircleAddress
+            !linkUsable
           ) {
             await prisma.consumerAccount
               .update({
                 where: { id: account.id },
                 data: { linkedCircleAddress: prior.walletAddress },
               })
-              .catch(() => {});
+              .catch((e: any) => {
+                // Never blocks wallet connection — but never silent either:
+                // the bridge preview re-resolves right after this call, so a
+                // dropped write must be diagnosable rather than surfacing as a
+                // bare "no FlareHQ wallet linked yet" with no explanation.
+                console.warn(
+                  '[consumer/session] bridge destination link write failed:',
+                  e?.message ?? e
+                );
+              });
           }
         }
       } catch {

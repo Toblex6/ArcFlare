@@ -111,12 +111,25 @@ export interface ExternalBridgeProps {
    * /api/consumer/email-auth (the page owns the flow and returns to Bridge).
    */
   onContinueWithEmail: () => void;
+  /**
+   * Bumped by the page whenever the bridge-destination link may have changed
+   * (returning from email onboarding, or an explicit wallet reconnect that
+   * just re-proved the external wallet). The component stays MOUNTED through
+   * onboarding — the email form is an overlay — and the returning session can
+   * be the very same external address, so `sessionAddress` alone is not a
+   * usable change signal: without this key the destination preview would keep
+   * showing the stale "not linked yet" gate even after the server recorded the
+   * link. Re-resolving re-runs the server-authoritative preview only; selected
+   * source chain and amount are component state and are never reset.
+   */
+  destinationRefreshKey?: number;
 }
 
 export default function ExternalBridge({
   sessionAddress,
   onBridgeCompleted,
   onContinueWithEmail,
+  destinationRefreshKey = 0,
 }: ExternalBridgeProps) {
   const sources = useMemo(() => getBridgeSourceChains(), []);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? 'Arbitrum_Sepolia');
@@ -176,6 +189,10 @@ export default function ExternalBridge({
   }, []);
 
   // ── Destination preview (display only — intent re-resolves server-side) ──
+  // Re-resolves when the session wallet changes OR the page signals that the
+  // link may have changed (destinationRefreshKey) — the returning email
+  // onboarding path keeps this component mounted with the SAME external
+  // address, so the key is what clears a stale "not linked yet" gate.
   useEffect(() => {
     let cancelled = false;
     setDestLoading(true);
@@ -207,7 +224,7 @@ export default function ExternalBridge({
     return () => {
       cancelled = true;
     };
-  }, [sessionAddress]);
+  }, [sessionAddress, destinationRefreshKey]);
 
   // ── Real source-chain USDC balance from the connected wallet/provider ──
   useEffect(() => {

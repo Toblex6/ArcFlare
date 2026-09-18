@@ -197,6 +197,16 @@ function ConsumerAppInner() {
   // bridge destination itself — the destination is always re-resolved
   // server-side from the stored link).
   const bridgeEmailReturnRef = useRef<{ prevWalletAddress: string } | null>(null);
+  // Bumped whenever the destination-link state may have changed while the
+  // Bridge component stayed MOUNTED (email onboarding return, explicit wallet
+  // reconnect). The destination preview is keyed on [sessionAddress, this] —
+  // the returning session is usually the SAME external address, so without
+  // this signal the Bridge would keep showing the stale "not linked yet" gate
+  // even though the server recorded the link. Bumping re-runs the
+  // server-authoritative preview only; the component keeps its state, so the
+  // selected source chain and amount are preserved.
+  const [bridgeDestinationRefreshKey, setBridgeDestinationRefreshKey] = useState(0);
+  const refreshBridgeDestination = () => setBridgeDestinationRefreshKey((k) => k + 1);
   // ── Email OTP resend cooldowns (Part 4, seconds remaining) ──
   const [emailCooldown, setEmailCooldown] = useState(0);
   const [recipient, setRecipient] = useState("");
@@ -762,6 +772,11 @@ function ConsumerAppInner() {
       applySessionAccount(data.account);
       setJustCreatedWallet(false);
       setSwitchOpen(false);
+      // A reconnect re-proves the external wallet, which is what writes the
+      // bridge-destination link when it is unset or dangling — including the
+      // case where the reconnected address is the SAME one already in session
+      // (no sessionAddress change would otherwise re-resolve the preview).
+      refreshBridgeDestination();
       // from there) — never onboarding, never a blank state.
       setView(switchReturnRef.current);
     } catch (e: any) {
@@ -876,9 +891,13 @@ function ConsumerAppInner() {
         const switchData = await res.json();
         if (!switchData.success) throw new Error(switchData.error || 'Could not return to your wallet.');
         // The server records the bridge-destination link (CIRCLE wallet this
-        // session just created/verified ← proven external wallet) when unset.
+        // session just created/verified ← proven external wallet) when unset
+        // or dangling. The session is back on the SAME external address, so
+        // signal the Bridge to re-resolve the preview — otherwise it would keep
+        // showing the stale "not linked yet" gate after this successful link.
         applySessionAccount(switchData.account);
         setJustCreatedWallet(false);
+        refreshBridgeDestination();
       } catch (e: any) {
         // The CIRCLE wallet exists and the email is verified, but the user
         // did not complete the signature to return. Keep the CIRCLE session
@@ -897,6 +916,7 @@ function ConsumerAppInner() {
     } else {
       applySessionAccount(data.account, data.isNew === true);
     }
+    refreshBridgeDestination();
     setBridgeEmailOpen(false);
     setBridgeEmailNote(null);
     setBridgeReconnectHint(false);
@@ -2169,6 +2189,7 @@ function ConsumerAppInner() {
                 sessionAddress={walletAddress}
                 onBridgeCompleted={refreshActivity}
                 onContinueWithEmail={startBridgeEmailOnboarding}
+                destinationRefreshKey={bridgeDestinationRefreshKey}
               />
             ) : (
               <>

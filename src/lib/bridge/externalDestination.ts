@@ -9,8 +9,8 @@
 //   EXTERNAL session row --linkedCircleAddress--> CIRCLE row (bound
 //   circleWalletId) --> its walletAddress.
 //
-// The link is written ONLY by the server when it provisions that CIRCLE
-// wallet from the EXTERNAL session (POST /api/consumer/flare-wallet) —
+// The link is written ONLY by the server when a signature-verified
+// EXTERNAL reconnect follows an authenticated CIRCLE session (POST /api/consumer/session) —
 // there is no browser-writable path to it, and it is not a wallet-set
 // binding (no walletSetId anywhere in this model).
 //
