@@ -11,9 +11,10 @@ import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { prisma } from '@/src/lib/prisma';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { explorerTxUrl } from '@/lib/config/network';
+import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
 import { getBridgeSourceChain, sourceExplorerTxUrl, formatBridgeBaseUnits } from '@/lib/bridge/sourceChains';
 import { verifyArcMint, type MintVerifyFailure } from '@/lib/bridge/externalVerify';
+import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 function mintFailureCopy(reason: MintVerifyFailure): string {
   switch (reason) {
@@ -88,8 +89,21 @@ export async function POST(req: NextRequest) {
       // (Binding happens only on verified success below.)
     }
 
+    logBridgeStage(intent.id, {
+      stage: 'MINT_PENDING',
+      txHash: mintTxHash,
+      chainId: getNetworkConfig().chainId,
+      metadata: { destination: intent.destination },
+    });
     const proof = await verifyArcMint({ destination: intent.destination, mintTxHash });
     if (!proof.ok) {
+      logBridgeStage(intent.id, {
+        stage: 'FAILED',
+        txHash: mintTxHash,
+        chainId: getNetworkConfig().chainId,
+        errorDetail: proof.detail ?? proof.reason,
+        metadata: { reason: proof.reason },
+      });
       return NextResponse.json(
         { success: false, code: 'MINT_NOT_VERIFIED', reason: proof.reason, error: mintFailureCopy(proof.reason) },
         { status: 422 }
@@ -101,6 +115,18 @@ export async function POST(req: NextRequest) {
       data: { status: 'COMPLETED', mintTxHash: proof.mintTxHash, actualAmount: proof.actualAmount.toString() },
     });
     const source = getBridgeSourceChain(updated.sourceChain);
+
+    logBridgeStage(intent.id, {
+      stage: 'MINT_CONFIRMED',
+      txHash: proof.mintTxHash,
+      chainId: getNetworkConfig().chainId,
+      metadata: { actualAmount: proof.actualAmount.toString() },
+    });
+    logBridgeStage(intent.id, {
+      stage: 'VERIFIED',
+      txHash: proof.mintTxHash,
+      chainId: getNetworkConfig().chainId,
+    });
 
     return NextResponse.json({
       success: true,

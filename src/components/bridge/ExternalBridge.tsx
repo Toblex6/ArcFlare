@@ -98,6 +98,36 @@ function stepOf(result: any, name: 'Approve' | 'Burn' | 'Mint'): KitStep | null 
   return steps.find((s) => s?.name === name) ?? null;
 }
 
+// Server-side stage enum values → user-facing labels.
+const STAGE_LABELS: Record<string, string> = {
+  PREPARING: 'Preparing bridge',
+  APPROVAL_PENDING: 'Waiting for wallet approval',
+  APPROVAL_CONFIRMED: 'Approval confirmed',
+  BURN_PENDING: 'Submitting source burn',
+  BURN_CONFIRMED: 'Source burn confirmed',
+  ATTESTATION_PENDING: 'Waiting for Circle attestation',
+  ATTESTATION_CONFIRMED: 'Circle attestation received',
+  MINT_PENDING: 'Minting on Arc',
+  MINT_CONFIRMED: 'Mint confirmed on Arc',
+  VERIFIED: 'Bridge verified',
+  FAILED: 'Bridge failed',
+};
+
+/**
+ * Fetch the current server-side stage for an intent. Returns null on any
+ * error (the existing error message is used as a fallback).
+ */
+async function fetchBridgeStage(reference: string): Promise<{ stage: string | null; txHash: string | null }> {
+  try {
+    const res = await fetch(`/api/cctp/transfer/external/status?reference=${reference}`);
+    const data = await res.json();
+    if (data?.success) {
+      return { stage: data.currentStage ?? null, txHash: data.lastStageTxHash ?? null };
+    }
+  } catch {}
+  return { stage: null, txHash: null };
+}
+
 export interface ExternalBridgeProps {
   /** EXTERNAL session walletAddress (the source wallet). */
   sessionAddress: string;
@@ -155,6 +185,7 @@ export default function ExternalBridge({
   const [stages, setStages] = useState<StageState[]>([]);
   const [stageNote, setStageNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorStage, setErrorStage] = useState<{ stage: string; txHash: string | null; label: string } | null>(null);
   const [receipt, setReceipt] = useState<{
     amountDisplay: string;
     actualDisplay: string;
@@ -521,6 +552,7 @@ export default function ExternalBridge({
     setStages([]);
     setStageNote(null);
     setError(null);
+    setErrorStage(null);
     setReceipt(null);
     setPhase('form');
   }, []);
@@ -529,6 +561,7 @@ export default function ExternalBridge({
     // Synchronous double-submit guard (button disable alone races).
     if (busyRef.current || phase !== 'form') return;
     setError(null);
+    setErrorStage(null);
 
     if (!isConnected || !connectedAddress || !walletsMatch) {
       setError('Reconnect your wallet to continue.');
@@ -635,7 +668,7 @@ export default function ExternalBridge({
         setStages([]);
         setStageNote(null);
         const msg = String(e?.message ?? '');
-        setError(
+        const baseError =
           msg.includes('Reconnect your wallet') ||
           msg.includes('Switch your wallet to') ||
           msg.includes('Enter a valid') ||
@@ -649,8 +682,17 @@ export default function ExternalBridge({
           msg.includes('No verified email') ||
           msg.includes('Could not start the bridge')
             ? msg
-            : friendlyBridgeError(e, { sourceLabel: source.label })
-        );
+            : friendlyBridgeError(e, { sourceLabel: source.label });
+
+        // Enrich the error with the server-side stage if available.
+        const ref = resumeRef.current?.intentReference;
+        if (ref) {
+          const { stage, txHash } = await fetchBridgeStage(ref);
+          if (stage) {
+            setErrorStage({ stage, txHash, label: STAGE_LABELS[stage] ?? stage });
+          }
+        }
+        setError(baseError);
       }
     }
   }
@@ -660,6 +702,7 @@ export default function ExternalBridge({
     if (!saved || busyRef.current) return;
     busyRef.current = true;
     setError(null);
+    setErrorStage(null);
     setPhase('working');
     try {
       await ensureOnSourceChain();
@@ -696,6 +739,13 @@ export default function ExternalBridge({
           ? msg
           : friendlyBridgeError(e, { sourceLabel: source.label })
       );
+      // Fetch the server-side stage for display.
+      if (saved?.intentReference) {
+        const { stage, txHash } = await fetchBridgeStage(saved.intentReference);
+        if (stage) {
+          setErrorStage({ stage, txHash, label: STAGE_LABELS[stage] ?? stage });
+        }
+      }
     }
   }
 
@@ -846,6 +896,14 @@ export default function ExternalBridge({
 
           {phase === 'awaiting-resume' ? (
             <div style={styles.resumeCard}>
+              {errorStage && (
+                <p style={styles.stageError}>
+                  Last known stage: <strong>{errorStage.label}</strong>
+                  {errorStage.txHash && (
+                    <span style={styles.hash}> · {shortAddr(errorStage.txHash)}</span>
+                  )}
+                </p>
+              )}
               <p style={styles.resumeText}>{error}</p>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button style={styles.submitButton} onClick={handleResume}>
@@ -889,6 +947,14 @@ export default function ExternalBridge({
               )}
               {error && phase === 'form' ? (
                 <div style={styles.resultError}>
+                  {errorStage && (
+                    <p style={styles.stageError}>
+                      Failed at: <strong>{errorStage.label}</strong>
+                      {errorStage.txHash && (
+                        <span style={styles.hash}> · {shortAddr(errorStage.txHash)}</span>
+                      )}
+                    </p>
+                  )}
                   <p style={styles.resultText}>⚠️ {error}</p>
                 </div>
               ) : null}
@@ -1002,6 +1068,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(248,113,113,0.08)',
     border: '1px solid rgba(248,113,113,0.4)',
   },
+  stageError: { margin: '0 0 6px', fontSize: 12, color: '#fbbf24', lineHeight: 1.4 },
   resultIcon: { fontSize: 22, margin: '0 0 6px' },
   resultText: { margin: '0 0 8px', fontSize: 14, lineHeight: 1.55 },
   hashRow: { margin: '6px 0', fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' },

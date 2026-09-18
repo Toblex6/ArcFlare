@@ -15,6 +15,7 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { getBridgeSourceChain, sourceExplorerTxUrl } from '@/lib/bridge/sourceChains';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
 import { verifyExternalBurn, type BurnVerifyFailure } from '@/lib/bridge/externalVerify';
+import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 function burnFailureCopy(reason: BurnVerifyFailure, sourceLabel: string): string {
   switch (reason) {
@@ -101,10 +102,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const source = getBridgeSourceChain(intent.sourceChain);
+    const sourceLabel = source?.label ?? intent.sourceChain;
+
     if (new Date(intent.expiresAt).getTime() < Date.now()) {
       await (prisma as any).flowBridgeIntent.update({
         where: { id: intent.id },
         data: { status: 'FAILED', error: 'Bridge intent expired before the burn was submitted.' },
+      });
+      logBridgeStage(intent.id, {
+        stage: 'FAILED',
+        chainId: source?.chainId,
+        errorDetail: 'Bridge intent expired before the burn was submitted.',
+        metadata: { burnTxHash, sourceChain: intent.sourceChain },
       });
       return NextResponse.json(
         { success: false, code: 'INTENT_EXPIRED', error: 'This bridge expired before the burn was submitted. Start a new bridge to try again.' },
@@ -125,8 +135,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const source = getBridgeSourceChain(intent.sourceChain);
-    const sourceLabel = source?.label ?? intent.sourceChain;
+    logBridgeStage(intent.id, {
+      stage: 'BURN_PENDING',
+      txHash: burnTxHash,
+      chainId: source?.chainId,
+      metadata: { sourceChain: intent.sourceChain, sourceAddress: intent.sourceWallet },
+    });
     const proof = await verifyExternalBurn({
       sourceId: intent.sourceChain,
       sourceAddress: intent.sourceWallet,
@@ -141,6 +155,13 @@ export async function POST(req: NextRequest) {
           data: { status: 'FAILED', error: burnFailureCopy(proof.reason, sourceLabel) },
         });
       }
+      logBridgeStage(intent.id, {
+        stage: 'FAILED',
+        txHash: burnTxHash,
+        chainId: source?.chainId,
+        errorDetail: proof.detail ?? proof.reason,
+        metadata: { reason: proof.reason, terminal: isTerminalFailure(proof.reason) },
+      });
       return NextResponse.json(
         {
           success: false,
@@ -155,6 +176,13 @@ export async function POST(req: NextRequest) {
     const updated = await (prisma as any).flowBridgeIntent.update({
       where: { id: intent.id },
       data: { status: 'BURN_CONFIRMED', burnTxHash: proof.burnTxHash, destinationBound: proof.destinationBound },
+    });
+
+    logBridgeStage(intent.id, {
+      stage: 'BURN_CONFIRMED',
+      txHash: proof.burnTxHash,
+      chainId: source?.chainId,
+      metadata: { destinationBound: proof.destinationBound },
     });
 
     return NextResponse.json({

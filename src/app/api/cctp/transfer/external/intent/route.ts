@@ -21,6 +21,7 @@ import {
   type BridgeAmountError,
 } from '@/lib/bridge/sourceChains';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
+import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 const INTENT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours to submit the burn
 
@@ -133,6 +134,18 @@ export async function POST(req: NextRequest) {
         amount: checked.amountBaseUnits.toString(),
         status: 'PENDING',
         expiresAt: new Date(Date.now() + INTENT_TTL_MS),
+      },
+    });
+
+    logBridgeStage(intent.id, {
+      stage: 'PREPARING',
+      chainId: source.chainId,
+      metadata: {
+        sourceChain: source.id,
+        sourceWallet: sessionAddress,
+        destination: dest.destination,
+        amount: checked.amountBaseUnits.toString(),
+        amountDisplay: formatBridgeBaseUnits(checked.amountBaseUnits),
       },
     });
 

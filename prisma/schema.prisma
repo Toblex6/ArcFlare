@@ -808,6 +808,27 @@ model FlowBridgeIntent {
   @@map("flow_bridge_intents")
 }
 
+// ── Bridge stage tracking (diagnostic, read-only append log) ────────────────
+// Every meaningful stage transition on a FlowBridgeIntent is recorded here
+// with timestamp, txHash, chainId, and raw errorDetail. The row is append-
+// only: the current stage for a given intent is the latest row ordered by
+// createdAt. This is purely observability — it never gates execution logic.
+
+model BridgeAttemptStage {
+  id           String   @id @default(cuid())
+  intentId     String   // references flow_bridge_intents.id (not a FK — the intent may be cleaned up)
+  stage        String   // one of the BridgeStage enum values (stored as text, not a PG enum)
+  txHash       String?  // on-chain tx hash when available at this stage
+  chainId      Int?     // source chain id (for burn stages) or Arc chain id (for mint stages)
+  errorDetail  String?  // raw error (not sanitized) — only set on FAILED
+  metadata     String?  // JSON blob for extra context (attestation response, polling round, etc.)
+  createdAt    DateTime @default(now())
+
+  @@index([intentId])
+  @@index([intentId, createdAt])
+  @@map("bridge_attempt_stages")
+}
+
 // ── Build 3: Economic Ledger + Treasury ────────────────────────────────────
 // Append-only accounting layer derived from authoritative PaymentLog / job /
 // on-chain events. PaymentLog remains the source of truth for whether money

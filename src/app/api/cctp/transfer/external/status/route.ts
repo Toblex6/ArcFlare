@@ -10,6 +10,7 @@ import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { prisma } from '@/src/lib/prisma';
 import { explorerTxUrl } from '@/lib/config/network';
 import { getBridgeSourceChain, sourceExplorerTxUrl, formatBridgeBaseUnits } from '@/lib/bridge/sourceChains';
+import { getBridgeStageHistory, getBridgeCurrentStage } from '@/lib/bridge/stageLogger';
 
 export async function GET(req: NextRequest) {
   try {
@@ -27,6 +28,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'No bridge found for that reference.' }, { status: 404 });
     }
     const source = getBridgeSourceChain(intent.sourceChain);
+
+    // Stage history: the full append-only log + the current (latest) stage.
+    const [stageHistory, currentStage] = await Promise.all([
+      getBridgeStageHistory(intent.id),
+      getBridgeCurrentStage(intent.id),
+    ]);
+
     return NextResponse.json({
       success: true,
       reference: intent.id,
@@ -53,6 +61,17 @@ export async function GET(req: NextRequest) {
       destinationExplorerUrl: intent.mintTxHash ? explorerTxUrl(intent.mintTxHash) : null,
       error: intent.status === 'FAILED' ? intent.error : undefined,
       expiresAt: intent.expiresAt,
+      // Stage diagnostics: current stage + last txHash + full history.
+      currentStage: currentStage?.stage ?? null,
+      lastStageTxHash: currentStage?.txHash ?? null,
+      stageHistory: stageHistory.map((s: any) => ({
+        stage: s.stage,
+        txHash: s.txHash,
+        chainId: s.chainId,
+        errorDetail: s.errorDetail,
+        metadata: s.metadata ? JSON.parse(s.metadata) : null,
+        createdAt: s.createdAt,
+      })),
     });
   } catch (error: any) {
     console.error('[cctp/transfer/external/status]', error);

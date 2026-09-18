@@ -64,18 +64,42 @@ function towerHeaders(apiKey: string): Record<string, string> {
 }
 
 async function towerFetchJson(url: string, init: RequestInit): Promise<any> {
+  // Temporary diagnostic: log raw HTTP status per Tower call without ever
+  // logging the API key value (headers are never printed).
+  let path = url;
+  let host = 'unknown-host';
+  try {
+    const u = new URL(url);
+    path = u.pathname;
+    host = u.host;
+  } catch {
+    /* keep raw url as path fallback */
+  }
+  const method = String((init as any)?.method ?? 'GET').toUpperCase();
   let res: Response;
   try {
     res = await fetch(url, { ...init, signal: (init as any)?.signal ?? AbortSignal.timeout(15_000) });
   } catch (e: any) {
+    console.error(`[tower-diag] towerFetch ${method} ${host}${path} network-error message=${String(e?.message ?? e).slice(0, 160)}`);
     throw routingError(503, `[tower] Tower request failed: ${e?.message ?? e}`);
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || (body as any)?.success === false) {
-    const msg = typeof (body as any)?.error === 'string' ? (body as any).error : `HTTP ${res.status}`;
-    const status = res.status === 404 ? 503 : res.status >= 500 ? 503 : 400;
+  const bodySuccess = (body as any)?.success;
+  if (!res.ok || bodySuccess === false) {
+    const rawStatus = res.status;
+    const errSnippet =
+      typeof (body as any)?.error === 'string' ? String((body as any).error).slice(0, 120) : '';
+    // Keep the raw upstream HTTP status in both the log line and the thrown
+    // message so getTowerCandidate()'s truncated note still carries it.
+    console.error(
+      `[tower-diag] towerFetch ${method} ${host}${path} -> HTTP ${rawStatus} success=${String(bodySuccess)}` +
+        (errSnippet ? ` error=${errSnippet}` : '')
+    );
+    const msg = errSnippet ? `HTTP ${rawStatus} ${errSnippet}` : `HTTP ${rawStatus}`;
+    const status = rawStatus === 404 ? 503 : rawStatus >= 500 ? 503 : 400;
     throw routingError(status, `[tower] Tower quote unavailable: ${msg}`);
   }
+  console.log(`[tower-diag] towerFetch ${method} ${host}${path} -> HTTP ${res.status} ok`);
   return body;
 }
 

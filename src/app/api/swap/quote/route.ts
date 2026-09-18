@@ -42,6 +42,13 @@ export async function POST(req: NextRequest) {
       outputSymbol,
       inputAmount,
     });
+    // Temporary diagnostic (per-request, no secrets): mirrors the Tower
+    // outcome into Render logs so a prod quote can be correlated with the
+    // [tower-diag] lines emitted inside getTowerCandidate()/towerFetchJson.
+    console.log(
+      `[swap-quote] tower consulted=${tower.consulted} available=${tower.available} ` +
+        `note=${String(tower.note ?? '').slice(0, 160)} intent=${view.intentId} pair=${inputSymbol}->${outputSymbol}`
+    );
     return NextResponse.json({ success: true, ...view, tower });
   } catch (error: any) {
     const status = typeof error?.status === 'number' ? error.status : 500;

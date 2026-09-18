@@ -601,17 +601,39 @@ export async function getTowerCandidate(
   req: Pick<FlowQuoteRequest, 'inputSymbol' | 'outputSymbol' | 'inputAmount' | 'env'>
 ): Promise<TowerCandidate> {
   const env = req.env ?? process.env;
-  const flag = (env.ROUTING_PROVIDER_TOWER_ENABLED ?? '').trim().toLowerCase();
+  // Temporary diagnostic (no secret values): flag value is safe to log;
+  // the API key is logged as present/absent only, never its value.
+  const flagRaw = env.ROUTING_PROVIDER_TOWER_ENABLED ?? '';
+  const flag = flagRaw.trim().toLowerCase();
+  const keyPresent = ((env.TOWER_SWAP_API_KEY ?? '').trim().length > 0);
+  const baseRaw = (env.TOWER_SWAP_BASE_URL ?? '').trim();
+  let baseHost = '(default https://www.tower.exchange)';
+  if (baseRaw) {
+    try {
+      baseHost = new URL(baseRaw).host;
+    } catch {
+      baseHost = '(invalid TOWER_SWAP_BASE_URL)';
+    }
+  }
+  console.log(
+    `[tower-diag] getTowerCandidate start flag=${JSON.stringify(flagRaw)} keyPresent=${keyPresent} ` +
+      `baseHost=${baseHost} pair=${req.inputSymbol}->${req.outputSymbol} amount=${req.inputAmount.toString()}`
+  );
   if (flag !== '1' && flag !== 'true') {
+    console.log('[tower-diag] getTowerCandidate skip consulted=false available=false reason=flag-off');
     return { consulted: false, available: false, note: 'Tower discovery disabled (flag off).' };
   }
-  if (!((env.TOWER_SWAP_API_KEY ?? '').trim())) {
+  if (!keyPresent) {
+    console.log('[tower-diag] getTowerCandidate skip consulted=true available=false reason=no-api-key');
     return { consulted: true, available: false, note: 'Tower discovery unavailable (no API key).' };
   }
   try {
     const q = await requestTowerQuote(
       { inputSymbol: req.inputSymbol, outputSymbol: req.outputSymbol, inputAmount: req.inputAmount },
       env
+    );
+    console.log(
+      `[tower-diag] getTowerCandidate ok consulted=true available=true quotedOutput=${q.quotedOutputAmount.toString()}`
     );
     return {
       consulted: true,
@@ -621,6 +643,9 @@ export async function getTowerCandidate(
       note: 'Informational candidate only — Tower does not execute; UnitFlow remains the executor.',
     };
   } catch (e: any) {
+    console.log(
+      `[tower-diag] getTowerCandidate fail consulted=true available=false err=${String(e?.message ?? e).slice(0, 160)}`
+    );
     return { consulted: true, available: false, note: `Tower discovery failed closed: ${String(e?.message ?? e).slice(0, 160)}` };
   }
 }
