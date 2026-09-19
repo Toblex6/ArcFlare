@@ -63,6 +63,19 @@ function towerHeaders(apiKey: string): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
 }
 
+/** Per-attempt timeout for Tower fetches (Tower is normally sub-second when
+ * healthy; 15s already exceeds the 8–10s reasonable ceiling — the prod
+ * aborts at 15s because Tower's origin hangs ~16s before returning 502,
+ * not because the ceiling is too low). */
+export const TOWER_FETCH_TIMEOUT_MS = 15_000;
+/** One retry with backoff on network/timeout/5xx only (never on 4xx). */
+export const TOWER_FETCH_MAX_ATTEMPTS = 2;
+const TOWER_FETCH_RETRY_DELAY_MS = 800;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function towerFetchJson(url: string, init: RequestInit): Promise<any> {
   // Temporary diagnostic: log raw HTTP status per Tower call without ever
   // logging the API key value (headers are never printed).
@@ -76,31 +89,46 @@ async function towerFetchJson(url: string, init: RequestInit): Promise<any> {
     /* keep raw url as path fallback */
   }
   const method = String((init as any)?.method ?? 'GET').toUpperCase();
-  let res: Response;
-  try {
-    res = await fetch(url, { ...init, signal: (init as any)?.signal ?? AbortSignal.timeout(15_000) });
-  } catch (e: any) {
-    console.error(`[tower-diag] towerFetch ${method} ${host}${path} network-error message=${String(e?.message ?? e).slice(0, 160)}`);
-    throw routingError(503, `[tower] Tower request failed: ${e?.message ?? e}`);
+  // One retry with backoff on network/timeout errors and HTTP 5xx (transient
+  // origin failures). 4xx fails closed immediately — retrying a rejected
+  // request cannot succeed and only adds origin load.
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= TOWER_FETCH_MAX_ATTEMPTS; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal: (init as any)?.signal ?? AbortSignal.timeout(TOWER_FETCH_TIMEOUT_MS) });
+    } catch (e: any) {
+      lastError = routingError(503, `[tower] Tower request failed: ${e?.message ?? e}`);
+      console.error(`[tower-diag] towerFetch ${method} ${host}${path} network-error attempt=${attempt}/${TOWER_FETCH_MAX_ATTEMPTS} message=${String(e?.message ?? e).slice(0, 160)}`);
+      if (attempt < TOWER_FETCH_MAX_ATTEMPTS) await sleep(TOWER_FETCH_RETRY_DELAY_MS * attempt);
+      continue;
+    }
+    const body = await res.json().catch(() => ({}));
+    const bodySuccess = (body as any)?.success;
+    if (!res.ok || bodySuccess === false) {
+      const rawStatus = res.status;
+      const errSnippet =
+        typeof (body as any)?.error === 'string' ? String((body as any).error).slice(0, 120) : '';
+      // Keep the raw upstream HTTP status in both the log line and the thrown
+      // message so getTowerCandidate()'s truncated note still carries it.
+      console.error(
+        `[tower-diag] towerFetch ${method} ${host}${path} -> HTTP ${rawStatus} success=${String(bodySuccess)} attempt=${attempt}/${TOWER_FETCH_MAX_ATTEMPTS}` +
+          (errSnippet ? ` error=${errSnippet}` : '')
+      );
+      const msg = errSnippet ? `HTTP ${rawStatus} ${errSnippet}` : `HTTP ${rawStatus}`;
+      const status = rawStatus === 404 ? 503 : rawStatus >= 500 ? 503 : 400;
+      lastError = routingError(status, `[tower] Tower quote unavailable: ${msg}`);
+      // Retry server-side failures (5xx); client errors (4xx) fail closed now.
+      if (res.status >= 500 && attempt < TOWER_FETCH_MAX_ATTEMPTS) {
+        await sleep(TOWER_FETCH_RETRY_DELAY_MS * attempt);
+        continue;
+      }
+      throw lastError;
+    }
+    console.log(`[tower-diag] towerFetch ${method} ${host}${path} -> HTTP ${res.status} ok attempt=${attempt}/${TOWER_FETCH_MAX_ATTEMPTS}`);
+    return body;
   }
-  const body = await res.json().catch(() => ({}));
-  const bodySuccess = (body as any)?.success;
-  if (!res.ok || bodySuccess === false) {
-    const rawStatus = res.status;
-    const errSnippet =
-      typeof (body as any)?.error === 'string' ? String((body as any).error).slice(0, 120) : '';
-    // Keep the raw upstream HTTP status in both the log line and the thrown
-    // message so getTowerCandidate()'s truncated note still carries it.
-    console.error(
-      `[tower-diag] towerFetch ${method} ${host}${path} -> HTTP ${rawStatus} success=${String(bodySuccess)}` +
-        (errSnippet ? ` error=${errSnippet}` : '')
-    );
-    const msg = errSnippet ? `HTTP ${rawStatus} ${errSnippet}` : `HTTP ${rawStatus}`;
-    const status = rawStatus === 404 ? 503 : rawStatus >= 500 ? 503 : 400;
-    throw routingError(status, `[tower] Tower quote unavailable: ${msg}`);
-  }
-  console.log(`[tower-diag] towerFetch ${method} ${host}${path} -> HTTP ${res.status} ok`);
-  return body;
+  throw lastError ?? routingError(503, '[tower] Tower request failed: retry exhausted');
 }
 
 /** Minimal Tower DEX catalog entry (all fields untrusted except presence of id). */
