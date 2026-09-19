@@ -512,19 +512,50 @@ export default function ExternalBridge({
     bridgeTrace('step-bc kit.bridge signing start', { reference: intentReference });
     let result: any;
     try {
-      result = await (kit as any).bridge({
-      from: {
+      // User-controlled adapter (createViemAdapterFromProvider over the
+      // connected browser wallet): BridgeKit auto-resolves the source
+      // address from the connected wallet and FORBIDS an explicit
+      // `address` in the `from` context — passing one fails at runtime
+      // (CONNECTION_FAILED.code.bridge: "Address should not be provided
+      // for user-controlled adapters…"). See QUICKSTART.md "User-Controlled"
+      // and AdapterContext's `address?: never` for this adapter type. The
+      // developer-controlled path (server-signed Circle wallets in
+      // src/lib/cctp-v2.ts) is a different adapter mode and keeps explicit
+      // addresses. Source identity is still pinned server-side: the intent
+      // route resolves the source from the authenticated session and the
+      // echo check below refuses a substituted address.
+      // TEMP-PROD-DIAG (remove after the address-error root cause is
+      // confirmed fixed live): log the EXACT from/to shape being sent so
+      // the next attempt shows whether an `address` key is present via any
+      // path (direct literal, spread, or merge). Adapter itself is
+      // intentionally reduced to keys/capabilities (it is non-serializable).
+      const bridgeFromCtx: Record<string, unknown> = {
         adapter,
         chain: source.id,
-        address: sessionLower as `0x${string}`,
-      },
-      // ForwarderDestination: Circle's relayer mints on Arc — the user is
-      // never asked to sign on, or switch to, the destination chain.
-      to: {
+      };
+      const bridgeToCtx: Record<string, unknown> = {
         chain: 'Arc_Testnet',
         recipientAddress: destination as `0x${string}`,
         useForwarder: true,
-      },
+      };
+      try {
+        console.log('[external-bridge] kit.bridge from/to payload', {
+          fromKeys: Object.keys(bridgeFromCtx),
+          addressInFrom: 'address' in bridgeFromCtx,
+          fromAddressValue: (bridgeFromCtx as { address?: unknown }).address ?? null,
+          fromChain: bridgeFromCtx.chain,
+          adapterCapabilities: (adapter as { capabilities?: unknown })?.capabilities ?? null,
+          to: JSON.parse(JSON.stringify(bridgeToCtx)),
+          amount: amount.trim(),
+        });
+      } catch {
+        // logging must never break the flow
+      }
+      result = await (kit as any).bridge({
+      from: bridgeFromCtx as { adapter: typeof adapter; chain: string },
+      // ForwarderDestination: Circle's relayer mints on Arc — the user is
+      // never asked to sign on, or switch to, the destination chain.
+      to: bridgeToCtx as unknown as { chain: string; recipientAddress: `0x${string}`; useForwarder: boolean },
       amount: amount.trim(),
       });
     } catch (signErr: any) {
