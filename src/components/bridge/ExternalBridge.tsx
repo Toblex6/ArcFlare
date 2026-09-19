@@ -93,6 +93,24 @@ function bridgeDiag(stage: string, data: unknown): void {
   if (BRIDGE_DIAG_ENABLED) console.debug(`[external-bridge:diag] ${stage}`, data);
 }
 
+// ── Production-visible step trail (diagnosis instrumentation, no behavior change) ──
+// bridgeDiag above is dev-only (gated by NODE_ENV), so production browsers emit
+// NOTHING at each sub-step — a stall before verify leaves zero client evidence.
+// bridgeTrace is ALWAYS ON (console.log, production included) and logs ONLY the
+// step name + intent reference + public tx hashes / step states at the four
+// sub-steps that matter: (a) intent created, (b/c) wallet signing via
+// kit.bridge (approve+burn prompts), (d) verify POST. No keys, no seed phrases,
+// no provider internals — reference + hashes are enough to correlate with the
+// server's [bridge-stage] / [cctp/transfer/external/verify] Render log lines.
+function bridgeTrace(step: string, data?: unknown): void {
+  try {
+    if (data === undefined) console.log(`[external-bridge] ${step}`);
+    else console.log(`[external-bridge] ${step}`, data);
+  } catch {
+    // logging must never break the flow
+  }
+}
+
 function stepOf(result: any, name: 'Approve' | 'Burn' | 'Mint'): KitStep | null {
   const steps: KitStep[] = Array.isArray(result?.steps) ? result.steps : [];
   return steps.find((s) => s?.name === name) ?? null;
@@ -420,9 +438,18 @@ export default function ExternalBridge({
       );
     }
     setStageNote('Verifying the source transaction…');
+    // (d) verify POST — always-on trace so a missing server hit is provable.
+    bridgeTrace('step-d verify POST', { reference: intentReference, burnTxHash });
     const v = await postJson('/api/cctp/transfer/external/verify', {
       reference: intentReference,
       burnTxHash,
+    });
+    bridgeTrace('step-d verify response', {
+      reference: intentReference,
+      ok: v?.success,
+      code: v?.code ?? null,
+      reason: v?.reason ?? null,
+      error: v?.error ?? null,
     });
     bridgeDiag('I. verify response (server burn proof)', { ok: v?.success, code: v?.code, reason: v?.reason, error: v?.error });
     if (!v?.success) {
@@ -476,7 +503,16 @@ export default function ExternalBridge({
     ]);
     setStageNote('Waiting for wallet confirmation…');
 
-    const result = await (kit as any).bridge({
+    // (b/c) wallet signing: kit.bridge drives BOTH the approval prompt and the
+    // burn prompt inside a single call (there are no separate sign calls).
+    // Trace entry + exit + thrown error with the SAME reference so we can see
+    // whether the session ever returned from the wallet at all. A throw here
+    // is the "intent created, verify never called" stall — surfaced below with
+    // name/message/code (never swallowed).
+    bridgeTrace('step-bc kit.bridge signing start', { reference: intentReference });
+    let result: any;
+    try {
+      result = await (kit as any).bridge({
       from: {
         adapter,
         chain: source.id,
@@ -490,6 +526,29 @@ export default function ExternalBridge({
         useForwarder: true,
       },
       amount: amount.trim(),
+      });
+    } catch (signErr: any) {
+      // Signing-layer throw (user rejected a prompt, wallet/chain error, or
+      // kit.bridge threw before returning a result). Log the RAW signing error
+      // with the intent reference — friendlyBridgeError mapping downstream
+      // hides this detail, and without this line a stall here is silent.
+      bridgeTrace('step-bc kit.bridge signing THREW', {
+        reference: intentReference,
+        name: signErr?.name ?? null,
+        code: signErr?.code ?? null,
+        shortMessage: signErr?.shortMessage ?? null,
+        message: String(signErr?.message ?? signErr ?? '').slice(0, 500),
+      });
+      console.error('[external-bridge] kit.bridge signing failed', { reference: intentReference }, signErr);
+      throw signErr;
+    }
+    bridgeTrace('step-bc kit.bridge signing returned', {
+      reference: intentReference,
+      state: result?.state ?? null,
+      approve: stepOf(result, 'Approve') ? { state: stepOf(result, 'Approve')?.state ?? null, txHash: stepOf(result, 'Approve')?.txHash ?? null } : null,
+      burn: stepOf(result, 'Burn') ? { state: stepOf(result, 'Burn')?.state ?? null, txHash: stepOf(result, 'Burn')?.txHash ?? null } : null,
+      mint: stepOf(result, 'Mint') ? { state: stepOf(result, 'Mint')?.state ?? null, txHash: stepOf(result, 'Mint')?.txHash ?? null } : null,
+      error: result?.state === 'error' ? String(result?.error?.message ?? result?.error ?? '').slice(0, 300) : null,
     });
     bridgeDiag('G–I. kit result (approval/burn hashes + step states)', result);
     resumeRef.current = { result, intentReference };
@@ -608,7 +667,8 @@ export default function ExternalBridge({
         throw new Error(intent?.error ?? 'Could not start the bridge. Please try again.');
       }
       const intentReference = intent.reference as string;
-      bridgeDiag('E. bridge intent created', {
+      // (a) intent created — always-on trace (bridgeDiag above is dev-only).
+      bridgeTrace('step-a intent created', {
         reference: intentReference,
         destination: intent.destination,
         amount: intent.amount,
@@ -624,6 +684,7 @@ export default function ExternalBridge({
       setDestination(intent.destination);
 
       setStageNote('Opening your wallet…');
+      bridgeTrace('step-bc opening wallet (adapter/kit init)', { reference: intentReference });
       const [{ BridgeKit }, { createViemAdapterFromProvider }] = await Promise.all([
         import('@circle-fin/bridge-kit'),
         import('@circle-fin/adapter-viem-v2'),

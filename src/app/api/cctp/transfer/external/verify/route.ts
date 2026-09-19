@@ -41,6 +41,11 @@ function isTerminalFailure(reason: BurnVerifyFailure): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // Diagnosis instrumentation: prove whether verify is ever HIT. Render keeps
+  // stdout, so log the hit + outcome with the intent reference BEFORE any
+  // early return can hide it. Reference + hash are public chain identifiers.
+  let dbgReference: string | null = null;
+  let dbgBurnTxHash: string | null = null;
   try {
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse!;
@@ -62,6 +67,9 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     const { reference, burnTxHash } = body ?? {};
+    dbgReference = typeof reference === 'string' ? reference : null;
+    dbgBurnTxHash = typeof burnTxHash === 'string' ? burnTxHash : null;
+    console.log('[cctp/transfer/external/verify] HIT', { reference: dbgReference, burnTxHash: dbgBurnTxHash });
     if (typeof reference !== 'string' || !reference) {
       return NextResponse.json({ success: false, error: 'Missing reference.' }, { status: 400 });
     }
@@ -149,6 +157,11 @@ export async function POST(req: NextRequest) {
       burnTxHash,
     });
     if (!proof.ok) {
+      console.log('[cctp/transfer/external/verify] BURN_NOT_VERIFIED', {
+        reference: intent.id,
+        reason: proof.reason,
+        detail: (proof.detail ?? proof.reason ?? '').toString().slice(0, 300),
+      });
       if (isTerminalFailure(proof.reason)) {
         await (prisma as any).flowBridgeIntent.update({
           where: { id: intent.id },
@@ -177,6 +190,7 @@ export async function POST(req: NextRequest) {
       where: { id: intent.id },
       data: { status: 'BURN_CONFIRMED', burnTxHash: proof.burnTxHash, destinationBound: proof.destinationBound },
     });
+    console.log('[cctp/transfer/external/verify] BURN_CONFIRMED', { reference: intent.id, burnTxHash: proof.burnTxHash });
 
     logBridgeStage(intent.id, {
       stage: 'BURN_CONFIRMED',
@@ -193,7 +207,7 @@ export async function POST(req: NextRequest) {
       sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, proof.burnTxHash) : null,
     });
   } catch (error: any) {
-    console.error('[cctp/transfer/external/verify]', error);
+    console.error('[cctp/transfer/external/verify] ERROR', { reference: dbgReference, burnTxHash: dbgBurnTxHash }, error);
     return NextResponse.json({ success: false, error: 'Could not verify the bridge. Please try again.' }, { status: 500 });
   }
 }
