@@ -314,6 +314,17 @@ export async function checkBridgeStatus(
 // (per-chain, so the source burn and destination mint links are correct
 // for whichever chain that step actually happened on) — just look the
 // step up by name instead of reconstructing a URL ourselves.
+//
+// Step names are lowercase at runtime in the installed SDK
+// ('approve' | 'burn' | 'fetchAttestation' | 'mint'; QUICKSTART also
+// documents 'depositForBurn' for the source-tx leg), so match
+// case-insensitively and accept the depositForBurn burn alias.
+const BURN_STEP_ALIASES = new Set(['burn', 'depositforburn', 'deposit_for_burn']);
 export function findStep(result: BridgeResult, name: 'Approve' | 'Burn' | 'Mint') {
-  return result.steps.find((s) => s.name === name);
+  const want = name.toLowerCase();
+  return result.steps.find((s) => {
+    const n = String(s.name ?? '').toLowerCase();
+    if (want === 'burn') return n === 'burn' || BURN_STEP_ALIASES.has(n);
+    return n === want;
+  });
 }

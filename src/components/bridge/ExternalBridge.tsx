@@ -111,9 +111,35 @@ function bridgeTrace(step: string, data?: unknown): void {
   }
 }
 
+const BURN_STEP_ALIASES = new Set(['burn', 'depositforburn', 'deposit_for_burn']);
+
 function stepOf(result: any, name: 'Approve' | 'Burn' | 'Mint'): KitStep | null {
   const steps: KitStep[] = Array.isArray(result?.steps) ? result.steps : [];
-  return steps.find((s) => s?.name === name) ?? null;
+  const want = name.toLowerCase();
+  return (
+    steps.find((s) => {
+      const n = String(s?.name ?? '').toLowerCase();
+      if (!n) return false;
+      // The burn leg is named 'burn' at runtime in the installed SDK, but
+      // QUICKSTART documents 'depositForBurn' as the source-tx step in some
+      // flows — accept both so a valid burn hash is never missed.
+      if (want === 'burn') return n === 'burn' || BURN_STEP_ALIASES.has(n);
+      return n === want;
+    }) ?? null
+  );
+}
+
+// Raw step summary for the production trace: step names exactly as the SDK
+// emitted them, so a future naming variant shows up as data instead of
+// silent nulls (a previous SDK-shape mismatch surfaced as
+// approve/burn/mint all null with state 'success').
+function rawStepSummary(result: any): Array<{ name: string | null; state: string | null; hasTx: boolean }> {
+  const steps: KitStep[] = Array.isArray(result?.steps) ? result.steps : [];
+  return steps.map((s) => ({
+    name: typeof s?.name === 'string' ? s.name : null,
+    state: typeof s?.state === 'string' ? s.state : null,
+    hasTx: typeof s?.txHash === 'string' && s.txHash.length > 0,
+  }));
 }
 
 // Server-side stage enum values → user-facing labels.
@@ -385,7 +411,9 @@ export default function ExternalBridge({
     const mint = stepOf(result, 'Mint');
     // Only mark SUCCESS when BridgeKit actually reports it — never
     // optimistically. A missing step stays pending (honest, not fake).
-    if (approve?.state === 'success') setStage('approve', 'done');
+    // 'noop' counts as done: the SDK skips approval when allowance already
+    // suffices, and there is nothing left to do for that leg.
+    if (approve?.state === 'success' || approve?.state === 'noop') setStage('approve', 'done');
     else if (approve?.state === 'error') setStage('approve', 'error');
     if (burn?.state === 'success') setStage('burn', 'done');
     else if (burn?.state === 'error') setStage('burn', 'error');
@@ -576,6 +604,7 @@ export default function ExternalBridge({
     bridgeTrace('step-bc kit.bridge signing returned', {
       reference: intentReference,
       state: result?.state ?? null,
+      rawSteps: rawStepSummary(result),
       approve: stepOf(result, 'Approve') ? { state: stepOf(result, 'Approve')?.state ?? null, txHash: stepOf(result, 'Approve')?.txHash ?? null } : null,
       burn: stepOf(result, 'Burn') ? { state: stepOf(result, 'Burn')?.state ?? null, txHash: stepOf(result, 'Burn')?.txHash ?? null } : null,
       mint: stepOf(result, 'Mint') ? { state: stepOf(result, 'Mint')?.state ?? null, txHash: stepOf(result, 'Mint')?.txHash ?? null } : null,
