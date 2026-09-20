@@ -29,6 +29,8 @@ import { ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/flarehqContracts';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import { parseUnits } from 'viem';
 import { explorerTxUrl } from "@/lib/config/network";
+import { enforceSpendLimit } from '@/lib/agents/spendWindow';
+import { checkRateLimit } from '@/src/lib/ratelimit';
 
 interface PayrollRecipient {
   recipientSCA: string;
@@ -55,6 +57,9 @@ function normalizeAmount(raw: unknown): string | null {
 // ── POST /api/payroll/run ─────────────────────────────────────────────────────
 async function runPayrollHandler(request: NextRequest) {
   try {
+    // H9: payments-tier rate limit on this fund-moving POST.
+    const { allowed, response: limitResponse } = await checkRateLimit(request, 'payments');
+    if (!allowed) return limitResponse!;
     const merchant = await resolveMerchant(request);
     if (!merchant) {
       return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
@@ -180,6 +185,23 @@ async function runPayrollHandler(request: NextRequest) {
       (sum: number, r: PayrollRecipient) => sum + parseFloat(r.amount as any),
       0
     );
+
+    // ── Spend-limit gate (audit: spend-limit gap) — BEFORE any transfer
+    // executes. Composes the on-chain ArcFlareSpendLimit pre-flight with the
+    // atomic per-payer DB window (Serializable + FOR UPDATE), so a payroll
+    // batch can never move value uncapped, and concurrent batches for the
+    // same payer can't jointly exceed the cap by racing.
+    const spendGate = await enforceSpendLimit({
+      payerAddress: payerSCA,
+      amountMicros: BigInt(Math.round(totalAmount * 1e6)),
+      context: `payroll/run:${batchRef}`,
+    });
+    if (!spendGate.allowed) {
+      return NextResponse.json(
+        { success: false, error: spendGate.reason ?? 'Spend limit rejected.' },
+        { status: 403 }
+      );
+    }
 
     console.log(
       `💰 Running payroll batch: ${recipients.length} recipients, ${totalAmount} ${token.symbol} total, payer wallet kind: ${walletProvider.kind}`

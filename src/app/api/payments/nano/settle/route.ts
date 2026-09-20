@@ -30,6 +30,8 @@ import {
   resolvePlatformPayerSca,
   resolvePlatformPayerWalletId,
 } from "@/lib/config/platformDefaults";
+import { enforceSpendLimit } from '@/lib/agents/spendWindow';
+import { parseUnits } from 'viem';
 
 // ── Constants & Types ────────────────────────────────────────────────────────
 // Platform shared default payer — TESTNET-ONLY pins live in
@@ -275,10 +277,18 @@ async function settleOnchain(
     const scoped = candidates.filter((n) => logMatchesToken(n as any, token));
     const ids = scoped.map((n) => n.id);
     if (ids.length > 0) {
-      await tx.nanoPayment.updateMany({
-        where: { id: { in: ids } },
+      // H10: conditional claim — only rows still unsettled AND unbatched may
+      // be claimed. Concurrent settlers race here; the updateMany count tells
+      // who won. Anything less than full ownership aborts the batch.
+      const claim = await tx.nanoPayment.updateMany({
+        where: { id: { in: ids }, settled: false, batchRef: null },
         data: { batchRef },
       });
+      if (claim.count !== ids.length) {
+        throw new Error(
+          `refusing to settle: ${ids.length - claim.count} row(s) were claimed by a concurrent settle — release and retry`
+        );
+      }
     }
 
     const lockedRows = ids.length > 0
@@ -320,6 +330,24 @@ async function settleOnchain(
 
   if (count === 0 || total <= 0) {
     throw new Error(`No pending ${token.symbol} payments found or already settling.`);
+  }
+
+  // ── Spend-limit gate (audit: spend-limit gap) — BEFORE the transfer
+  // executes. The batch total is the amount that debits the payer's wallet;
+  // gate it through the on-chain pre-flight + atomic per-payer DB window so
+  // a force-settled batch (or several concurrent settlements) can never
+  // jointly exceed the payer's cap. Rows stay batchRef-locked on rejection,
+  // so nothing is lost — the failure is retried after the window clears.
+  const totalMicros = parseUnits(total.toFixed(token.decimals), token.decimals);
+  const spendGate = await enforceSpendLimit({
+    payerAddress: agentSCA,
+    amountMicros: totalMicros,
+    context: `nano:settle:${batchRef}`,
+  });
+  if (!spendGate.allowed) {
+    throw new Error(
+      `Nano settlement blocked by spend limit: ${spendGate.reason} — no funds moved; rows remain pending.`
+    );
   }
 
   // Decimals come from the canonical resolver — never assumed. Both

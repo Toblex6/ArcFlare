@@ -16,6 +16,8 @@ import {
 } from '@/src/lib/nanopayment';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import { resolvePlatformPayerSca } from '@/lib/config/platformDefaults';
+import { enforceSpendLimit } from '@/lib/agents/spendWindow';
+import { parseUnits } from 'viem';
 
 // The platform's shared default payer (same identity as settle/route.ts) —
 // TESTNET-ONLY pin lives in platformDefaults.ts (single authority,
@@ -47,9 +49,18 @@ async function nanoHandler(request: Request) {
       );
     }
 
-    if (parseFloat(amount) <= 0) {
+    // M6: shared usdcAmount rule (decimal string, ≤6 decimals, >0, capped) +
+    // isAddress on every receiver/payer field — no float drift.
+    if (!/^0x[a-fA-F0-9]{40}$/.test(String(agentSCA)) || !/^0x[a-fA-F0-9]{40}$/.test(String(merchantSCA))) {
       return NextResponse.json(
-        { success: false, error: 'Amount must be greater than 0.' },
+        { success: false, error: 'agentSCA and merchantSCA must be valid 0x addresses.' },
+        { status: 400 }
+      );
+    }
+    const nanoAmountStr = String(amount).trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(nanoAmountStr) || !Number.isFinite(parseFloat(nanoAmountStr)) || parseFloat(nanoAmountStr) <= 0 || parseFloat(nanoAmountStr) > 10_000_000) {
+      return NextResponse.json(
+        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
         { status: 400 }
       );
     }
@@ -94,10 +105,28 @@ async function nanoHandler(request: Request) {
     }
 
     // Record the nanopayment
+    // ── Spend-limit gate (audit: spend-limit gap) — BEFORE the row is
+    // recorded. A nano charge is a future debit of agentSCA at settlement;
+    // recording it against the payer's atomic window (on-chain pre-flight +
+    // Serializable row-locked sum) means concurrent micro-charges can never
+    // race past the payer's cap before settle executes.
+    const amountMicros = parseUnits(String(amount), token.decimals);
+    const spendGate = await enforceSpendLimit({
+      payerAddress: agentSCA,
+      amountMicros,
+      context: 'nano:record',
+    });
+    if (!spendGate.allowed) {
+      return NextResponse.json(
+        { success: false, error: spendGate.reason ?? 'Spend limit rejected.' },
+        { status: 403 }
+      );
+    }
+
     const nano = await recordNanoPayment({
       agentSCA,
       merchantSCA,
-      amount: parseFloat(amount),
+      amount: parseFloat(nanoAmountStr),
       description,
       currency: token.symbol,
       tokenAddress: token.address,

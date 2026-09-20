@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
+import { checkRateLimit } from '@/src/lib/ratelimit';
 import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { resolveRowCurrency } from '@/lib/tokens/resolveCurrency';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { resolveConsumerWallet } from "@/src/lib/auth/consumerWallet";
+import { enforceSpendLimit } from '@/lib/agents/spendWindow';
+import { parseUnits } from 'viem';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -85,6 +88,22 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
   // Decimals come from the canonical resolver — never assumed.
   const amountStr = scheduled.amount.toFixed(token.decimals);
 
+  // ── Spend-limit gate (audit: spend-limit gap) — BEFORE the transfer
+  // executes. Every scheduled debit composes the on-chain ArcFlareSpendLimit
+  // pre-flight with the atomic per-payer DB window, so a burst of due rows
+  // (or concurrent runners) can never jointly exceed the payer's cap.
+  const amountMicros = parseUnits(amountStr, token.decimals);
+  const spendGate = await enforceSpendLimit({
+    payerAddress: scheduled.payerSCA,
+    amountMicros,
+    context: `scheduled/run:${scheduled.reference}`,
+  });
+  if (!spendGate.allowed) {
+    throw new Error(
+      `Scheduled payment ${scheduled.reference} blocked by spend limit: ${spendGate.reason} — no funds moved.`
+    );
+  }
+
   let txHash: string;
 
   try {
@@ -133,6 +152,10 @@ const STALE_CLAIM_MS = 5 * 60 * 1000;
 
 async function runScheduledHandler(request: Request) {
   try {
+    // H9: payments-tier rate limit on this fund-moving POST (fail-closed:
+    // memory fallback still enforces when Upstash is unreachable).
+    const { allowed, response: limitResponse } = await checkRateLimit(request as any, 'payments');
+    if (!allowed) return limitResponse!;
     const now = new Date();
 
     const candidates = await (prisma as any).scheduledPayment.findMany({

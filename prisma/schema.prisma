@@ -642,6 +642,23 @@ model DisputeAnalysis {
 // relayer) but the on-chain spend-limit record (checkAndRecordSpend) reverted
 // because a concurrent spend pushed the agent over cap in the race window.
 // Durable audit trail + auto-refund tracking — see src/lib/jobs/settlementRecovery.ts.
+// ── Per-payer windowed-sum spend limiter (audit: spend-limit gap) ────────────
+// Every value-moving path enforces (1) the on-chain ArcFlareSpendLimit
+// pre-flight, (2) THIS atomic DB-level windowed sum per payer, and (3) the
+// relayer-signed on-chain checkAndRecordSpend BEFORE the transfer. The window
+// here is what stops concurrent small requests from racing each other past a
+// cap: the read-check-write runs inside a single Serializable transaction
+// with a row lock (SELECT … FOR UPDATE) — NOT a JS-side sum-then-write.
+model SpendWindow {
+  id           String   @id @default(cuid())
+  payerAddress String   @unique // lowercased payer SCA/EOA
+  windowStart  DateTime @default(now())
+  spentMicros  BigInt   @default(0) // 6-dec canonical base units
+  updatedAt    DateTime @updatedAt
+
+  @@map("spend_windows")
+}
+
 model StuckSettlement {
   id               String   @id @default(cuid())
   agentAddress     String

@@ -20,9 +20,24 @@ import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAd
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { parseUnits } from 'viem';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { checkRateLimit } from '@/src/lib/ratelimit';
+import { enforceSpendLimit } from '@/lib/agents/spendWindow';
 
 const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
 const USDC_ARC: string = getNetworkConfig().usdcAddress;
+
+// ── Per-merchant stream ceilings (audit: spend-limit gap) ────────────────────
+// ratePerSecond/totalDeposited were previously unbounded — a single accepted
+// stream could lock an arbitrarily large deposit or drain the sender at an
+// arbitrarily fast drip. Both are now bounded before the stream is accepted:
+//   • max 10 USDC/s drip rate
+//   • max 10,000 USDC total deposit per stream
+//   • max 10 ACTIVE streams per sender (concurrent-stream accumulation cap)
+const MAX_STREAM_RATE_PER_SECOND = 10;
+const MAX_STREAM_TOTAL_DEPOSIT = 10_000;
+const MAX_ACTIVE_STREAMS_PER_SENDER = 10;
+
+const STREAM_AMOUNT_RE = /^\d+(\.\d{1,6})?$/;
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -51,23 +66,30 @@ async function waitForCircleTx(
 
 async function createStreamHandler(request: NextRequest) {
   try {
-    const {
-      senderSCA, // Circle SCA wallet address of sender
-      receiverSCA, // Recipient SCA wallet address
-      ratePerSecond, // USDC per second as string e.g. "0.001" = 0.001 USDC/s
-      totalDeposited, // Total USDC to lock e.g. "10.00"
-      webhookUrl,
-    } = await request.json();
-
-    if (!senderSCA || !receiverSCA || !ratePerSecond || !totalDeposited) {
+    // H9: payments-tier rate limit on this fund-moving POST.
+    const { allowed, response: limitResponse } = await checkRateLimit(request, 'payments');
+    if (!allowed) return limitResponse!;
+    // H12: the existing StreamCreateSchema is now enforced — scaAddress on
+    // both endpoints, shared usdcAmount rule (≤6 decimals, >0, capped) on
+    // both money fields, totalDeposited ≥ ratePerSecond. Unvalidated
+    // parseUnits on raw body fields never reaches a sink.
+    const raw = await request.json();
+    const { parseBody, StreamCreateSchema } = await import('@/src/lib/validation');
+    const { data, error: validationError } = parseBody(StreamCreateSchema, raw);
+    if (validationError) {
+      const msg = await (validationError as Response).json().catch(() => null);
       return NextResponse.json(
-        {
-          success: false,
-          error: 'senderSCA, receiverSCA, ratePerSecond and totalDeposited are required.',
-        },
+        { success: false, error: (msg as any)?.error ?? 'Validation failed.' },
         { status: 400 }
       );
     }
+    const {
+      senderSCA,
+      receiverSCA,
+      ratePerSecond,
+      totalDeposited,
+      webhookUrl,
+    } = data;
 
     if (!STREAM_CONTRACT) {
       return NextResponse.json(
@@ -103,6 +125,46 @@ async function createStreamHandler(request: NextRequest) {
 
     const circleClient = getCircleClient();
     const reference = `stream_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+    // ── Per-merchant stream ceilings (audit: spend-limit gap) — BEFORE the
+    // approve tx. ratePerSecond/totalDeposited were unbounded before this
+    // gate; both are now bounded, and the composed spend gate (on-chain
+    // pre-flight + atomic per-payer DB window) bounds the payer's total
+    // committed outflow so concurrent stream creations can't race past it.
+    const rateNum = Number(ratePerSecond);
+    const depositNum = Number(totalDeposited);
+    if (!Number.isFinite(rateNum) || rateNum <= 0 || rateNum > MAX_STREAM_RATE_PER_SECOND) {
+      return NextResponse.json(
+        { success: false, error: `ratePerSecond must be a positive number up to ${MAX_STREAM_RATE_PER_SECOND} USDC/s.` },
+        { status: 400 }
+      );
+    }
+    if (!Number.isFinite(depositNum) || depositNum <= 0 || depositNum > MAX_STREAM_TOTAL_DEPOSIT) {
+      return NextResponse.json(
+        { success: false, error: `totalDeposited must be a positive number up to ${MAX_STREAM_TOTAL_DEPOSIT} USDC.` },
+        { status: 400 }
+      );
+    }
+    const activeStreamCount = await prisma.stream.count({
+      where: { senderSCA, status: 'ACTIVE' },
+    });
+    if (activeStreamCount >= MAX_ACTIVE_STREAMS_PER_SENDER) {
+      return NextResponse.json(
+        { success: false, error: `Sender already has ${activeStreamCount} active streams (max ${MAX_ACTIVE_STREAMS_PER_SENDER}). Close one before opening another.` },
+        { status: 403 }
+      );
+    }
+    const streamSpendGate = await enforceSpendLimit({
+      payerAddress: senderSCA,
+      amountMicros: BigInt(Math.round(depositNum * 1e6)),
+      context: `stream/create:${reference}`,
+    });
+    if (!streamSpendGate.allowed) {
+      return NextResponse.json(
+        { success: false, error: streamSpendGate.reason ?? 'Spend limit rejected.' },
+        { status: 403 }
+      );
+    }
 
     // Convert to 6 decimal USDC units
     const rateWei = parseUnits(ratePerSecond.toString(), 6);
