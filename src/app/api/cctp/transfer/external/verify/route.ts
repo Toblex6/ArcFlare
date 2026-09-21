@@ -96,6 +96,33 @@ export async function POST(req: NextRequest) {
       // accepted once a burn is bound (prevents double-record).
       if ((intent.burnTxHash ?? '').toLowerCase() === burnTxHash.toLowerCase()) {
         const source = getBridgeSourceChain(intent.sourceChain);
+        // Backfill the CCTP message nonce for burns verified before nonce
+        // binding existed: re-prove the already-bound hash and record the
+        // nonce so completion can bind the mint to it. Best-effort — a
+        // re-proof failure (e.g. source RPC flake) never regresses the
+        // already-recorded BURN_CONFIRMED state.
+        if (!intent.cctpNonce) {
+          const backfill = await verifyExternalBurn({
+            sourceId: intent.sourceChain,
+            sourceAddress: intent.sourceWallet,
+            amountBaseUnits: BigInt(intent.amount),
+            destination: intent.destination,
+            burnTxHash,
+          }).catch(() => null);
+          if (backfill?.ok) {
+            await (prisma as any).flowBridgeIntent.updateMany({
+              where: { id: intent.id, status: 'BURN_CONFIRMED' },
+              data: { cctpNonce: backfill.cctpNonce, destinationBound: true },
+            });
+            intent.cctpNonce = backfill.cctpNonce;
+            await logBridgeStage(intent.id, {
+              stage: 'BURN_CONFIRMED',
+              txHash: burnTxHash,
+              chainId: source?.chainId,
+              metadata: { destinationBound: true, cctpNonce: backfill.cctpNonce, backfill: true },
+            });
+          }
+        }
         return NextResponse.json({
           success: true,
           state: 'burn-confirmed',
@@ -211,7 +238,7 @@ export async function POST(req: NextRequest) {
     try {
       const claim = await (prisma as any).flowBridgeIntent.updateMany({
         where: { id: intent.id, status: 'PENDING' },
-        data: { status: 'BURN_CONFIRMED', burnTxHash: proof.burnTxHash, destinationBound: proof.destinationBound },
+        data: { status: 'BURN_CONFIRMED', burnTxHash: proof.burnTxHash, destinationBound: proof.destinationBound, cctpNonce: proof.cctpNonce },
       });
       if (claim.count === 0) {
         const reread = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });
@@ -254,7 +281,7 @@ export async function POST(req: NextRequest) {
       stage: 'BURN_CONFIRMED',
       txHash: proof.burnTxHash,
       chainId: source?.chainId,
-      metadata: { destinationBound: proof.destinationBound, lateRecovery: expired },
+      metadata: { destinationBound: proof.destinationBound, cctpNonce: proof.cctpNonce, lateRecovery: expired },
     });
 
     return NextResponse.json({

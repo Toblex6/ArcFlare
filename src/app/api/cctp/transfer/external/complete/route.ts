@@ -7,13 +7,14 @@
 // actual. Only COMPLETED intents surface in Recent Activity.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { pad } from 'viem';
 import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { prisma } from '@/src/lib/prisma';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
 import { getBridgeSourceChain, sourceExplorerTxUrl, formatBridgeBaseUnits } from '@/lib/bridge/sourceChains';
-import { verifyArcMint, type MintVerifyFailure } from '@/lib/bridge/externalVerify';
+import { verifyArcMint, sourceCctpV2, type MintVerifyFailure } from '@/lib/bridge/externalVerify';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 function mintFailureCopy(reason: MintVerifyFailure): string {
@@ -22,8 +23,10 @@ function mintFailureCopy(reason: MintVerifyFailure): string {
       return 'Destination transaction not found on Arc yet. Wait a moment and try again.';
     case 'REVERTED':
       return 'The destination transaction reverted on-chain. The bridge was not completed.';
-    case 'NO_DESTINATION_CREDIT':
-      return 'That transaction did not credit your FlareHQ wallet. Bridge could not be completed.';
+    case 'NONCE_MISMATCH':
+      return 'That transaction is not the mint for this bridge — it carries a different bridge message. Submit the Arc mint from your bridge result.';
+    case 'AMOUNT_MISMATCH':
+      return 'That transaction credited a different amount than this bridge expects after relayer fees. Submit the Arc mint from your bridge result.';
     case 'RPC_UNAVAILABLE':
       return 'Could not reach Arc. Your wallet was not charged unless a transaction was confirmed — try again.';
   }
@@ -99,14 +102,42 @@ export async function POST(req: NextRequest) {
       chainId: getNetworkConfig().chainId,
       metadata: { destination: intent.destination },
     });
-    const proof = await verifyArcMint({ destination: intent.destination, mintTxHash });
+    const proof = await verifyArcMint(
+      (() => {
+        // The mint must reproduce the burn's message: expected source
+        // domain + source TokenMessenger sender pin the message identity
+        // alongside the nonce (all server-derived from the intent's source
+        // chain — never client-supplied). A source chain unknown to the
+        // installed BridgeKit yields no pins and the nonce check alone
+        // still gates completion.
+        const cctp = sourceCctpV2(intent.sourceChain);
+        return {
+          destination: intent.destination,
+          mintTxHash,
+          expectedNonce: (intent.cctpNonce as string | null) ?? null,
+          expectedAmount: BigInt(intent.amount),
+          expectedSourceDomain: cctp?.domain ?? null,
+          expectedSender: cctp ? pad(cctp.tokenMessenger as `0x${string}`, { size: 32 }) : null,
+        };
+      })()
+    );
     if (!proof.ok) {
+      // Every rejected mint leaves a FAILED stage with the specific
+      // mismatch reason + expected-vs-actual binding facts, so a wrong
+      // submission is visible in stage history instead of silently
+      // succeeding or silently disappearing.
       await logBridgeStage(intent.id, {
         stage: 'FAILED',
         txHash: mintTxHash,
         chainId: getNetworkConfig().chainId,
         errorDetail: proof.detail ?? proof.reason,
-        metadata: { reason: proof.reason },
+        metadata: {
+          reason: proof.reason,
+          expectedNonce: (intent.cctpNonce as string | null) ?? null,
+          expectedAmount: intent.amount,
+          ...(proof.actualAmount !== undefined ? { actualAmount: proof.actualAmount.toString() } : {}),
+          ...(proof.actualNonce !== undefined ? { actualNonce: proof.actualNonce } : {}),
+        },
       });
       return NextResponse.json(
         { success: false, code: 'MINT_NOT_VERIFIED', reason: proof.reason, error: mintFailureCopy(proof.reason) },

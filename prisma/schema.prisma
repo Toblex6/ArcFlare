@@ -296,6 +296,10 @@ model ConsumerAccount {
   pinLockedUntil   DateTime? // step-up lockout expiry after repeated failures; null = not locked
   telegramUserId   String?  @unique // Telegram bot identity (Telegram users are consumer_token accounts)
   onboardingSource String? // "telegram" | "web" | etc — how this account was created
+  // M4: consumer session revocation — bumped on recovery/credential change so
+  // stolen consumer_token cookies die immediately (mirrors merchant
+  // sessionVersion). Tokens carry this claim; the resolver rejects mismatches.
+  sessionVersion   Int      @default(0)
   createdAt        DateTime @default(now())
   lastSeenAt       DateTime @default(now())
 }
@@ -813,6 +817,7 @@ model FlowBridgeIntent {
   mintTxHash      String?  @unique // Arc destination mint tx (set on COMPLETED)
   actualAmount    String? // measured destination credit, canonical units (set on COMPLETED)
   destinationBound Boolean @default(false) // true when the burn receipt's DepositForBurn provably names destination+domain
+  cctpNonce      String?  @unique // CCTP V2 bytes32 message nonce (0x + 64 hex) bound at BURN_CONFIRMED; the mint must reproduce it
   status          String   @default("PENDING") // PENDING | BURN_CONFIRMED | COMPLETED | FAILED
   error           String? // terminal failure detail (FAILED only)
   expiresAt       DateTime // intents expire uncompleted; expired intents are never completable

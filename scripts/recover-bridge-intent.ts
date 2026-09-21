@@ -18,9 +18,10 @@
 // Env: DATABASE_URL (production). Never prints secrets.
 
 import fs from 'node:fs';
+import { pad } from 'viem';
 import { prisma } from '@/src/lib/prisma';
 import { getBridgeSourceChain } from '@/lib/bridge/sourceChains';
-import { verifyExternalBurn, verifyArcMint } from '@/lib/bridge/externalVerify';
+import { verifyExternalBurn, verifyArcMint, sourceCctpV2 } from '@/lib/bridge/externalVerify';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 function loadEnvLocal() {
@@ -103,7 +104,7 @@ async function main() {
       });
       const claim = await (prisma as any).flowBridgeIntent.updateMany({
         where: { id: intent.id, status: 'PENDING' },
-        data: { status: 'BURN_CONFIRMED', burnTxHash, destinationBound: burn.destinationBound },
+        data: { status: 'BURN_CONFIRMED', burnTxHash, destinationBound: burn.destinationBound, cctpNonce: burn.cctpNonce },
       });
       if (claim.count === 0) {
         console.log('PENDING claim lost a race (state changed) — re-run to reassess.');
@@ -113,7 +114,7 @@ async function main() {
         stage: 'BURN_CONFIRMED',
         txHash: burnTxHash!,
         chainId: source?.chainId,
-        metadata: { destinationBound: burn.destinationBound, recovery: true, lateRecovery: new Date(intent.expiresAt).getTime() < Date.now() },
+        metadata: { destinationBound: burn.destinationBound, cctpNonce: burn.cctpNonce, recovery: true, lateRecovery: new Date(intent.expiresAt).getTime() < Date.now() },
       });
       console.log('Claimed PENDING → BURN_CONFIRMED.');
     }
@@ -121,8 +122,43 @@ async function main() {
     console.log(`Status is ${intent.status} — burn already bound, skipping to mint.`);
   }
 
+  // Nonce for mint binding: the freshly verified burn wins; otherwise the
+  // stored nonce. Legacy BURN_CONFIRMED rows predate nonce binding — re-prove
+  // the bound burn hash to backfill it (same rule as the verify route).
+  let cctpNonce: string | null = (intent.cctpNonce as string | null) ?? null;
+  if (burn.ok) cctpNonce = burn.cctpNonce;
+  if (!cctpNonce) {
+    console.log('No burn nonce on record — re-proving the bound burn to backfill it.');
+    const backfill = await verifyExternalBurn({
+      sourceId: intent.sourceChain,
+      sourceAddress: intent.sourceWallet,
+      amountBaseUnits: BigInt(intent.amount),
+      destination: intent.destination,
+      burnTxHash: burnTxHash!,
+    });
+    console.log('burn backfill:', backfill.ok ? `OK nonce=${backfill.cctpNonce}` : `FAIL ${backfill.reason} — ${backfill.detail ?? ''}`);
+    if (!backfill.ok) return;
+    cctpNonce = backfill.cctpNonce;
+    if (execute) {
+      await (prisma as any).flowBridgeIntent.updateMany({
+        where: { id: intent.id, status: 'BURN_CONFIRMED' },
+        data: { cctpNonce, destinationBound: true },
+      });
+    } else {
+      console.log(`WOULD backfill cctpNonce=${cctpNonce} on the intent.`);
+    }
+  }
+
   // ── Step 2: prove the mint (same call the complete route makes) ──
-  const mint = await verifyArcMint({ destination: intent.destination, mintTxHash: mintTxHash! });
+  const cctp = sourceCctpV2(intent.sourceChain);
+  const mint = await verifyArcMint({
+    destination: intent.destination,
+    mintTxHash: mintTxHash!,
+    expectedNonce: cctpNonce,
+    expectedAmount: BigInt(intent.amount),
+    expectedSourceDomain: cctp?.domain ?? null,
+    expectedSender: cctp ? pad(cctp.tokenMessenger as `0x${string}`, { size: 32 }) : null,
+  });
   console.log('mint verify:', mint.ok ? `OK actualAmount=${mint.actualAmount.toString()}` : `FAIL ${mint.reason} — ${mint.detail ?? ''}`);
   if (!mint.ok) return;
 

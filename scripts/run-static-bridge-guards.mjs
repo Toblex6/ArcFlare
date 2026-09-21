@@ -53,5 +53,17 @@ for (const p of files) {
 ok('verify no pre-verification expiry kill', !verify.includes('if (new Date(intent.expiresAt).getTime() < Date.now()) {'));
 ok('verify late-recovery advance present', verify.includes('lateRecovery'));
 ok('verify expired+unprovable still INTENT_EXPIRED', verify.includes("code: 'INTENT_EXPIRED'"));
+// Completion-integrity guards (H1/M3): the burn's CCTP message nonce is
+// stored at verify time and the mint must reproduce it; undecodable burns
+// fail closed instead of landing destinationBound=false.
+const complete = src('src/app/api/cctp/transfer/external/complete/route.ts');
+const extVerify = src('src/lib/bridge/externalVerify.ts');
+ok('verify stores cctpNonce on BURN_CONFIRMED', verify.includes('cctpNonce'));
+ok('complete binds expectedNonce', complete.includes('expectedNonce'));
+ok('complete binds expectedAmount', complete.includes('expectedAmount'));
+ok('complete FAILED stage carries mismatch facts', complete.includes('expectedNonce') && complete.includes('actualAmount'));
+ok('extVerify decodes V2 DepositForBurn (minFinalityThreshold)', extVerify.includes('minFinalityThreshold'));
+ok('extVerify has no V1 nonce-shaped DepositForBurn', !extVerify.includes("name: 'nonce', type: 'uint64'"));
+ok('extVerify has no destinationBound:false success path', !extVerify.includes('destinationBound: false'));
 console.log('\nstatic-bridge-guards: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail > 0 ? 1 : 0);
