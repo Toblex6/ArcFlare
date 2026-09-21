@@ -40,5 +40,18 @@ ok('verify HIT log present', verify.includes('[cctp/transfer/external/verify] HI
 ok('verify BURN_CONFIRMED log present', verify.includes('BURN_CONFIRMED'));
 ok('verify BURN_NOT_VERIFIED log present', verify.includes('BURN_NOT_VERIFIED'));
 ok('verify ERROR log has reference', verify.includes('dbgReference'));
+// Stall-class guards: stage logs must be awaited (fire-and-forget + immediate
+// return loses the outcome row on serverless freeze → "BURN_PENDING with no
+// outcome" silent stalls), and expiry must never kill an intent whose burn
+// proves on-chain (late verify advances as lateRecovery).
+for (const p of files) {
+  const s = strip(src(p));
+  const total = (s.match(/logBridgeStage\(/g) ?? []).length;
+  const awaited = (s.match(/await logBridgeStage\(/g) ?? []).length;
+  ok(p + ' all stage logs awaited', total > 0 && total === awaited, total + ' total, ' + awaited + ' awaited');
+}
+ok('verify no pre-verification expiry kill', !verify.includes('if (new Date(intent.expiresAt).getTime() < Date.now()) {'));
+ok('verify late-recovery advance present', verify.includes('lateRecovery'));
+ok('verify expired+unprovable still INTENT_EXPIRED', verify.includes("code: 'INTENT_EXPIRED'"));
 console.log('\nstatic-bridge-guards: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail > 0 ? 1 : 0);

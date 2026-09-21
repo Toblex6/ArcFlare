@@ -137,7 +137,10 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    logBridgeStage(intent.id, {
+    // Awaited (not fire-and-forget) so the PREPARING row is never lost on
+    // serverless freeze before the response returns. logBridgeStage never
+    // throws, so awaiting is safe.
+    await logBridgeStage(intent.id, {
       stage: 'PREPARING',
       chainId: source.chainId,
       metadata: {

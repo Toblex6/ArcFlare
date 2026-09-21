@@ -89,7 +89,11 @@ export async function POST(req: NextRequest) {
       // (Binding happens only on verified success below.)
     }
 
-    logBridgeStage(intent.id, {
+    // Stage logs are awaited (not fire-and-forget): on serverless the
+    // function may freeze before an un-awaited log flushes, leaving a
+    // "MINT_PENDING with no outcome" silent stall. logBridgeStage never
+    // throws, so awaiting is safe.
+    await logBridgeStage(intent.id, {
       stage: 'MINT_PENDING',
       txHash: mintTxHash,
       chainId: getNetworkConfig().chainId,
@@ -97,7 +101,7 @@ export async function POST(req: NextRequest) {
     });
     const proof = await verifyArcMint({ destination: intent.destination, mintTxHash });
     if (!proof.ok) {
-      logBridgeStage(intent.id, {
+      await logBridgeStage(intent.id, {
         stage: 'FAILED',
         txHash: mintTxHash,
         chainId: getNetworkConfig().chainId,
@@ -110,19 +114,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const updated = await (prisma as any).flowBridgeIntent.update({
-      where: { id: intent.id },
-      data: { status: 'COMPLETED', mintTxHash: proof.mintTxHash, actualAmount: proof.actualAmount.toString() },
-    });
+    // H2: conditional claim — only BURN_CONFIRMED may advance to COMPLETED.
+    // Concurrent complete calls race here; the loser re-reads and returns the
+    // winner's state. P2002 (mintTxHash unique) maps to 409.
+    let updated: any;
+    try {
+      const claim = await (prisma as any).flowBridgeIntent.updateMany({
+        where: { id: intent.id, status: 'BURN_CONFIRMED' },
+        data: { status: 'COMPLETED', mintTxHash: proof.mintTxHash, actualAmount: proof.actualAmount.toString() },
+      });
+      if (claim.count === 0) {
+        const reread = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });
+        if (reread?.status === 'COMPLETED') {
+          return NextResponse.json({
+            success: true,
+            state: 'completed',
+            reference: reread.id,
+            actualAmount: reread.actualAmount,
+            actualAmountDisplay: reread.actualAmount ? formatBridgeBaseUnits(BigInt(reread.actualAmount)) : null,
+            destinationExplorerUrl: reread.mintTxHash ? explorerTxUrl(reread.mintTxHash) : null,
+          });
+        }
+        return NextResponse.json(
+          { success: false, code: 'INTENT_STATE_CONFLICT', error: 'This bridge changed state while completing. Please retry.' },
+          { status: 409 }
+        );
+      }
+      updated = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        return NextResponse.json(
+          { success: false, code: 'INTENT_ALREADY_USED', error: 'This destination transaction is already bound to a bridge.' },
+          { status: 409 }
+        );
+      }
+      throw e;
+    }
     const source = getBridgeSourceChain(updated.sourceChain);
 
-    logBridgeStage(intent.id, {
+    await logBridgeStage(intent.id, {
       stage: 'MINT_CONFIRMED',
       txHash: proof.mintTxHash,
       chainId: getNetworkConfig().chainId,
       metadata: { actualAmount: proof.actualAmount.toString() },
     });
-    logBridgeStage(intent.id, {
+    await logBridgeStage(intent.id, {
       stage: 'VERIFIED',
       txHash: proof.mintTxHash,
       chainId: getNetworkConfig().chainId,

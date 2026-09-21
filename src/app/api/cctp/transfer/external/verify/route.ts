@@ -113,22 +113,14 @@ export async function POST(req: NextRequest) {
     const source = getBridgeSourceChain(intent.sourceChain);
     const sourceLabel = source?.label ?? intent.sourceChain;
 
-    if (new Date(intent.expiresAt).getTime() < Date.now()) {
-      await (prisma as any).flowBridgeIntent.update({
-        where: { id: intent.id },
-        data: { status: 'FAILED', error: 'Bridge intent expired before the burn was submitted.' },
-      });
-      logBridgeStage(intent.id, {
-        stage: 'FAILED',
-        chainId: source?.chainId,
-        errorDetail: 'Bridge intent expired before the burn was submitted.',
-        metadata: { burnTxHash, sourceChain: intent.sourceChain },
-      });
-      return NextResponse.json(
-        { success: false, code: 'INTENT_EXPIRED', error: 'This bridge expired before the burn was submitted. Start a new bridge to try again.' },
-        { status: 400 }
-      );
-    }
+    // Expiry is evaluated AFTER on-chain verification, not before: a burn
+    // that proves on-chain (exact sender + exact amount) disproves the
+    // "never submitted" rationale for expiry, so a late verify still
+    // advances (marked lateRecovery) instead of stranding a funded intent
+    // as FAILED. Only an UNPROVABLE burn on an expired intent fails closed
+    // here. (A verify that starts before expiry but lands after it advances
+    // normally — the claim below is conditional on PENDING either way.)
+    const expired = new Date(intent.expiresAt).getTime() < Date.now();
 
     // Destination is re-resolved at verify time: if the link changed since
     // the intent was issued, fail closed rather than crediting a stale row.
@@ -143,11 +135,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    logBridgeStage(intent.id, {
+    // Stage logs are awaited (not fire-and-forget): on serverless the
+    // function may freeze before an un-awaited log flushes, which previously
+    // produced "BURN_PENDING with no outcome" silent stalls. logBridgeStage
+    // never throws, so awaiting is safe.
+    await logBridgeStage(intent.id, {
       stage: 'BURN_PENDING',
       txHash: burnTxHash,
       chainId: source?.chainId,
-      metadata: { sourceChain: intent.sourceChain, sourceAddress: intent.sourceWallet },
+      metadata: { sourceChain: intent.sourceChain, sourceAddress: intent.sourceWallet, lateRetry: expired },
     });
     const proof = await verifyExternalBurn({
       sourceId: intent.sourceChain,
@@ -162,13 +158,34 @@ export async function POST(req: NextRequest) {
         reason: proof.reason,
         detail: (proof.detail ?? proof.reason ?? '').toString().slice(0, 300),
       });
+      if (expired && (proof.reason === 'NOT_FOUND' || proof.reason === 'NOT_MINED')) {
+        // Expired and no burn was ever submitted for this hash — the only
+        // case that still fails as INTENT_EXPIRED.
+        // H2: conditional claim — never overwrite a concurrently-completed intent.
+        await (prisma as any).flowBridgeIntent.updateMany({
+          where: { id: intent.id, status: 'PENDING' },
+          data: { status: 'FAILED', error: 'Bridge intent expired before the burn was submitted.' },
+        });
+        await logBridgeStage(intent.id, {
+          stage: 'FAILED',
+          txHash: burnTxHash,
+          chainId: source?.chainId,
+          errorDetail: 'Bridge intent expired before the burn was submitted.',
+          metadata: { burnTxHash, sourceChain: intent.sourceChain, reason: proof.reason },
+        });
+        return NextResponse.json(
+          { success: false, code: 'INTENT_EXPIRED', error: 'This bridge expired before the burn was submitted. Start a new bridge to try again.' },
+          { status: 400 }
+        );
+      }
       if (isTerminalFailure(proof.reason)) {
-        await (prisma as any).flowBridgeIntent.update({
-          where: { id: intent.id },
+        // H2: conditional claim — never overwrite a concurrently-completed intent.
+        await (prisma as any).flowBridgeIntent.updateMany({
+          where: { id: intent.id, status: 'PENDING' },
           data: { status: 'FAILED', error: burnFailureCopy(proof.reason, sourceLabel) },
         });
       }
-      logBridgeStage(intent.id, {
+      await logBridgeStage(intent.id, {
         stage: 'FAILED',
         txHash: burnTxHash,
         chainId: source?.chainId,
@@ -186,17 +203,58 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const updated = await (prisma as any).flowBridgeIntent.update({
-      where: { id: intent.id },
-      data: { status: 'BURN_CONFIRMED', burnTxHash: proof.burnTxHash, destinationBound: proof.destinationBound },
-    });
-    console.log('[cctp/transfer/external/verify] BURN_CONFIRMED', { reference: intent.id, burnTxHash: proof.burnTxHash });
+    // H2: conditional claim — only PENDING may advance to BURN_CONFIRMED.
+    // Concurrent verify calls race here; the loser re-reads and returns the
+    // winner's state instead of overwriting it. P2002 (burnTxHash unique)
+    // maps to 409 so a replayed hash never 500s.
+    let updated: any;
+    try {
+      const claim = await (prisma as any).flowBridgeIntent.updateMany({
+        where: { id: intent.id, status: 'PENDING' },
+        data: { status: 'BURN_CONFIRMED', burnTxHash: proof.burnTxHash, destinationBound: proof.destinationBound },
+      });
+      if (claim.count === 0) {
+        const reread = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });
+        if (reread?.status === 'BURN_CONFIRMED') {
+          if ((reread.burnTxHash ?? '').toLowerCase() === proof.burnTxHash.toLowerCase()) {
+            return NextResponse.json({
+              success: true,
+              state: 'burn-confirmed',
+              reference: reread.id,
+              destinationBound: reread.destinationBound,
+              sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, reread.burnTxHash) : null,
+            });
+          }
+          return NextResponse.json(
+            { success: false, code: 'INTENT_ALREADY_USED', error: 'This bridge already has a verified burn transaction.' },
+            { status: 409 }
+          );
+        }
+        if (reread?.status === 'COMPLETED') {
+          return NextResponse.json({ success: true, state: 'completed', reference: reread.id });
+        }
+        return NextResponse.json(
+          { success: false, code: 'INTENT_STATE_CONFLICT', error: 'This bridge changed state while verifying. Please retry.' },
+          { status: 409 }
+        );
+      }
+      updated = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        return NextResponse.json(
+          { success: false, code: 'INTENT_ALREADY_USED', error: 'This burn transaction is already bound to a bridge.' },
+          { status: 409 }
+        );
+      }
+      throw e;
+    }
+    console.log('[cctp/transfer/external/verify] BURN_CONFIRMED', { reference: intent.id, burnTxHash: proof.burnTxHash, lateRecovery: expired });
 
-    logBridgeStage(intent.id, {
+    await logBridgeStage(intent.id, {
       stage: 'BURN_CONFIRMED',
       txHash: proof.burnTxHash,
       chainId: source?.chainId,
-      metadata: { destinationBound: proof.destinationBound },
+      metadata: { destinationBound: proof.destinationBound, lateRecovery: expired },
     });
 
     return NextResponse.json({
