@@ -552,11 +552,6 @@ export default function ExternalBridge({
       // addresses. Source identity is still pinned server-side: the intent
       // route resolves the source from the authenticated session and the
       // echo check below refuses a substituted address.
-      // TEMP-PROD-DIAG (remove after the address-error root cause is
-      // confirmed fixed live): log the EXACT from/to shape being sent so
-      // the next attempt shows whether an `address` key is present via any
-      // path (direct literal, spread, or merge). Adapter itself is
-      // intentionally reduced to keys/capabilities (it is non-serializable).
       const bridgeFromCtx: Record<string, unknown> = {
         adapter,
         chain: source.id,
@@ -566,19 +561,6 @@ export default function ExternalBridge({
         recipientAddress: destination as `0x${string}`,
         useForwarder: true,
       };
-      try {
-        console.log('[external-bridge] kit.bridge from/to payload', {
-          fromKeys: Object.keys(bridgeFromCtx),
-          addressInFrom: 'address' in bridgeFromCtx,
-          fromAddressValue: (bridgeFromCtx as { address?: unknown }).address ?? null,
-          fromChain: bridgeFromCtx.chain,
-          adapterCapabilities: (adapter as { capabilities?: unknown })?.capabilities ?? null,
-          to: JSON.parse(JSON.stringify(bridgeToCtx)),
-          amount: amount.trim(),
-        });
-      } catch {
-        // logging must never break the flow
-      }
       result = await (kit as any).bridge({
       from: bridgeFromCtx as { adapter: typeof adapter; chain: string },
       // ForwarderDestination: Circle's relayer mints on Arc — the user is
