@@ -23,9 +23,10 @@ import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
 import { ethers } from "ethers";
 import { NextRequest } from "next/server";
-import { BridgeChain } from "@circle-fin/bridge-kit";
+import { BridgeChain, BridgeKit } from "@circle-fin/bridge-kit";
 import {
   ArbitrumSepolia,
+  ArcTestnet,
   BaseSepolia,
   OptimismSepolia,
   EthereumSepolia,
@@ -102,6 +103,29 @@ async function main() {
     JSON.stringify(getCctpSources().map((c) => c.id).sort()) === JSON.stringify(sources.map((s) => s.id).sort()));
   ok("destination is Arc Testnet (not a source)",
     getBridgeSourceChain("Arc_Testnet") === null);
+  // A dropped SDK route presents EXACTLY as "stuck at PREPARING, no burn":
+  // kit.bridge throws UnsupportedRoute before the first signature prompt,
+  // so the intent row never advances. Pin every canonical source → Arc
+  // USDC route against the INSTALLED provider (diagnosed 2026-09-22 on the
+  // unexplained Base Sepolia stall 9f88d8ca: route was supported, the stall
+  // was per-attempt pre-signature abandonment, proven by the same wallet's
+  // Optimism burn 40s later + live preflight {"ok":true} + nonce still 0).
+  const routeDefs: Record<string, any> = {
+    Arbitrum_Sepolia: ArbitrumSepolia, Base_Sepolia: BaseSepolia, Optimism_Sepolia: OptimismSepolia,
+    Ethereum_Sepolia: EthereumSepolia, Polygon_Amoy_Testnet: PolygonAmoy,
+  };
+  const kit = new BridgeKit();
+  const routeProvider = (kit as any).providers?.[0];
+  ok("installed provider routes every canonical source to Arc (USDC)",
+    typeof routeProvider?.supportsRoute === "function" &&
+    sources.every((s) => {
+      try {
+        return routeProvider.supportsRoute(routeDefs[s.id], ArcTestnet, "USDC") === true;
+      } catch {
+        return false;
+      }
+    }),
+    JSON.stringify(sources.map((s) => s.id)));
 
   // ── 2. Amount rules ────────────────────────────────────────────────────
   ok("parse 10.00 -> 10000000n", parseBridgeAmountToBaseUnits("10.00") === 10_000_000n);
