@@ -7,7 +7,9 @@
 // SAME V2 ABI constants production uses:
 //
 //   Burn binding (extractBurnBinding):
-//     B1 valid V2 burn -> ok + the exact bytes32 message nonce
+//     B1 valid V2 burn -> ok (binding proves WITHOUT a nonce: CCTP V2 emits
+//        MessageSent with EMPTY_NONCE zeros by construction — the attested
+//        nonce comes from Iris, never from this receipt)
 //     B2 transfer-only receipt (no CCTP events) -> BINDING_MISMATCH, no
 //        BURN_CONFIRMED (M3: undecodable burns fail closed)
 //     B3 DepositForBurn naming a different recipient -> BINDING_MISMATCH
@@ -18,11 +20,14 @@
 //        wallet approves the kit bridge contract, the kit contract calls
 //        depositForBurn — proven on-chain on Ethereum Sepolia 0x1b286af1…
 //        and Optimism Sepolia 0x459f2d90…, both naming the kit contract as
-//        depositor) -> ok + the exact bytes32 message nonce
+//        depositor) -> ok
 //     B7 third-party contract depositor (not the wallet, not the known kit
 //        contract) -> BINDING_MISMATCH (no silent allow-list widening)
 //     B8 kit-contract depositor with unknown chain config (bridgeContract
 //        null) -> BINDING_MISMATCH (fail-closed, pre-fix behavior)
+//     B9 chain-faithful MessageSent (ZERO nonce, exactly as V2 emits on every
+//        chain — proven on both production burns above) -> ok (the zero
+//        placeholder must not break binding; it is simply not a nonce)
 //   Mint binding (analyzeMintReceipt), production pattern 300000 requested
 //   / 276074 credited (23926 relayer fee):
 //     M1 dust Transfer (1 wei), no bridge message -> NONCE_MISMATCH (the H1
@@ -37,6 +42,17 @@
 //     M5 matching nonce + credit but no MintAndWithdraw -> AMOUNT_MISMATCH
 //     M6 legacy row (expectedNonce null) -> NONCE_MISMATCH, never a pass
 //     M7 MintAndWithdraw gross (net + fee) != requested -> AMOUNT_MISMATCH
+//     M8 zero-placeholder expectedNonce (a stored MessageSent EMPTY_NONCE,
+//        the exact dead-end that stranded Optimism Sepolia 1.0 USDC intent
+//        2784ef57…) -> NONCE_MISMATCH without touching receipts: no genuine
+//        mint can carry it, so it must never bind
+//   Iris attested-nonce parsing (parseIrisMessagesResponse, pure):
+//     I1 complete attestation -> attested nonce + relay mint hash
+//     I2 pending attestation -> ATTESTATION_PENDING (retryable, not a failure)
+//     I3 unknown burn (no messages) -> NOT_FOUND (retryable)
+//     I4 no message to Arc -> BINDING_MISMATCH
+//     I5 multiple attested messages -> BINDING_MISMATCH (never guess)
+//     I6 zero-nonce attestation -> BINDING_MISMATCH (placeholder is not a nonce)
 //
 // Run: npx tsx scripts/bridge-completion-integrity-tests.ts
 
@@ -51,6 +67,7 @@ import {
   analyzeMintReceipt,
   type ReceiptLog,
 } from '@/lib/bridge/externalVerify';
+import { parseIrisMessagesResponse, EMPTY_MESSAGE_NONCE } from '@/lib/bridge/irisNonce';
 
 const show = (v: unknown) => JSON.stringify(v, (_, x) => (typeof x === 'bigint' ? x.toString() : x) as unknown)?.slice(0, 200) ?? '';
 
@@ -153,9 +170,9 @@ const mintCtxBase = {
   expectedSender: pad(SRC_TM as Hex, { size: 32 }),
 };
 
-function validBurnLogs(recipient: string = DEST, depositor: string = USER): ReceiptLog[] {
+function validBurnLogs(recipient: string = DEST, depositor: string = USER, msgNonce: Hex = NONCE): ReceiptLog[] {
   const body = burnBody({ burnToken: USDC_SRC, mintRecipient: recipient, amount: REQUESTED, sender: USER, maxFee: 30000n, feeExecuted: 0n });
-  const message = cctpMessage({ src: 6, dst: 26, nonce: NONCE, sender: SRC_TM, recipient: ARC_TM, caller: FORWARDER, minFT: 1000, ftExec: 1000, body });
+  const message = cctpMessage({ src: 6, dst: 26, nonce: msgNonce, sender: SRC_TM, recipient: ARC_TM, caller: FORWARDER, minFT: 1000, ftExec: 1000, body });
   return [
     toLog(SRC_TM, encodeLog({
       abi: DEPOSIT_FOR_BURN_V2_ABI, eventName: 'DepositForBurn',
@@ -195,7 +212,7 @@ function productionMintLogs(): ReceiptLog[] {
 function main() {
   // ── Burn binding ─────────────────────────────────────────────────────────
   const b1 = extractBurnBinding(validBurnLogs(), burnCtx);
-  ok('B1 valid V2 burn binds + yields the message nonce', b1.ok === true && b1.ok && b1.cctpNonce === NONCE.toLowerCase(), show(b1));
+  ok('B1 valid V2 burn binds (no nonce yielded — attested nonce comes from Iris)', b1.ok === true, show(b1));
 
   const transferOnly = [
     toLog(USDC_SRC, encodeLog({
@@ -225,13 +242,16 @@ function main() {
   ok('B5 legacy V1-shaped burn event fails closed', !b5.ok && (b5 as any).reason === 'BINDING_MISMATCH', show(b5));
 
   const b6 = extractBurnBinding(validBurnLogs(DEST, KIT_BRIDGE), burnCtx);
-  ok('B6 kit-contract depositor (forwarder path) binds + yields the message nonce', b6.ok === true && b6.ok && b6.cctpNonce === NONCE.toLowerCase(), show(b6));
+  ok('B6 kit-contract depositor (forwarder path) binds', b6.ok === true, show(b6));
 
   const b7 = extractBurnBinding(validBurnLogs(DEST, ATTACKER), burnCtx);
   ok('B7 third-party contract depositor is proof against', !b7.ok && (b7 as any).reason === 'BINDING_MISMATCH', show(b7));
 
   const b8 = extractBurnBinding(validBurnLogs(DEST, KIT_BRIDGE), { ...burnCtx, bridgeContract: null });
   ok('B8 kit-contract depositor with unknown chain config fails closed', !b8.ok && (b8 as any).reason === 'BINDING_MISMATCH', show(b8));
+
+  const b9 = extractBurnBinding(validBurnLogs(DEST, KIT_BRIDGE, EMPTY_MESSAGE_NONCE), burnCtx);
+  ok('B9 chain-faithful zero-nonce MessageSent still binds (placeholder is not a nonce)', b9.ok === true, show(b9));
 
   // ── Mint binding ─────────────────────────────────────────────────────────
   const dust = [
@@ -286,6 +306,53 @@ function main() {
   });
   const m7 = analyzeMintReceipt(grossMismatchLogs, { ...mintCtxBase, expectedNonce: NONCE });
   ok('M7 mint gross (net + fee) != requested REJECTED', !m7.ok && (m7 as any).reason === 'AMOUNT_MISMATCH', show(m7));
+
+  const m8 = analyzeMintReceipt(productionMintLogs(), { ...mintCtxBase, expectedNonce: EMPTY_MESSAGE_NONCE });
+  ok('M8 zero-placeholder expectedNonce REJECTED (unbound bridge can never complete)', !m8.ok && (m8 as any).reason === 'NONCE_MISMATCH', show(m8));
+
+  // ── Iris attested-nonce parsing ────────────────────────────────────────
+  const irisComplete = {
+    messages: [
+      {
+        status: 'complete',
+        eventNonce: NONCE.toLowerCase(),
+        nonce: NONCE.toLowerCase(),
+        decodedMessage: { sourceDomain: '6', destinationDomain: '26', nonce: NONCE.toLowerCase() },
+        forwardState: 'COMPLETE',
+        forwardTxHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        destinationMintTxHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+      },
+    ],
+  };
+  const i1 = parseIrisMessagesResponse(irisComplete, 26);
+  ok(
+    'I1 complete attestation yields nonce + relay mint hash',
+    i1.ok === true && i1.ok && i1.nonce === NONCE.toLowerCase() && i1.destinationMintTxHash === '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+    show(i1)
+  );
+
+  const i2 = parseIrisMessagesResponse({ messages: [{ status: 'pending', eventNonce: NONCE.toLowerCase(), decodedMessage: { sourceDomain: '6', destinationDomain: '26' } }] }, 26);
+  ok('I2 pending attestation is retryable, not a failure', !i2.ok && (i2 as any).reason === 'ATTESTATION_PENDING', show(i2));
+
+  const i3 = parseIrisMessagesResponse({ messages: [] }, 26);
+  ok('I3 unknown burn (no messages) is retryable NOT_FOUND', !i3.ok && (i3 as any).reason === 'NOT_FOUND', show(i3));
+
+  const i4 = parseIrisMessagesResponse({ messages: [{ status: 'complete', eventNonce: NONCE.toLowerCase(), decodedMessage: { sourceDomain: '6', destinationDomain: '5', nonce: NONCE.toLowerCase() } }] }, 26);
+  ok('I4 attestation not targeting Arc is proof against', !i4.ok && (i4 as any).reason === 'BINDING_MISMATCH', show(i4));
+
+  const i5 = parseIrisMessagesResponse(
+    {
+      messages: [
+        { status: 'complete', eventNonce: NONCE.toLowerCase(), decodedMessage: { sourceDomain: '6', destinationDomain: '26', nonce: NONCE.toLowerCase() } },
+        { status: 'complete', eventNonce: WRONG_NONCE.toLowerCase(), decodedMessage: { sourceDomain: '6', destinationDomain: '26', nonce: WRONG_NONCE.toLowerCase() } },
+      ],
+    },
+    26
+  );
+  ok('I5 multiple attested messages refuses to guess', !i5.ok && (i5 as any).reason === 'BINDING_MISMATCH', show(i5));
+
+  const i6 = parseIrisMessagesResponse({ messages: [{ status: 'complete', eventNonce: EMPTY_MESSAGE_NONCE, decodedMessage: { sourceDomain: '6', destinationDomain: '26', nonce: EMPTY_MESSAGE_NONCE } }] }, 26);
+  ok('I6 zero-nonce attestation is not a binding nonce', !i6.ok && (i6 as any).reason === 'BINDING_MISMATCH', show(i6));
 
   console.log(`\nbridge-completion-integrity-tests: ${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);

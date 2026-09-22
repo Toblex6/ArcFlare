@@ -2,7 +2,8 @@
 //
 // Proves the Arc destination mint for a BURN_CONFIRMED external bridge
 // intent. The browser submits the mint tx hash from its BridgeKit result;
-// the server verifies the mined Arc receipt (canonical USDC credited the
+// the server resolves the burn's Circle-attested nonce from Iris, then
+// verifies the mined Arc receipt (canonical USDC credited the
 // server-resolved destination) before recording COMPLETED with the measured
 // actual. Only COMPLETED intents surface in Recent Activity.
 
@@ -15,6 +16,7 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
 import { getBridgeSourceChain, sourceExplorerTxUrl, formatBridgeBaseUnits } from '@/lib/bridge/sourceChains';
 import { verifyArcMint, sourceCctpV2, type MintVerifyFailure } from '@/lib/bridge/externalVerify';
+import { fetchIrisBridgeMessage } from '@/lib/bridge/irisNonce';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 function mintFailureCopy(reason: MintVerifyFailure): string {
@@ -92,6 +94,67 @@ export async function POST(req: NextRequest) {
       // (Binding happens only on verified success below.)
     }
 
+    // The burn↔mint binding nonce is Circle's offchain-assigned attested
+    // nonce — resolved fresh from Iris by the BOUND burn hash on every
+    // completion attempt, never trusted from the row. (CCTP V2 emits
+    // MessageSent with EMPTY_NONCE zeros, so any stored sent-message nonce
+    // — including legacy rows — could never satisfy a genuine mint. The
+    // resolved attested nonce is persisted on the COMPLETED claim below.)
+    const cctp = sourceCctpV2(intent.sourceChain);
+    if (!cctp || !intent.burnTxHash) {
+      return NextResponse.json(
+        { success: false, code: 'INTENT_STATE_CONFLICT', error: 'This bridge is missing its verified burn. Please retry verification first.' },
+        { status: 409 }
+      );
+    }
+    const iris = await fetchIrisBridgeMessage({ sourceDomain: cctp.domain, burnTxHash: intent.burnTxHash });
+    if (!iris.ok) {
+      if (iris.reason === 'NOT_FOUND' || iris.reason === 'ATTESTATION_PENDING' || iris.reason === 'IRIS_UNAVAILABLE') {
+        // Retryable, NOT a FAILED stage: the mint cannot exist before Circle
+        // attests, and an unreachable Iris must never fail an honest bridge.
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'MINT_NOT_READY',
+            reason: iris.reason,
+            error:
+              iris.reason === 'IRIS_UNAVAILABLE'
+                ? 'Could not reach Circle attestation right now — your burn is safe, please try again.'
+                : 'Circle has not finished attesting your burn yet — the Arc mint lands automatically once it does. Please try again in a minute.',
+          },
+          { status: 422 }
+        );
+      }
+      await logBridgeStage(intent.id, {
+        stage: 'FAILED',
+        txHash: mintTxHash,
+        chainId: getNetworkConfig().chainId,
+        errorDetail: iris.detail ?? iris.reason,
+        metadata: { reason: 'NONCE_MISMATCH', irisReason: iris.reason },
+      });
+      return NextResponse.json(
+        { success: false, code: 'MINT_NOT_VERIFIED', reason: 'NONCE_MISMATCH', error: mintFailureCopy('NONCE_MISMATCH') },
+        { status: 422 }
+      );
+    }
+    // Forwarder pin: when Iris reports the relay mint hash for this burn,
+    // the submitted hash must BE it — a dust transfer or another bridge's
+    // mint is rejected before any receipt is even read.
+    const pinnedMint = iris.destinationMintTxHash ?? iris.forwardTxHash;
+    if (pinnedMint && pinnedMint.toLowerCase() !== mintTxHash.toLowerCase()) {
+      await logBridgeStage(intent.id, {
+        stage: 'FAILED',
+        txHash: mintTxHash,
+        chainId: getNetworkConfig().chainId,
+        errorDetail: `Submitted mint ${mintTxHash} does not match Circle's relay mint ${pinnedMint} for this burn.`,
+        metadata: { reason: 'NONCE_MISMATCH', expectedMintTxHash: pinnedMint },
+      });
+      return NextResponse.json(
+        { success: false, code: 'MINT_NOT_VERIFIED', reason: 'NONCE_MISMATCH', error: mintFailureCopy('NONCE_MISMATCH') },
+        { status: 422 }
+      );
+    }
+
     // Stage logs are awaited (not fire-and-forget): on serverless the
     // function may freeze before an un-awaited log flushes, leaving a
     // "MINT_PENDING with no outcome" silent stall. logBridgeStage never
@@ -104,17 +167,17 @@ export async function POST(req: NextRequest) {
     });
     const proof = await verifyArcMint(
       (() => {
-        // The mint must reproduce the burn's message: expected source
-        // domain + source TokenMessenger sender pin the message identity
-        // alongside the nonce (all server-derived from the intent's source
-        // chain — never client-supplied). A source chain unknown to the
-        // installed BridgeKit yields no pins and the nonce check alone
-        // still gates completion.
-        const cctp = sourceCctpV2(intent.sourceChain);
+        // The mint must reproduce the burn's Circle-attested message: the
+        // nonce comes from Iris (resolved above by burn hash), while the
+        // expected source domain + source TokenMessenger sender pin the
+        // message identity alongside it (all server-derived from the
+        // intent's source chain — never client-supplied). A source chain
+        // unknown to the installed BridgeKit yields no pins and the nonce
+        // check alone still gates completion.
         return {
           destination: intent.destination,
           mintTxHash,
-          expectedNonce: (intent.cctpNonce as string | null) ?? null,
+          expectedNonce: iris.nonce,
           expectedAmount: BigInt(intent.amount),
           expectedSourceDomain: cctp?.domain ?? null,
           expectedSender: cctp ? pad(cctp.tokenMessenger as `0x${string}`, { size: 32 }) : null,
@@ -133,7 +196,7 @@ export async function POST(req: NextRequest) {
         errorDetail: proof.detail ?? proof.reason,
         metadata: {
           reason: proof.reason,
-          expectedNonce: (intent.cctpNonce as string | null) ?? null,
+          expectedNonce: iris.nonce,
           expectedAmount: intent.amount,
           ...(proof.actualAmount !== undefined ? { actualAmount: proof.actualAmount.toString() } : {}),
           ...(proof.actualNonce !== undefined ? { actualNonce: proof.actualNonce } : {}),
@@ -152,7 +215,7 @@ export async function POST(req: NextRequest) {
     try {
       const claim = await (prisma as any).flowBridgeIntent.updateMany({
         where: { id: intent.id, status: 'BURN_CONFIRMED' },
-        data: { status: 'COMPLETED', mintTxHash: proof.mintTxHash, actualAmount: proof.actualAmount.toString() },
+        data: { status: 'COMPLETED', mintTxHash: proof.mintTxHash, actualAmount: proof.actualAmount.toString(), cctpNonce: iris.nonce },
       });
       if (claim.count === 0) {
         const reread = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });

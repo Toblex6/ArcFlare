@@ -15,6 +15,7 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { getBridgeSourceChain, sourceExplorerTxUrl } from '@/lib/bridge/sourceChains';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
 import { verifyExternalBurn, type BurnVerifyFailure } from '@/lib/bridge/externalVerify';
+import { EMPTY_MESSAGE_NONCE } from '@/lib/bridge/irisNonce';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 function burnFailureCopy(reason: BurnVerifyFailure, sourceLabel: string): string {
@@ -96,12 +97,16 @@ export async function POST(req: NextRequest) {
       // accepted once a burn is bound (prevents double-record).
       if ((intent.burnTxHash ?? '').toLowerCase() === burnTxHash.toLowerCase()) {
         const source = getBridgeSourceChain(intent.sourceChain);
-        // Backfill the CCTP message nonce for burns verified before nonce
-        // binding existed: re-prove the already-bound hash and record the
-        // nonce so completion can bind the mint to it. Best-effort — a
-        // re-proof failure (e.g. source RPC flake) never regresses the
-        // already-recorded BURN_CONFIRMED state.
-        if (!intent.cctpNonce) {
+        // Backfill the Circle-attested CCTP message nonce for burns verified
+        // before attested-nonce binding existed (or while Iris was still
+        // pending): re-prove the already-bound hash and record the nonce so
+        // completion can bind the mint to it. A stored zero placeholder is
+        // treated as unbound (V2 emits MessageSent with EMPTY_NONCE — it can
+        // never satisfy a genuine mint). Best-effort — a re-proof failure
+        // (e.g. source RPC flake) or a still-pending attestation never
+        // regresses the already-recorded BURN_CONFIRMED state.
+        const storedNonce = (intent.cctpNonce as string | null) ?? null;
+        if (!storedNonce || storedNonce.toLowerCase() === EMPTY_MESSAGE_NONCE) {
           const backfill = await verifyExternalBurn({
             sourceId: intent.sourceChain,
             sourceAddress: intent.sourceWallet,

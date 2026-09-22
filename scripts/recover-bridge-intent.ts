@@ -22,6 +22,7 @@ import { pad } from 'viem';
 import { prisma } from '@/src/lib/prisma';
 import { getBridgeSourceChain } from '@/lib/bridge/sourceChains';
 import { verifyExternalBurn, verifyArcMint, sourceCctpV2 } from '@/lib/bridge/externalVerify';
+import { fetchIrisBridgeMessage, EMPTY_MESSAGE_NONCE } from '@/lib/bridge/irisNonce';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
 
 function loadEnvLocal() {
@@ -122,35 +123,48 @@ async function main() {
     console.log(`Status is ${intent.status} — burn already bound, skipping to mint.`);
   }
 
-  // Nonce for mint binding: the freshly verified burn wins; otherwise the
-  // stored nonce. Legacy BURN_CONFIRMED rows predate nonce binding — re-prove
-  // the bound burn hash to backfill it (same rule as the verify route).
-  let cctpNonce: string | null = (intent.cctpNonce as string | null) ?? null;
-  if (burn.ok) cctpNonce = burn.cctpNonce;
-  if (!cctpNonce) {
-    console.log('No burn nonce on record — re-proving the bound burn to backfill it.');
-    const backfill = await verifyExternalBurn({
-      sourceId: intent.sourceChain,
-      sourceAddress: intent.sourceWallet,
-      amountBaseUnits: BigInt(intent.amount),
-      destination: intent.destination,
-      burnTxHash: burnTxHash!,
-    });
-    console.log('burn backfill:', backfill.ok ? `OK nonce=${backfill.cctpNonce}` : `FAIL ${backfill.reason} — ${backfill.detail ?? ''}`);
-    if (!backfill.ok) return;
-    cctpNonce = backfill.cctpNonce;
-    if (execute) {
-      await (prisma as any).flowBridgeIntent.updateMany({
-        where: { id: intent.id, status: 'BURN_CONFIRMED' },
-        data: { cctpNonce, destinationBound: true },
-      });
-    } else {
-      console.log(`WOULD backfill cctpNonce=${cctpNonce} on the intent.`);
+  // ── Step 1b: resolve the Circle-attested nonce from Iris (same rule as
+  // the complete route). CCTP V2 emits MessageSent with EMPTY_NONCE (zeros),
+  // so the burn↔mint binding nonce ALWAYS comes from Iris keyed by the burn
+  // hash — never from decoding MessageSent, never from the row. A stored
+  // zero placeholder is treated as unbound.
+  const cctp = sourceCctpV2(intent.sourceChain);
+  if (!cctp) {
+    console.log(`Unknown source chain ${intent.sourceChain} — refusing (fail-closed).`);
+    return;
+  }
+  const iris = await fetchIrisBridgeMessage({ sourceDomain: cctp.domain, burnTxHash: burnTxHash! });
+  if (!iris.ok) {
+    console.log(`Iris: ${iris.reason} — ${iris.detail ?? ''}`);
+    console.log('Recovery stops here: the burn is proven but Circle has not finished attesting it (or Iris is unreachable). Funds are safe; re-run once attestation is complete.');
+    return;
+  }
+  const storedNonce = (intent.cctpNonce as string | null) ?? null;
+  if (storedNonce && storedNonce.toLowerCase() !== EMPTY_MESSAGE_NONCE && storedNonce.toLowerCase() !== iris.nonce.toLowerCase()) {
+    console.log(`REFUSING: row stores nonce ${storedNonce} but Iris attests ${iris.nonce} for this burn — operator must reconcile manually.`);
+    return;
+  }
+  const pinnedMint = iris.destinationMintTxHash ?? iris.forwardTxHash;
+  if (pinnedMint) {
+    console.log(`Iris relay mint: ${pinnedMint}`);
+    if (pinnedMint.toLowerCase() !== mintTxHash!.toLowerCase()) {
+      console.log(`REFUSING: --mint ${mintTxHash} is not Circle's relay mint for this burn. Re-run with --mint ${pinnedMint}.`);
+      return;
     }
   }
+  console.log(`Iris: attested nonce=${iris.nonce}`);
+  if (execute && (storedNonce?.toLowerCase() !== iris.nonce.toLowerCase())) {
+    await (prisma as any).flowBridgeIntent.updateMany({
+      where: { id: intent.id },
+      data: { cctpNonce: iris.nonce },
+    });
+    console.log(`Recorded attested cctpNonce=${iris.nonce} on the intent.`);
+  } else if (!execute) {
+    console.log(`WOULD record attested cctpNonce=${iris.nonce} on the intent.`);
+  }
+  const cctpNonce: string = iris.nonce;
 
   // ── Step 2: prove the mint (same call the complete route makes) ──
-  const cctp = sourceCctpV2(intent.sourceChain);
   const mint = await verifyArcMint({
     destination: intent.destination,
     mintTxHash: mintTxHash!,
@@ -175,7 +189,7 @@ async function main() {
   });
   const claim2 = await (prisma as any).flowBridgeIntent.updateMany({
     where: { id: intent.id, status: 'BURN_CONFIRMED' },
-    data: { status: 'COMPLETED', mintTxHash, actualAmount: mint.actualAmount.toString() },
+    data: { status: 'COMPLETED', mintTxHash, actualAmount: mint.actualAmount.toString(), cctpNonce: iris.nonce },
   });
   if (claim2.count === 0) {
     const reread = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });

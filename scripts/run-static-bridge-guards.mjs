@@ -53,17 +53,28 @@ for (const p of files) {
 ok('verify no pre-verification expiry kill', !verify.includes('if (new Date(intent.expiresAt).getTime() < Date.now()) {'));
 ok('verify late-recovery advance present', verify.includes('lateRecovery'));
 ok('verify expired+unprovable still INTENT_EXPIRED', verify.includes("code: 'INTENT_EXPIRED'"));
-// Completion-integrity guards (H1/M3): the burn's CCTP message nonce is
-// stored at verify time and the mint must reproduce it; undecodable burns
-// fail closed instead of landing destinationBound=false.
+// Completion-integrity guards (H1/M3 + attested-nonce fix): the burn's
+// burn↔mint binding nonce is Circle's OFFCHAIN-assigned attested nonce
+// resolved from Iris by burn hash — never decoded from MessageSent (CCTP V2
+// emits EMPTY_NONCE zeros there by construction). Undecodable burns fail
+// closed instead of landing destinationBound=false, and a zero placeholder
+// can never satisfy a genuine mint.
 const complete = src('src/app/api/cctp/transfer/external/complete/route.ts');
 const extVerify = src('src/lib/bridge/externalVerify.ts');
+const irisNonce = src('src/lib/bridge/irisNonce.ts');
 ok('verify stores cctpNonce on BURN_CONFIRMED', verify.includes('cctpNonce'));
 ok('complete binds expectedNonce', complete.includes('expectedNonce'));
 ok('complete binds expectedAmount', complete.includes('expectedAmount'));
 ok('complete FAILED stage carries mismatch facts', complete.includes('expectedNonce') && complete.includes('actualAmount'));
+ok('complete resolves attested nonce from Iris (never the row)', complete.includes('fetchIrisBridgeMessage'));
+ok('complete pins forwarder relay mint hash when Iris reports it', complete.includes('destinationMintTxHash'));
+ok('complete never trusts a stored MessageSent nonce', !/expectedNonce:\s*\(intent\.cctpNonce/.test(strip(complete)));
+ok('recover script resolves attested nonce from Iris', src('scripts/recover-bridge-intent.ts').includes('fetchIrisBridgeMessage'));
 ok('extVerify decodes V2 DepositForBurn (minFinalityThreshold)', extVerify.includes('minFinalityThreshold'));
 ok('extVerify has no V1 nonce-shaped DepositForBurn', !extVerify.includes("name: 'nonce', type: 'uint64'"));
 ok('extVerify has no destinationBound:false success path', !extVerify.includes('destinationBound: false'));
+ok('extVerify yields no MessageSent nonce (offchain-assigned)', !/cctpNonce:\s*(binding\.cctpNonce|msg\.nonce)/.test(strip(extVerify)));
+ok('extVerify rejects the zero-placeholder nonce', extVerify.includes('EMPTY_MESSAGE_NONCE'));
+ok('irisNonce documents offchain nonce assignment', irisNonce.includes('assigns CCTP V2 message nonces OFFCHAIN') || irisNonce.includes('OFFCHAIN'));
 console.log('\nstatic-bridge-guards: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail > 0 ? 1 : 0);

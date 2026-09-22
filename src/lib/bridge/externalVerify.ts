@@ -15,8 +15,8 @@
 //        DepositForBurn from the known source TokenMessengerV2 naming this
 //        exact amount, depositor, mint recipient, Arc domain, and Arc
 //        TokenMessenger — AND a MessageSent from the known source
-//        MessageTransmitterV2 whose message binds the same recipient/amount
-//        and yields the message nonce (bytes32, e.g. 0xc6dd3c88…).
+//        MessageTransmitterV2 whose message body binds the same
+//        recipient/amount.
 //        Anything else — absent events, undecodable events, or a decodable
 //        event naming someone else — fails closed with BINDING_MISMATCH and
 //        the intent NEVER advances to BURN_CONFIRMED. There is no
@@ -34,12 +34,26 @@
 //        the canonical-USDC debit sum from the wallet == intent amount, so
 //        accepting the kit contract cannot credit a burn the wallet never
 //        funded.
+//     5. the burn↔mint binding nonce is resolved best-effort from Circle
+//        Iris (fetchIrisBridgeMessage, keyed by the burn hash) — NEVER from
+//        decoding MessageSent. CCTP V2 formats every outbound message with
+//        EMPTY_NONCE (bytes32 zeros; see MessageV2._formatMessageForRelay),
+//        so the emitted MessageSent ALWAYS carries a zero nonce (proven on
+//        both burns above); Circle assigns the real nonce offchain and the
+//        attesters fill it before signing. A burn whose attestation is not
+//        yet complete verifies WITHOUT a nonce (cctpNonce null); completion
+//        resolves it then. Storing the zero placeholder as a binding nonce
+//        would make completion impossible — and is rejected outright.
 //   mint   (verifyArcMint):
 //     1. the mint tx mined SUCCESSFULLY on Arc,
 //     2. a MessageReceived from the canonical Arc MessageTransmitterV2
-//        carries the SAME bytes32 nonce recorded at burn-verify time
-//        (a dust transfer or an unrelated transaction has no such message
-//        and is rejected with NONCE_MISMATCH),
+//        carries the SAME Circle-attested bytes32 nonce resolved from Iris
+//        for the bound burn (an all-zero/placeholder expected nonce is
+//        rejected without touching the chain: no genuine mint can carry it
+//        — the transmitter claims the 0-nonce at initialize time, so a
+//        zero-nonce relay reverts on-chain; a dust transfer or an unrelated
+//        transaction has no such message and is rejected with
+//        NONCE_MISMATCH),
 //     3. the message body (BurnMessageV2) names this destination and the
 //        full requested amount,
 //     4. a MintAndWithdraw from the canonical Arc TokenMessengerV2 names
@@ -61,6 +75,7 @@ import {
   type BridgeSourceChain,
 } from '@/lib/bridge/sourceChains';
 import { sourceViemChainFor } from '@/lib/bridge/sourceViemChains';
+import { fetchIrisBridgeMessage, EMPTY_MESSAGE_NONCE } from '@/lib/bridge/irisNonce';
 // TokenMessenger addresses are BridgeKit's own deployment facts (same
 // package the browser flow bridges through), not invented constants.
 import {
@@ -241,7 +256,13 @@ function arcCctpV2(): SourceCctpV2 {
 export interface ParsedV2Message {
   sourceDomain: number;
   destinationDomain: number;
-  /** bytes32 message nonce, lowercase 0x hex (the burn↔mint binding key). */
+  /**
+   * bytes32 message nonce, lowercase 0x hex. On RELAYED messages (Iris
+   * `message`, Arc MessageReceived) this is Circle's offchain-assigned
+   * attested nonce — the burn↔mint binding key. On EMITTED MessageSent
+   * messages it is always EMPTY_NONCE (zeros) by V2 construction and must
+   * never be used as a binding key.
+   */
   nonce: Hex;
   /** bytes32 sender, lowercase 0x hex (the source TokenMessenger). */
   sender: Hex;
@@ -330,13 +351,18 @@ export interface BurnBindingContext {
 
 // ─── Pure burn-binding analysis ─────────────────────────────────────────────
 // Proves, from a source receipt's logs only, that the burn is a CCTP V2
-// deposit for THIS intent and extracts the bytes32 message nonce to bind
-// the later mint against. Fail-closed: absent/undecodable/mismatched
+// deposit for THIS intent. Fail-closed: absent/undecodable/mismatched
 // events are BINDING_MISMATCH, never a soft "unbound" success.
+//
+// Deliberately yields NO message nonce: CCTP V2 emits MessageSent with
+// EMPTY_NONCE (bytes32 zeros) by construction — the attested nonce is
+// assigned offchain by Circle and resolved via Iris (see irisNonce.ts).
+// Returning the zero placeholder as a "binding" nonce would bind every burn
+// to a nonce no genuine mint can reproduce.
 export function extractBurnBinding(
   logs: ReceiptLog[],
   ctx: BurnBindingContext,
-): { ok: true; cctpNonce: Hex } | { ok: false; reason: 'BINDING_MISMATCH'; detail: string } {
+): { ok: true } | { ok: false; reason: 'BINDING_MISMATCH'; detail: string } {
   const tm = ctx.tokenMessenger.toLowerCase();
   const expectedRecipient = pad(ctx.destination as Hex, { size: 32 }).toLowerCase();
   const expectedArcTM = pad(ctx.arcTokenMessenger as Hex, { size: 32 }).toLowerCase();
@@ -417,7 +443,10 @@ export function extractBurnBinding(
     if (!body || body.mintRecipient !== expectedRecipient || body.amount !== ctx.amountBaseUnits) {
       return { ok: false, reason: 'BINDING_MISMATCH', detail: 'Burn message body names a different recipient or amount.' };
     }
-    return { ok: true, cctpNonce: msg.nonce };
+    // Bound. The message nonce field itself is NOT read here: V2 emits it
+    // as EMPTY_NONCE (zeros) — see the module header. The attested nonce is
+    // resolved from Iris by the caller.
+    return { ok: true };
   }
   return { ok: false, reason: 'BINDING_MISMATCH', detail: 'No verifiable CCTP message for this bridge in the source transaction.' };
 }
@@ -429,7 +458,11 @@ export interface MintReceiptContext {
   /** Arc TokenMessengerV2 (MintAndWithdraw must come from here). */
   tokenMessenger: string;
   destination: string;
-  /** bytes32 message nonce recorded at burn-verify time (null = legacy row). */
+  /**
+   * Circle's offchain-assigned bytes32 message nonce for the bound burn,
+   * resolved from Iris (null = attestation not yet resolved or legacy row;
+   * never the MessageSent zero placeholder — analyzeMintReceipt rejects it).
+   */
   expectedNonce: string | null;
   /** Full requested amount, 6-dec base units (gross, before relayer fee). */
   expectedAmount: bigint;
@@ -456,6 +489,12 @@ export function analyzeMintReceipt(
     return { ok: false, reason: 'NONCE_MISMATCH', detail: 'This bridge has no recorded burn message — re-verify the source burn before completing.' };
   }
   const expected = (ctx.expectedNonce as string).toLowerCase();
+  // The V2 EMPTY_NONCE placeholder is never a binding nonce (no genuine
+  // mint can carry it — see the module header). A row holding it is an
+  // unbound bridge: refuse without reading receipts further.
+  if (expected === EMPTY_MESSAGE_NONCE) {
+    return { ok: false, reason: 'NONCE_MISMATCH', detail: 'This bridge has no Circle-attested message yet — wait for attestation, then retry.' };
+  }
 
   const mt = ctx.messageTransmitter.toLowerCase();
   const seenNonces: string[] = [];
@@ -595,8 +634,13 @@ export interface BurnVerifyOk {
   ok: true;
   /** Always true on success: the burn provably names this destination+domain. */
   destinationBound: true;
-  /** bytes32 CCTP message nonce binding this burn to its future mint. */
-  cctpNonce: Hex;
+  /**
+   * Circle's offchain-assigned bytes32 message nonce for this burn (the
+   * burn↔mint binding key), resolved best-effort from Iris at verify time.
+   * Null while the attestation is still pending — completion resolves it
+   * then. NEVER the MessageSent zero placeholder (see the module header).
+   */
+  cctpNonce: Hex | null;
   burnTxHash: Hex;
 }
 
@@ -670,9 +714,11 @@ export async function verifyExternalBurn(params: {
 
   // Strict V2 binding (fail-closed): DepositForBurn from the known source
   // TokenMessengerV2 + MessageSent from the known source
-  // MessageTransmitterV2, both naming this intent. Yields the bytes32
-  // message nonce the mint must later reproduce. No soft "unbound"
-  // success exists — an unverifiable burn is an unverified burn.
+  // MessageTransmitterV2, both naming this intent. No soft "unbound"
+  // success exists — an unverifiable burn is an unverified burn. The
+  // burn↔mint binding nonce is NOT decoded from MessageSent (V2 always
+  // emits EMPTY_NONCE there); it is resolved best-effort from Circle Iris
+  // below and is null while the attestation is still pending.
   const cctp = sourceCctpV2(sourceId);
   if (!cctp) {
     return { ok: false, reason: 'BINDING_MISMATCH', detail: 'Unknown source chain.' };
@@ -695,7 +741,23 @@ export async function verifyExternalBurn(params: {
     return { ok: false, reason: binding.reason, detail: binding.detail };
   }
 
-  return { ok: true, destinationBound: true, cctpNonce: binding.cctpNonce, burnTxHash: hash };
+  // Best-effort attested-nonce resolution: Iris may not have indexed the
+  // burn yet (verify typically runs seconds after the burn). A pending or
+  // unreachable Iris is NOT a burn failure — the burn already proved
+  // on-chain above; completion resolves the nonce when the mint exists.
+  // A zero/malformed Iris nonce is treated as unresolved, never stored.
+  let cctpNonce: Hex | null = null;
+  try {
+    const iris = await fetchIrisBridgeMessage({ sourceDomain: cctp.domain, burnTxHash: hash });
+    if (iris.ok && iris.nonce.toLowerCase() !== EMPTY_MESSAGE_NONCE) {
+      cctpNonce = iris.nonce;
+    }
+  } catch {
+    // Config/programmer errors surface as throws from the Iris module;
+    // transport failures already map to failure reasons inside it.
+  }
+
+  return { ok: true, destinationBound: true, cctpNonce, burnTxHash: hash };
 }
 
 export type MintVerifyFailure =
@@ -714,7 +776,7 @@ export interface MintVerifyOk {
 export async function verifyArcMint(params: {
   destination: string;
   mintTxHash: string;
-  /** bytes32 message nonce recorded at burn-verify time (null = legacy row). */
+  /** Circle-attested bytes32 message nonce for the bound burn (null = unresolved legacy row). */
   expectedNonce: string | null;
   /** Full requested amount, 6-dec base units (gross, before relayer fee). */
   expectedAmount: bigint;
