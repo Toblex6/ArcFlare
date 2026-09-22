@@ -22,6 +22,18 @@
 //        the intent NEVER advances to BURN_CONFIRMED. There is no
 //        destinationBound=false path anymore: an unverifiable burn is an
 //        unverified burn.
+//        The accepted `depositor` is the session wallet (direct
+//        depositForBurn path) OR the known per-chain BridgeKit bridge
+//        contract (BridgeKit's customBurnWithHook forwarder path: the wallet
+//        approves the kit contract and the kit contract calls
+//        depositForBurn, so the on-chain depositor is the kit contract —
+//        proven on-chain on Ethereum Sepolia burn 0x1b286af1… and Optimism
+//        Sepolia burn 0x459f2d90…, both naming depositor 0xC5567a5E…).
+//        Any other depositor is proof AGAINST the intent. The wallet is
+//        still bound independently of this field: tx.from == wallet AND
+//        the canonical-USDC debit sum from the wallet == intent amount, so
+//        accepting the kit contract cannot credit a burn the wallet never
+//        funded.
 //   mint   (verifyArcMint):
 //     1. the mint tx mined SUCCESSFULLY on Arc,
 //     2. a MessageReceived from the canonical Arc MessageTransmitterV2
@@ -175,6 +187,36 @@ export function sourceCctpV2(sourceId: string): SourceCctpV2 | null {
   return { tokenMessenger: tm, messageTransmitter: mt, domain };
 }
 
+/**
+ * Known per-chain BridgeKit execution contract (kitContracts.bridge from
+ * the installed bridge-kit chain definitions — same single-authority
+ * precedent as sourceCctpV2 above).
+ *
+ * BridgeKit's CCTP V2 provider routes forwarder flows
+ * (customBurnWithHook, hookData "cctp-forwarder") through this contract:
+ * the browser wallet approves it for the burn amount and it calls
+ * TokenMessengerV2.depositForBurn, so the on-chain DepositForBurn
+ * `depositor` is this contract, not the wallet. Returns null when the
+ * installed package carries no bridge contract for the chain — callers
+ * then accept only the wallet as depositor (fail-closed, pre-fix
+ * behavior).
+ */
+export function sourceBridgeContract(sourceId: string): string | null {
+  const defs: Record<string, any> = {
+    Arbitrum_Sepolia: ArbitrumSepolia,
+    Base_Sepolia: BaseSepolia,
+    Optimism_Sepolia: OptimismSepolia,
+    Ethereum_Sepolia: EthereumSepolia,
+    Polygon_Amoy_Testnet: PolygonAmoy,
+  };
+  const def = defs[sourceId];
+  const bridge = def?.kitContracts?.bridge;
+  if (typeof bridge !== 'string' || !bridge) {
+    return null;
+  }
+  return bridge;
+}
+
 function arcCctpV2(): SourceCctpV2 {
   // Split authority on purpose: the Arc MessageTransmitter/domain are Arc
   // network topology (single authority: getNetworkConfig), while the Arc
@@ -274,6 +316,12 @@ export interface BurnBindingContext {
   /** Source-chain MessageTransmitterV2 (MessageSent must come from here). */
   messageTransmitter: string;
   sourceAddress: string;
+  /**
+   * Known per-chain BridgeKit bridge contract, accepted as DepositForBurn
+   * depositor alongside the wallet (the kit-contract forwarder execution
+   * path). Null = unknown chain config: only the wallet binds (fail-closed).
+   */
+  bridgeContract: string | null;
   amountBaseUnits: bigint;
   destination: string;
   arcDomain: number;
@@ -317,13 +365,22 @@ export function extractBurnBinding(
       destinationDomain: number;
       destinationTokenMessenger: string;
     };
-    // A decodable DepositForBurn that names a different amount/
-    // depositor/recipient/token/domain/messenger is proof AGAINST this
-    // intent — fail immediately, never keep scanning for a softer match.
+    // The depositor is the session wallet on the direct path, or the known
+    // per-chain BridgeKit bridge contract on the kit-contract forwarder
+    // path (wallet approves the kit contract; the kit contract burns).
+    // Either way the wallet independently funded this receipt (tx.from +
+    // USDC debit checks), so a decodable DepositForBurn naming a THIRD
+    // depositor — or a different amount/recipient/token/domain/messenger —
+    // is proof AGAINST this intent: fail immediately, never keep scanning
+    // for a softer match.
+    const depositor = (args.depositor as string).toLowerCase();
+    const walletFunded =
+      depositor === ctx.sourceAddress.toLowerCase() ||
+      (typeof ctx.bridgeContract === 'string' && ctx.bridgeContract !== '' && depositor === ctx.bridgeContract.toLowerCase());
     if (
+      !walletFunded ||
       (args.burnToken as string).toLowerCase() !== ctx.usdcAddress.toLowerCase() ||
       BigInt(args.amount) !== ctx.amountBaseUnits ||
-      (args.depositor as string).toLowerCase() !== ctx.sourceAddress.toLowerCase() ||
       (args.mintRecipient as string).toLowerCase() !== expectedRecipient ||
       Number(args.destinationDomain) !== ctx.arcDomain ||
       (args.destinationTokenMessenger as string).toLowerCase() !== expectedArcTM
@@ -626,6 +683,9 @@ export async function verifyExternalBurn(params: {
     tokenMessenger: cctp.tokenMessenger,
     messageTransmitter: cctp.messageTransmitter,
     sourceAddress,
+    // Null when the installed bridge-kit carries no bridge contract for
+    // this chain: only the wallet binds (fail-closed, pre-fix behavior).
+    bridgeContract: sourceBridgeContract(sourceId),
     amountBaseUnits,
     destination,
     arcDomain: arc.domain,

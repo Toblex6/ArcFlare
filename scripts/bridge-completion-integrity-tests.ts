@@ -14,6 +14,15 @@
 //     B4 burn without MessageSent -> BINDING_MISMATCH
 //     B5 legacy V1-shaped DepositForBurn -> BINDING_MISMATCH (the old ABI
 //        never decoded a real V2 burn; unknown shapes fail closed)
+//     B6 kit-contract depositor (BridgeKit customBurnWithHook forwarder path:
+//        wallet approves the kit bridge contract, the kit contract calls
+//        depositForBurn — proven on-chain on Ethereum Sepolia 0x1b286af1…
+//        and Optimism Sepolia 0x459f2d90…, both naming the kit contract as
+//        depositor) -> ok + the exact bytes32 message nonce
+//     B7 third-party contract depositor (not the wallet, not the known kit
+//        contract) -> BINDING_MISMATCH (no silent allow-list widening)
+//     B8 kit-contract depositor with unknown chain config (bridgeContract
+//        null) -> BINDING_MISMATCH (fail-closed, pre-fix behavior)
 //   Mint binding (analyzeMintReceipt), production pattern 300000 requested
 //   / 276074 credited (23926 relayer fee):
 //     M1 dust Transfer (1 wei), no bridge message -> NONCE_MISMATCH (the H1
@@ -61,6 +70,10 @@ const USDC_ARC = '0x6666666666666666666666666666666666666666';
 const USER = '0x7777777777777777777777777777777777777777';
 const DEST = '0x8888888888888888888888888888888888888888';
 const FORWARDER = '0x9999999999999999999999999999999999999999';
+// Synthetic stand-in for the installed bridge-kit's kitContracts.bridge
+// (production: 0xC5567a5E3370d4DBfB0540025078e283e36A363d on every chain).
+const KIT_BRIDGE = '0xcccccccccccccccccccccccccccccccccccccccc';
+const ATTACKER = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 const REQUESTED = 300_000n; // production: 0.30 USDC requested
 const FEE = 23_926n;        // production: relayer fee observed
@@ -123,6 +136,7 @@ const burnCtx = {
   tokenMessenger: SRC_TM,
   messageTransmitter: SRC_MT,
   sourceAddress: USER,
+  bridgeContract: KIT_BRIDGE,
   amountBaseUnits: REQUESTED,
   destination: DEST,
   arcDomain: 26,
@@ -139,14 +153,14 @@ const mintCtxBase = {
   expectedSender: pad(SRC_TM as Hex, { size: 32 }),
 };
 
-function validBurnLogs(recipient: string = DEST): ReceiptLog[] {
+function validBurnLogs(recipient: string = DEST, depositor: string = USER): ReceiptLog[] {
   const body = burnBody({ burnToken: USDC_SRC, mintRecipient: recipient, amount: REQUESTED, sender: USER, maxFee: 30000n, feeExecuted: 0n });
   const message = cctpMessage({ src: 6, dst: 26, nonce: NONCE, sender: SRC_TM, recipient: ARC_TM, caller: FORWARDER, minFT: 1000, ftExec: 1000, body });
   return [
     toLog(SRC_TM, encodeLog({
       abi: DEPOSIT_FOR_BURN_V2_ABI, eventName: 'DepositForBurn',
       args: {
-        burnToken: USDC_SRC as Hex, amount: REQUESTED, depositor: USER as Hex,
+        burnToken: USDC_SRC as Hex, amount: REQUESTED, depositor: depositor as Hex,
         mintRecipient: pad(recipient as Hex, { size: 32 }), destinationDomain: 26,
         destinationTokenMessenger: pad(ARC_TM as Hex, { size: 32 }),
         destinationCaller: pad(FORWARDER as Hex, { size: 32 }),
@@ -209,6 +223,15 @@ function main() {
   }));
   const b5 = extractBurnBinding([v1burn], burnCtx);
   ok('B5 legacy V1-shaped burn event fails closed', !b5.ok && (b5 as any).reason === 'BINDING_MISMATCH', show(b5));
+
+  const b6 = extractBurnBinding(validBurnLogs(DEST, KIT_BRIDGE), burnCtx);
+  ok('B6 kit-contract depositor (forwarder path) binds + yields the message nonce', b6.ok === true && b6.ok && b6.cctpNonce === NONCE.toLowerCase(), show(b6));
+
+  const b7 = extractBurnBinding(validBurnLogs(DEST, ATTACKER), burnCtx);
+  ok('B7 third-party contract depositor is proof against', !b7.ok && (b7 as any).reason === 'BINDING_MISMATCH', show(b7));
+
+  const b8 = extractBurnBinding(validBurnLogs(DEST, KIT_BRIDGE), { ...burnCtx, bridgeContract: null });
+  ok('B8 kit-contract depositor with unknown chain config fails closed', !b8.ok && (b8 as any).reason === 'BINDING_MISMATCH', show(b8));
 
   // ── Mint binding ─────────────────────────────────────────────────────────
   const dust = [
