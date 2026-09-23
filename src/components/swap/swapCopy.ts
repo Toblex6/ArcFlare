@@ -149,6 +149,22 @@ export function shortAddress(address: string): string {
 }
 
 /**
+ * Whether the UI may show the "Rate comparison via Tower · Execution via …"
+ * attribution for a backend quote. TRUE only when the backend reports Tower
+ * was actually consulted AND successfully returned a candidate for THIS
+ * quote (consulted === true && available === true). Every other shape —
+ * missing payload, flag-off fallback, missing-key fallback, Tower failure
+ * fallback — returns FALSE so the UI never claims Tower was consulted when
+ * it was not. Single authority for the attribution rule (FlowSwapView +
+ * tests consume this; no inline copies).
+ */
+export function shouldShowTowerAttribution(
+  tower: { consulted?: boolean; available?: boolean } | null | undefined
+): boolean {
+  return tower?.consulted === true && tower?.available === true;
+}
+
+/**
  * Customer-facing label for a swap venue id returned by the backend quote
  * response. Unknown ids fall back to the raw id (never blank, never a
  * hardcoded claim about a venue the backend did not name).

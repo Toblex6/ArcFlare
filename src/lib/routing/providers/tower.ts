@@ -1,27 +1,62 @@
 // src/lib/routing/providers/tower.ts
 //
-// Tower swap quote client — Phase 1 (quote only, no execution).
+// Tower swap quote client — quote/rate-comparison ONLY, never execution.
 //
 // SERVER-ONLY MODULE: the Tower API key lives in process.env and must never
 // reach client code. Importing this module in a browser bundle throws.
 //
 // Allowed endpoints:
-//   GET  /api/public/swap/dexes   (venue catalog)
-//   POST /api/public/swap/quote   (optimal quote)
-// Explicitly NOT allowed in Phase 1:
+//   GET  /api/public/swap/dexes   (venue catalog, scope: read, 1 CU)
+//   POST /api/public/swap/quote   (optimal quote, scope: swaps, 2 CU)
+// Explicitly NOT allowed (FlareHQ architecture: Tower = rate comparison,
+// UnitFlowV3 = execution/settlement):
 //   /api/public/swap/build-tx, transaction creation, wallet interaction.
 //
+// Official Tower findings (docs.tower.exchange, Developer Console, read
+// 2026-09-23; console at devs.tower.exchange):
+//   - Base URL: https://www.tower.exchange — the public API root is
+//     https://www.tower.exchange/api/public for BOTH Arc Testnet and Arc
+//     Mainnet (one gateway, no separate mainnet endpoint; the Testnet &
+//     Faucet page shows the same base for both environments).
+//   - Auth: Bearer <API_KEY> (standard Authorization header) or the
+//     x-api-key header; HTTPS required. This client uses Bearer. Keys look
+//     like sk_live_<hex> (live) / sk_test_<hex> (test); the SAME key works
+//     on testnet and mainnet.
+//   - Where the key comes from: generate at the Tower Developer Console
+//     (devs.tower.exchange → API Keys) with scopes `read` (prices, dexes)
+//     and `swaps` (quote; build-tx is out of scope for FlareHQ). Without
+//     the `swaps` scope /swap/quote returns 403.
+//   - Quote shape: POST /swap/quote {inputToken, outputToken, inputAmount,
+//     slippageTolerance? (bps, default 50), dexId?}; 200 data carries
+//     inputToken/outputToken/inputAmount echoes, outputAmount, minOut,
+//     priceImpact, gasEstimate, feeBps, platformFeeAmount, dexId/dexName,
+//     route{type,hops}, routeOptions. Errors are {success:false, error}
+//     with 400/401/403/404/429/5xx semantics (rate limits: free tier
+//     60 req/min, 100k CU/mo; quote costs 2 CU).
+//   - Tokens/chains relevant to FlareHQ: swaps settle on Arc (testnet chain
+//     5042002; mainnet per Arc docs 5042). Supported swap assets include
+//     USDC, EURC, USDT, cirBTC (+ regional stables cNGN, QCAD); DEX venues
+//     aggregated include Synthra, UnitFlow, and Tower DEX.
+//   - Token identity on the wire: Tower accepts symbols OR addresses and
+//     echoes contract addresses. This client always SENDS explicit contract
+//     addresses resolved from supportedTokens.ts for the SELECTED network
+//     (mainnet quotes automatically target ARC_MAINNET_* addresses; cirBTC
+//     refuses on mainnet) and cross-checks Tower's echo before normalizing.
 // Every Tower response field is UNTRUSTED provider input: token identity and
-// amounts are validated and parsed through normalize.ts (canonical 6-dec
-// Arc base units; mismatched decimals claims are rejected, never coerced).
+// amounts are validated and parsed through normalize.ts (canonical Arc base
+// units per token — 6 for USDC/EURC, 8 for cirBTC; mismatched decimals
+// claims are rejected, never coerced).
 //
-// Tower docs note (docs.tower.exchange, Get Optimal Swap Quote): the example
-// response annotates outputAmount as "(18 decimals for EURC)" even though
-// USDC/EURC are 6 decimals on Arc. The quote response carries NO decimals
-// field, so Phase 1 passes NO decimals claim into normalize() (canonical
-// resolution is authoritative). Phase 2 must re-verify Tower's actual unit
-// convention live before any execution use — no silent rescaling here.
+// Tower docs anomaly (Get Optimal Swap Quote page): the example response
+// annotates outputAmount as "(18 decimals for EURC)" even though USDC/EURC
+// are 6 decimals on Arc (confirmed by Tower's own testnet token table and
+// the quickstart's "100 USDC = 100000000" rule). The quote response carries
+// NO decimals field, so NO decimals claim is passed into normalize()
+// (canonical resolution is authoritative). Execution use must re-verify
+// Tower's actual unit convention live before any rescaling — no silent
+// rescaling here, and Tower never executes in FlareHQ regardless.
 
+import { getArcNetworkName } from '../../config/network';
 import { getTokenBySymbol } from '../../tokens/supportedTokens';
 import { routingError } from '../canonical';
 import { normalizeProviderQuote } from './normalize';
@@ -61,6 +96,48 @@ export function getTowerConfig(
 
 function towerHeaders(apiKey: string): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+}
+
+/**
+ * Pure, network-aware Tower configuration status (no I/O, no secrets in the
+ * output — key presence only). Per the official docs the Tower gateway and
+ * API key are SHARED across Arc Testnet and Arc Mainnet (one base URL, one
+ * key); what changes per network is the TOKEN identity this client sends
+ * (supportedTokens.ts resolves ARC_MAINNET_* addresses under mainnet).
+ * Callers use this to report "Tower configured / fallback" honestly — the
+ * UI attribution rule (shouldShowTowerAttribution) additionally requires an
+ * actually-successful consultation, so `configured: true` alone never
+ * implies Tower was consulted.
+ */
+export interface TowerConfigStatus {
+  network: 'testnet' | 'mainnet';
+  /** Effective gateway root (https, trailing slashes stripped). */
+  baseUrl: string;
+  keyPresent: boolean;
+  flagEnabled: boolean;
+  configured: boolean;
+  reason: string;
+}
+
+export function getTowerStatus(
+  env: Record<string, string | undefined> = process.env
+): TowerConfigStatus {
+  const network = getArcNetworkName(env);
+  const flagRaw = (env.ROUTING_PROVIDER_TOWER_ENABLED ?? '').trim().toLowerCase();
+  const flagEnabled = flagRaw === '1' || flagRaw === 'true';
+  const keyPresent = (env.TOWER_SWAP_API_KEY ?? '').trim().length > 0;
+  const baseUrl = ((env.TOWER_SWAP_BASE_URL ?? '').trim() || TOWER_SWAP_BASE_URL_DEFAULT).replace(/\/+$/, '');
+  const baseOk = /^https:\/\//.test(baseUrl);
+  if (!flagEnabled) {
+    return { network, baseUrl, keyPresent, flagEnabled, configured: false, reason: 'Tower discovery disabled (flag off).' };
+  }
+  if (!keyPresent) {
+    return { network, baseUrl, keyPresent, flagEnabled, configured: false, reason: 'Tower discovery unavailable (no API key).' };
+  }
+  if (!baseOk) {
+    return { network, baseUrl, keyPresent, flagEnabled, configured: false, reason: 'Tower base URL must be https (TOWER_SWAP_BASE_URL).' };
+  }
+  return { network, baseUrl, keyPresent, flagEnabled, configured: true, reason: 'Tower discovery configured (quote/comparison only — UnitFlow executes).' };
 }
 
 /** Per-attempt timeout for Tower fetches (Tower is normally sub-second when
@@ -210,11 +287,24 @@ export async function requestTowerQuote(
 
   // Cross-check Tower's echo against the request — untrusted provider input
   // must not substitute tokens or amounts.
+  // Temporary diagnostic: on mismatch, log requested vs returned token
+  // identity (values + JS types + truncated raw data keys) so a single
+  // USDC->EURC probe reveals whether Tower echoes a different address,
+  // a nested object, a symbol string, or whitespace/casing drift. No
+  // secrets are logged here (addresses only, never the API key).
+  const diagTokens = () =>
+    `[tower-diag] token-echo reqIn=${inputToken.address} reqOut=${outputToken.address} ` +
+    `retIn=${JSON.stringify((data as any)?.inputToken)?.slice(0, 120)}(${typeof (data as any)?.inputToken}) ` +
+    `retOut=${JSON.stringify((data as any)?.outputToken)?.slice(0, 120)}(${typeof (data as any)?.outputToken}) ` +
+    `reqAmt=${req.inputAmount.toString()} retAmt=${JSON.stringify((data as any)?.inputAmount)?.slice(0, 40)} ` +
+    `dataKeys=${JSON.stringify(Object.keys(data as any))?.slice(0, 200)}`;
   const eqAddr = (a: any, b: string) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
   if (!eqAddr(data.inputToken, inputToken.address)) {
+    console.error(`${diagTokens()} -> INPUT_MISMATCH`);
     throw routingError(400, '[tower] Tower quote input token does not match the requested token.');
   }
   if (!eqAddr(data.outputToken, outputToken.address)) {
+    console.error(`${diagTokens()} -> OUTPUT_MISMATCH`);
     throw routingError(400, '[tower] Tower quote output token does not match the requested token.');
   }
   if (String(data.inputAmount ?? '').trim() !== req.inputAmount.toString()) {

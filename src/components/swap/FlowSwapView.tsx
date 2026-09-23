@@ -76,6 +76,7 @@ import {
   normalizeBalanceString,
   parseAmountToBaseUnits,
   shortAddress,
+  shouldShowTowerAttribution,
   shortHash,
   SWAP_SYMBOLS,
   truncateToDecimals,
@@ -1096,9 +1097,10 @@ export function FlowSwapView({
                     </span>
                   </div>
                   {/* Routing provenance (secondary): Tower is named ONLY when
-                      the backend actually consulted it for this quote.
+                      the backend actually consulted it for this quote
+                      (shouldShowTowerAttribution — consulted && available).
                       Otherwise the Route row above names the executor alone. */}
-                  {quote.quote.tower?.consulted && quote.quote.tower.available ? (
+                  {shouldShowTowerAttribution(quote.quote.tower) ? (
                     <p style={styles.routeNote}>
                       Rate comparison via {friendlyVenueLabel('tower')} · Execution via{' '}
                       {friendlyVenueLabel(quote.quote.venueId ?? 'unitflow-v3')}

@@ -80,10 +80,18 @@ export function getTokenBySymbol(symbol: SupportedSymbol): SupportedToken {
 export function getTokenByAddress(address: string): SupportedToken | undefined {
   const normalized = address.toLowerCase();
   // Match the environment-selected addresses first (mainnet-aware), then the
-  // pinned testnet table.
+  // pinned testnet table. Symbols unconfigured for the selected network
+  // (cirBTC on mainnet) are skipped — they must not break lookup for the
+  // configured symbols (Tower comparison normalizes USDC/EURC on mainnet).
   for (const symbol of ["USDC", "EURC", "CIRBTC"] as const) {
-    if (addressFor(symbol).toLowerCase() === normalized) {
-      return { ...SUPPORTED_TOKENS[symbol]!, address: addressFor(symbol) };
+    let selected: string;
+    try {
+      selected = addressFor(symbol);
+    } catch {
+      continue;
+    }
+    if (selected.toLowerCase() === normalized) {
+      return { ...SUPPORTED_TOKENS[symbol]!, address: selected };
     }
   }
   return Object.values(SUPPORTED_TOKENS).find(t => t.address.toLowerCase() === normalized);
