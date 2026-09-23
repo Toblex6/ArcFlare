@@ -21,16 +21,29 @@
 // The ledger entry uses type ADJUSTMENT (not REVENUE) deliberately — a treasury
 // top-up is liquidity, not earned revenue, so it must never inflate the agent's
 // trust/reputation signals.
+//
+// IDEMPOTENCY (P1-3, merchant/withdraw reference pattern): Idempotency-Key is
+// MANDATORY. The PaymentLog row keyed by `treasury-credit:{agentId}:{key}`
+// (unique) is claimed BEFORE the live transfer; a duplicate request with the
+// same key replays the bound result and never creates another Circle
+// transfer. The Circle transaction ID is persisted as soon as creation
+// returns it, so crash-recovery resumes the tracked transfer instead of
+// sending twice. The later ledger txHash dedupe stays as defense-in-depth —
+// it was never sufficient alone (two transfers have two hashes).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
-import { resolveAgentRouteRef } from '@/lib/agents/resolveAgentRef';
+import { resolveAgentRouteRefIdOnly as resolveAgentRouteRef } from '@/lib/agents/resolveAgentRef';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { getCircleClient } from '@/lib/circle/client';
-import { transferUsdc } from '@/lib/circle/transfers';
 import { recordLedgerEntry, usdcLedgerIdentity } from '@/lib/ledger/ledgerService';
 import { computeTreasuryView } from '@/lib/ledger/treasuryService';
+import {
+  executeTrackedTransfer,
+  prismaTrackedTransferStore,
+  TransferInProgressError,
+} from '@/src/lib/payments/trackedTransfer';
 import { createPublicClient, http, erc20Abi } from 'viem';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
 const arcTestnet = getArcChain();
@@ -50,15 +63,24 @@ async function readUsdcBalance(owner: string): Promise<bigint> {
 
 async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  // Canonical agent reference: registry id, ERC-8004 tokenId, or SCA address
-  // (auto, ambiguity refused). Merchant-ownership + caller-control of the
-  // RESOLVED agent are enforced below — unchanged.
+  // M5: id-only on this caller-control endpoint (documented id-only policy).
+  // Only strict registry ids resolve; tokenId/SCA aliases are a clean 404.
   const { agent: refAgent, ambiguous: refAmbiguous, malformed: refMalformed } = await resolveAgentRouteRef(id);
   if (refAmbiguous) {
     return NextResponse.json({ error: 'ambiguous agent reference' }, { status: 400 });
   }
   if (refMalformed) {
     return NextResponse.json({ error: 'invalid agent id' }, { status: 400 });
+  }
+
+  // P1-3: mandatory server idempotency key (merchant/withdraw pattern — the
+  // key is required before any transfer can be initiated).
+  const rawKey = req.headers.get('idempotency-key')?.trim();
+  if (!rawKey || rawKey.length > 120) {
+    return NextResponse.json(
+      { success: false, error: 'Idempotency-Key header (1-120 chars) is required.' },
+      { status: 400 }
+    );
   }
 
   // Amount from the body — the ONLY thing the caller may supply.
@@ -85,6 +107,7 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
   const agent = refAgent;
   if (!agent) return NextResponse.json({ error: 'agent not found' }, { status: 404 });
   const agentId: number = agent.id;
+  const idempotencyKey = `treasury-credit:${agentId}:${rawKey}`;
   const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? '');
   if (!actor) return NextResponse.json({ error: 'You do not control this agent.' }, { status: 403 });
 
@@ -138,42 +161,132 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
     destBefore = await readUsdcBalance(destAddress);
   } catch {}
 
+  // P1-3: tenant guard on the idempotency scope (merchant/withdraw parity) —
+  // a key bound to another merchant's credit replays as 409, never as funds.
+  const boundClaim = await (prisma as any).paymentLog
+    .findUnique({ where: { idempotencyKey } })
+    .catch(() => null);
+  if (boundClaim?.merchantId && boundClaim.merchantId !== merchant.id) {
+    return NextResponse.json({ success: false, error: 'Idempotency key already in use.' }, { status: 409 });
+  }
+
+  // P1-3: idempotent live transfer. The claim row is created BEFORE the
+  // on-chain write; the Circle transaction ID is persisted as soon as
+  // creation returns it. Duplicate/replayed/crashed attempts resolve to the
+  // SAME tracked transfer — a second Circle transfer is never created.
+  const store = prismaTrackedTransferStore((prisma as any).paymentLog);
+  let receivedWei = amountWei;
   let arcTxHash: string;
+  let replayed = false;
+  let resumed = false;
   try {
-    const result = await transferUsdc({
-      walletId: sourceWalletId,
-      walletAddress: sourceAddress,
-      destinationAddress: destAddress,
-      amount: amountStr,
+    const exec = await executeTrackedTransfer({
+      store,
+      circle: circleClient as any,
+      idempotencyKey,
+      claimData: {
+        reference: `treasury-credit_${agentId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        amount: parseFloat(amountStr),
+        currency: 'USDC',
+        tokenAddress: USDC_ARC,
+        chain: getNetworkConfig().circleBlockchain,
+        senderEmail: merchantRecord.email ?? 'merchant@treasury-credit',
+        merchant: merchantRecord.businessName ?? merchant.id,
+        merchantId: merchant.id,
+        merchantSCA: sourceAddress,
+        agentSCA: destAddress,
+        metadata: {
+          requested: amountStr,
+          sourceWalletId,
+          purpose: 'treasury-fund',
+          destBefore: destBefore.toString(),
+        },
+      },
+      createNative: () =>
+        (circleClient as any).createTransaction({
+          walletId: sourceWalletId,
+          blockchain: getNetworkConfig().circleBlockchain,
+          tokenAddress: USDC_ARC,
+          destinationAddress: destAddress,
+          amounts: [amountStr],
+          fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+        }),
+      createFallback: () =>
+        (circleClient as any).createContractExecutionTransaction({
+          walletAddress: sourceAddress,
+          blockchain: getNetworkConfig().circleBlockchain,
+          contractAddress: USDC_ARC,
+          abiFunctionSignature: 'transfer(address,uint256)',
+          abiParameters: [destAddress, amountWei.toString()],
+          fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+        }),
+      // Idempotent completion (may run twice across crash-recovery):
+      // re-measures the received delta from the claim's persisted destBefore
+      // and records the ADJUSTMENT CREDIT exactly once via txHash dedupe.
+      // NOTE: txHash comes from the executor — the claim row carries no
+      // arcTxHash yet at this point (SUCCESS is marked after this runs).
+      onConfirmed: async (confirmedTxHash: string) => {
+        let base = destBefore;
+        try {
+          const claim = await (prisma as any).paymentLog
+            .findUnique({ where: { idempotencyKey } })
+            .catch(() => null);
+          const persisted = (claim?.metadata as any)?.destBefore;
+          if (typeof persisted === 'string' && /^[0-9]+$/.test(persisted)) base = BigInt(persisted);
+        } catch {}
+        let measured = amountWei;
+        try {
+          const destAfter = await readUsdcBalance(destAddress);
+          const delta = destAfter - base;
+          if (delta > 0n) measured = delta;
+        } catch {
+          // RPC hiccup — fall back to the nominal amount; the transfer itself
+          // already succeeded, so failing here would leave money moved but no
+          // ledger record. Record nominal and note it.
+        }
+        receivedWei = measured;
+        // Ledger: ADJUSTMENT CREDIT deduped by txHash (idempotent retry-safe).
+        // Phase 2D: treasury top-ups are explicitly USDC-only.
+        await recordLedgerEntry({
+          ...usdcLedgerIdentity(),
+          agentRegistryId: agentId,
+          type: 'ADJUSTMENT',
+          amount: measured,
+          direction: 'CREDIT',
+          txHash: confirmedTxHash,
+          description: `treasury fund top-up ${amountStr} USDC from merchant wallet`,
+          metadata: { requested: amountStr, sourceWalletId, purpose: 'treasury-fund' },
+        });
+      },
     });
-    arcTxHash = result.arcTxHash;
+    arcTxHash = exec.txHash;
+    replayed = exec.replayed;
+    resumed = exec.resumed;
   } catch (e: any) {
+    if (e instanceof TransferInProgressError || e?.name === 'TransferInProgressError') {
+      return NextResponse.json(
+        { success: false, error: 'This treasury credit is already being processed — retry with the same Idempotency-Key shortly.' },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: `transfer failed: ${e.message}` }, { status: 500 });
   }
 
-  let receivedWei = amountWei;
-  try {
-    const destAfter = await readUsdcBalance(destAddress);
-    const delta = destAfter - destBefore;
-    if (delta > 0n) receivedWei = delta;
-  } catch {
-    // RPC hiccup — fall back to the nominal amount; the transfer itself already
-    // succeeded, so failing the whole request here would leave money moved but
-    // no ledger record. Record nominal and note it.
+  if (replayed) {
+    // Reuse the bound result: the canonical received amount is the ledgered
+    // one (SUCCESS implies onConfirmed completed, so the entry must exist).
+    const dedupeKey = `${arcTxHash.toLowerCase()}:${agentId}:ADJUSTMENT`;
+    const entry = await (prisma as any).agentLedgerEntry
+      .findUnique({ where: { dedupeKey } })
+      .catch(() => null);
+    if (!entry) {
+      return NextResponse.json(
+        { success: false, error: 'completed treasury credit has no ledger record' },
+        { status: 500 }
+      );
+    }
+    receivedWei = BigInt(entry.amount);
   }
-
-  // Ledger: ADJUSTMENT CREDIT deduped by txHash (idempotent retry-safe).
-  // Phase 2D: treasury top-ups are explicitly USDC-only (transferUsdc moves USDC).
-  await recordLedgerEntry({
-    ...usdcLedgerIdentity(),
-    agentRegistryId: agentId,
-    type: 'ADJUSTMENT',
-    amount: receivedWei,
-    direction: 'CREDIT',
-    txHash: arcTxHash,
-    description: `treasury fund top-up ${amountStr} USDC from merchant wallet`,
-    metadata: { requested: amountStr, sourceWalletId, purpose: 'treasury-fund' },
-  });
 
   const treasury = await computeTreasuryView(agentId);
   return NextResponse.json({
@@ -183,6 +296,8 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
     receivedUsdc: (Number(receivedWei) / 1e6).toFixed(6),
     txHash: arcTxHash,
     treasury,
+    replayed,
+    resumed,
   });
 }
 

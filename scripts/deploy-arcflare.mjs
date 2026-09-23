@@ -1,4 +1,8 @@
 import { network } from "hardhat";
+import {
+  assertMainnetJobEscrowRoles,
+  MAINNET_PRODUCTION_ROLES,
+} from "./mainnet-roles.mjs";
 
 // ---------------------------------------------------------------------------
 // ArcFlare testnet deployment script (Hardhat 3 + hardhat-ethers v4)
@@ -100,6 +104,25 @@ const relayer = requireEnvAddress("JOB_ESCROW_RELAYER", "relayer");
 // ---- 1. ArcFlareSpendLimit (owner, recorder) ----
 const spendLimitOwner = optionalEnvAddress("SPEND_LIMIT_OWNER", owner, "JOB_ESCROW_OWNER");
 const spendLimitRecorder = optionalEnvAddress("SPEND_LIMIT_RECORDER", relayer, "JOB_ESCROW_RELAYER");
+
+// ---- MAINNET production role allowlist (P1-1) ----
+// Chain ID alone is not enough: the abandoned 0x62Ca…fA4fA mainnet deployment
+// passed the chain guard with TESTNET role addresses. On chain 5042 every
+// resolved role must exactly match the production allowlist (owner/Safe,
+// arbiter, relayer, treasury sink), owner != relayer, and no known testnet
+// address is accepted. Testnet deploys skip this entirely (unchanged).
+if (isMainnet) {
+  assertMainnetJobEscrowRoles({
+    owner,
+    arbiter,
+    treasurySink,
+    relayer,
+    spendLimitOwner,
+    spendLimitRecorder,
+  });
+  console.log("Mainnet roles: exact production allowlist verified");
+  console.log(`  (owner/Safe ${MAINNET_PRODUCTION_ROLES.owner})`);
+}
 console.log("Deploying ArcFlareSpendLimit ...");
 console.log("  owner   :", spendLimitOwner);
 console.log("  recorder:", spendLimitRecorder);

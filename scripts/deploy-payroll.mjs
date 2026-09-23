@@ -1,4 +1,5 @@
 import { network } from "hardhat";
+import { assertMainnetPayrollRoles } from "./mainnet-roles.mjs";
 
 // ---------------------------------------------------------------------------
 // ArcFlarePayroll deployment (Hardhat 3 + hardhat-ethers v4)
@@ -93,6 +94,17 @@ const relayer = isMainnet
 console.log("Deploying ArcFlarePayroll ...");
 console.log("  owner  :", owner);
 console.log("  relayer:", relayer);
+
+// ---- MAINNET production role allowlist (P1-1) ----
+// Same class of bug as the abandoned 0x62Ca…fA4fA SpendLimit deployment:
+// chain ID alone does not prove the ROLES are production. On chain 5042
+// PAYROLL_OWNER must equal the production Safe and PAYROLL_RELAYER must
+// equal the production relayer (exact match, owner != relayer, no known
+// testnet address). Testnet deploys skip this entirely (unchanged).
+if (isMainnet) {
+  assertMainnetPayrollRoles({ owner, relayer });
+  console.log("Mainnet roles: exact production allowlist verified");
+}
 
 const Payroll = await ethers.getContractFactory("ArcFlarePayroll", deployer);
 const payroll = await Payroll.deploy(owner, relayer);

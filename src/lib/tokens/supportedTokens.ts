@@ -94,6 +94,14 @@ export function getTokenByAddress(address: string): SupportedToken | undefined {
       return { ...SUPPORTED_TOKENS[symbol]!, address: selected };
     }
   }
+  // NETWORK ISOLATION (pre-mainnet fix): on mainnet the testnet-pinned table
+  // below MUST NOT be consulted — a mainnet path resolving a testnet token
+  // address would silently use testnet configuration, violating the hard
+  // invariant "no mainnet path may silently use testnet configuration."
+  // Testnet behavior is unchanged (falls through to the pinned table).
+  if (getNetworkConfig().name === "mainnet") {
+    return undefined;
+  }
   return Object.values(SUPPORTED_TOKENS).find(t => t.address.toLowerCase() === normalized);
 }
 

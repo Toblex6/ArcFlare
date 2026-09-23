@@ -8,6 +8,16 @@ import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { resolveConsumerWallet } from "@/src/lib/auth/consumerWallet";
 import { enforceSpendLimit } from '@/lib/agents/spendWindow';
 import { parseUnits } from 'viem';
+import {
+  executeTrackedTransfer,
+  prismaTrackedTransferStore,
+  TransferInProgressError,
+} from '@/src/lib/payments/trackedTransfer';
+import {
+  computeScheduleAdvance,
+  scheduledPeriodKey,
+  scheduledPeriodReference,
+} from '@/src/lib/payments/scheduledExecution';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -16,44 +26,40 @@ function getCircleClient() {
   });
 }
 
-async function waitForCircleTx(
-  client: ReturnType<typeof getCircleClient>,
-  txId: string
-): Promise<string> {
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 2500));
-    const { data } = await client.getTransaction({ id: txId });
-    if (data?.transaction?.state === 'COMPLETE' && data.transaction.txHash) {
-      return data.transaction.txHash;
-    }
-    if (data?.transaction?.state === 'FAILED') {
-      throw new Error('Scheduled payment transaction failed onchain.');
-    }
-  }
-  throw new Error('Scheduled payment transaction timed out.');
-}
-
-async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof getCircleClient>) {
-  // FAIL CLOSED — no shared-default fallback, ever. A schedule with no
-  // explicitly resolved payer wallet must not execute: the C1-class drain
-  // used `payerWalletId || DEFAULT_PAYER_WALLET_ID` to debit the shared
-  // platform wallet for arbitrary payers. Creation resolves the wallet
-  // (ConsumerAccount / AgentRegistry / platform agent) and refuses to
-  // persist a row it cannot bind — a null payerWalletId here means a row
-  // from before that rule, or a payer with no Circle-custodied wallet;
-  // either way it stays unpaid until the payer is bound.
+// ── Pure derivation for one scheduled execution (no state change, no Circle
+// call): resolved payer wallet, canonical token, formatted amount. Throws
+// fail-closed before any claim row or transfer exists.
+function deriveScheduledTransfer(scheduled: any) {
+  // FAIL CLOSED — no shared-default fallback, ever. (See original comment
+  // preserved on assertScheduledPayerBinding below.)
   if (!scheduled.payerWalletId) {
     throw new Error(
       `Scheduled payment ${scheduled.reference} has no resolved payer wallet (payerWalletId is null) — refusing to execute against a shared default.`
     );
   }
-  // Consumer binding revalidation at EXECUTION time: the stored payerWalletId
-  // must still be exactly the signing identity the payer's CURRENT
-  // ConsumerAccount row binds (CIRCLE + bound). A row whose account changed
-  // custody since creation (or a legacy/stale row that predates the binding
-  // rule) fails closed here instead of debiting a wallet the account no
-  // longer unambiguously maps to. Non-consumer payers (merchant / agent /
-  // platform schedules) are untouched by this check.
+  // Phase 2C: resolve THIS row's canonical token — the transfer moves exactly
+  // this token. Historical rows with NULL tokenAddress resolve to USDC, so
+  // legacy schedules execute byte-identically.
+  let token;
+  try {
+    token = resolveRowCurrency(scheduled);
+  } catch (tokenError: any) {
+    throw new Error(
+      `Scheduled payment ${scheduled.reference} has an unresolvable token (currency=${scheduled.currency ?? 'null'} tokenAddress=${scheduled.tokenAddress ?? 'null'}): ${tokenError.message} — refusing to execute.`
+    );
+  }
+  const walletId: string = scheduled.payerWalletId;
+  // Decimals come from the canonical resolver — never assumed.
+  const amountStr = scheduled.amount.toFixed(token.decimals);
+  return { token, amountStr, walletId };
+}
+
+// Consumer binding revalidation at CREATION time: the stored payerWalletId
+// must still be exactly the signing identity the payer's CURRENT
+// ConsumerAccount row binds (CIRCLE + bound). Runs inside `beforeCreate`, so
+// it gates every fresh transfer but never blocks resuming an already-created
+// one (refusing to poll cannot un-send; only completing is safe).
+async function assertScheduledPayerBinding(scheduled: any, walletId: string) {
   const payerAccount = await (prisma as any).consumerAccount
     .findUnique({ where: { walletAddress: scheduled.payerSCA } })
     .catch(() => null);
@@ -64,90 +70,140 @@ async function executeOnePayment(scheduled: any, circleClient: ReturnType<typeof
         `Scheduled payment ${scheduled.reference} payer ${scheduled.payerSCA} is not a server-signable CIRCLE wallet — refusing to execute.`
       );
     }
-    if (wallet.circleWalletId !== scheduled.payerWalletId) {
+    if (wallet.circleWalletId !== walletId) {
       throw new Error(
         `Scheduled payment ${scheduled.reference} payer wallet binding changed since creation — refusing to execute against a stale wallet id.`
       );
     }
   }
-  // Phase 2C: resolve THIS row's canonical token — the transfer moves exactly
-  // this token. Historical rows with NULL tokenAddress resolve to USDC, so
-  // legacy schedules execute byte-identically. No hardcoded USDC remains
-  // where the schedule is explicitly EURC. A row whose token cannot be
-  // resolved (unsupported/mismatched) fails closed and is retried, never
-  // paid in the wrong asset.
-  let token;
-  try {
-    token = resolveRowCurrency(scheduled);
-  } catch (tokenError: any) {
-    throw new Error(
-      `Scheduled payment ${scheduled.reference} has an unresolvable token (currency=${scheduled.currency ?? 'null'} tokenAddress=${scheduled.tokenAddress ?? 'null'}): ${tokenError.message} — refusing to execute.`
-    );
-  }
-  const walletId = scheduled.payerWalletId;
-  // Decimals come from the canonical resolver — never assumed.
-  const amountStr = scheduled.amount.toFixed(token.decimals);
+}
 
-  // ── Spend-limit gate (audit: spend-limit gap) — BEFORE the transfer
-  // executes. Every scheduled debit composes the on-chain ArcFlareSpendLimit
-  // pre-flight with the atomic per-payer DB window, so a burst of due rows
-  // (or concurrent runners) can never jointly exceed the payer's cap.
-  const amountMicros = parseUnits(amountStr, token.decimals);
-  const spendGate = await enforceSpendLimit({
-    payerAddress: scheduled.payerSCA,
-    amountMicros,
-    context: `scheduled/run:${scheduled.reference}`,
-  });
-  if (!spendGate.allowed) {
-    throw new Error(
-      `Scheduled payment ${scheduled.reference} blocked by spend limit: ${spendGate.reason} — no funds moved.`
-    );
-  }
+// ── Crash-safe execution of ONE scheduled period (P1-2) ────────────────────
+// ONE scheduled execution period produces AT MOST ONE Circle transfer.
+// The PaymentLog row keyed by scheduledPeriodKey(id, runCount) is the claim:
+// the Circle transaction ID is persisted to it as soon as creation returns,
+// so a crash before normal completion is recovered by RESUMING the tracked
+// transfer — never by creating a second one. A FAILED tracked transfer is
+// terminal (discarded, fresh creation allowed — settle parity); anything else
+// keeps its ID for resume. See trackedTransfer.ts for the full contract.
+async function executeScheduledPeriod(
+  scheduled: any,
+  circleClient: ReturnType<typeof getCircleClient>,
+  now: Date
+) {
+  const prep = deriveScheduledTransfer(scheduled);
+  const { token, amountStr, walletId } = prep;
+  const store = prismaTrackedTransferStore((prisma as any).paymentLog);
 
-  let txHash: string;
-
-  try {
-    const transferTx = await circleClient.createTransaction({
-      walletId,
-      blockchain: getNetworkConfig().circleBlockchain as any,
+  const exec = await executeTrackedTransfer({
+    store,
+    circle: circleClient as any,
+    idempotencyKey: scheduledPeriodKey({ id: scheduled.id, runCount: scheduled.runCount }),
+    claimData: {
+      // PaymentLog is the source of truth for whether this period's money
+      // moved (circleTxId/arcTxHash live here); the schedule row below is
+      // advanced only on confirmation.
+      reference: scheduledPeriodReference({ reference: scheduled.reference, runCount: scheduled.runCount }),
+      amount: scheduled.amount,
+      currency: token.symbol,
       tokenAddress: token.address,
-      destinationAddress: scheduled.receiverSCA,
-      amounts: [amountStr],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    } as any);
+      chain: getNetworkConfig().circleBlockchain,
+      senderEmail: 'scheduled-payment-system',
+      merchant: scheduled.receiverSCA,
+      agentSCA: scheduled.payerSCA,
+      payerSCA: scheduled.payerSCA,
+    },
+    // Creation-time gates (never run on resume — the spend was recorded when
+    // the tracked transfer was created; re-running them cannot un-send).
+    beforeCreate: async () => {
+      await assertScheduledPayerBinding(scheduled, walletId);
+      // ── Spend-limit gate (audit: spend-limit gap) — BEFORE the transfer
+      // executes. Every scheduled debit composes the on-chain
+      // ArcFlareSpendLimit pre-flight with the atomic per-payer DB window, so
+      // a burst of due rows (or concurrent runners) can never jointly exceed
+      // the payer's cap.
+      const amountMicros = parseUnits(amountStr, token.decimals);
+      const spendGate = await enforceSpendLimit({
+        payerAddress: scheduled.payerSCA,
+        amountMicros,
+        context: `scheduled/run:${scheduled.reference}`,
+      });
+      if (!spendGate.allowed) {
+        throw new Error(
+          `Scheduled payment ${scheduled.reference} blocked by spend limit: ${spendGate.reason} — no funds moved.`
+        );
+      }
+    },
+    createNative: () =>
+      circleClient.createTransaction({
+        walletId,
+        blockchain: getNetworkConfig().circleBlockchain as any,
+        tokenAddress: token.address,
+        destinationAddress: scheduled.receiverSCA,
+        amounts: [amountStr],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      } as any),
+    createFallback: async () => {
+      const amountWei = parseUnits(amountStr, token.decimals);
+      return circleClient.createContractExecutionTransaction({
+        walletAddress: scheduled.payerSCA,
+        blockchain: getNetworkConfig().circleBlockchain as any,
+        contractAddress: token.address,
+        abiFunctionSignature: 'transfer(address,uint256)',
+        abiParameters: [scheduled.receiverSCA, amountWei.toString()],
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      });
+    },
+    // Idempotent completion: advances the schedule ONLY if this attempt still
+    // holds the PROCESSING claim at the expected runCount. A retry after a
+    // crash between advancement and the SUCCESS mark finds count 0 and
+    // proceeds — exactly one advancement per period, ever.
+    onConfirmed: async () => {
+      const adv = computeScheduleAdvance(
+        {
+          runCount: scheduled.runCount,
+          maxRuns: scheduled.maxRuns,
+          intervalDays: scheduled.intervalDays,
+        },
+        now
+      );
+      await (prisma as any).scheduledPayment.updateMany({
+        where: { id: scheduled.id, status: 'PROCESSING', runCount: scheduled.runCount },
+        data: {
+          lastRunAt: now,
+          runCount: adv.newRunCount,
+          nextRunAt: adv.nextRunAt,
+          status: adv.isComplete ? 'COMPLETED' : 'ACTIVE',
+        },
+      });
+    },
+  });
 
-    if (!transferTx.data?.id) throw new Error('No transaction ID returned.');
-    txHash = await waitForCircleTx(circleClient, transferTx.data.id);
-  } catch (err: any) {
-    const { parseUnits } = await import('viem');
-    const amountWei = parseUnits(amountStr, token.decimals);
-
-    const erc20Tx = await circleClient.createContractExecutionTransaction({
-      walletAddress: scheduled.payerSCA,
-      blockchain: getNetworkConfig().circleBlockchain as any,
-      contractAddress: token.address,
-      abiFunctionSignature: 'transfer(address,uint256)',
-      abiParameters: [scheduled.receiverSCA, amountWei.toString()],
-      fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    });
-
-    if (!erc20Tx.data?.id) throw new Error('No transaction ID returned.');
-    txHash = await waitForCircleTx(circleClient, erc20Tx.data.id);
-  }
-
-  return { txHash, currency: token.symbol, tokenAddress: token.address };
+  return {
+    txHash: exec.txHash,
+    currency: token.symbol,
+    tokenAddress: token.address,
+    resumed: exec.resumed,
+    replayed: exec.replayed,
+  };
 }
 
 // ── POST /api/payments/scheduled/run ──────────────────────────────────────────
 //
-// DOUBLE-PAYMENT PROTECTION (H7): two concurrent /run calls (or a retry
-// while one is still executing) must never both pay the same scheduled row.
-// Each due row is claimed ATOMICALLY (status ACTIVE → PROCESSING via a
-// conditional updateMany keyed on id + status) before it is executed. Only
-// the runner whose claim succeeded processes the row; a concurrent runner
-// sees 0 claimed rows and skips them. A row left PROCESSING by a crashed
-// runner is reclaimed after STALE_CLAIM_MS (lastRunAt is stamped at claim
-// time, so a crashed run can't block the row forever).
+// DOUBLE-PAYMENT PROTECTION (H7 + P1-2): two concurrent /run calls (or a retry
+// while one is still executing) must never both pay the same scheduled row,
+// and a crash between transfer creation and completion must never produce a
+// second transfer on recovery.
+//   Layer 1 — per-row ATOMIC claim: status ACTIVE → PROCESSING via a
+//   conditional updateMany keyed on id + status. Only the runner whose claim
+//   succeeded processes the row; a concurrent runner sees 0 claimed rows and
+//   skips them. A row left PROCESSING by a crashed runner is reclaimed after
+//   STALE_CLAIM_MS (lastRunAt is stamped at claim time, so a crashed run
+//   can't block the row forever).
+//   Layer 2 — per-PERIOD tracked transfer (executeScheduledPeriod): the
+//   PaymentLog row keyed by (schedule id, runCount) carries the Circle
+//   transaction ID from creation to finality. Stale recovery RESUMES that
+//   transfer instead of creating another — one period, at most one transfer.
 const STALE_CLAIM_MS = 5 * 60 * 1000;
 
 async function runScheduledHandler(request: Request) {
@@ -212,21 +268,20 @@ async function runScheduledHandler(request: Request) {
       }
 
       try {
-        const execution = await executeOnePayment(scheduled, circleClient);
+        // Crash-safe: the schedule row is advanced inside onConfirmed (only
+        // on a confirmed transfer, exactly once per period); the PaymentLog
+        // period row proves whether this period's money moved.
+        const execution = await executeScheduledPeriod(scheduled, circleClient, now);
         const { txHash } = execution;
 
-        const newRunCount = scheduled.runCount + 1;
-        const isComplete = scheduled.maxRuns && newRunCount >= scheduled.maxRuns;
-
-        await (prisma as any).scheduledPayment.update({
-          where: { id: scheduled.id },
-          data: {
-            lastRunAt: now,
-            runCount: newRunCount,
-            nextRunAt: new Date(now.getTime() + scheduled.intervalDays * 24 * 60 * 60 * 1000),
-            status: isComplete ? 'COMPLETED' : 'ACTIVE',
+        const adv = computeScheduleAdvance(
+          {
+            runCount: scheduled.runCount,
+            maxRuns: scheduled.maxRuns,
+            intervalDays: scheduled.intervalDays,
           },
-        });
+          now
+        );
 
         if (scheduled.webhookUrl) {
           fetch(scheduled.webhookUrl, {
@@ -240,10 +295,10 @@ async function runScheduledHandler(request: Request) {
               tokenAddress: execution.tokenAddress,
               txHash,
               explorerUrl: `${explorerTxUrl(txHash)}`,
-              runCount: newRunCount,
-              nextRunAt: isComplete
-                ? null
-                : new Date(now.getTime() + scheduled.intervalDays * 24 * 60 * 60 * 1000),
+              runCount: adv.newRunCount,
+              nextRunAt: adv.isComplete ? null : adv.nextRunAt,
+              resumed: execution.resumed,
+              replayed: execution.replayed,
             }),
           }).catch(() => {});
         }
@@ -255,12 +310,28 @@ async function runScheduledHandler(request: Request) {
           explorerUrl: `${explorerTxUrl(txHash)}`,
           currency: execution.currency,
           tokenAddress: execution.tokenAddress,
+          resumed: execution.resumed,
+          replayed: execution.replayed,
         });
         executedCount++;
         console.log(`✅ Executed scheduled payment ${scheduled.reference} (${execution.currency}): ${txHash}`);
       } catch (err: any) {
+        // Another flight owns this period's claim row (fresh PROCESSING, no
+        // tracked transfer yet): leave its claim alone — releasing it here
+        // could hand a live execution to a third runner.
+        if (err instanceof TransferInProgressError || err?.name === 'TransferInProgressError') {
+          console.log(`⏭️ Skipped scheduled payment ${scheduled.reference}: period claim held by another flight`);
+          results.push({
+            reference: scheduled.reference,
+            success: false,
+            error: 'skipped — period already being processed (idempotent claim held)',
+          });
+          continue;
+        }
         // Release the claim back to ACTIVE so the failure is retried on the
-        // next tick (prior behavior for failures), never double-success.
+        // next tick. Safe under P1-2: a persisted Circle transaction ID is
+        // resumed, never duplicated; a FAILED preflight/creation left no
+        // transfer behind, so the retry creates exactly one.
         await (prisma as any).scheduledPayment
           .updateMany({
             where: { id: scheduled.id, status: 'PROCESSING' },
