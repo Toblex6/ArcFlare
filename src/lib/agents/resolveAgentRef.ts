@@ -188,3 +188,21 @@ export async function resolveAgentRouteRef(
   }
   return { agent: null, ambiguous: false, malformed };
 }
+
+/**
+ * M5 — id-only route resolver for caller-control endpoints
+ * (agents/[id]/pay|policy|wallet|treasury|treasury/credit). These routes
+ * authorize via verifyCallerControlsAddress on the RESOLVED agent's SCA, so
+ * accepting tokenId/SCA aliases would widen the auth handle beyond the
+ * documented id-only policy. Only strict registry ids resolve here; every
+ * other well-formed reference is a clean 404, garbage is malformed 400.
+ */
+export async function resolveAgentRouteRefIdOnly(
+  ref: string | number | null | undefined
+): Promise<AgentRouteRef> {
+  const { agent } = await resolveAgentRef(ref, "id");
+  if (agent) return { agent, ambiguous: false, malformed: false };
+  const raw = String(ref ?? "").trim();
+  const malformed = !/^\d+$/.test(raw);
+  return { agent: null, ambiguous: false, malformed };
+}

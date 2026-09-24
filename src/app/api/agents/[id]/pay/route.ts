@@ -13,7 +13,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
-import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
+// M5: id-only on this caller-control endpoint (documented id-only policy).
+import { resolveAgentRouteRefIdOnly as resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { executeAgentToAgentPayment } from "@/lib/agents/agentPay";
 import { checkRateLimit } from "@/lib/ratelimit";
 

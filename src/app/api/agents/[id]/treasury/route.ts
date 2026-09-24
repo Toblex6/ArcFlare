@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
-import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
+// M5: id-only on this caller-control endpoint (documented id-only policy).
+import { resolveAgentRouteRefIdOnly as resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getAgentWalletAddress, getOrCreateAgentWallet } from "@/lib/x402-wallet";

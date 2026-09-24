@@ -11,7 +11,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
-import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
+// M5: id-only on this caller-control endpoint (documented id-only policy).
+import { resolveAgentRouteRefIdOnly as resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { getAgentPolicy, setAgentPolicy } from "@/lib/agents/agentPay";
 
 async function policyHandler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
