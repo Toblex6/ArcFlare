@@ -71,12 +71,15 @@ import {
 import { TowerProvider, requestTowerQuote } from '@/src/lib/routing/providers/tower';
 import {
   UNITFLOW_6_TO_18_SCALE,
+  UNITFLOW_V3_DIRECT_ROUTER_ABI,
   UNITFLOW_V3_ROUTER_ABI,
   assertWrapBeforeSwap,
   buildUnitFlowV3Execution,
   buildWusdcWithdrawTx,
   computeUnitFlowExecutionIdentity,
+  decodeV3DirectExactInputSingle,
   decodeWusdcWithdraw,
+  getUnitFlowExecutor,
   verifyUnitFlowExecution,
   UnitFlowV3Provider,
   type UnitFlowExecutionEvidence,
@@ -255,10 +258,15 @@ export function swapIdempotencyKey(prefix: 'flowswap' | 'quote', id: string, quo
   return `${prefix}-${id}-${quoteHash.slice(2, 18)}`;
 }
 
-/** Swap-leg units → canonical base units (exact; USDC leg rescales /1e12, EURC/cirBTC legs are identity). */
-export function canonicalFromSwapUnits(symbol: SwapSymbol, amountSwap: bigint): bigint {
+/** Swap-leg units → canonical base units (exact; TESTNET USDC leg rescales /1e12, mainnet USDC leg + EURC/cirBTC legs are identity). */
+export function canonicalFromSwapUnits(
+  symbol: SwapSymbol,
+  amountSwap: bigint,
+  deployment?: UnitFlowV3Deployment
+): bigint {
   if (amountSwap <= 0n) throw routingError(400, 'Swap amount must be positive.');
   if (symbol !== 'USDC') return amountSwap;
+  if (deployment && getUnitFlowExecutor(deployment) === 'v3-direct') return amountSwap;
   if (amountSwap % UNITFLOW_6_TO_18_SCALE !== 0n) {
     throw routingError(503, '[unitflow-v3] USDC-leg amount is not 1e12-aligned — refusing to rescale.');
   }
@@ -267,6 +275,12 @@ export function canonicalFromSwapUnits(symbol: SwapSymbol, amountSwap: bigint): 
 
 // ─── Pure: execute() calldata decoding ───────────────────────────────────────
 // Decodes MINED tx calldata with the single-authority router ABI (no RPC).
+// Executor-aware: universal-router deployments decode execute(bytes,bytes[],
+// uint256); v3-direct deployments (mainnet) decode exactInputSingle(((…))).
+// The return shape is shared: v3-direct params are re-expressed as the
+// equivalent universal-router evidence (commands '0x' sentinel + inputs
+// [exactInputSingle calldata] + deadline from the params tuple) so the
+// downstream verifier branches on ONE executor value with no second decoder.
 
 export interface DecodedUnitFlowExecute {
   commands: `0x${string}`;
@@ -274,9 +288,28 @@ export interface DecodedUnitFlowExecute {
   deadline: bigint;
 }
 
-export function decodeUnitFlowExecute(data: unknown): DecodedUnitFlowExecute {
+export function decodeUnitFlowExecute(
+  data: unknown,
+  deployment?: UnitFlowV3Deployment
+): DecodedUnitFlowExecute {
   if (typeof data !== 'string' || !/^0x[0-9a-fA-F]+$/.test(data)) {
     throw routingError(400, '[unitflow-v3] malformed execute() calldata: not hex.');
+  }
+  // V3-direct shape first when the deployment selects it (mainnet): the
+  // execute() selector never decodes as exactInputSingle and vice versa, so
+  // order is unambiguous — a foreign calldata fails closed in both decoders.
+  if (deployment && getUnitFlowExecutor(deployment) === 'v3-direct') {
+    try {
+      const params = decodeV3DirectExactInputSingle(data);
+      return {
+        commands: '0x' as unknown as `0x${string}`,
+        inputs: [data as `0x${string}`],
+        deadline: params.deadline,
+      };
+    } catch (e: any) {
+      if (typeof e?.status === 'number') throw e;
+      throw routingError(400, '[unitflow-v3] malformed exactInputSingle() calldata: undecodable.');
+    }
   }
   try {
     const decoded = decodeFunctionData({ abi: UNITFLOW_V3_ROUTER_ABI, data: data as `0x${string}` });
@@ -772,9 +805,10 @@ export interface RegisterExecutionRequest extends IntentLocator {
 
 /**
  * Persist broadcast hashes for a live intent (status stays QUOTED until
- * on-chain verification). Wrap is required up-front for USDC-leg inputs —
- * the swap cannot succeed without WUSDC, so fail fast instead of tracking
- * an unexecutable intent.
+ * on-chain verification). Universal-router (testnet): wrap is required
+ * up-front for USDC-leg inputs — the swap cannot succeed without WUSDC, so
+ * fail fast instead of tracking an unexecutable intent. V3-direct
+ * (mainnet): no wrap exists — a supplied wrap hash is rejected outright.
  */
 export async function registerFlowSwapExecution(req: RegisterExecutionRequest): Promise<any> {
   const ownerWallet = assertAddress('ownerWallet', req.ownerWallet);
@@ -787,8 +821,13 @@ export async function registerFlowSwapExecution(req: RegisterExecutionRequest): 
     throw routingError(409, 'This transaction was already consumed by another swap or payment.');
   }
 
+  const deployment = getUnitFlowV3Deployment();
+  const executor = getUnitFlowExecutor(deployment);
   let wrapTxHash: string | null = row.wrapTxHash ?? null;
   if (req.wrapTxHash !== undefined && req.wrapTxHash !== null && String(req.wrapTxHash).trim() !== '') {
+    if (executor === 'v3-direct') {
+      throw routingError(400, 'V3-direct swaps carry no wrap step — refusing a foreign wrap hash.');
+    }
     wrapTxHash = assertTxHash('wrapTxHash', req.wrapTxHash);
     const dupWrapFlow = await (prisma as any).flowSwapIntent
       .findUnique({ where: { wrapTxHash } })
@@ -800,7 +839,13 @@ export async function registerFlowSwapExecution(req: RegisterExecutionRequest): 
       throw routingError(409, 'This wrap transaction is already tracked by another swap or payment.');
     }
   }
-  if (row.inputSymbol === 'USDC' && !wrapTxHash) {
+  if (executor === 'v3-direct') {
+    // Stored rows predate the executor split and can never carry a wrap on
+    // mainnet — a non-null stored hash is drift, not evidence.
+    if (wrapTxHash) {
+      throw routingError(400, 'V3-direct swaps carry no wrap step — refusing a foreign wrap hash.');
+    }
+  } else if (row.inputSymbol === 'USDC' && !wrapTxHash) {
     throw routingError(400, 'USDC-leg swaps require the WUSDC.deposit wrap transaction hash — broadcast the wrap first.');
   }
 
@@ -876,7 +921,7 @@ export async function collectUnitFlowEvidence(args: {
     throw routingError(400, 'Swap transaction reverted on-chain.');
   }
 
-  const decoded = decodeUnitFlowExecute(tx.input);
+  const decoded = decodeUnitFlowExecute(tx.input, args.deployment);
   const block = await readWithRetry('swap block', () =>
     client.getBlock({ blockHash: receipt.blockHash })
   );
@@ -909,6 +954,11 @@ export async function collectUnitFlowEvidence(args: {
     })
   )) as bigint;
 
+  // Executor-shaped evidence: universal-router decodes execute() into
+  // commands/inputs; v3-direct carries the exactInputSingle calldata in
+  // v3Direct with the commands sentinel + empty inputs (the verifier's
+  // completeness gate enforces exactly one shape per executor).
+  const executor = getUnitFlowExecutor(args.deployment);
   const evidence: UnitFlowExecutionEvidence = {
     deployment: args.deployment,
     txHash,
@@ -916,6 +966,7 @@ export async function collectUnitFlowEvidence(args: {
     value: (tx as any).value ?? 0n,
     commands: decoded.commands,
     inputs: decoded.inputs as unknown as string[],
+    ...(executor === 'v3-direct' ? { v3Direct: tx.input as string } : {}),
     deadline: decoded.deadline,
     payer: tx.from,
     expectedPayer: args.expectedPayer,
@@ -1078,11 +1129,20 @@ export async function verifyFlowSwap(req: VerifyFlowRequest): Promise<{
     deadline: BigInt(evidence.deadline as any),
   });
 
-  // USDC-leg wrap linkage (separate tx, explicitly linked — never assumed).
-  // Validated correlation only (see header + checkWrapTxOnChain): matching
-  // receipt + wrap-before-swap ordering, never cryptographic funding proof.
+  // Executor-aware wrap linkage. Universal-router (testnet): the USDC-leg
+  // wrap is a separate tx, explicitly linked — never assumed. Validated
+  // correlation only (see header + checkWrapTxOnChain): matching receipt +
+  // wrap-before-swap ordering, never cryptographic funding proof.
+  // V3-direct (mainnet): NO wrap exists (native USDC leg) — a supplied wrap
+  // hash is rejected outright so a stale testnet-shaped caller can never
+  // satisfy a mainnet intent with a foreign wrap.
+  const executor = getUnitFlowExecutor(deployment);
   let wrapTxHash: string | null = ((req.wrapTxHash ?? row.wrapTxHash ?? '') as string).trim() || null;
-  if (row.inputSymbol === 'USDC') {
+  if (executor === 'v3-direct') {
+    if (wrapTxHash) {
+      throw routingError(400, 'V3-direct swaps carry no wrap step — refusing a foreign wrap hash.');
+    }
+  } else if (row.inputSymbol === 'USDC') {
     if (!wrapTxHash) {
       throw routingError(400, 'USDC-leg swaps require the WUSDC.deposit wrap transaction hash.');
     }
@@ -1096,23 +1156,24 @@ export async function verifyFlowSwap(req: VerifyFlowRequest): Promise<{
     });
   }
 
-  const actualInput = canonicalFromSwapUnits(row.inputSymbol as SwapSymbol, verified.inputAmount).toString();
-  // USDC-output swaps settle in dust-inclusive WUSDC swap units: the Quoter's
-  // 18-dec output is essentially never 1e12-aligned, so an exact rescale is
-  // impossible (canonicalFromSwapUnits throws by design — alignment IS
-  // required on the input/wrap direction). Floor to canonical micro-USDC
-  // instead: dust < 1e-6 USDC stays in the wallet as WUSDC (still owned by
-  // the user, never claimed), and the unwrap exit burns exactly this floored
-  // amount, keeping every downstream exact equation intact.
+  const actualInput = canonicalFromSwapUnits(row.inputSymbol as SwapSymbol, verified.inputAmount, deployment).toString();
+  // TESTNET USDC-output swaps settle in dust-inclusive WUSDC swap units: the
+  // Quoter's 18-dec output is essentially never 1e12-aligned, so an exact
+  // rescale is impossible (canonicalFromSwapUnits throws by design —
+  // alignment IS required on the input/wrap direction). Floor to canonical
+  // micro-USDC instead: dust < 1e-6 USDC stays in the wallet as WUSDC (still
+  // owned by the user, never claimed), and the unwrap exit burns exactly
+  // this floored amount, keeping every downstream exact equation intact.
+  // V3-direct (mainnet) USDC legs are 6-dec identity — no dust can exist.
   let actualOutput: string;
-  if ((row.outputSymbol as SwapSymbol) === 'USDC') {
+  if ((row.outputSymbol as SwapSymbol) === 'USDC' && executor !== 'v3-direct') {
     const floored = verified.actualOutput - (verified.actualOutput % UNITFLOW_6_TO_18_SCALE);
     if (floored <= 0n) {
       throw routingError(503, '[unitflow-v3] USDC-leg output below one micro-USDC — refusing.');
     }
     actualOutput = (floored / UNITFLOW_6_TO_18_SCALE).toString();
   } else {
-    actualOutput = canonicalFromSwapUnits(row.outputSymbol as SwapSymbol, verified.actualOutput).toString();
+    actualOutput = canonicalFromSwapUnits(row.outputSymbol as SwapSymbol, verified.actualOutput, deployment).toString();
   }
 
   // Atomic claim: per-hash advisory lock + in-transaction cross-table recheck
@@ -1154,12 +1215,17 @@ export async function verifyFlowSwap(req: VerifyFlowRequest): Promise<{
   }
 }
 
-// ─── Application: Flow Swap unwrap (WUSDC -> native USDC exit) ───────────────
-// The UnitFlow V3 pools settle the USDC leg in WUSDC, so a verified Flow Swap
-// into USDC credits WUSDC first. The user-facing settlement is completed by
-// ONE further unsigned wallet transaction — WUSDC.withdraw(wad) — that burns
-// the caller's WUSDC 1:1 into native USDC (the same asset the 0x3600… 6-dec
-// ERC-20 balance view reports, so post-unwrap balance refreshes just work).
+// ─── Application: Flow Swap unwrap (TESTNET WUSDC -> native USDC exit) ───────
+// The TESTNET UnitFlow V3 pools settle the USDC leg in WUSDC, so a verified
+// testnet Flow Swap into USDC credits WUSDC first. The user-facing settlement
+// is completed by ONE further unsigned wallet transaction — WUSDC.withdraw
+// (wad) — that burns the caller's WUSDC 1:1 into native USDC (the same asset
+// the 0x3600… 6-dec ERC-20 balance view reports, so post-unwrap balance
+// refreshes just work).
+//
+// On v3-direct (mainnet) the USDC leg IS native USDC — this whole section
+// refuses fail-closed (flowNeedsUnwrap() is false, unwrapAmountSwapForIntent()
+// throws, request/verify unwrap throw before any RPC).
 //
 // Rules (fail-closed, server-resolved, stateless):
 // - The unwrap amount is NEVER client-supplied: it is exactly the verified
@@ -1178,9 +1244,20 @@ export async function verifyFlowSwap(req: VerifyFlowRequest): Promise<{
 // - Only USDC-output intents need this step. USDC inputs (wrap) and EURC
 //   outputs are untouched.
 
-/** True when a Flow intent settles into USDC and needs the unwrap exit step. */
-export function flowNeedsUnwrap(row: { outputSymbol: string }): boolean {
-  return String(row.outputSymbol ?? '').toUpperCase() === 'USDC';
+/**
+ * True when a Flow intent settles into USDC and needs the unwrap exit step.
+ * Executor-aware: the unwrap exit exists ONLY on universal-router deployments
+ * (testnet WUSDC leg). On v3-direct (mainnet native USDC) the swap settles
+ * the canonical token itself — always false, never a wrap/unwrap path.
+ */
+export function flowNeedsUnwrap(row: { outputSymbol: string; deploymentName?: string }): boolean {
+  if (String(row.outputSymbol ?? '').toUpperCase() !== 'USDC') return false;
+  // Deployment binding is authoritative when present. Deployment names flow
+  // from getUnitFlowV3Deployment() only (never client input); unknown names
+  // fail OPEN is forbidden — default to the conservative testnet shape (wrap
+  // required) unless the row is explicitly bound to mainnet.
+  if (!row.deploymentName) return true;
+  return String(row.deploymentName).toLowerCase() !== 'mainnet';
 }
 
 /**
@@ -1190,6 +1267,12 @@ export function flowNeedsUnwrap(row: { outputSymbol: string }): boolean {
  */
 export function unwrapAmountSwapForIntent(row: any): bigint {
   if (!flowNeedsUnwrap(row ?? {})) {
+    throw routingError(400, 'This swap settles directly — no unwrap step is needed.');
+  }
+  const deployment = getUnitFlowV3Deployment();
+  if (getUnitFlowExecutor(deployment) === 'v3-direct') {
+    // Defense in depth: even if a caller passes a legacy-shaped row, the
+    // CURRENT network executor settles native USDC — no unwrap exists.
     throw routingError(400, 'This swap settles directly — no unwrap step is needed.');
   }
   if (row.status !== 'EXECUTED') {
@@ -1229,6 +1312,12 @@ export async function requestFlowUnwrap(req: RequestFlowUnwrapRequest): Promise<
   if (deployment.name !== row.deploymentName || deployment.wusdc.toLowerCase() !== String(row.tokenOutSwap ?? '').toLowerCase()) {
     throw routingError(503, '[unitflow-v3] deployment drift — stored binding does not match the atomic family. Refusing.');
   }
+  // V3-direct (mainnet native USDC) has no unwrap exit — refuse before
+  // building any tx so a stale testnet-shaped caller can never unwrap
+  // mainnet proceeds.
+  if (getUnitFlowExecutor(deployment) === 'v3-direct') {
+    throw routingError(400, 'This swap settles directly — no unwrap step is needed.');
+  }
   const amountSwap = unwrapAmountSwapForIntent(row);
   const tx = buildWusdcWithdrawTx(deployment.wusdc, amountSwap);
   return {
@@ -1264,6 +1353,12 @@ export async function verifyFlowUnwrap(req: VerifyFlowUnwrapRequest): Promise<{
   const deployment = getUnitFlowV3Deployment();
   if (deployment.name !== row.deploymentName || deployment.wusdc.toLowerCase() !== String(row.tokenOutSwap ?? '').toLowerCase()) {
     throw routingError(503, '[unitflow-v3] deployment drift — stored binding does not match the atomic family. Refusing.');
+  }
+  // V3-direct (mainnet native USDC) has no unwrap exit — refuse before any
+  // RPC so a stale testnet-shaped caller can never verify an unwrap on
+  // mainnet proceeds.
+  if (getUnitFlowExecutor(deployment) === 'v3-direct') {
+    throw routingError(400, 'This swap settles directly — no unwrap step is needed.');
   }
   const expectedSwap = unwrapAmountSwapForIntent(row);
 
@@ -1696,28 +1791,38 @@ export async function verifyCheckoutUnitFlow(
     deadline: BigInt(bound.deadline as any),
   });
 
-  // USDC-leg wrap linkage (checkout UnitFlow v1 is always USDC in).
-  // Validated correlation only: matching receipt + wrap-before-swap ordering —
-  // never a claim that the wrap funded the swap (separate transactions).
+  // Executor-aware wrap linkage (checkout UnitFlow v1 is always USDC in).
+  // Universal-router (testnet): validated correlation only — matching
+  // receipt + wrap-before-swap ordering, never a claim that the wrap funded
+  // the swap (separate transactions). V3-direct (mainnet): NO wrap exists
+  // (native USDC leg) — a supplied wrap hash is rejected outright.
+  const checkoutExecutor = getUnitFlowExecutor(deployment);
   const wrapTxHash = ((req.wrapTxHash ?? conversion.wrapTxHash ?? '') as string).trim() || null;
-  if (!wrapTxHash) {
-    throw routingError(400, 'USDC-leg conversions require the WUSDC.deposit wrap transaction hash.');
+  if (checkoutExecutor === 'v3-direct') {
+    if (wrapTxHash) {
+      throw routingError(400, 'V3-direct conversions carry no wrap step — refusing a foreign wrap hash.');
+    }
+  } else {
+    if (!wrapTxHash) {
+      throw routingError(400, 'USDC-leg conversions require the WUSDC.deposit wrap transaction hash.');
+    }
+    await checkWrapTxOnChain({
+      wrapTxHash,
+      wusdc: deployment.wusdc,
+      payer,
+      amountInSwap: conversion.amountInSwap,
+      swapBlockNumber,
+      rpcUrl: req.rpcUrl,
+    });
   }
-  await checkWrapTxOnChain({
-    wrapTxHash,
-    wusdc: deployment.wusdc,
-    payer,
-    amountInSwap: conversion.amountInSwap,
-    swapBlockNumber,
-    rpcUrl: req.rpcUrl,
-  });
 
   // Exact-in binding: the pure verifier already proved decoded amountIn ==
   // the stored swap-leg input, which was derived from conversion.inputAmount.
   const actualInputCanonical = conversion.inputAmount as string;
   const actualOutputCanonical = canonicalFromSwapUnits(
     CHECKOUT_UNITFLOW_OUTPUT,
-    verified.actualOutput
+    verified.actualOutput,
+    deployment
   ).toString();
 
   // Atomic: conversion EXECUTED + payment SUCCESS (same shape as the
@@ -1740,9 +1845,9 @@ export async function verifyCheckoutUnitFlow(
   try {
     updated = await prisma.$transaction(async (db: any) => {
       await claimTxSlot(db, txHash);
-      await claimTxSlot(db, wrapTxHash);
+      if (wrapTxHash) await claimTxSlot(db, wrapTxHash);
       await recheckExecutionConsumerTx(db, txHash, { kind: 'checkout', paymentLogId: payment.id });
-      await recheckWrapConsumerTx(db, wrapTxHash, { kind: 'checkout', paymentLogId: payment.id });
+      if (wrapTxHash) await recheckWrapConsumerTx(db, wrapTxHash, { kind: 'checkout', paymentLogId: payment.id });
       const live = await db.paymentConversion.findUnique({ where: { id: conversion.id } });
       if (!live) throw routingError(404, 'Conversion not found.');
       if (live.status === 'EXECUTED') {

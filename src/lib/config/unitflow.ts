@@ -15,11 +15,16 @@
 //     identity/decimals read on-chain; Gate C mined tx 0xf23751f0… decoded.
 //   - "mainnet": the V3 core family (Factory/Quoter/Router/PositionManager/
 //     Multicall/TickLens/descriptors/Migrator) is pinned to the SUPPLIED Arc
-//     Mainnet deployment below (chain 5042); the three executor-side inputs
-//     (UniversalRouter/Permit2/WUSDC) stay required UNITFLOW_MAINNET_*
-//     environment values. Selecting mainnet with a missing/malformed executor
-//     value FAILS CLOSED — it never inherits testnet values and never falls
-//     back to any alternate deployment.
+//     Mainnet deployment below (chain 5042). Mainnet executes DIRECTLY
+//     against the pinned UnitFlowV3Router via standard Uniswap V3
+//     exactInputSingle calls (no UniversalRouter needed — see executor note
+//     below); the USDC leg uses Arc's canonical native USDC ERC-20 interface
+//     (no WUSDC wrapper exists on Arc — docs.arc.io/contract-addresses).
+//     Mainnet therefore initializes WITHOUT any UNITFLOW_MAINNET_* executor
+//     env values; Factory/Quoter accept an explicit override, Permit2/USDC-leg
+//     accept one. Selecting mainnet with a malformed override FAILS CLOSED —
+//     it never inherits testnet values and never falls back to any alternate
+//     deployment.
 // Selection reuses getArcNetworkName() — no second network switch is
 // introduced here. No secrets live in this module (public contract addresses
 // only); client-safe (no node-only imports).
@@ -36,20 +41,40 @@ export interface UnitFlowV3Deployment {
   factory: string;
   /** V3 Quoter (quoteExactInputSingle interface proven live). */
   quoter: string;
-  /** UniversalRouter entry point (execute() proven live in Gate C). */
+  /**
+   * Executor entry point for THIS network (single authority consumed via
+   * getUnitFlowExecutor() — never branched on by callers):
+   *   - testnet: the UniversalRouter (execute() proven live in Gate C);
+   *   - mainnet: the pinned UnitFlowV3Router (direct V3 exactInputSingle —
+   *     no UniversalRouter exists on mainnet, none is needed).
+   */
   universalRouter: string;
+  /**
+   * Direct V3 SwapRouter address when the executor IS the V3 router
+   * (mainnet: pinned 0x6fD8…; testnet: absent — the testnet executor is the
+   * UniversalRouter, whose V3-router internals were never pinned).
+   */
+  v3Router?: string;
   /** Shared Permit2 (approve/allowance selectors verified in bytecode). */
   permit2: string;
-  /** WUSDC (Wrapped USDC, WETH9-style deposit/withdraw). */
+  /**
+   * USDC-leg swap token for THIS network (single authority consumed via
+   * unitFlowSwapLeg()/resolveUnitFlowUsdcSwapToken() — never branched on by
+   * callers):
+   *   - testnet: WUSDC (Wrapped USDC, WETH9-style deposit/withdraw);
+   *   - mainnet: Arc's canonical native USDC ERC-20 interface (no WUSDC
+   *     wrapper exists on Arc — docs.arc.io/contract-addresses).
+   */
   wusdc: string;
   /**
    * Full V3 core family (mainnet only — supplied Arc Mainnet deployment;
    * absent on testnet where these periphery addresses were never pinned).
-   * Execution/verification consume factory/quoter/universalRouter/permit2/
-   * wusdc above; these are exposed atomically for future wiring (position
+   * Execution/verification consume factory/quoter plus the network executor
+   * (universalRouter field: testnet UniversalRouter, mainnet V3Router) and
+   * the network USDC-leg token (wusdc field: testnet WUSDC, mainnet canonical
+   * USDC); these are exposed atomically for future wiring (position
    * management, multicall reads) — never mixed across networks.
    */
-  v3Router?: string;
   positionManager?: string;
   multicall?: string;
   tickLens?: string;
@@ -95,13 +120,29 @@ const TESTNET_DEPLOYMENT = {
 // Bytecode presence is NOT an interface/liquidity audit: no quoter/pool
 // validation and no real mainnet swap run in this stage (NEXT stage review).
 //
-// The supplied UnitFlowV3Router (0x6fD8…) is the V3 SwapRouter — it is NOT
-// the Permit2-based UniversalRouter executor whose execute(bytes,bytes[],
-// uint256) entry point was proven on testnet (Gate C). It is therefore
-// exposed as v3Router (future wiring) and NEVER aliased to universalRouter.
-// Likewise no audited mainnet Permit2 / WUSDC values were supplied, so the
-// three executor-side inputs below stay required UNITFLOW_MAINNET_* env
-// values and mainnet execution stays fail-closed until they are set.
+// DETERMINATION (2026-09-24 — UniversalRouter vs UnitFlowV3Router):
+// No UniversalRouter is needed on mainnet, and none exists there. Evidence:
+//   (a) UnitFlow's own source (UnitFlow-Finance/UnitFlowV3-contract, main
+//       branch README: "Forked from Uniswap V3, using native Arc USDC") is a
+//       straight V3 core+periphery fork — contracts/core +
+//       contracts/periphery (PositionManager, UnitFlowV3Router, Quoter,
+//       TickLens, Multicall, Migrator, descriptors). No UniversalRouter
+//       contract exists anywhere in that repo.
+//   (b) UnitFlow docs (docs.unitflow.finance/docs/dev/contracts, Arc Mainnet
+//       chain 5042) list exactly ONE swap executor: "UnitFlowV3Router —
+//       Executes V3 swaps — 0x6fD8351b9596C1F0b2f2479BfA6A171cb3d0f410".
+//       No UniversalRouter appears on that page or on /docs/versions/v3.
+//   (c) UnitFlowV3Router IS UnitFlowV3Router (contract UnitFlowV3Router is
+//       ISwapRouter …, raw source verified): it exposes exactInputSingle(
+//       ExactInputSingleParams) + exactInput(ExactInputParams) directly —
+//       single-hop AND multi-hop exact-input swaps with NO Permit2, NO
+//       command bytes, NO wrapper step. payer is fixed to msg.sender and the
+//       pool pulls the input via transferFrom through the swap callback, so
+//       the ONLY pre-approval is token → V3Router directly.
+// Therefore the fail-closed UNITFLOW_MAINNET_UNIVERSAL_ROUTER requirement was
+// a wrong assumption (carried over from the testnet UniversalRouter proof),
+// and mainnet executes direct V3 exactInputSingle against the pinned
+// 0x6fD8… router. Testnet keeps its proven UniversalRouter path untouched.
 export const UNITFLOW_MAINNET_CHAIN_ID_PIN = 5042;
 
 export const MAINNET_V3_FAMILY = {
@@ -116,21 +157,45 @@ export const MAINNET_V3_FAMILY = {
   migrator: '0x36E9b24b9CF39c4C7069B75f01FA0419547F977a',
 } as const;
 
-// Executor-side inputs with NO verified mainnet value supplied — required
-// environment inputs on mainnet, fail-closed when absent. Nothing is
-// inherited from testnet and there is no fallback to any alternate set.
-export const UNITFLOW_MAINNET_REQUIRED_VARS = [
-  'UNITFLOW_MAINNET_UNIVERSAL_ROUTER',
-  'UNITFLOW_MAINNET_PERMIT2',
-  'UNITFLOW_MAINNET_WUSDC',
-] as const;
+// ─── Mainnet executor + token legs (no env required) ─────────────────────────
+// Permit2 is deployed at the SAME keyless address on every EVM chain that
+// carries it (Uniswap docs: 0x0000…22D4…78BA3 everywhere except zkSync),
+// and Arc's official contract-addresses page pins exactly that address on
+// BOTH Arc Mainnet and Arc Testnet ("Required for StableFX") — so mainnet
+// Permit2 is the canonical pin, not an env input. (Kept for interface
+// compatibility / future Permit2-based flows; the direct V3 path below does
+// NOT route approvals through it.)
+export const UNITFLOW_PERMIT2_PIN = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+
+// Arc has NO wrapped-USDC contract: the docs state verbatim "There is no
+// wrapped USDC address on Arc" and "The wrapping step does not exist;
+// protocols should use this address directly" — the native USDC ERC-20
+// interface (same 0x3600…0000 address on mainnet and testnet, 6 decimals)
+// serves the "wrapped native" role. The deployment's USDC-leg swap token is
+// therefore resolved from the authoritative network config (ARC_MAINNET_* on
+// mainnet, pinned 0x3600…0000 on testnet), with an explicit operator override
+// available. The legacy UNITFLOW_MAINNET_WUSDC variable is RETIRED — it is
+// ignored when set (never read) and absent from the required list — so no
+// code path can treat WUSDC as a separate required mainnet address.
+
+// Legacy fail-closed executor env list — RETIRED 2026-09-24 (see
+// DETERMINATION above). Kept as an EMPTY export so existing imports keep
+// compiling; mainnet initialization requires NONE of these.
+export const UNITFLOW_MAINNET_REQUIRED_VARS = [] as const;
 
 // Factory/Quoter accept an explicit operator override but default to the
-// pinned mainnet family above (never testnet). Overrides are validated as
-// 0x addresses and fail closed when malformed.
+// pinned mainnet family above (never testnet). Permit2 accepts an explicit
+// operator override but defaults to the canonical keyless pin (same address
+// on Arc mainnet + testnet). The USDC-leg swap token accepts an explicit
+// operator override but defaults to the authoritative network config's USDC
+// address (ARC_MAINNET_USDC_ADDRESS on mainnet, pinned 0x3600…0000 on
+// testnet — never a WUSDC wrapper, which does not exist on Arc). Overrides
+// are validated as 0x addresses and fail closed when malformed.
 export const UNITFLOW_MAINNET_OPTIONAL_VARS = [
   'UNITFLOW_MAINNET_FACTORY',
   'UNITFLOW_MAINNET_QUOTER',
+  'UNITFLOW_MAINNET_PERMIT2',
+  'UNITFLOW_MAINNET_USDC',
 ] as const;
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
@@ -154,22 +219,22 @@ function readAddressOrPin(
 }
 
 function buildMainnetDeployment(env: Record<string, string | undefined>): UnitFlowV3Deployment {
-  const missing = UNITFLOW_MAINNET_REQUIRED_VARS.filter((k) => !readEnv(env, k));
-  if (missing.length > 0) {
-    throw new Error(
-      'ARC_NETWORK=mainnet is selected but required UnitFlow deployment configuration is missing: ' +
-        missing.join(', ') +
-        '. Set each UNITFLOW_MAINNET_* variable explicitly — testnet values are never inherited. ' +
-        '(No verified mainnet UniversalRouter/Permit2/WUSDC values have been supplied; mainnet execution stays fail-closed until they are.)'
-    );
-  }
-  const get = (k: (typeof UNITFLOW_MAINNET_REQUIRED_VARS)[number]): string => {
-    const v = readEnv(env, k)!;
-    if (!ADDRESS_RE.test(v)) {
-      throw new Error(`${k} must be a 0x EVM address (got "${v}").`);
-    }
-    return v;
-  };
+  // Mainnet executor: direct V3 exactInputSingle against the pinned
+  // UnitFlowV3Router — no UniversalRouter exists on mainnet and none is
+  // needed (see DETERMINATION). The USDC-leg swap token is Arc's canonical
+  // native USDC ERC-20 interface (no WUSDC wrapper on Arc). Permit2 defaults
+  // to the canonical keyless pin (same address on Arc mainnet + testnet).
+  // Malformed overrides fail closed; testnet values are never inherited and
+  // there is no fallback to any alternate deployment.
+  //
+  // IMPORTANT: USDC-leg resolution must NOT import network.ts or
+  // supportedTokens.ts here — unitflow.ts is imported BY network-adjacent
+  // modules and a static import would risk an evaluation cycle. Only the
+  // ARC_MAINNET_USDC_ADDRESS env input is read directly (it is the same
+  // source buildMainnetConfig() in network.ts requires); when absent, the
+  // canonical 0x3600…0000 pin is used (identical on Arc mainnet + testnet
+  // per docs.arc.io/contract-addresses — a documented pin, not testnet
+  // inheritance).
   const chainIdRaw = readEnv(env, 'UNITFLOW_MAINNET_CHAIN_ID') ?? '';
   // Default is the pinned Arc Mainnet chain id (docs.arc.io, confirmed in
   // .env.example 2026-09-22) — derivation from a pin, not testnet
@@ -179,14 +244,30 @@ function buildMainnetDeployment(env: Record<string, string | undefined>): UnitFl
   if (!Number.isInteger(chainId) || chainId <= 0) {
     throw new Error(`UNITFLOW_MAINNET_CHAIN_ID must be a positive integer (got "${chainIdRaw || '(default pin)'}").`);
   }
+  const usdcRaw = readEnv(env, 'UNITFLOW_MAINNET_USDC') ?? readEnv(env, 'ARC_MAINNET_USDC_ADDRESS');
+  const usdcSwap = usdcRaw ?? '0x3600000000000000000000000000000000000000';
+  if (!ADDRESS_RE.test(usdcSwap)) {
+    throw new Error(`UNITFLOW_MAINNET_USDC/ARC_MAINNET_USDC_ADDRESS must be a 0x EVM address (got "${usdcRaw}").`);
+  }
   return {
     name: 'mainnet',
     chainId,
     factory: readAddressOrPin(env, 'UNITFLOW_MAINNET_FACTORY', MAINNET_V3_FAMILY.factory),
     quoter: readAddressOrPin(env, 'UNITFLOW_MAINNET_QUOTER', MAINNET_V3_FAMILY.quoter),
-    universalRouter: get('UNITFLOW_MAINNET_UNIVERSAL_ROUTER'),
-    permit2: get('UNITFLOW_MAINNET_PERMIT2'),
-    wusdc: get('UNITFLOW_MAINNET_WUSDC'),
+    // Executor IS the pinned V3 SwapRouter (direct exactInputSingle — no
+    // UniversalRouter on mainnet). universalRouter keeps its field name so
+    // every downstream consumer (execution identity, drift checks, stored
+    // deploymentRouter bindings) works UNCHANGED — it now carries the V3
+    // router on mainnet, the UniversalRouter on testnet. v3Router pins the
+    // same address explicitly for direct-V3 call encoding.
+    universalRouter: MAINNET_V3_FAMILY.v3Router,
+    permit2: readAddressOrPin(env, 'UNITFLOW_MAINNET_PERMIT2', UNITFLOW_PERMIT2_PIN),
+    // USDC leg: canonical native USDC ERC-20 interface (no WUSDC on Arc).
+    // wusdc keeps its field name so every downstream consumer (swap legs,
+    // wrap/unwrap gating, stored tokenInSwap/tokenOutSwap bindings) works
+    // UNCHANGED — it now carries canonical USDC (6-dec, identity units) on
+    // mainnet, WUSDC (18-dec) on testnet.
+    wusdc: usdcSwap,
     v3Router: MAINNET_V3_FAMILY.v3Router,
     positionManager: MAINNET_V3_FAMILY.positionManager,
     multicall: MAINNET_V3_FAMILY.multicall,
@@ -199,11 +280,14 @@ function buildMainnetDeployment(env: Record<string, string | undefined>): UnitFl
 
 /**
  * Atomic UnitFlow V3 deployment for the selected Arc network. Testnet returns
- * the pinned verified family; mainnet returns the pinned mainnet V3 core
- * family (Factory/Quoter/Router/PositionManager/Multicall/TickLens/
- * descriptors/Migrator + chain 5042) with the three executor-side inputs
- * (UniversalRouter/Permit2/WUSDC) resolved from required env vars — mainnet
- * fails closed while any of those are absent. Never mixes families.
+ * the pinned verified family (UniversalRouter executor, WUSDC USDC-leg);
+ * mainnet returns the pinned mainnet V3 core family (Factory/Quoter/Router/
+ * PositionManager/Multicall/TickLens/descriptors/Migrator + chain 5042) with
+ * the executor set to the pinned UnitFlowV3Router (direct V3 exactInputSingle
+ * — no UniversalRouter needed) and the USDC leg set to Arc's canonical
+ * native USDC ERC-20 interface (no WUSDC wrapper on Arc). Mainnet
+ * initializes with NO required env values; malformed overrides fail closed.
+ * Never mixes families.
  */
 export function getUnitFlowV3Deployment(
   env: Record<string, string | undefined> = process.env

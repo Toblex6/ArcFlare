@@ -290,6 +290,12 @@ export async function executeFlowSwapAsServer(req: ServerSwapRequest): Promise<S
 
   let wrapTxHash: string | null = null;
   if (envelope.wrapTx) {
+    if (envelope.executor === 'v3-direct') {
+      // Structural impossibility: v3-direct envelopes never carry a wrap
+      // step (native USDC leg). Refuse rather than broadcast a wrap-shaped
+      // step against mainnet bindings.
+      throw routingError(500, "[swap-execute] V3-direct envelope carries a wrap step — refusing.");
+    }
     // USDC-leg wrap: WUSDC.deposit{value} — the native value travels in the
     // Circle `amount` field (decimal native units), never in calldata.
     const nativeDecimal = formatUnits(envelope.wrapTx.value, 18);
@@ -300,7 +306,7 @@ export async function executeFlowSwapAsServer(req: ServerSwapRequest): Promise<S
       nativeAmount: nativeDecimal,
       label: "WUSDC wrap",
     });
-  } else if (row.inputSymbol === "USDC") {
+  } else if (row.inputSymbol === "USDC" && envelope.executor !== 'v3-direct') {
     throw routingError(500, "[swap-execute] USDC-leg intent rebuilt without its wrap step — refusing.");
   }
 
@@ -332,14 +338,15 @@ export async function executeFlowSwapAsServer(req: ServerSwapRequest): Promise<S
     ...(envelope.wrapTx ? { expectedWrapData: envelope.wrapTx.data } : {}),
   });
 
-  // USDC-output swaps credit WUSDC first — complete the exit the same way
-  // the browser flow does: server-built exact withdraw, server-broadcast
+  // TESTNET USDC-output swaps credit WUSDC first — complete the exit the same
+  // way the browser flow does: server-built exact withdraw, server-broadcast
   // from the same SCA, then relayed unwrap verification (server broadcasts
   // are relayed by construction, so the direct unwrap proof cannot cover
-  // them).
+  // them). On v3-direct (mainnet native USDC) no unwrap exists — the exit
+  // is complete at swap verification.
   let unwrapTxHash: string | null = null;
   let finalOutput = verified.actualOutput;
-  if (String(row.outputSymbol).toUpperCase() === "USDC") {
+  if (String(row.outputSymbol).toUpperCase() === "USDC" && envelope.executor !== 'v3-direct') {
     const unwrap = await requestFlowUnwrap({ ownerWallet, intentId: row.id });
     if (unwrap.unwrapTx.value !== "0") {
       throw routingError(500, "[swap-execute] unwrap step carries unexpected native value — refusing.");

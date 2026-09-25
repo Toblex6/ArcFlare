@@ -2,43 +2,37 @@
 //
 // UnitFlow V3 provider — Phase 2 (unsigned execution + pure verification).
 //
-// Deployment family (factory/quoter/universalRouter/permit2/wusdc) lives ONLY
+// Deployment family (factory/quoter/executor/permit2/usdc-leg) lives ONLY
 // in src/lib/config/unitflow.ts and is consumed atomically here — no address
 // copies, no mixing with the dead alternate README deployment set.
 //
-// PRE-CODING INVESTIGATION (live Arc Testnet evidence, 2026-09-12):
-//   - ArcFlare USDC = ERC-20 interface 0x3600…0000 (6-dec view) over the
-//     18-dec native gas asset. Native value-sends are fee-free.
-//   - UnitFlow pools are WUSDC-denominated. WUSDC 0x911b…382Df is 18-dec,
-//     WETH9-style (deposit()/withdraw(uint256) selectors verified in
-//     bytecode). The direct 0x3600…/EURC pool (fee 100) exists but has ZERO
-//     liquidity and the Quoter reverts on it — it MUST NOT be used.
-//   - WUSDC/EURC pools exist at fees 100/500/3000/10000. Fee 100
-//     (0xe8f7…) holds deep liquidity (~1.7e17) and quoted best for a 0.01
-//     probe (8037 vs 8008/8012) — it is the default; any other tier is used
-//     only after live getPool + liquidity + quote validation, bound in the
-//     envelope.
-//   - Gate C mined tx 0xf23751f0… proves the deployed UniversalRouter
-//     execute(bytes,bytes[],uint256) with a SINGLE command 0x00
-//     (V3_SWAP_EXACT_IN) and 5-param input
-//     (recipient, amountIn, amountOutMinimum, path, payerIsUser=true),
-//     recipient = arbitrary merchant EOA (no merchant signature needed),
-//     value = 0, payer pulled via Permit2. Permit2 approve/allowance
-//     selectors verified in the deployed bytecode.
-//   - CONSEQUENCE for USDC input: no WRAP_ETH (0x0b) command is encoded inside
-//     execute(). Wrapping is an explicit SEPARATE unsigned WUSDC.deposit{value}
-//     step (native 18-dec value -> 1:1 WUSDC), returned alongside the swap.
-//     This avoids unproven router-internal recipient codes and keeps execute()
-//     to the single proven command. Rescale: canonical 6-dec USDC x 1e12 =
-//     18-dec wrap/swap units.
-//   - quote() stays NOT_IMPLEMENTED: standalone provider quoting is out of
-//     scope (no wiring into /api/payments/quote in this phase). buildExecution
-//     performs its own live Factory/Quoter validation and binds the result.
+// TWO EXECUTORS (network-selected, never mixed):
+//   - testnet: UniversalRouter execute(bytes,bytes[],uint256) with a SINGLE
+//     proven command 0x00 (V3_SWAP_EXACT_IN) + Permit2 pull. Pools are
+//     WUSDC-denominated (18-dec, WETH9-style). USDC input wraps via a
+//     SEPARATE unsigned WUSDC.deposit{value} step; execute() value is always
+//     0. Rescale: canonical 6-dec USDC x 1e12 = 18-dec wrap/swap units.
+//     Evidence: Gate C mined tx 0xf23751f0… (recipient = arbitrary merchant
+//     EOA, payer pulled via Permit2 — selectors verified in bytecode).
+//   - mainnet: UnitFlowV3Router exactInputSingle() DIRECTLY (standard Uniswap
+//     V3 SwapRouter — contract UnitFlowV3Router is ISwapRouter …, raw source
+//     verified; no UniversalRouter exists on mainnet, none is needed).
+//     Pools are NATIVE-USDC-denominated (canonical 0x3600…0000, 6-dec —
+//     docs.arc.io: "There is no wrapped USDC address on Arc … The wrapping
+//     step does not exist"). payer is fixed to msg.sender (pool pulls input
+//     via transferFrom through the swap callback), so the ONLY pre-approval
+//     is token → V3Router directly (no Permit2 in the path). No wrap step,
+//     no rescale, USDC legs are 6-dec identity throughout.
+// Branching rule: every network difference flows from the deployment object
+// (getUnitFlowExecutor() / resolveUnitFlowUsdcSwapToken() /
+// usdcSwapDecimalsFor() below). Callers NEVER branch on deployment.name and
+// NEVER hardcode a network token address.
 //
 // Tower execution remains quote-only; canonical routing is untouched.
 
 import {
   decodeAbiParameters,
+  decodeFunctionData,
   encodeAbiParameters,
   encodeFunctionData,
   encodePacked,
@@ -75,7 +69,7 @@ export const UNITFLOW_V3_ALLOWED_FEES = [100, 500, 3000, 10000] as const;
 export const UNITFLOW_V3_DEFAULT_FEE = 100;
 /** Proven deployed V3 exact-input command byte. */
 export const UNITFLOW_V3_SWAP_EXACT_IN = '0x00' as const;
-/** 6-dec canonical units -> 18-dec WUSDC/native units. */
+/** 6-dec canonical units -> 18-dec WUSDC/native units (TESTNET USDC leg only). */
 export const UNITFLOW_6_TO_18_SCALE = 1_000_000_000_000n;
 /** Zero address (no pool / no recipient). */
 export const UNITFLOW_ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
@@ -180,6 +174,39 @@ const UNIVERSAL_ROUTER_ABI = [
  */
 export const UNITFLOW_V3_ROUTER_ABI = UNIVERSAL_ROUTER_ABI;
 
+/**
+ * Direct-V3 SwapRouter ABI (mainnet executor): standard Uniswap V3
+ * exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,
+ * uint160)) — field order tokenIn/tokenOut/fee/recipient/deadline/amountIn/
+ * amountOutMinimum/sqrtPriceLimitX96 per UnitFlow's ISwapRouter.sol (which is
+ * Uniswap's ISwapRouter with UnitFlowV3* renames). Exported so the swap
+ * service can decode mined direct-V3 calldata with this single authority.
+ */
+export const UNITFLOW_V3_DIRECT_ROUTER_ABI = [
+  {
+    name: 'exactInputSingle',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      {
+        name: 'params',
+        type: 'tuple',
+        components: [
+          { name: 'tokenIn', type: 'address' },
+          { name: 'tokenOut', type: 'address' },
+          { name: 'fee', type: 'uint24' },
+          { name: 'recipient', type: 'address' },
+          { name: 'deadline', type: 'uint256' },
+          { name: 'amountIn', type: 'uint256' },
+          { name: 'amountOutMinimum', type: 'uint256' },
+          { name: 'sqrtPriceLimitX96', type: 'uint160' },
+        ],
+      },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+] as const;
+
 // ─── Helpers (pure) ──────────────────────────────────────────────────────────
 function isAddress(v: unknown): v is string {
   return typeof v === 'string' && /^0x[a-fA-F0-9]{40}$/.test(v);
@@ -193,12 +220,46 @@ function isZeroAddress(a: string): boolean {
   return a.toLowerCase() === UNITFLOW_ZERO_ADDRESS;
 }
 
-/** Swap-leg view: what UnitFlow actually settles (WUSDC 18-dec vs EURC 6-dec vs cirBTC 8-dec). */
+/**
+ * Which swap executor this deployment uses. Mainnet executes DIRECTLY
+ * against the pinned UnitFlowV3Router (deployment.v3Router set); testnet
+ * executes via the UniversalRouter (no v3Router pinned). Single authority —
+ * every executor-dependent branch below reads this, never deployment.name.
+ */
+export type UnitFlowExecutor = 'universal-router' | 'v3-direct';
+
+export function getUnitFlowExecutor(deployment: UnitFlowV3Deployment): UnitFlowExecutor {
+  return typeof (deployment as any)?.v3Router === 'string' &&
+    /^0x[a-fA-F0-9]{40}$/.test((deployment as any).v3Router)
+    ? 'v3-direct'
+    : 'universal-router';
+}
+
+/**
+ * USDC-leg swap decimals for THIS deployment: 18 on testnet (WUSDC), 6 on
+ * mainnet (canonical native USDC — no wrapper on Arc). Single authority —
+ * unit conversion below reads this, never deployment.name.
+ */
+export function usdcSwapDecimalsFor(deployment: UnitFlowV3Deployment): 18 | 6 {
+  return getUnitFlowExecutor(deployment) === 'v3-direct' ? 6 : 18;
+}
+
+/**
+ * Resolve the pool-side USDC token for a Quoter/Factory call. Mainnet pools
+ * are native-USDC-denominated (canonical 0x3600…0000 via deployment.wusdc);
+ * testnet pools are WUSDC-denominated. Never hardcodes an address — always
+ * the deployment's own USDC-leg field.
+ */
+export function resolveUnitFlowUsdcSwapToken(deployment: UnitFlowV3Deployment): string {
+  return deployment.wusdc;
+}
+
+/** Swap-leg view: what UnitFlow actually settles (USDC-leg 18/6-dec vs EURC 6-dec vs cirBTC 8-dec). */
 export interface UnitFlowSwapLeg {
   symbol: 'USDC' | 'EURC' | 'CIRBTC';
-  /** Address used inside the V3 path (WUSDC for the USDC leg, spot token otherwise). */
+  /** Address used inside the V3 path (USDC-leg token for the USDC leg, spot token otherwise). */
   swapAddress: string;
-  /** Decimals of the swap token (18 for WUSDC, 6 for EURC, 8 for cirBTC). */
+  /** Decimals of the swap token (18/6 for the USDC leg by network, 6 for EURC, 8 for cirBTC). */
   swapDecimals: number;
 }
 
@@ -207,7 +268,7 @@ export function unitFlowSwapLeg(
   deployment: UnitFlowV3Deployment
 ): UnitFlowSwapLeg {
   if (symbol === 'USDC') {
-    return { symbol, swapAddress: deployment.wusdc, swapDecimals: 18 };
+    return { symbol, swapAddress: resolveUnitFlowUsdcSwapToken(deployment), swapDecimals: usdcSwapDecimalsFor(deployment) };
   }
   if (symbol === 'CIRBTC') {
     // cirBTC pools settle the spot 8-dec token directly (no wrapped variant).
@@ -216,10 +277,21 @@ export function unitFlowSwapLeg(
   return { symbol, swapAddress: getTokenBySymbol('EURC').address, swapDecimals: 6 };
 }
 
-/** Canonical base units -> swap-leg units (USDC leg rescales 6 -> 18; EURC/cirBTC legs are identity). */
-export function toSwapUnits(symbol: 'USDC' | 'EURC' | 'CIRBTC', canonical: bigint): bigint {
+/**
+ * Canonical base units -> swap-leg units. The USDC leg rescales 6 -> 18 on
+ * TESTNET only (WUSDC); on mainnet the USDC leg is 6-dec identity (native
+ * USDC). EURC/cirBTC legs are always identity. Deployment-aware — never
+ * assumes one network.
+ */
+export function toSwapUnits(
+  symbol: 'USDC' | 'EURC' | 'CIRBTC',
+  canonical: bigint,
+  deployment?: UnitFlowV3Deployment
+): bigint {
   if (canonical <= 0n) throw routingError(400, '[unitflow-v3] input amount must be positive.');
-  return symbol === 'USDC' ? canonical * UNITFLOW_6_TO_18_SCALE : canonical;
+  if (symbol !== 'USDC') return canonical;
+  if (deployment && usdcSwapDecimalsFor(deployment) === 6) return canonical;
+  return canonical * UNITFLOW_6_TO_18_SCALE;
 }
 
 /**
@@ -236,6 +308,81 @@ export function unitFlowMinOut(
   const base = ROUTING_OUT_FEE_BUFFER[outputSymbol];
   const buffer = outputSwapDecimals === 18 ? base * UNITFLOW_6_TO_18_SCALE : base;
   return discountForSlippage(quotedSwap, slippageBps, buffer);
+}
+
+/**
+ * Encode the direct-V3 exactInputSingle params tuple for the mainnet
+ * executor. Field order is the ISwapRouter struct order (verified against
+ * UnitFlow's ISwapRouter.sol): tokenIn/tokenOut/fee/recipient/deadline/
+ * amountIn/amountOutMinimum/sqrtPriceLimitX96. sqrtPriceLimitX96 is always 0
+ * (no price limit — the Quoter-validated minOut is the floor).
+ */
+export function encodeV3DirectExactInputSingle(args: {
+  tokenIn: string;
+  tokenOut: string;
+  fee: number;
+  recipient: string;
+  deadline: bigint;
+  amountIn: bigint;
+  amountOutMinimum: bigint;
+}): `0x${string}` {
+  return encodeFunctionData({
+    abi: UNITFLOW_V3_DIRECT_ROUTER_ABI,
+    functionName: 'exactInputSingle',
+    args: [
+      {
+        tokenIn: args.tokenIn as `0x${string}`,
+        tokenOut: args.tokenOut as `0x${string}`,
+        fee: args.fee,
+        recipient: args.recipient as `0x${string}`,
+        deadline: args.deadline,
+        amountIn: args.amountIn,
+        amountOutMinimum: args.amountOutMinimum,
+        sqrtPriceLimitX96: 0n,
+      },
+    ],
+  });
+}
+
+/** Decoded direct-V3 exactInputSingle params (pure — no RPC). */
+export interface DecodedV3DirectExactInputSingle {
+  tokenIn: string;
+  tokenOut: string;
+  fee: number;
+  recipient: string;
+  deadline: bigint;
+  amountIn: bigint;
+  amountOutMinimum: bigint;
+  sqrtPriceLimitX96: bigint;
+}
+
+export function decodeV3DirectExactInputSingle(data: unknown): DecodedV3DirectExactInputSingle {
+  if (typeof data !== 'string' || !/^0x[0-9a-fA-F]+$/.test(data)) {
+    throw routingError(400, '[unitflow-v3] malformed exactInputSingle() calldata: not hex.');
+  }
+  try {
+    const decoded = decodeFunctionData({ abi: UNITFLOW_V3_DIRECT_ROUTER_ABI, data: data as `0x${string}` });
+    if (decoded.functionName !== 'exactInputSingle') throw new Error('not exactInputSingle()');
+    const [params] = decoded.args as unknown as [
+      {
+        tokenIn: string;
+        tokenOut: string;
+        fee: number;
+        recipient: string;
+        deadline: bigint;
+        amountIn: bigint;
+        amountOutMinimum: bigint;
+        sqrtPriceLimitX96: bigint;
+      }
+    ];
+    if (!isAddress(params.tokenIn) || !isAddress(params.tokenOut) || !isAddress(params.recipient)) {
+      throw routingError(400, '[unitflow-v3] malformed exactInputSingle() calldata: addresses.');
+    }
+    return { ...params };
+  } catch (e: any) {
+    if (typeof e?.status === 'number') throw e;
+    throw routingError(400, '[unitflow-v3] malformed exactInputSingle() calldata: undecodable.');
+  }
 }
 
 // ─── buildExecution() ────────────────────────────────────────────────────────
@@ -283,6 +430,13 @@ export interface UnitFlowV3ExecutionEnvelope extends UnsignedExecution {
   readonly venueId: 'unitflow-v3';
   readonly phase: 'phase-2-only';
   readonly deployment: UnitFlowV3Deployment;
+  /**
+   * Which executor this envelope targets: 'universal-router' (testnet —
+   * execute(bytes,bytes[],uint256) + Permit2 pull + WUSDC wrap) or
+   * 'v3-direct' (mainnet — exactInputSingle against the V3 router, token →
+   * router approval, no wrap). Bound at build time from the deployment.
+   */
+  readonly executor: UnitFlowExecutor;
   /** Validated V3 pool for (tokenIn, tokenOut, fee). */
   readonly pool: string;
   /** Live-validated fee tier bound to this execution. */
@@ -293,7 +447,7 @@ export interface UnitFlowV3ExecutionEnvelope extends UnsignedExecution {
   readonly tokenOutSwap: string;
   /** Echo of the requested exact input (canonical base units, token-native precision). */
   readonly inputAmountCanonical: bigint;
-  /** Exact swap input (swap-leg units; 18-dec on the USDC leg). */
+  /** Exact swap input (swap-leg units; 18-dec on the TESTNET USDC leg, 6-dec identity on mainnet). */
   readonly amountInSwap: bigint;
   readonly quotedOutputSwap: bigint;
   readonly minOutSwap: bigint;
@@ -302,17 +456,41 @@ export interface UnitFlowV3ExecutionEnvelope extends UnsignedExecution {
   readonly expectedPayer?: string;
   /** Echo of the build-time self-custody scope (Flow Swap only). */
   readonly selfPayer: boolean;
+  /**
+   * Universal-router command envelope (executor 'universal-router' ONLY):
+   * commands is always the single proven 0x00 byte; inputs carries the
+   * 5-param (recipient, amountIn, amountOutMinimum, path, payerIsUser) tuple.
+   * On 'v3-direct' commands is the '0x' sentinel with EMPTY inputs — the
+   * exactInputSingle calldata binds via v3Direct (below), never via
+   * commands/inputs — so the verifier's executor shape gate is unambiguous.
+   */
   readonly commands: `0x${string}`;
-  readonly inputs: [`0x${string}`];
+  readonly inputs: [`0x${string}`] | [];
+  /**
+   * Direct-V3 exactInputSingle calldata (executor 'v3-direct' ONLY): the
+   * exact bytes the wallet broadcasts to the V3 router. Absent on
+   * universal-router.
+   */
+  readonly v3Direct?: `0x${string}`;
   readonly deadline: bigint;
   readonly expiresAtSec: number;
-  /** Single-command execute() call (value always 0; wrap is separate). */
+  /**
+   * The swap call (value always 0): UniversalRouter execute() on testnet,
+   * V3Router exactInputSingle() on mainnet.
+   */
   readonly swapTx: UnitFlowUnsignedTx;
-  /** Present ONLY when inputSymbol is USDC: WUSDC.deposit{value}. */
+  /**
+   * Present ONLY on the testnet USDC leg: WUSDC.deposit{value}. NEVER present
+   * on v3-direct (mainnet has no wrapper — the USDC leg is native USDC).
+   */
   readonly wrapTx?: UnitFlowUnsignedTx;
-  /** Unsigned approvals for the customer wallet (ERC20->Permit2, Permit2->UR). */
+  /**
+   * Unsigned approvals for the customer wallet. Universal-router: two steps
+   * (ERC20->Permit2, Permit2->UR). V3-direct: ONE step (token->V3Router
+   * directly — the pool pulls via transferFrom through the swap callback).
+   */
   readonly approvals: UnitFlowUnsignedTx[];
-  /** Pre-broadcast binding identity (keccak over router/commands/inputs/deadline). */
+  /** Pre-broadcast binding identity (keccak over executor/router/calldata/deadline). */
   readonly executionIdentity: string;
 }
 
@@ -431,13 +609,21 @@ export async function buildUnitFlowV3Execution(
 
   const deployment = getUnitFlowV3Deployment(env);
   assertUnitFlowDeploymentComplete(deployment);
-  if (isZeroAddress(deployment.universalRouter) || eqAddr(deployment.universalRouter, merchantSCA)) {
+  const executor = getUnitFlowExecutor(deployment);
+  // Executor binding: universal-router deployments execute via
+  // deployment.universalRouter; v3-direct deployments execute via the pinned
+  // deployment.v3Router. Both are fail-closed on zero/self-recipient.
+  const executorAddress =
+    executor === 'v3-direct'
+      ? (deployment.v3Router ?? deployment.universalRouter)
+      : deployment.universalRouter;
+  if (!isAddress(executorAddress) || isZeroAddress(executorAddress) || eqAddr(executorAddress, merchantSCA)) {
     throw routingError(503, '[unitflow-v3] deployment router binding invalid.');
   }
 
   const inLeg = unitFlowSwapLeg(inputSymbol, deployment);
   const outLeg = unitFlowSwapLeg(outputSymbol, deployment);
-  const amountInSwap = toSwapUnits(inputSymbol, inputAmount);
+  const amountInSwap = toSwapUnits(inputSymbol, inputAmount, deployment);
   if (amountInSwap >= 2n ** 160n) throw routingError(400, '[unitflow-v3] input amount exceeds uint160.');
   if (BigInt(expiresAtSec) >= 2n ** 48n) throw routingError(400, '[unitflow-v3] expiry exceeds uint48.');
 
@@ -456,70 +642,123 @@ export async function buildUnitFlowV3Execution(
     slippageBps
   );
   const minOutSwap = unitFlowMinOut(quoted, slippageBps, outputSymbol, outLeg.swapDecimals);
-
-  const path = encodePacked(
-    ['address', 'uint24', 'address'],
-    [inLeg.swapAddress as `0x${string}`, fee, outLeg.swapAddress as `0x${string}`]
-  );
-  const v3input = encodeAbiParameters(
-    [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'bool' }],
-    [merchantSCA as `0x${string}`, amountInSwap, minOutSwap, path, true]
-  );
-  const commands = UNITFLOW_V3_SWAP_EXACT_IN as unknown as `0x${string}`;
   const deadline = BigInt(expiresAtSec);
-  const calldata = encodeFunctionData({
-    abi: UNIVERSAL_ROUTER_ABI,
-    functionName: 'execute',
-    args: [commands, [v3input], deadline],
-  });
 
-  const erc20ApproveData = encodeFunctionData({
-    abi: ERC20_ABI,
-    functionName: 'approve',
-    args: [deployment.permit2 as `0x${string}`, amountInSwap],
-  });
-  const permit2ApproveData = encodeFunctionData({
-    abi: PERMIT2_ABI,
-    functionName: 'approve',
-    args: [
-      inLeg.swapAddress as `0x${string}`,
-      deployment.universalRouter as `0x${string}`,
-      amountInSwap,
-      Number(deadline),
-    ],
-  });
-
-  const approvals: UnitFlowUnsignedTx[] = [
-    { to: inLeg.swapAddress, data: erc20ApproveData, value: 0n, label: `${inputSymbol}-token -> Permit2 approve` },
-    { to: deployment.permit2, data: permit2ApproveData, value: 0n, label: `Permit2 allowance -> UniversalRouter` },
-  ];
-
-  const swapTx: UnitFlowUnsignedTx = {
-    to: deployment.universalRouter,
-    data: calldata,
-    value: 0n,
-    label: 'UniversalRouter execute(V3_SWAP_EXACT_IN)',
-  };
-
-  // USDC-leg input conversion: explicit separate wrap (native value -> WUSDC
-  // 1:1). NOT a WRAP_ETH command inside execute() — see header.
+  // ── Executor-specific call encoding ──────────────────────────────────────
+  // Universal-router (testnet): execute(0x00, [v3input], deadline) + Permit2
+  // pull + separate WUSDC wrap on the USDC leg.
+  // V3-direct (mainnet): exactInputSingle(tokenIn/tokenOut/fee/recipient/
+  // deadline/amountIn/amountOutMinimum/0) with a single token->router
+  // approval and NO wrap step (native USDC leg, no wrapper on Arc).
+  let commands: `0x${string}`;
+  let v3input: `0x${string}`;
+  let calldata: `0x${string}`;
+  let approvals: UnitFlowUnsignedTx[];
+  let swapTx: UnitFlowUnsignedTx;
   let wrapTx: UnitFlowUnsignedTx | undefined;
-  if (inputSymbol === 'USDC') {
-    const depositData = encodeFunctionData({ abi: WUSDC_ABI, functionName: 'deposit' });
-    wrapTx = { to: deployment.wusdc, data: depositData, value: amountInSwap, label: 'WUSDC.deposit (wrap native USDC)' };
-  }
+  let executionIdentity: string;
 
-  const executionIdentity = computeUnitFlowExecutionIdentity({
-    router: deployment.universalRouter,
-    commands,
-    v3input,
-    deadline,
-  });
+  if (executor === 'v3-direct') {
+    calldata = encodeV3DirectExactInputSingle({
+      tokenIn: inLeg.swapAddress,
+      tokenOut: outLeg.swapAddress,
+      fee,
+      recipient: merchantSCA,
+      deadline,
+      amountIn: amountInSwap,
+      amountOutMinimum: minOutSwap,
+    });
+    // Sentinel evidence values: commands/inputs are universal-router
+    // concepts. commands '0x' (empty — never the proven 0x00 byte) marks a
+    // direct-V3 envelope; inputs carries the exactInputSingle calldata so
+    // the identity hash still binds the full execution bytes.
+    commands = '0x' as unknown as `0x${string}`;
+    v3input = calldata;
+    const directApproveData = encodeFunctionData({
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [executorAddress as `0x${string}`, amountInSwap],
+    });
+    approvals = [
+      { to: inLeg.swapAddress, data: directApproveData, value: 0n, label: `${inputSymbol}-token -> V3Router approve` },
+    ];
+    swapTx = {
+      to: executorAddress,
+      data: calldata,
+      value: 0n,
+      label: 'UnitFlowV3Router exactInputSingle',
+    };
+    // NO wrap step: mainnet has no WUSDC wrapper (native USDC leg).
+    executionIdentity = computeUnitFlowExecutionIdentity({
+      router: executorAddress,
+      commands,
+      v3input,
+      deadline,
+    });
+  } else {
+    const path = encodePacked(
+      ['address', 'uint24', 'address'],
+      [inLeg.swapAddress as `0x${string}`, fee, outLeg.swapAddress as `0x${string}`]
+    );
+    v3input = encodeAbiParameters(
+      [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'bool' }],
+      [merchantSCA as `0x${string}`, amountInSwap, minOutSwap, path, true]
+    );
+    commands = UNITFLOW_V3_SWAP_EXACT_IN as unknown as `0x${string}`;
+    calldata = encodeFunctionData({
+      abi: UNIVERSAL_ROUTER_ABI,
+      functionName: 'execute',
+      args: [commands, [v3input], deadline],
+    });
+
+    const erc20ApproveData = encodeFunctionData({
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [deployment.permit2 as `0x${string}`, amountInSwap],
+    });
+    const permit2ApproveData = encodeFunctionData({
+      abi: PERMIT2_ABI,
+      functionName: 'approve',
+      args: [
+        inLeg.swapAddress as `0x${string}`,
+        deployment.universalRouter as `0x${string}`,
+        amountInSwap,
+        Number(deadline),
+      ],
+    });
+
+    approvals = [
+      { to: inLeg.swapAddress, data: erc20ApproveData, value: 0n, label: `${inputSymbol}-token -> Permit2 approve` },
+      { to: deployment.permit2, data: permit2ApproveData, value: 0n, label: `Permit2 allowance -> UniversalRouter` },
+    ];
+
+    swapTx = {
+      to: deployment.universalRouter,
+      data: calldata,
+      value: 0n,
+      label: 'UniversalRouter execute(V3_SWAP_EXACT_IN)',
+    };
+
+    // USDC-leg input conversion: explicit separate wrap (native value -> WUSDC
+    // 1:1). NOT a WRAP_ETH command inside execute() — see header.
+    if (inputSymbol === 'USDC') {
+      const depositData = encodeFunctionData({ abi: WUSDC_ABI, functionName: 'deposit' });
+      wrapTx = { to: deployment.wusdc, data: depositData, value: amountInSwap, label: 'WUSDC.deposit (wrap native USDC)' };
+    }
+
+    executionIdentity = computeUnitFlowExecutionIdentity({
+      router: deployment.universalRouter,
+      commands,
+      v3input,
+      deadline,
+    });
+  }
 
   return {
     venueId: 'unitflow-v3',
     phase: 'phase-2-only',
     deployment,
+    executor,
     pool,
     fee,
     inputSymbol,
@@ -535,7 +774,12 @@ export async function buildUnitFlowV3Execution(
     selfPayer,
     ...(expectedPayer ? { expectedPayer } : {}),
     commands,
-    inputs: [v3input],
+    // Universal-router inputs carry [v3input] (the 5-param tuple). V3-direct
+    // inputs carry the sentinel EMPTY tuple — the exactInputSingle calldata
+    // binds via v3Direct (below), not inputs — so the verifier's shape gate
+    // (sentinel + empty inputs vs 0x00 + [tuple]) is unambiguous.
+    inputs: executor === 'v3-direct' ? [] : [v3input],
+    ...(executor === 'v3-direct' ? { v3Direct: calldata } : {}),
     deadline,
     expiresAtSec,
     swapTx,
@@ -582,12 +826,16 @@ export function assertWrapBeforeSwap(wrapBlockNumber: bigint, swapBlockNumber: b
   }
 }
 
-// ─── Pure: WUSDC -> native-USDC unwrap (Flow Swap EURC->USDC exit) ───────────
-// The UnitFlow V3 pools settle the USDC leg in WUSDC (18-dec). A Flow Swap
-// into USDC therefore credits WUSDC first; the user-facing settlement is
-// completed by a SEPARATE unsigned WUSDC.withdraw(wad) wallet transaction
-// that burns the caller's WUSDC 1:1 into native USDC (the same asset the
-// 0x3600… 6-dec ERC-20 view reports).
+// ─── Pure: WUSDC -> native-USDC unwrap (TESTNET Flow Swap EURC->USDC exit) ───
+// The TESTNET UnitFlow V3 pools settle the USDC leg in WUSDC (18-dec). A
+// testnet Flow Swap into USDC therefore credits WUSDC first; the user-facing
+// settlement is completed by a SEPARATE unsigned WUSDC.withdraw(wad) wallet
+// transaction that burns the caller's WUSDC 1:1 into native USDC (the same
+// asset the 0x3600… 6-dec ERC-20 view reports).
+//
+// On v3-direct (mainnet) the USDC leg IS native USDC — this helper is never
+// called there (flowNeedsUnwrap() is false, unwrapAmountSwapForIntent()
+// refuses). It stays for the testnet executor only.
 //
 // Evidence basis (Arc Testnet, no invented functions):
 //   - WUSDC 0x911b…382Df reads name=Wrapped USDC / symbol=WUSDC / decimals=18
@@ -651,12 +899,36 @@ export interface UnitFlowExecutionEvidence {
   deployment: UnitFlowV3Deployment;
   /** Mined execution tx hash (surfaced as the replay/single-consumption id). */
   txHash: string;
-  /** tx.to — must be the canonical UniversalRouter. */
+  /**
+   * tx.to — must be the canonical executor for the deployment (UniversalRouter
+   * on universal-router, V3Router on v3-direct).
+   */
   to: string;
-  /** tx.value — must be 0 for the single-command path (wrap is separate). */
+  /** tx.value — must be 0 on the swap path (wrap is separate / absent). */
   value: bigint | string | number;
+  /**
+   * Command bytes: '0x00' (single proven V3 exact-input) on
+   * 'universal-router', the '0x' sentinel on 'v3-direct' (direct-V3 has no
+   * command envelope — the sentinel marks the executor so a UR proof can
+   * never satisfy a V3 binding and vice versa).
+   */
   commands: string;
+  /**
+   * Calldata inputs:
+   *   - universal-router: single-element [5-param V3 tuple
+   *     (recipient/amountIn/minOut/path/payerIsUser)] proven in Gate C;
+   *   - v3-direct: EMPTY [] — the exactInputSingle calldata binds via
+   *     v3Direct (below), never via inputs.
+   * The executor is bound by `commands` + the deployment — never inferred
+   * from the bytes alone.
+   */
   inputs: string[];
+  /**
+   * Direct-V3 exactInputSingle calldata (executor 'v3-direct' ONLY): the
+   * exact bytes the wallet broadcast to the V3 router. Absent on
+   * universal-router.
+   */
+  v3Direct?: string;
   deadline: bigint | string | number;
   /** tx.from. */
   payer: string;
@@ -743,68 +1015,156 @@ export function verifyUnitFlowExecution(ev: UnitFlowExecutionEvidence): UnitFlow
   } catch {
     throw routingError(400, '[unitflow-v3] missing or malformed execution evidence: deployment.');
   }
+  const executor = getUnitFlowExecutor(d);
+  // Canonical executor for THIS deployment — the ONLY address the swap may
+  // be addressed to (testnet UniversalRouter, mainnet V3Router).
+  const canonicalExecutor =
+    executor === 'v3-direct' ? (d.v3Router ?? d.universalRouter) : d.universalRouter;
+  // Fail-closed completeness FIRST: the executor shape must be unambiguous
+  // before any value below is trusted. Universal-router evidence carries
+  // commands '0x00' + exactly one inputs element (the 5-param tuple) and NO
+  // v3Direct; v3-direct evidence carries the '0x' commands sentinel with
+  // EMPTY inputs and the exactInputSingle calldata in v3Direct. A hybrid
+  // (both shapes) or an empty (neither) proof is rejected — an attacker must
+  // not be able to smuggle UR bytes into a V3 proof or vice versa.
+  const inputs = (ev as any).inputs;
+  const hasV3Direct = typeof (ev as any).v3Direct === 'string' && (ev as any).v3Direct.trim() !== '';
+  if (executor === 'v3-direct') {
+    if (String(ev.commands ?? '').toLowerCase() !== '0x') {
+      throw routingError(403, '[unitflow-v3] unexpected command sequence — v3-direct proof must carry the 0x sentinel.');
+    }
+    if (!Array.isArray(inputs) || inputs.length !== 0) {
+      throw routingError(400, '[unitflow-v3] malformed execution evidence: v3-direct proof must carry the commands sentinel with empty inputs.');
+    }
+    if (!hasV3Direct || !/^0x[0-9a-fA-F]+$/.test((ev as any).v3Direct)) {
+      throw routingError(400, '[unitflow-v3] missing or malformed execution evidence: v3Direct.');
+    }
+  } else {
+    if (hasV3Direct) {
+      throw routingError(400, '[unitflow-v3] malformed execution evidence: universal-router proof must not carry v3Direct.');
+    }
+    if (!Array.isArray(inputs) || inputs.length !== 1 || typeof inputs[0] !== 'string') {
+      throw routingError(400, '[unitflow-v3] malformed execution evidence: inputs.');
+    }
+  }
 
-  // A. Router identity — reject foreign routers.
-  if (!isAddress(ev.to) || !eqAddr(ev.to, d.universalRouter)) {
-    throw routingError(403, '[unitflow-v3] foreign UniversalRouter — tx.to is not the canonical router.');
+  // A. Executor identity — reject foreign routers.
+  if (!isAddress(ev.to) || !eqAddr(ev.to, canonicalExecutor)) {
+    throw routingError(
+      403,
+      executor === 'v3-direct'
+        ? '[unitflow-v3] foreign V3Router — tx.to is not the canonical router.'
+        : '[unitflow-v3] foreign UniversalRouter — tx.to is not the canonical router.'
+    );
   }
   if (typeof ev.txHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(ev.txHash)) {
     throw routingError(400, '[unitflow-v3] missing or malformed execution evidence: txHash.');
   }
 
-  // Command sequence: exactly the single proven V3 exact-input command.
-  // No wrapping/unwrapping/multi-command sequences are supported.
-  const commands = (ev.commands ?? '').trim().toLowerCase();
-  if (!/^0x[0-9a-f]*$/.test(commands) || commands.length < 4) {
-    throw routingError(400, '[unitflow-v3] malformed execute() calldata: commands.');
-  }
-  if (commands !== '0x00') {
-    const body = commands.slice(2);
-    if (body.includes('0b') || body.includes('0c')) {
-      throw routingError(403, '[unitflow-v3] unsafe/unsupported wrapper command sequence — only 0x00 is supported.');
-    }
-    throw routingError(403, '[unitflow-v3] unexpected recipient command sequence — only 0x00 is supported.');
-  }
-  if (!Array.isArray(ev.inputs) || ev.inputs.length !== 1 || typeof ev.inputs[0] !== 'string') {
-    throw routingError(400, '[unitflow-v3] malformed execute() calldata: inputs.');
-  }
-
-  // Decode the 5-param V3 exact-input tuple (proven Gate C format).
+  // Executor-shaped calldata decode.
+  // Universal-router: exactly the single proven V3 exact-input command
+  // (0x00); no wrapping/unwrapping/multi-command sequences are supported.
+  // V3-direct: exactInputSingle params (tokenIn/tokenOut/fee/recipient/
+  // deadline/amountIn/amountOutMinimum/sqrtPriceLimitX96). Both shapes bind
+  // the same downstream variables (recipient/amountIn/amountOutMin/fee).
   let recipient: string;
   let amountIn: bigint;
   let amountOutMin: bigint;
-  let path: string;
-  let payerIsUser: boolean;
-  try {
-    const decoded = decodeAbiParameters(
-      [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'bool' }],
-      ev.inputs[0] as `0x${string}`
-    );
-    [recipient, amountIn, amountOutMin, path, payerIsUser] = decoded as unknown as [
-      string,
-      bigint,
-      bigint,
-      string,
-      boolean
-    ];
-  } catch {
-    throw routingError(400, '[unitflow-v3] malformed execute() calldata: V3 input undecodable.');
-  }
-  if (!isAddress(recipient) || amountIn <= 0n || amountOutMin <= 0n || payerIsUser !== true) {
-    throw routingError(400, '[unitflow-v3] malformed execute() calldata: V3 input fields invalid.');
+  let pathFee: number;
+  let payerIsUser: boolean | null = null;
+  if (executor === 'v3-direct') {
+    // Direct-V3 calldata lives in v3Direct (the exact bytes broadcast to
+    // the V3 router — same bytes the envelope binds in its identity hash).
+    // The '0x' sentinel + empty inputs were already enforced above; a UR
+    // 0x00 proof can never decode as exactInputSingle and vice versa.
+    let params: DecodedV3DirectExactInputSingle;
+    try {
+      params = decodeV3DirectExactInputSingle((ev as any).v3Direct);
+    } catch (e: any) {
+      if (typeof e?.status === 'number') throw e;
+      throw routingError(400, '[unitflow-v3] malformed exactInputSingle() calldata: undecodable.');
+    }
+    recipient = params.recipient;
+    amountIn = params.amountIn;
+    amountOutMin = params.amountOutMinimum;
+    pathFee = params.fee;
+    if (!isAddress(recipient) || amountIn <= 0n || amountOutMin <= 0n) {
+      throw routingError(400, '[unitflow-v3] malformed exactInputSingle() calldata: params invalid.');
+    }
+    if (params.sqrtPriceLimitX96 !== 0n) {
+      throw routingError(400, '[unitflow-v3] malformed exactInputSingle() calldata: sqrtPriceLimitX96 must be 0.');
+    }
+    if (!eqAddr(params.tokenIn, ev.tokenInSwap) || !eqAddr(params.tokenOut, ev.tokenOutSwap)) {
+      throw routingError(403, '[unitflow-v3] wrong input/output token — exactInputSingle tokens != frozen swap legs.');
+    }
+    // The params-tuple deadline must bind exactly to the evidence deadline —
+    // otherwise the stored execution-identity binding is not the mined call.
+    try {
+      const evidenceDeadline = evBigint('deadline', ev.deadline, false);
+      if (params.deadline !== evidenceDeadline) {
+        throw routingError(403, '[unitflow-v3] deadline binding mismatch — params deadline != evidence deadline.');
+      }
+    } catch (e: any) {
+      if (typeof e?.status === 'number') throw e;
+      throw routingError(400, '[unitflow-v3] missing or malformed execution evidence: deadline.');
+    }
+  } else {
+    // Command sequence: exactly the single proven V3 exact-input command.
+    // No wrapping/unwrapping/multi-command sequences are supported.
+    const commands = (ev.commands ?? '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]*$/.test(commands) || commands.length < 4) {
+      throw routingError(400, '[unitflow-v3] malformed execute() calldata: commands.');
+    }
+    if (commands !== '0x00') {
+      const body = commands.slice(2);
+      if (body.includes('0b') || body.includes('0c')) {
+        throw routingError(403, '[unitflow-v3] unsafe/unsupported wrapper command sequence — only 0x00 is supported.');
+      }
+      throw routingError(403, '[unitflow-v3] unexpected recipient command sequence — only 0x00 is supported.');
+    }
+    if (!Array.isArray(ev.inputs) || ev.inputs.length !== 1 || typeof ev.inputs[0] !== 'string') {
+      throw routingError(400, '[unitflow-v3] malformed execute() calldata: inputs.');
+    }
+
+    // Decode the 5-param V3 exact-input tuple (proven Gate C format).
+    let path: string;
+    try {
+      const decoded = decodeAbiParameters(
+        [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'bool' }],
+        ev.inputs[0] as `0x${string}`
+      );
+      let decodedFee: number | null = null;
+      [recipient, amountIn, amountOutMin, path, payerIsUser] = decoded as unknown as [
+        string,
+        bigint,
+        bigint,
+        string,
+        boolean
+      ];
+      void decodedFee;
+    } catch {
+      throw routingError(400, '[unitflow-v3] malformed execute() calldata: V3 input undecodable.');
+    }
+    if (!isAddress(recipient!) || amountIn! <= 0n || amountOutMin! <= 0n || payerIsUser !== true) {
+      throw routingError(400, '[unitflow-v3] malformed execute() calldata: V3 input fields invalid.');
+    }
+    // Path binding is decoded below (pathFee + token legs).
+    pathFee = -1;
+    void path;
   }
 
-  // Single-command path carries no native value (wrap is a separate tx).
+  // Swap path carries no native value (universal-router: wrap is a separate
+  // tx; v3-direct: no wrap exists at all).
   const value = evBigint('value', ev.value, true);
   if (value !== 0n) {
     throw routingError(403, '[unitflow-v3] unexpected native value in single-command execution.');
   }
 
   // D. Recipient — decoded from calldata, must equal the frozen merchantSCA.
-  if (!isAddress(ev.merchantSCA) || isZeroAddress(ev.merchantSCA) || eqAddr(ev.merchantSCA, d.universalRouter)) {
+  if (!isAddress(ev.merchantSCA) || isZeroAddress(ev.merchantSCA) || eqAddr(ev.merchantSCA, canonicalExecutor)) {
     throw routingError(400, '[unitflow-v3] missing or malformed execution evidence: merchantSCA.');
   }
-  if (!eqAddr(recipient, ev.merchantSCA)) {
+  if (!eqAddr(recipient!, ev.merchantSCA)) {
     throw routingError(403, '[unitflow-v3] wrong merchant recipient — decoded recipient != frozen merchantSCA.');
   }
 
@@ -816,7 +1176,7 @@ export function verifyUnitFlowExecution(ev: UnitFlowExecutionEvidence): UnitFlow
   if (!eqAddr(ev.payer, ev.expectedPayer)) {
     throw routingError(403, '[unitflow-v3] payer mismatch — tx payer != expected payer.');
   }
-  if (eqAddr(ev.payer, d.universalRouter) || isZeroAddress(ev.payer)) {
+  if (eqAddr(ev.payer, canonicalExecutor) || isZeroAddress(ev.payer)) {
     throw routingError(403, '[unitflow-v3] payer mismatch — router/zero address cannot be the payer.');
   }
   // Self-custody (Flow Swap) is the one scope where payer == recipient is
@@ -826,19 +1186,43 @@ export function verifyUnitFlowExecution(ev: UnitFlowExecutionEvidence): UnitFlow
     throw routingError(403, '[unitflow-v3] payer mismatch — merchant cannot be its own payer.');
   }
 
-  // Path: packed tokenIn|fee|tokenOut (43 bytes => 86 hex chars).
-  if (typeof path !== 'string' || !/^0x[0-9a-fA-F]+$/.test(path) || path.length !== 2 + 86) {
-    throw routingError(400, '[unitflow-v3] invalid path encoding — expected 43-byte packed V3 path.');
-  }
-  const pathTokenIn = `0x${path.slice(2, 42)}`;
-  const pathFeeHex = path.slice(42, 48);
-  const pathTokenOut = `0x${path.slice(48, 88)}`;
-  if (!isAddress(pathTokenIn) || !isAddress(pathTokenOut) || !/^[0-9a-fA-F]{6}$/.test(pathFeeHex)) {
-    throw routingError(400, '[unitflow-v3] invalid path encoding — token/fee fields malformed.');
-  }
-  const pathFee = parseInt(pathFeeHex, 16);
-  if (!(UNITFLOW_V3_ALLOWED_FEES as readonly number[]).includes(pathFee)) {
-    throw routingError(400, '[unitflow-v3] wrong fee tier — path fee is not an allowed V3 tier.');
+  // Path binding: universal-router decodes the packed tokenIn|fee|tokenOut
+  // path (43 bytes => 86 hex chars); v3-direct binds tokenIn/tokenOut/fee
+  // from the exactInputSingle params (already checked above) + the allowed
+  // fee-tier allowlist.
+  let pathTokenIn: string;
+  let pathTokenOut: string;
+  if (executor === 'v3-direct') {
+    pathTokenIn = ev.tokenInSwap;
+    pathTokenOut = ev.tokenOutSwap;
+    if (!(UNITFLOW_V3_ALLOWED_FEES as readonly number[]).includes(pathFee)) {
+      throw routingError(400, '[unitflow-v3] wrong fee tier — exactInputSingle fee is not an allowed V3 tier.');
+    }
+  } else {
+    const path = ((): string => {
+      try {
+        const decoded = decodeAbiParameters(
+          [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'bool' }],
+          ev.inputs[0] as `0x${string}`
+        );
+        return (decoded as unknown as [string, bigint, bigint, string, boolean])[3];
+      } catch {
+        throw routingError(400, '[unitflow-v3] malformed execute() calldata: V3 input undecodable.');
+      }
+    })();
+    if (typeof path !== 'string' || !/^0x[0-9a-fA-F]+$/.test(path) || path.length !== 2 + 86) {
+      throw routingError(400, '[unitflow-v3] invalid path encoding — expected 43-byte packed V3 path.');
+    }
+    pathTokenIn = `0x${path.slice(2, 42)}`;
+    const pathFeeHex = path.slice(42, 48);
+    pathTokenOut = `0x${path.slice(48, 88)}`;
+    if (!isAddress(pathTokenIn) || !isAddress(pathTokenOut) || !/^[0-9a-fA-F]{6}$/.test(pathFeeHex)) {
+      throw routingError(400, '[unitflow-v3] invalid path encoding — token/fee fields malformed.');
+    }
+    pathFee = parseInt(pathFeeHex, 16);
+    if (!(UNITFLOW_V3_ALLOWED_FEES as readonly number[]).includes(pathFee)) {
+      throw routingError(400, '[unitflow-v3] wrong fee tier — path fee is not an allowed V3 tier.');
+    }
   }
 
   // B/C. Input token + exact amount against the persisted binding. Token
@@ -854,7 +1238,7 @@ export function verifyUnitFlowExecution(ev: UnitFlowExecutionEvidence): UnitFlow
     throw routingError(403, '[unitflow-v3] wrong input token — path tokenIn != quoted tokenIn.');
   }
   const expectedAmountIn = evBigint('amountInSwap', ev.amountInSwap, false);
-  if (amountIn !== expectedAmountIn) {
+  if (amountIn! !== expectedAmountIn) {
     throw routingError(403, '[unitflow-v3] wrong input amount — decoded amountIn != persisted binding.');
   }
 
@@ -895,7 +1279,7 @@ export function verifyUnitFlowExecution(ev: UnitFlowExecutionEvidence): UnitFlow
   const minOut = evBigint('minOutSwap', ev.minOutSwap, false);
   // The calldata floor must bind exactly to the persisted quote minimum —
   // a weaker on-chain floor is rejected even if the observed delta is large.
-  if (amountOutMin !== minOut) {
+  if (amountOutMin! !== minOut) {
     throw routingError(403, '[unitflow-v3] amountOutMinimum binding mismatch — calldata floor != persisted minOut.');
   }
   const delta = after - before;
@@ -908,9 +1292,9 @@ export function verifyUnitFlowExecution(ev: UnitFlowExecutionEvidence): UnitFlow
     executionTxHash: ev.txHash,
     router: ev.to,
     payer: ev.payer,
-    recipient,
+    recipient: recipient!,
     inputToken: pathTokenIn,
-    inputAmount: amountIn,
+    inputAmount: amountIn!,
     outputToken: pathTokenOut,
     actualOutput: delta,
     minOut,

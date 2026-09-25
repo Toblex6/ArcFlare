@@ -22,6 +22,7 @@ import {
   getUnitFlowV3Deployment,
   MAINNET_V3_FAMILY,
   UNITFLOW_MAINNET_CHAIN_ID_PIN,
+  UNITFLOW_PERMIT2_PIN,
 } from '@/src/lib/config/unitflow';
 import {
   __resetNetworkConfigCacheForTests,
@@ -35,7 +36,7 @@ import {
   TOWER_SWAP_BASE_URL_DEFAULT,
 } from '@/src/lib/routing/providers/tower';
 import { getTowerCandidate } from '@/src/lib/swap/service';
-import { buildUnitFlowV3Execution } from '@/src/lib/routing/providers/unitflowV3';
+import { buildUnitFlowV3Execution, getUnitFlowExecutor } from '@/src/lib/routing/providers/unitflowV3';
 import { shouldShowTowerAttribution } from '@/src/components/swap/swapCopy';
 
 let pass = 0, fail = 0;
@@ -89,7 +90,9 @@ const MAINNET_ENV_BASE = {
   ARC_MAINNET_ERC8183_ADDRESS: '0x' + '4'.repeat(40),
   ARC_MAINNET_X402_VERIFIER: '0x' + '5'.repeat(40),
 };
-// Executor-side mainnet inputs (throwaway distinct addresses — never funded).
+// Legacy executor-side mainnet inputs (RETIRED — ignored when set, never
+// required). Kept so the suite proves legacy vars cannot resurrect a
+// UniversalRouter/WUSDC requirement on mainnet.
 const MAINNET_EXEC_ENV = {
   UNITFLOW_MAINNET_UNIVERSAL_ROUTER: '0x' + 'a'.repeat(40),
   UNITFLOW_MAINNET_PERMIT2: '0x' + 'b'.repeat(40),
@@ -126,8 +129,23 @@ async function configTests() {
   ok('testnet carries no mainnet family fields',
     testnet.v3Router === undefined && testnet.positionManager === undefined);
 
-  expectThrow('mainnet without executor env still fails closed',
-    () => getUnitFlowV3Deployment({ ARC_NETWORK: 'mainnet' }), 'missing');
+  // Mainnet initializes WITHOUT executor env: direct V3Router (no
+  // UniversalRouter needed, none exists), canonical Permit2 pin, canonical
+  // native USDC leg (no WUSDC wrapper on Arc). This is the required proof
+  // that mainnet swap can initialize (not fail-closed) with the real
+  // supplied config, without executing any transaction.
+  const mmBare = getUnitFlowV3Deployment({ ARC_NETWORK: 'mainnet' });
+  ok('mainnet initializes without executor env (ready to test, no tx)',
+    mmBare.name === 'mainnet' && mmBare.chainId === 5042 &&
+    getUnitFlowExecutor(mmBare) === 'v3-direct');
+  ok('mainnet executor is the pinned V3Router (no UniversalRouter)',
+    mmBare.universalRouter === MAINNET_V3_FAMILY.v3Router &&
+    mmBare.v3Router === '0x6fD8351b9596C1F0b2f2479BfA6A171cb3d0f410');
+  ok('mainnet Permit2 is the canonical keyless pin (same on all Arc networks)',
+    mmBare.permit2 === UNITFLOW_PERMIT2_PIN &&
+    UNITFLOW_PERMIT2_PIN === '0x000000000022D473030F116dDEE9F6B43aC78BA3');
+  ok('mainnet USDC leg is canonical native USDC (no WUSDC wrapper)',
+    mmBare.wusdc === '0x3600000000000000000000000000000000000000');
 
   const mm = getUnitFlowV3Deployment({ ARC_NETWORK: 'mainnet', ...MAINNET_EXEC_ENV });
   ok('mainnet factory/quoter default to supplied pins',
@@ -144,10 +162,10 @@ async function configTests() {
     mm.nftDescriptor === '0x9Ca8e324380Aa2E80011A16C4d684366E47d4Ab4' &&
     mm.positionDescriptor === '0x5Bc0735F5D806C184EDE0A7731632F7c491B3B02' &&
     mm.migrator === '0x36E9b24b9CF39c4C7069B75f01FA0419547F977a');
-  ok('mainnet executor inputs come from env (fail-closed, never testnet)',
-    mm.universalRouter === MAINNET_EXEC_ENV.UNITFLOW_MAINNET_UNIVERSAL_ROUTER &&
-    mm.permit2 === MAINNET_EXEC_ENV.UNITFLOW_MAINNET_PERMIT2 &&
-    mm.wusdc === MAINNET_EXEC_ENV.UNITFLOW_MAINNET_WUSDC);
+  ok('legacy UR/WUSDC env is retired (ignored, never required)',
+    mm.universalRouter === MAINNET_V3_FAMILY.v3Router &&
+    mm.wusdc === '0x3600000000000000000000000000000000000000' &&
+    getUnitFlowExecutor(mm) === 'v3-direct');
 
   // Explicit operator overrides win over pins (still validated).
   const over = getUnitFlowV3Deployment({
@@ -182,13 +200,14 @@ async function configTests() {
 async function executionSafetyTests() {
   console.log('── B. mainnet execution never selects testnet addresses ────────');
   const MERCHANT = '0xc119bb61dCd7Ce422557485ecD17D679f44250a1';
-  // Missing executor env: build throws during deployment resolution — before
-  // any pool/router/token use, hence before any testnet address could load.
-  await expectThrowAsync('mainnet build without executor env fails before RPC',
-    () => buildUnitFlowV3Execution(
-      { inputSymbol: 'USDC', outputSymbol: 'EURC', inputAmount: 10000n, merchantSCA: MERCHANT },
-      { ARC_NETWORK: 'mainnet' }
-    ), 'missing');
+  // Mainnet deployment resolves without executor env and contains zero
+  // testnet addresses — the build then proceeds to live pool validation
+  // (RPC reads only, no signing). Arg validation still runs first (no RPC).
+  const mmDep = getUnitFlowV3Deployment({ ARC_NETWORK: 'mainnet' });
+  const mmVals = JSON.stringify(mmDep).toLowerCase();
+  ok('mainnet deployment resolves with zero testnet addresses',
+    TESTNET_PINS.every((p) => !mmVals.includes(p.toLowerCase())) &&
+    getUnitFlowExecutor(mmDep) === 'v3-direct');
   // Even arg validation runs first; deployment gating follows — either way no RPC.
   await expectThrowAsync('mainnet build arg validation still first',
     () => buildUnitFlowV3Execution(

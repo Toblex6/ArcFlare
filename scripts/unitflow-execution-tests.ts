@@ -15,9 +15,17 @@ import {
   getUnitFlowV3Deployment,
 } from '@/src/lib/config/unitflow';
 import {
+  MAINNET_V3_FAMILY,
+  UNITFLOW_PERMIT2_PIN,
+} from '@/src/lib/config/unitflow';
+import {
   buildUnitFlowV3Execution,
+  decodeV3DirectExactInputSingle,
+  encodeV3DirectExactInputSingle,
+  getUnitFlowExecutor,
   UNITFLOW_V3_ALLOWED_FEES,
   UNITFLOW_V3_DEFAULT_FEE,
+  usdcSwapDecimalsFor,
   verifyUnitFlowExecution,
   type UnitFlowExecutionEvidence,
 } from '@/src/lib/routing/providers/unitflowV3';
@@ -123,17 +131,33 @@ async function main() {
   try { assertUnitFlowDeploymentComplete(DEPLOYMENT); ok('complete deployment asserts clean', true); }
   catch (e: any) { ok('complete deployment asserts clean', false, String(e?.message ?? e)); }
   expectThrow('incomplete deployment rejected', () => assertUnitFlowDeploymentComplete({ ...DEPLOYMENT, quoter: '' } as any), 'missing or malformed');
-  expectThrow('mainnet without env fails closed', () => getUnitFlowV3Deployment({ ARC_NETWORK: 'mainnet' }), 'missing');
+  // Mainnet initializes WITHOUT executor env (direct V3Router, canonical
+  // Permit2 + canonical USDC — no UniversalRouter needed, no WUSDC exists).
+  // This is the task's required proof: mainnet swap can initialize
+  // (not fail-closed) with the real supplied config, without any transaction.
+  const mmBare = getUnitFlowV3Deployment({ ARC_NETWORK: 'mainnet' });
+  ok('mainnet initializes without executor env (ready to test, no tx)',
+    mmBare.name === 'mainnet' && mmBare.chainId === 5042 &&
+    mmBare.universalRouter === MAINNET_V3_FAMILY.v3Router &&
+    mmBare.v3Router === MAINNET_V3_FAMILY.v3Router &&
+    mmBare.factory === MAINNET_V3_FAMILY.factory &&
+    mmBare.quoter === MAINNET_V3_FAMILY.quoter &&
+    mmBare.permit2 === UNITFLOW_PERMIT2_PIN &&
+    mmBare.wusdc === '0x3600000000000000000000000000000000000000');
+  ok('mainnet executor is v3-direct (no UniversalRouter)',
+    getUnitFlowExecutor(mmBare) === 'v3-direct');
+  ok('mainnet USDC leg is 6-dec identity (no wrapper)',
+    usdcSwapDecimalsFor(mmBare) === 6);
+  try { assertUnitFlowDeploymentComplete(mmBare); ok('bare mainnet deployment asserts clean', true); }
+  catch (e: any) { ok('bare mainnet deployment asserts clean', false, String(e?.message ?? e)); }
   const mm = getUnitFlowV3Deployment({
     ARC_NETWORK: 'mainnet',
     UNITFLOW_MAINNET_FACTORY: '0x1111111111111111111111111111111111111111',
     UNITFLOW_MAINNET_QUOTER: '0x2222222222222222222222222222222222222222',
-    UNITFLOW_MAINNET_UNIVERSAL_ROUTER: '0x3333333333333333333333333333333333333333',
-    UNITFLOW_MAINNET_PERMIT2: '0x4444444444444444444444444444444444444444',
-    UNITFLOW_MAINNET_WUSDC: '0x5555555555555555555555555555555555555555',
   });
-  ok('mainnet resolves explicit env family (no testnet inheritance)',
-    mm.factory === '0x1111111111111111111111111111111111111111' && mm.name === 'mainnet');
+  ok('mainnet resolves explicit factory/quoter overrides (no testnet inheritance)',
+    mm.factory === '0x1111111111111111111111111111111111111111' && mm.name === 'mainnet' &&
+    getUnitFlowExecutor(mm) === 'v3-direct');
 
   console.log('── happy path ───────────────────────────────────────────────────');
   const v = verifyUnitFlowExecution(happyEvidence());
@@ -195,9 +219,10 @@ async function main() {
   // 15. invalid path encoding
   expectThrow('15 invalid path encoding rejected',
     () => verifyUnitFlowExecution(withEv({ inputs: [reencode({ path: '0x1234' as any })] })), 'invalid path encoding');
-  // 16. unsafe/unsupported wrapper command sequence
+  // 16. unsafe/unsupported wrapper command sequence (single input so the
+  // command gate — not the inputs-length gate — is the rejecting check)
   expectThrow('16 unsafe/unsupported wrapper command sequence rejected',
-    () => verifyUnitFlowExecution(withEv({ commands: '0x0b00', inputs: ['0x', '0x'] } as any)), 'wrapper command sequence');
+    () => verifyUnitFlowExecution(withEv({ commands: '0x0b00', inputs: ['0x00'] } as any)), 'wrapper command sequence');
   // 17. replay identity surfaced for future shared uniqueness enforcement
   const r1 = verifyUnitFlowExecution(happyEvidence());
   const r2 = verifyUnitFlowExecution(happyEvidence());
@@ -239,6 +264,53 @@ async function main() {
   await buildThrows('client recipient shape rejected', { inputSymbol: 'USDC', outputSymbol: 'EURC', inputAmount: 1n, merchantSCA: 'not-an-address' }, 'merchantSCA');
   await buildThrows('bad fee tier rejected', { inputSymbol: 'USDC', outputSymbol: 'EURC', inputAmount: 1n, merchantSCA: MERCHANT, feeTier: 999 }, 'feeTier');
   await buildThrows('payer==merchant rejected', { inputSymbol: 'USDC', outputSymbol: 'EURC', inputAmount: 1n, merchantSCA: MERCHANT, expectedPayer: MERCHANT }, 'must not equal');
+
+  console.log('── v3-direct (mainnet) pure verification, no RPC ────────────────');
+  const MM = getUnitFlowV3Deployment({ ARC_NETWORK: 'mainnet' });
+  const MM_USDC = '0x3600000000000000000000000000000000000000';
+  const MM_EURC = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  const MM_POOL = '0xffffffffffffffffffffffffffffffffffffffff';
+  const MM_TX = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const mmAmountIn = 10_000n;
+  const mmMinOut = 9_500n;
+  const mmDeadline = BigInt(EXPIRES);
+  const mmCalldata = encodeV3DirectExactInputSingle({
+    tokenIn: MM_USDC, tokenOut: MM_EURC, fee: 100, recipient: MERCHANT,
+    deadline: mmDeadline, amountIn: mmAmountIn, amountOutMinimum: mmMinOut,
+  });
+  const mmDecoded = decodeV3DirectExactInputSingle(mmCalldata);
+  ok('v3-direct encode/decode round-trips',
+    mmDecoded.tokenIn.toLowerCase() === MM_USDC.toLowerCase() &&
+    mmDecoded.tokenOut.toLowerCase() === MM_EURC.toLowerCase() && mmDecoded.fee === 100 &&
+    mmDecoded.recipient.toLowerCase() === MERCHANT.toLowerCase() &&
+    mmDecoded.amountIn === mmAmountIn &&
+    mmDecoded.amountOutMinimum === mmMinOut && mmDecoded.sqrtPriceLimitX96 === 0n);
+  const mmHappy: UnitFlowExecutionEvidence = {
+    deployment: MM, txHash: MM_TX, to: MAINNET_V3_FAMILY.v3Router, value: 0n,
+    commands: '0x', inputs: [], v3Direct: mmCalldata, deadline: mmDeadline,
+    payer: PAYER, expectedPayer: PAYER, merchantSCA: MERCHANT,
+    tokenInSwap: MM_USDC, tokenOutSwap: MM_EURC,
+    amountInSwap: mmAmountIn, minOutSwap: mmMinOut, fee: 100, pool: MM_POOL,
+    expiresAtSec: EXPIRES, txTimestampSec: NOW + 60,
+    merchantBalanceBefore: 0n, merchantBalanceAfter: mmMinOut + 10n,
+  };
+  const mmV = verifyUnitFlowExecution(mmHappy);
+  ok('v3-direct happy path verifies',
+    mmV.executionTxHash === MM_TX && mmV.actualOutput === mmMinOut + 10n &&
+    mmV.fee === 100 && mmV.pool === MM_POOL && mmV.recipient === MERCHANT);
+  expectThrow('v3-direct foreign router rejected',
+    () => verifyUnitFlowExecution({ ...mmHappy, to: '0x9999999999999999999999999999999999999999' }), 'foreign V3Router');
+  expectThrow('v3-direct UR sentinel rejected (0x00 smuggled)',
+    () => verifyUnitFlowExecution({ ...mmHappy, commands: '0x00' }), '0x sentinel');
+  expectThrow('v3-direct wrong floor rejected',
+    () => verifyUnitFlowExecution({ ...mmHappy, v3Direct: encodeV3DirectExactInputSingle({
+      tokenIn: MM_USDC, tokenOut: MM_EURC, fee: 100, recipient: MERCHANT,
+      deadline: mmDeadline, amountIn: mmAmountIn, amountOutMinimum: mmMinOut + 1n,
+    }) }), 'binding mismatch');
+  expectThrow('UR shape rejected on v3-direct deployment',
+    () => verifyUnitFlowExecution({ ...mmHappy, commands: '0x00', inputs: [encodeV3Input(MERCHANT, mmAmountIn, mmMinOut, pathFor(MM_USDC, 100, MM_EURC))] }), '0x sentinel');
+  expectThrow('v3-direct missing v3Direct rejected',
+    () => verifyUnitFlowExecution({ ...mmHappy, v3Direct: undefined }), 'v3Direct');
 
   console.log(`\nPASS: ${pass}  FAIL: ${fail}`);
   if (fail > 0) { for (const f of failures) console.log(`  ✗ ${f}`); process.exit(1); }

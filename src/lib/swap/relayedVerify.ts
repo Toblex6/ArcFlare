@@ -46,6 +46,7 @@ import {
   decodeEventLog,
   erc20Abi,
   keccak256,
+  toFunctionSelector,
   toHex,
 } from "viem";
 import { prisma } from "@/src/lib/prisma";
@@ -58,9 +59,11 @@ import {
 import { getUnitFlowV3Deployment } from "@/src/lib/config/unitflow";
 import {
   UNITFLOW_6_TO_18_SCALE,
+  UNITFLOW_V3_DIRECT_ROUTER_ABI,
   assertWrapBeforeSwap,
   computeUnitFlowExecutionIdentity,
   decodeWusdcWithdraw,
+  getUnitFlowExecutor,
 } from "@/src/lib/routing/providers/unitflowV3";
 import {
   assertIntentLive,
@@ -87,6 +90,12 @@ const ACCOUNT_EXECUTE_SELECTOR = "b61d27f6";
 // UniversalRouter execute(bytes,bytes[],uint256) — same single authority as
 // the direct path (decodeUnitFlowExecute), matched here for extraction only.
 const ROUTER_EXECUTE_SELECTOR = "3593564c";
+// Direct-V3 exactInputSingle(((…))) — derived ONCE from the canonical ABI
+// authority in providers/unitflowV3.ts (no second ABI copy). The
+// shape-discriminator above pins the keccak value in its comment.
+const V3_DIRECT_EXECUTE_SELECTOR = toFunctionSelector(
+  UNITFLOW_V3_DIRECT_ROUTER_ABI[0] as any
+).slice(2);
 
 // Uniswap V3 pool Swap + WETH9 Deposit/Withdrawal event signatures, hashed at
 // runtime (no literals): these are the pool/token contracts' public event
@@ -118,11 +127,13 @@ function hexToBigintWord(word: string): bigint {
 }
 
 // ─── Pure: submission-shape detection ────────────────────────────────────────
-// Direct submissions (browser-signed EOAs) call the router inline:
-// tx.to == router and input starts with execute(bytes,bytes[],uint256).
-// Anything else mined (Circle SCA relay envelopes, foreign txs) is NOT
-// direct — the caller routes those to the relayed proof (which fails closed
-// on unrecognized shapes) instead of the direct verifier.
+// Direct submissions (browser-signed EOAs) call the executor inline:
+// tx.to == canonical executor and input starts with the executor's entry
+// point (execute(bytes,bytes[],uint256) on universal-router,
+// exactInputSingle(((…))) on v3-direct). Anything else mined (Circle SCA
+// relay envelopes, foreign txs) is NOT direct — the caller routes those to
+// the relayed proof (which fails closed on unrecognized shapes) instead of
+// the direct verifier.
 export function isDirectSubmissionShape(
   txTo: unknown,
   txInput: unknown,
@@ -130,7 +141,16 @@ export function isDirectSubmissionShape(
 ): boolean {
   if (typeof txTo !== "string" || typeof txInput !== "string") return false;
   if (!eqAddr(txTo, router)) return false;
-  return txInput.trim().toLowerCase().startsWith(`0x${ROUTER_EXECUTE_SELECTOR.toLowerCase()}`);
+  const body = txInput.trim().toLowerCase();
+  // Universal-router entry point (testnet executor).
+  if (body.startsWith(`0x${ROUTER_EXECUTE_SELECTOR.toLowerCase()}`)) return true;
+  // Direct-V3 entry point (mainnet executor): UnitFlowV3Router
+  // exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,
+  // uint160)). Selector derived once here from the canonical ABI authority
+  // in providers/unitflowV3.ts — no second ABI copy. keccak pin verified:
+  // exactInputSingle selector = 0x04e45aaf (Uniswap V3 SwapRouter mainnet).
+  if (body.startsWith(`0x${V3_DIRECT_EXECUTE_SELECTOR.toLowerCase()}`)) return true;
+  return false;
 }
 
 // ─── Pure: relayed inner-call extraction ─────────────────────────────────────
@@ -550,11 +570,19 @@ export async function verifyFlowSwapRelayed(req: VerifyRelayedSwapRequest): Prom
   ) {
     throw routingError(503, "[relayed-swap] deployment drift — stored binding does not match the atomic family. Refusing.");
   }
+  // V3-direct (mainnet) has NO relay envelope: Circle-SCA server-broadcast
+  // relaying is a testnet-only path. Refuse before any RPC so a stale caller
+  // can never prove a relayed execution against mainnet bindings.
+  if (getUnitFlowExecutor(deployment) === "v3-direct") {
+    throw routingError(400, "[relayed-swap] relayed execution is not supported on V3-direct deployments.");
+  }
   const expiresAtSec = Math.floor(new Date(row.quoteExpiresAt).getTime() / 1000);
 
   // 1. Inner-call binding: extract the relayed inner call and prove it is
   // the bound execution (byte equality when the broadcast envelope is
   // supplied, plus execution-identity match against the stored binding).
+  // This block stays universal-router shaped (the executor gate above
+  // guarantees it) — exactInputSingle relay envelopes do not exist.
   const ev = await collectRelayTx(executionTxHash, req.rpcUrl);
   const inner = extractRelayedInner(ev.input, deployment.universalRouter, ownerWallet);
   if (inner.value !== 0n) {
@@ -563,7 +591,7 @@ export async function verifyFlowSwapRelayed(req: VerifyRelayedSwapRequest): Prom
   if (req.expectedInnerData && inner.innerData.toLowerCase() !== String(req.expectedInnerData).toLowerCase()) {
     throw routingError(403, "[relayed-swap] relayed execution != broadcast binding.");
   }
-  const decoded = decodeUnitFlowExecute(inner.innerData);
+  const decoded = decodeUnitFlowExecute(inner.innerData, deployment);
   assertExecutionIdentityMatchRelayed(row.executionIdentity, {
     router: deployment.universalRouter,
     commands: decoded.commands,
@@ -618,7 +646,10 @@ export async function verifyFlowSwapRelayed(req: VerifyRelayedSwapRequest): Prom
     throw routingError(403, "[relayed-swap] output settlement not proven — wallet output delta mismatch.");
   }
 
-  // 5. USDC-leg wrap linkage (Deposit mint + ordering).
+  // 5. Executor-aware USDC-leg wrap linkage (Deposit mint + ordering).
+  // Universal-router (testnet): required for USDC-leg inputs. V3-direct
+  // (mainnet): unreachable — the executor gate above already refused — so no
+  // second branch is needed here; this block stays testnet-shaped.
   let wrapTxHash: string | null = ((req.wrapTxHash ?? row.wrapTxHash ?? "") as string).trim() || null;
   if (row.inputSymbol === "USDC") {
     if (!wrapTxHash) {
@@ -732,6 +763,11 @@ export async function verifyFlowUnwrapRelayed(req: VerifyRelayedUnwrapRequest): 
     deployment.wusdc.toLowerCase() !== String(row.tokenOutSwap ?? "").toLowerCase()
   ) {
     throw routingError(503, "[relayed-swap] deployment drift — stored binding does not match the atomic family. Refusing.");
+  }
+  // The relayed unwrap path is testnet-WUSDC only. On v3-direct (mainnet
+  // native USDC) no unwrap exists — refuse before any RPC.
+  if (getUnitFlowExecutor(deployment) === "v3-direct") {
+    throw routingError(400, "[relayed-swap] relayed unwrap is not supported on V3-direct deployments.");
   }
   if (String(row.outputSymbol).toUpperCase() !== "USDC") {
     throw routingError(400, "[relayed-swap] this swap settles directly — no unwrap step is needed.");
