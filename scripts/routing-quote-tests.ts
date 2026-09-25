@@ -51,7 +51,7 @@ async function expectQuoteErr(label: string, fn: () => Promise<unknown>, status:
 const USDC = '0x3600000000000000000000000000000000000000';
 const EURC = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a';
 const POOL = (process.env.SWAP_POOL_CONTRACT_ADDRESS ?? '').trim();
-const MERCHANT = '0x0d9Dc1733FEA587Ce16E4CbBE449B8E01E677F44';
+const MERCHANT = '0x03badcdb102433798df5feb854b87c7a37dde3a6';
 const REF = `ROUTINGQ-${Date.now()}`;
 
 async function unit() {

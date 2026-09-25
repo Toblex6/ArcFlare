@@ -50,7 +50,7 @@ const DEPLOYMENT = getUnitFlowV3Deployment({});
 const WUSDC = DEPLOYMENT.wusdc;
 const EURC = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a';
 const ROUTER = DEPLOYMENT.universalRouter;
-const PAYER = '0x0d9Dc1733FEA587Ce16E4CbBE449B8E01E677F44';
+const PAYER = '0x03badcdb102433798df5feb854b87c7a37dde3a6';
 const MERCHANT = '0xc119bb61dCd7Ce422557485ecD17D679f44250a1';
 const POOL100 = '0xe8f7fA2A412e98C537554643F83DA34DfdD50c23';
 // Known-dead alternate README deployment family (never referenced by the

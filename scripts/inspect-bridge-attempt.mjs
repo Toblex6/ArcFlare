@@ -84,7 +84,7 @@ function fmt(v) {
 
 async function stageTableExists() {
   const rows = await prisma.$queryRawUnsafe(
-    `SELECT to_regclass('public.bridge_attempt_stages') AS tbl`
+    `SELECT to_regclass('public.bridge_attempt_stages')::text AS tbl`
   );
   return rows?.[0]?.tbl !== null;
 }

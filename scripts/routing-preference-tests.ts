@@ -37,7 +37,7 @@ function ok(name: string, cond: boolean, detail = '') {
 const USDC = '0x3600000000000000000000000000000000000000';
 const EURC = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a';
 const ATTACKER = '0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF';
-const WALLET = '0x0d9Dc1733FEA587Ce16E4CbBE449B8E01E677F44';
+const WALLET = '0x03badcdb102433798df5feb854b87c7a37dde3a6';
 const REF = `ROUTINGP-${Date.now()}`;
 
 function req(url: string, method: string, body: unknown, headers: Record<string, string> = {}) {

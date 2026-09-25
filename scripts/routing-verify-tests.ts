@@ -48,7 +48,7 @@ const USDC = '0x3600000000000000000000000000000000000000';
 const EURC = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a';
 const POOL = (process.env.SWAP_POOL_CONTRACT_ADDRESS ?? '').trim();
 const ROUTER = (process.env.PAYMENT_ROUTER_CONTRACT_ADDRESS ?? '').trim();
-const PAYER = '0x0d9Dc1733FEA587Ce16E4CbBE449B8E01E677F44';
+const PAYER = '0x03badcdb102433798df5feb854b87c7a37dde3a6';
 const MERCHANT = PAYER;
 const REF = `ROUTINGV-${Date.now()}`;
 const NOW = () => Math.floor(Date.now() / 1000);
