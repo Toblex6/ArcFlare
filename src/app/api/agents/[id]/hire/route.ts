@@ -8,6 +8,7 @@ import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 const arcTestnet = getArcChain();
 import { agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { hashCriteria } from "@/lib/jobs/criteriaHash";
@@ -78,9 +79,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const fullCriteria = { jobId: `temp-${Date.now()}`, description, requirements: criteria.requirements, deadlineUnix: criteria.deadlineUnix || Math.floor(Date.now()/1000) + 86400 };
     const expiredAt = fullCriteria.deadlineUnix;
-    // ERC-8183 contract address resolves from the authoritative network config
-    // (mainnet-aware) — never a static testnet pin or an env override.
-    const escrowContract = getNetworkConfig().erc8183Address as `0x${string}`;
+    // ERC-8183 contract address resolves per-request via erc8183AddressOr503()
+    // (authoritative network config, fail-closed 503 when the external
+    // protocol address is unconfigured) — never a static testnet pin.
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) return erc8183.response;
+    const escrowContract = erc8183.address;
     const createTx = await circleClient.createContractExecutionTransaction({ walletAddress: clientAddress, blockchain: getNetworkConfig().circleBlockchain, contractAddress: escrowContract, abiFunctionSignature: "createJob(address,address,uint256,string,address)", abiParameters: [providerAddress, evaluator, expiredAt.toString(), description, "0x0000000000000000000000000000000000000000"], fee: { type: "level", config: { feeLevel: "MEDIUM" } } });
     const txHash = await waitForTransaction(createTx.data?.id!, "create job");
     const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });

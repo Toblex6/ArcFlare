@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, createContractTransaction } from '@/lib/circle/client';
 import { getNetworkConfig } from '@/lib/config/network';
+import { erc8183AddressOr503 } from '@/lib/jobs/erc8183Guard';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
@@ -8,15 +9,11 @@ import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { keccak256, toHex, formatUnits } from 'viem';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
 
-// ERC-8183 contract address resolves from the authoritative network config
-// (mainnet-aware) — never the static testnet pin in erc8183.ts.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
-
-// SECURITY: fully closed now. Previously executed as any wallet named in
-// evaluatorWalletId, without checking it against the job's actual evaluator
-// or verifying the caller controls it.
 async function completeJobHandler(req: NextRequest) {
   try {
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) return erc8183.response;
+    const ERC8183_ADDRESS = erc8183.address;
     const { jobId, evaluatorWalletId, reason = 'deliverable-approved' } = await req.json();
     if (!jobId || !evaluatorWalletId) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });

@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCircleClient, createContractTransaction } from '@/lib/circle/client';
 import { prisma } from '@/lib/prisma';
 import { getNetworkConfig } from '@/lib/config/network';
+import { erc8183AddressOr503 } from '@/lib/jobs/erc8183Guard';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 
 // ERC-8183 contract + USDC token address resolve from the authoritative
 // network config (mainnet-aware) — never static testnet pins in erc8183.ts.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+// ERC-8183 resolves per-request via erc8183AddressOr503() (fail-closed 503
+// when the external protocol address is unconfigured), never at module level.
 const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 // SECURITY: fully closed now. Previously resolved clientWalletId to any
@@ -16,6 +18,9 @@ const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 // matched the job's actual client or that the caller controlled it.
 async function fundJobHandler(req: NextRequest) {
   try {
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) return erc8183.response;
+    const ERC8183_ADDRESS = erc8183.address;
     const { jobId, clientWalletId } = await req.json();
     if (!jobId || !clientWalletId) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });

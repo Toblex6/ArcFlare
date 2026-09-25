@@ -4,9 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { withGateway } from "@/lib/x402";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { getNetworkConfig } from "@/lib/config/network";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 
-// ERC-8183 contract address resolves from the authoritative network config.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+// ERC-8183 contract address resolves per-request inside handleJobStatus via
+// erc8183AddressOr503() (fail-closed 503 when the external protocol address
+// is unconfigured) — never at module level. The other nano resources
+// (agent-lookup, reputation-check) are DB-only and stay available.
 
 // Price table – amounts in dollars (withGateway expects "$X.XX" format)
 const PRICE_TABLE: Record<string, string> = {
@@ -69,6 +72,9 @@ async function handleReputationCheck(req: NextRequest): Promise<NextResponse> {
 }
 
 async function handleJobStatus(req: NextRequest): Promise<NextResponse> {
+  const erc8183 = erc8183AddressOr503();
+  if ("response" in erc8183) return erc8183.response;
+  const ERC8183_ADDRESS = erc8183.address;
   const { searchParams } = new URL(req.url);
   const jobId = searchParams.get("jobId");
   if (!jobId) {

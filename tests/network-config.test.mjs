@@ -300,9 +300,13 @@ test('USDC/EURC addresses are selected from the configured environment', async (
 test('ERC-8183 address comes from the configured environment (canonical pin intact)', async () => {
   await withEnv({ ARC_NETWORK: '' }, async () => {
     assert.equal(net.getNetworkConfig().erc8183Address, '0x0747EEf0706327138c69792bF28Cd525089e4583');
+    assert.equal(net.isErc8183Available(), true);
+    assert.equal(net.requireErc8183Address(), '0x0747EEf0706327138c69792bF28Cd525089e4583');
   });
   await withEnv(MAINNET_ENV, async () => {
     assert.equal(net.getNetworkConfig().erc8183Address, A4);
+    assert.equal(net.isErc8183Available(), true);
+    assert.equal(net.requireErc8183Address(), A4);
   });
   const erc8183 = read('src/lib/contracts/erc8183.ts');
   const networkSrc = read('src/lib/config/network.ts');
@@ -318,4 +322,39 @@ test('ERC-8183 address comes from the configured environment (canonical pin inta
   assert.ok(!erc8183.includes('import '), 'erc8183.ts must stay a pure constants/ABI module');
   // The ABI itself is network-independent — mainnet selection must not change it.
   assert.ok(erc8183.includes('export const agenticCommerceAbi'));
+});
+
+// ── 11. ERC-8183 is optional on mainnet: app boots, features fail closed ─────
+// (2026-09-23 decision: external protocol dependency, no verified mainnet
+// address — required at no layer, unavailable per-feature with 503.)
+test('ERC-8183 unconfigured on mainnet boots with null and fails closed per-feature', async () => {
+  const noAc = { ...MAINNET_ENV };
+  delete noAc.ARC_MAINNET_ERC8183_ADDRESS;
+  await withEnv(noAc, async () => {
+    // The app still boots: null address, no startup error.
+    const cfg = net.getNetworkConfig();
+    assert.equal(cfg.name, 'mainnet');
+    assert.equal(cfg.erc8183Address, null);
+    assert.equal(net.isErc8183Available(), false);
+    assert.deepEqual(net.validateNetworkEnv(), []);
+    // Direct access throws the typed unavailable error (never a testnet value).
+    assert.throws(() => net.requireErc8183Address(), (e) => e instanceof net.Erc8183UnavailableError && e.code === 'erc8183_unavailable');
+    try {
+      net.requireErc8183Address();
+      assert.fail('must throw');
+    } catch (e) {
+      assert.ok(!e.message.includes('0x0747EEf0706327138c69792bF28Cd525089e4583'), 'unavailable error must not leak the testnet pin as a suggestion');
+    }
+  });
+  // Malformed value fails closed (never silently ignored).
+  await withEnv({ ...noAc, ARC_MAINNET_ERC8183_ADDRESS: '0x1234' }, async () => {
+    assert.throws(() => net.getNetworkConfig(), /ARC_MAINNET_ERC8183_ADDRESS/);
+  });
+  // ERC-8183 is not a boot-blocking required var.
+  assert.ok(!net.MAINNET_REQUIRED_VARS.includes('ARC_MAINNET_ERC8183_ADDRESS'));
+  // The route guard answers 503 with the erc8183_unavailable code.
+  const guard = read('src/lib/jobs/erc8183Guard.ts');
+  assert.match(guard, /requireErc8183Address/);
+  assert.match(guard, /status:\s*503/);
+  assert.match(guard, /erc8183_unavailable/);
 });

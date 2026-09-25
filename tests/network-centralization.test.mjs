@@ -114,13 +114,24 @@ test('B: ARC_NETWORK=mainnet resolves the configured mainnet values', async () =
 });
 
 // ── C. No production money path can import the static ERC-8183 pin ──────────
+// (2026-09-23: routes resolve via getNetworkConfig().erc8183Address or the
+// fail-closed erc8183AddressOr503()/requireErc8183Address() guard — never the
+// static pin, never a module-level non-null assertion that could throw on
+// import or smuggle null into a contract call.)
 test('C: no money path imports AGENTIC_COMMERCE_CONTRACT from erc8183.ts (network config is the authority)', () => {
   for (const p of MONEY_PATHS) {
     const src = read(p);
     assert.match(
       src,
-      /getNetworkConfig\(\)\.erc8183Address/,
-      `${p} must resolve the ERC-8183 address from getNetworkConfig()`
+      /getNetworkConfig\(\)\.erc8183Address|erc8183AddressOr503\(\)|requireErc8183Address\(\)/,
+      `${p} must resolve the ERC-8183 address from getNetworkConfig() or the fail-closed guard`
+    );
+    // The old module-level non-null assertion pattern is banned: on mainnet
+    // without a verified address it either throws at import (whole-route
+    // 500) or smuggles null into a contract call. Per-request guard only.
+    assert.ok(
+      !/erc8183Address as `0x\$\{string\}`/.test(src),
+      `${p} must not assert a possibly-null erc8183Address non-null at module scope — use erc8183AddressOr503() per request`
     );
     const erc8183Imports = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]@\/lib\/contracts\/erc8183['"]/g)];
     assert.ok(

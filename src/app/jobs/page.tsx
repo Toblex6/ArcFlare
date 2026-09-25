@@ -820,16 +820,18 @@ export default function JobsPage() {
                   wordBreak: 'break-all',
                 }}
               >
-                {getNetworkConfig().erc8183Address}
+                {getNetworkConfig().erc8183Address ?? 'ERC-8183 unavailable on this network (external protocol address unconfigured)'}
               </p>
+              {getNetworkConfig().erc8183Address ? (
               <a
-                href={`${explorerAddressUrl(getNetworkConfig().erc8183Address)}`}
+                href={`${explorerAddressUrl(getNetworkConfig().erc8183Address as string)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--primary)', fontSize: 11 }}
               >
                 View on ArcScan →
               </a>
+              ) : null}
             </div>
             <div style={{ marginTop: 16 }}>
               <button

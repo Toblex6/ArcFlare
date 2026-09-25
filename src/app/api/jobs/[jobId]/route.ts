@@ -3,12 +3,14 @@ import { prisma } from '@/lib/prisma';
 import { agenticCommerceAbi, JOB_STATUS } from '@/lib/contracts/erc8183';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+import { erc8183AddressOr503 } from '@/lib/jobs/erc8183Guard';
 const arcTestnet = getArcChain();
-// ERC-8183 contract address resolves from the authoritative network config.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) return erc8183.response;
+    const ERC8183_ADDRESS = erc8183.address;
     const { jobId } = await params;
     // Malformed jobIds are a caller error (400), not a server error — the
     // same invalid-jobId contract as the canonical accept/fund routes.

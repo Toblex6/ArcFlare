@@ -14,6 +14,7 @@ import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 const arcTestnet = getArcChain();
 import { agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { hashCriteria } from "@/lib/jobs/criteriaHash";
@@ -166,9 +167,12 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     validationPolicy = { validatorSCA: validatorSCA.toLowerCase(), tag: validation.tag || null };
   }
 
-  // ERC-8183 contract address resolves from the authoritative network config
-  // (mainnet-aware) — never a static testnet pin or an env override.
-  const escrowContract = getNetworkConfig().erc8183Address as `0x${string}`;
+  // ERC-8183 contract address resolves per-request via erc8183AddressOr503()
+  // (authoritative network config, fail-closed 503 when the external
+  // protocol address is unconfigured) — never a static testnet pin.
+  const erc8183 = erc8183AddressOr503();
+  if ("response" in erc8183) return erc8183.response;
+  const escrowContract = erc8183.address;
   const circleClient = getCircleClient();
   const expiredAt = Math.floor(Date.now() / 1000) + (criteria.deadlineUnix ? criteria.deadlineUnix - Math.floor(Date.now()/1000) : 86400);
   const evaluator = evaluatorAddress || clientAddress;

@@ -21,16 +21,21 @@ import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAd
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
 import { getNetworkConfig } from "@/lib/config/network";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 import { evaluatePolicyForSpend, withTreasurySpendLock } from "@/lib/ledger/treasuryPolicy";
 import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimitEnforcer";
 import { checkRateLimit } from "@/src/lib/ratelimit";
 
 // ERC-8183 contract + USDC token address resolve from the authoritative
 // network config (mainnet-aware) — never static testnet pins in erc8183.ts.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+// ERC-8183 resolves per-request via erc8183AddressOr503() (fail-closed 503
+// when the external protocol address is unconfigured), never at module level.
 const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {
+  const erc8183 = erc8183AddressOr503();
+  if ("response" in erc8183) return erc8183.response;
+  const ERC8183_ADDRESS = erc8183.address;
   // H9: payments-tier rate limit on this fund-moving POST.
   const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
   if (!allowed) return limitResponse!;

@@ -12,9 +12,12 @@
 //     already live in this repository (verified, unchanged behavior).
 //   - "mainnet": Arc Mainnet (production target). NO mainnet deployment
 //     addresses are known in this repository, so EVERY mainnet value is a
-//     required ARC_MAINNET_* environment input. Selecting mainnet with a
-//     missing value FAILS CLOSED (throws) — it never silently inherits a
-//     testnet value.
+//     required ARC_MAINNET_* environment input — EXCEPT
+//     ARC_MAINNET_ERC8183_ADDRESS (external protocol dependency with no
+//     verified mainnet address; optional, null when unset, per-feature
+//     fail-closed via requireErc8183Address()). Selecting mainnet with a
+//     missing REQUIRED value FAILS CLOSED (throws) — it never silently
+//     inherits a testnet value.
 //
 // Selection: ARC_NETWORK (server) or NEXT_PUBLIC_ARC_NETWORK (browser).
 // Unset (or any value other than "mainnet") => testnet. Testnet never
@@ -58,8 +61,14 @@ export interface ArcNetworkConfig {
   usdcAddress: string;
   /** EURC (6 decimals) on Arc */
   eurcAddress: string;
-  /** ERC-8183 AgenticCommerce contract on Arc */
-  erc8183Address: string;
+  /**
+   * ERC-8183 AgenticCommerce contract on Arc — or null when unconfigured.
+   * Testnet always carries the pinned reference implementation. Mainnet
+   * carries the verified ARC_MAINNET_ERC8183_ADDRESS when set, otherwise
+   * null: ERC-8183-dependent features fail closed per-feature (503) instead
+   * of crashing the app, and NEVER fall back to the testnet address.
+   */
+  erc8183Address: string | null;
   /** WalletConnect chain identifier, e.g. "eip155:5042002" */
   walletConnectChainId: string;
 }
@@ -147,6 +156,13 @@ function buildTestnetConfig(
 
 // Every mainnet value is a required environment input — nothing is inherited
 // from testnet. Missing values fail closed with an actionable error.
+//
+// EXCEPTION: ARC_MAINNET_ERC8183_ADDRESS is deliberately NOT in this list.
+// ERC-8183 is an external protocol dependency with no verified mainnet
+// address (2026-09-23 decision). Requiring it would refuse to boot the entire
+// app on mainnet; instead it is optional (null when unset) and every
+// ERC-8183-dependent feature fails closed individually via
+// requireErc8183Address(). See erc8183Address docs on the interface above.
 export const MAINNET_REQUIRED_VARS = [
   "ARC_MAINNET_CHAIN_ID",
   "ARC_MAINNET_CIRCLE_BLOCKCHAIN",
@@ -158,7 +174,6 @@ export const MAINNET_REQUIRED_VARS = [
   "ARC_MAINNET_CCTP_MESSAGE_TRANSMITTER",
   "ARC_MAINNET_USDC_ADDRESS",
   "ARC_MAINNET_EURC_ADDRESS",
-  "ARC_MAINNET_ERC8183_ADDRESS",
   "ARC_MAINNET_X402_VERIFIER",
 ] as const;
 
@@ -191,13 +206,20 @@ function buildMainnetConfig(
     "ARC_MAINNET_CCTP_MESSAGE_TRANSMITTER",
     "ARC_MAINNET_USDC_ADDRESS",
     "ARC_MAINNET_EURC_ADDRESS",
-    "ARC_MAINNET_ERC8183_ADDRESS",
     "ARC_MAINNET_X402_VERIFIER",
   ] as const) {
     const v = readEnv(env, k)!;
     if (!ADDRESS_RE.test(v)) {
       throw new Error(`${k} must be a 0x EVM address (got "${v}").`);
     }
+  }
+  // ERC-8183 is optional on mainnet (see MAINNET_REQUIRED_VARS comment):
+  // validated when present, null when absent — never testnet-inherited.
+  const erc8183Raw = readEnv(env, "ARC_MAINNET_ERC8183_ADDRESS");
+  if (erc8183Raw !== undefined && !ADDRESS_RE.test(erc8183Raw)) {
+    throw new Error(
+      `ARC_MAINNET_ERC8183_ADDRESS must be a 0x EVM address (got "${erc8183Raw}") — or leave it unset for per-feature fail-closed.`
+    );
   }
   const primaryRpc = readEnv(env, "ARC_MAINNET_RPC_URL")!;
   const extraFallbacks = splitList(readEnv(env, "ARC_MAINNET_RPC_FALLBACKS"));
@@ -220,7 +242,7 @@ function buildMainnetConfig(
     x402VerifierContract: readEnv(env, "ARC_MAINNET_X402_VERIFIER")!,
     usdcAddress: readEnv(env, "ARC_MAINNET_USDC_ADDRESS")!,
     eurcAddress: readEnv(env, "ARC_MAINNET_EURC_ADDRESS")!,
-    erc8183Address: readEnv(env, "ARC_MAINNET_ERC8183_ADDRESS")!,
+    erc8183Address: erc8183Raw ?? null,
     walletConnectChainId:
       readEnv(env, "ARC_MAINNET_WALLETCONNECT_CHAIN_ID") ?? eip155,
   };
@@ -277,6 +299,48 @@ export function validateNetworkEnv(
   } catch (e: any) {
     return [e?.message ?? String(e)];
   }
+}
+
+// ─── ERC-8183 per-feature fail-closed ────────────────────────────────────────
+// ERC-8183 is an EXTERNAL protocol dependency (FlareHQ only calls it, never
+// deploys it) with no verified Arc Mainnet address (2026-09-23 decision).
+// The address is therefore optional in mainnet config (null when unset) and
+// every ERC-8183-dependent feature gates on requireErc8183Address(): set
+// address → the verified value; unset → Erc8183UnavailableError, which route
+// handlers translate to HTTP 503. There is no testnet fallback and no fake
+// address anywhere in this path.
+
+/** Thrown when a feature needs ERC-8183 but no address is configured. */
+export class Erc8183UnavailableError extends Error {
+  readonly code = "erc8183_unavailable";
+  constructor(networkName: ArcNetworkName = getArcNetworkName()) {
+    super(
+      `ERC-8183 AgenticCommerce is not configured on ${networkName} — job, hiring, and procurement features are unavailable. ` +
+        `Set ARC_MAINNET_ERC8183_ADDRESS to the verified mainnet protocol address to enable them; testnet addresses are never used.`
+    );
+    this.name = "Erc8183UnavailableError";
+  }
+}
+
+/** True when the selected network has a configured ERC-8183 address. */
+export function isErc8183Available(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  return getNetworkConfig(env).erc8183Address !== null;
+}
+
+/**
+ * The configured ERC-8183 address, or throws Erc8183UnavailableError.
+ * Route handlers MUST call this (via erc8183AddressOr503) instead of reading
+ * getNetworkConfig().erc8183Address directly, so mainnet stays fail-closed
+ * per-feature instead of crashing on a null address.
+ */
+export function requireErc8183Address(
+  env: Record<string, string | undefined> = process.env
+): string {
+  const cfg = getNetworkConfig(env);
+  if (!cfg.erc8183Address) throw new Erc8183UnavailableError(cfg.name);
+  return cfg.erc8183Address;
 }
 
 // ─── Convenience readers (all flow from getNetworkConfig) ───────────────────

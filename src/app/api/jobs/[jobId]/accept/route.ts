@@ -17,17 +17,18 @@ import { agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { evaluateProviderAcceptance } from "@/lib/procurement/procurementService";
 import { createPublicClient, http } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 const arcTestnet = getArcChain();
 
 // The chain the ERC-8183 contract lives on (same RPC wiring as the hire route).
 const RPC_URL = getNetworkConfig().primaryRpc;
-// ERC-8183 contract address resolves from the authoritative network config.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+// ERC-8183 resolves per-request via erc8183AddressOr503() (fail-closed 503
+// when unconfigured) — never at module level (must not throw on import).
 
-async function readOnChainJob(jobIdBig: bigint): Promise<{ budget: bigint; status: number } | null> {
+async function readOnChainJob(erc8183Address: `0x${string}`, jobIdBig: bigint): Promise<{ budget: bigint; status: number } | null> {
   const publicClient = createPublicClient({ chain: arcTestnet, transport: http(RPC_URL) });
   const job = (await publicClient.readContract({
-    address: ERC8183_ADDRESS,
+    address: erc8183Address,
     abi: agenticCommerceAbi as any,
     functionName: "getJob",
     args: [jobIdBig],
@@ -38,6 +39,9 @@ async function readOnChainJob(jobIdBig: bigint): Promise<{ budget: bigint; statu
 }
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {
+  const erc8183 = erc8183AddressOr503();
+  if ("response" in erc8183) return erc8183.response;
+  const ERC8183_ADDRESS = erc8183.address;
   const { jobId } = await ctx.params;
   const jobIdBig = (() => { try { return BigInt(jobId); } catch { return null; } })();
   if (!jobIdBig) return NextResponse.json({ error: "invalid jobId" }, { status: 400 });
@@ -102,7 +106,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   // chain proves that.
   let onChain: { budget: bigint; status: number } | null = null;
   try {
-    onChain = await readOnChainJob(jobIdBig);
+    onChain = await readOnChainJob(ERC8183_ADDRESS, jobIdBig);
   } catch (e: any) {
     return NextResponse.json({ error: `on-chain job read failed: ${e?.message ?? e}` }, { status: 502 });
   }
@@ -197,7 +201,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
     // Re-check the chain before reporting failure so a raced double-accept
     // still surfaces as a replay rather than a 500.
     try {
-      const after = await readOnChainJob(jobIdBig);
+      const after = await readOnChainJob(ERC8183_ADDRESS, jobIdBig);
       if (after && after.budget > 0n) {
         return NextResponse.json({ success: true, replayed: true, jobId, budget: after.budget.toString(), message: "Budget already set on-chain — replay" });
       }

@@ -18,6 +18,7 @@ import { resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { createPublicClient, http, decodeEventLog } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 const arcTestnet = getArcChain();
 import { agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
@@ -231,9 +232,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const description = posting.description;
   const expiredAt = Math.floor(Date.now() / 1000) + 86400;
-  // ERC-8183 contract address resolves from the authoritative network config
-  // (mainnet-aware) — never a static testnet pin or an env override.
-  const escrowContract = getNetworkConfig().erc8183Address as `0x${string}`;
+  // ERC-8183 contract address resolves per-request via erc8183AddressOr503()
+  // (authoritative network config, fail-closed 503 when the external
+  // protocol address is unconfigured) — never a static testnet pin.
+  const erc8183 = erc8183AddressOr503();
+  if ("response" in erc8183) return await fail("ERC-8183 job creation is unavailable on this network (external protocol address unconfigured).", 503, { code: "erc8183_unavailable" });
+  const escrowContract = erc8183.address;
   const circleClient = getCircleClient();
 
   // If we took over a STALE HIRING claim, the previous attempt may have already

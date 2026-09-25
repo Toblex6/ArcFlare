@@ -52,12 +52,15 @@ import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
 import { agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 
 // ── ERC-8183 contract on Arc ─────────────────────────────────────────────────
 // The ABI comes from the canonical src/lib/contracts/erc8183.ts. The contract
 // + USDC token ADDRESSES resolve from the AUTHORITATIVE network config
 // (getNetworkConfig(), mainnet-aware) — never a static testnet pin.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+// ERC-8183 resolves per-request via erc8183AddressOr503() inside each handler
+// (fail-closed 503 when the external protocol address is unconfigured) —
+// never at module level (must not throw on import).
 const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 const arcTestnet = {
@@ -129,7 +132,7 @@ function usdc(n: bigint): string {
   return formatUnits(n, 6);
 }
 
-async function requireJob(jobId: string | number): Promise<any> {
+async function requireJob(erc8183Address: `0x${string}`, jobId: string | number): Promise<any> {
   // Malformed jobIds are a caller error (400), not a chain/RPC failure —
   // the same invalid-jobId contract as the canonical [jobId] routes.
   // (Previously BigInt(jobId) threw inside the read try/catch → 502.)
@@ -141,7 +144,7 @@ async function requireJob(jobId: string | number): Promise<any> {
   }
   try {
     return (await publicClient.readContract({
-      address: ERC8183_ADDRESS,
+      address: erc8183Address,
       abi: agenticCommerceAbi,
       functionName: 'getJob',
       args: [jobIdBig],
@@ -151,7 +154,7 @@ async function requireJob(jobId: string | number): Promise<any> {
     throw new PreflightError(
       notFound ? 404 : 502,
       notFound
-        ? `Job #${jobId} does not exist on the ERC-8183 contract (${ERC8183_ADDRESS}) — check the jobId.`
+        ? `Job #${jobId} does not exist on the ERC-8183 contract (${erc8183Address}) — check the jobId.`
         : `Could not read job #${jobId} state from Arc Testnet RPC: ${e.message}`
     );
   }
@@ -184,12 +187,12 @@ const DB_STATUS_BY_ONCHAIN: Record<number, string> = {
  * true on-chain, before the caller's own update() applies the current step on
  * top. Never writes a status from scratch that ignores on-chain state.
  */
-async function ensureErc8183JobBackfilled(jobId: string, req?: Request): Promise<any> {
+async function ensureErc8183JobBackfilled(erc8183Address: `0x${string}`, jobId: string, req?: Request): Promise<any> {
   const jobIdBig = BigInt(jobId);
   const existing = await prisma.erc8183Job.findUnique({ where: { jobId: jobIdBig } });
   if (existing) return existing;
 
-  const onChain = await requireJob(jobId);
+  const onChain = await requireJob(erc8183Address, jobId);
   const merchant = req ? await resolveMerchant(req as any).catch(() => null) : null;
   const created = await prisma.erc8183Job.create({
     data: {
@@ -255,6 +258,9 @@ async function extractJobId(txHash: string): Promise<string> {
 // ─── POST /api/jobs ───────────────────────────────────────────────────────────
 async function jobsHandler(request: Request) {
   try {
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) return erc8183.response;
+    const ERC8183_ADDRESS = erc8183.address;
     const body = await request.json();
     const { action } = body;
 
@@ -533,7 +539,7 @@ async function jobsHandler(request: Request) {
       if (budgetStepUp) return budgetStepUp;
 
       // ── PREFLIGHT: catch revert causes before spending gas.
-      const jobForBudget = await requireJob(jobId);
+      const jobForBudget = await requireJob(ERC8183_ADDRESS, jobId);
       const onChainProvider = (jobForBudget.provider || '').toLowerCase();
       if (onChainProvider !== providerSCA.toLowerCase()) {
         throw new PreflightError(
@@ -559,7 +565,7 @@ async function jobsHandler(request: Request) {
       // Ensure the canonical row exists (backfill pre-change orphans from
       // on-chain truth) BEFORE the on-chain tx, so the update below can never
       // hit P2025 on a missing row after money has moved.
-      await ensureErc8183JobBackfilled(jobId, request);
+      await ensureErc8183JobBackfilled(ERC8183_ADDRESS, jobId, request);
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
@@ -698,7 +704,7 @@ async function jobsHandler(request: Request) {
       // ── PREFLIGHT: the escrow's fund() pulls the on-chain budget via
       // transferFrom, so every failure below used to revert on-chain after
       // the fact. Diagnose it up-front instead.
-      const jobToFund = await requireJob(jobId);
+      const jobToFund = await requireJob(ERC8183_ADDRESS, jobId);
       const statusName = JOB_STATUS_NAMES[Number(jobToFund.status)] || 'Unknown';
       if ((jobToFund.client || '').toLowerCase() !== clientSCA.toLowerCase()) {
         throw new PreflightError(
@@ -752,7 +758,7 @@ async function jobsHandler(request: Request) {
 
       // Ensure the canonical row exists (backfill pre-change orphans from
       // on-chain truth) BEFORE the on-chain tx.
-      await ensureErc8183JobBackfilled(jobId, request);
+      await ensureErc8183JobBackfilled(ERC8183_ADDRESS, jobId, request);
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
@@ -825,7 +831,7 @@ async function jobsHandler(request: Request) {
       if (submitStepUp) return submitStepUp;
 
       // ── PREFLIGHT
-      const jobToSubmit = await requireJob(jobId);
+      const jobToSubmit = await requireJob(ERC8183_ADDRESS, jobId);
       if ((jobToSubmit.provider || '').toLowerCase() !== providerSCA.toLowerCase()) {
         throw new PreflightError(
           409,
@@ -846,7 +852,7 @@ async function jobsHandler(request: Request) {
 
       // Ensure the canonical row exists (backfill pre-change orphans from
       // on-chain truth) BEFORE the on-chain tx.
-      await ensureErc8183JobBackfilled(jobId, request);
+      await ensureErc8183JobBackfilled(ERC8183_ADDRESS, jobId, request);
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: providerSCA,
@@ -904,7 +910,7 @@ async function jobsHandler(request: Request) {
       if (completeStepUp) return completeStepUp;
 
       // ── PREFLIGHT
-      const jobToComplete = await requireJob(jobId);
+      const jobToComplete = await requireJob(ERC8183_ADDRESS, jobId);
       // The provider identity is authoritative from on-chain getJob() — never
       // from the request body (complete is signed by the evaluator/client, so
       // any providerSCA in the body would be untrusted). Used by the ledger
@@ -948,7 +954,7 @@ async function jobsHandler(request: Request) {
 
       // Ensure the canonical row exists (backfill pre-change orphans from
       // on-chain truth) BEFORE the on-chain tx.
-      await ensureErc8183JobBackfilled(jobId, request);
+      await ensureErc8183JobBackfilled(ERC8183_ADDRESS, jobId, request);
 
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: clientSCA,
@@ -1114,6 +1120,9 @@ export const POST = withApiKeyOrAnySession(jobsHandler);
 // Reads job state directly from ERC-8183 AgenticCommerce contract
 async function getJobHandler(request: Request) {
   try {
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) return erc8183.response;
+    const ERC8183_ADDRESS = erc8183.address;
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get('jobId');
 

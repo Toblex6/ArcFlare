@@ -5,15 +5,20 @@ import { agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { prisma } from '@/lib/prisma';
 import { createPublicClient, http, decodeEventLog } from 'viem';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+import { erc8183AddressOr503 } from '@/lib/jobs/erc8183Guard';
 const arcTestnet = getArcChain();
-// ERC-8183 contract address resolves from the authoritative network config
-// (mainnet-aware) — never the static testnet pin in erc8183.ts.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
+// ERC-8183 contract address resolves per-request via erc8183AddressOr503()
+// (authoritative network config, mainnet-aware, fail-closed 503 when the
+// external protocol address is unconfigured) — never the static testnet pin
+// in erc8183.ts, and never at module level (must not throw on import).
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
 async function createJobHandler(req: NextRequest, merchant: AuthedMerchant) {
   try {
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) return erc8183.response;
+    const ERC8183_ADDRESS = erc8183.address;
     const body = await req.json();
     const { clientWalletId, providerAddress, evaluatorAddress, description } = body;
 

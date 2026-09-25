@@ -4,11 +4,14 @@ import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
 import { getNetworkConfig } from "@/lib/config/network";
 
 // Network-cutover: the ERC-8183 escrow contract address resolves from the
-// authoritative network config (getNetworkConfig().erc8183Address), which is
-// testnet's pinned value on testnet and the required ARC_MAINNET_ERC8183_ADDRESS
-// on mainnet. The old AGENTIC_COMMERCE_CONTRACT env override is intentionally
-// NOT honored — the network config is the single authority.
-function resolveEscrowContract(): string {
+// authoritative network config (getNetworkConfig().erc8183Address): the
+// pinned testnet value on testnet, the verified ARC_MAINNET_ERC8183_ADDRESS
+// on mainnet when set, or NULL when unconfigured (external protocol
+// dependency with no verified mainnet address — the card stays available
+// with escrowContract: null while the hire endpoint itself answers 503).
+// The old AGENTIC_COMMERCE_CONTRACT env override is intentionally NOT
+// honored — the network config is the single authority.
+function resolveEscrowContract(): string | null {
   return getNetworkConfig().erc8183Address;
 }
 

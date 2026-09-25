@@ -23,17 +23,17 @@ import { getCircleClient, createContractTransaction } from '@/lib/circle/client'
 import { agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+import { erc8183AddressOr503 } from '@/lib/jobs/erc8183Guard';
 const arcTestnet = getArcChain();
-// ERC-8183 contract address resolves from the authoritative network config.
-const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
-
+// ERC-8183 contract address resolves per-request (fail-closed when the
+// external protocol address is unconfigured) — never at module level.
 const RPC_URL = getNetworkConfig().primaryRpc;
 
-async function readOnChainJob(jobId: bigint): Promise<{ status: number; budget: bigint } | null> {
+async function readOnChainJob(erc8183Address: `0x${string}`, jobId: bigint): Promise<{ status: number; budget: bigint } | null> {
   try {
     const publicClient = createPublicClient({ chain: arcTestnet, transport: http(RPC_URL) });
     const job = (await publicClient.readContract({
-      address: ERC8183_ADDRESS,
+      address: erc8183Address,
       abi: agenticCommerceAbi as any,
       functionName: 'getJob',
       args: [jobId],
@@ -104,9 +104,16 @@ export async function POST(
 
     // Best-effort on-chain reject — only when the on-chain job is still OPEN
     // (nothing escrowed; safe). Signed with the evaluator's Circle wallet.
+    // Skipped (not failed) when ERC-8183 is unconfigured — DB removal above
+    // stays authoritative for moderation.
     let onChain: { attempted: boolean; txHash?: string; note?: string } = { attempted: false };
-    try {
-      const onChainJob = await readOnChainJob(jobIdBig);
+    const erc8183 = erc8183AddressOr503();
+    if ("response" in erc8183) {
+      onChain = { attempted: false, note: "erc8183_unavailable" };
+    } else {
+      const ERC8183_ADDRESS = erc8183.address;
+      try {
+      const onChainJob = await readOnChainJob(ERC8183_ADDRESS, jobIdBig);
       if (onChainJob && onChainJob.status === 0) {
         const evaluatorWalletId = await resolveEvaluatorWalletId(job.evaluatorSCA || job.clientSCA);
         if (evaluatorWalletId) {
@@ -135,6 +142,7 @@ export async function POST(
       }
     } catch (e: any) {
       onChain = { attempted: true, note: `on-chain reject failed (DB removal still applied): ${e?.message ?? e}` };
+      }
     }
 
     return NextResponse.json({
