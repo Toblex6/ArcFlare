@@ -6,19 +6,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/ratelimit";
-import { jwtVerify } from "jose";
-import { tryJwtSecret } from "@/src/lib/auth/secrets";
+import { resolveMerchant } from "@/src/lib/middleware/withMerchantAuth";
 
-const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
+// H5: central merchant auth (active + verified + sessionVersion).
 async function getMerchantFromCookie(req: NextRequest) {
-    const token = req.cookies.get("merchant_token")?.value;
-    if (!token || !JWT_SECRET) return null;
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
-    return prisma.merchant.findUnique({ where: { id: merchantId } });
+    const authed = await resolveMerchant(req);
+    if (!authed) return null;
+    return prisma.merchant.findUnique({ where: { id: authed.id } });
 }
 
 // ── TOOL DEFINITIONS ────────────────────────────────────────────────────────

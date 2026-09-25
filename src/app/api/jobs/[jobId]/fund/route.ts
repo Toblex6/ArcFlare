@@ -21,8 +21,9 @@ import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAd
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getCircleClient, createContractTransaction } from "@/lib/circle/client";
 import { getNetworkConfig } from "@/lib/config/network";
-import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
+import { evaluatePolicyForSpend, withTreasurySpendLock } from "@/lib/ledger/treasuryPolicy";
 import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimitEnforcer";
+import { checkRateLimit } from "@/src/lib/ratelimit";
 
 // ERC-8183 contract + USDC token address resolve from the authoritative
 // network config (mainnet-aware) — never static testnet pins in erc8183.ts.
@@ -30,6 +31,9 @@ const ERC8183_ADDRESS = getNetworkConfig().erc8183Address as `0x${string}`;
 const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {
+  // H9: payments-tier rate limit on this fund-moving POST.
+  const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
+  if (!allowed) return limitResponse!;
   const { jobId } = await ctx.params;
   let jobIdBig: bigint;
   try { jobIdBig = BigInt(jobId); } catch { return NextResponse.json({ error: "invalid jobId" }, { status: 400 }); }
@@ -72,6 +76,15 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   // (the Circle SCA derived above). All spend-limit enforcement binds to it.
   const payer = clientWalletAddress;
 
+  // H10: serialize the cap-check → on-chain fund → escrow-lock debit per
+  // agent. Daily-cap evaluation is read-then-debit; without the lock two
+  // concurrent funds could each read the same spentToday and both pass.
+  // The JOB_ESCROW_LOCK DEBIT recorded below counts toward the cap (the
+  // policy query sums all DEBIT entries), so holding the lock across the
+  // check and the lock-write makes the cap atomic. Server idempotency: the
+  // fundTx hash keys the ledger entry and the FUNDED transition is a
+  // conditional claim (status OPEN → FUNDED); replays return the winner.
+  return withTreasurySpendLock(clientAgent.id, async () => {
   // Policy checks — re-evaluate at fund time (treasury may have changed since hire)
   const policyCheck = await evaluatePolicyForSpend({ agentRegistryId: clientAgent.id, amount: BigInt(job.budget), kind: "subcontractor" });
   if (!policyCheck.allowed) return NextResponse.json({ error: `Treasury policy blocked: ${policyCheck.reason}` }, { status: 403 });
@@ -121,10 +134,19 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
     return NextResponse.json({ error: `fund failed: ${e.message}`, approveTx }, { status: 500 });
   }
 
-  await prisma.erc8183Job.update({
-    where: { jobId: jobIdBig },
+  // H10: conditional claim — only OPEN may transition to FUNDED. A
+  // concurrent fund that won the race leaves FUNDED; we replay it.
+  const fundedClaim = await prisma.erc8183Job.updateMany({
+    where: { jobId: jobIdBig, status: "OPEN" },
     data: { status: "FUNDED", txHashes: { push: [approveTx, fundTx] } },
   });
+  if (fundedClaim.count === 0) {
+    const reread = await prisma.erc8183Job.findUnique({ where: { jobId: jobIdBig } });
+    if (reread?.status === "FUNDED") {
+      return NextResponse.json({ success: true, replayed: true, jobId, status: "FUNDED", message: "Job already funded — replay" });
+    }
+    return NextResponse.json({ error: `Job is ${reread?.status ?? "unknown"}, not OPEN — cannot fund` }, { status: 409 });
+  }
 
   // Ledger: escrow lock for client if agent — awaited (non-fatal on failure)
   try {
@@ -145,6 +167,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ jobId: string 
   } catch (e: any) { console.error("[ledger] fund lock failed:", e.message); }
 
   return NextResponse.json({ success: true, jobId, status: "FUNDED", approveTx, fundTx, payer });
+  });
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ jobId: string }> }) {

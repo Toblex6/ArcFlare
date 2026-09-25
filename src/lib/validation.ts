@@ -5,10 +5,18 @@ import { z } from 'zod';
 
 const scaAddress = z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Must be a valid 0x Ethereum address');
 
+// H12: shared USDC amount rule — decimal string, up to 6 decimals, > 0,
+// capped so a malformed/huge input can never reach a bridge/gateway/stream
+// sink. All fund-moving routes validate amounts through this (or an
+// identical inline AMOUNT_RE), never parseFloat-then-trust.
+export const MAX_USDC_AMOUNT = 10_000_000; // 10M USDC per operation cap
+export const USDC_AMOUNT_RE = /^\d+(\.\d{1,6})?$/;
+
 const usdcAmount = z
   .string()
   .regex(/^\d+(\.\d{1,6})?$/, 'Amount must be a positive number with up to 6 decimals')
-  .refine((v) => parseFloat(v) > 0, 'Amount must be greater than 0');
+  .refine((v) => parseFloat(v) > 0, 'Amount must be greater than 0')
+  .refine((v) => parseFloat(v) <= MAX_USDC_AMOUNT, `Amount exceeds maximum ${MAX_USDC_AMOUNT}`);
 
 // ── /api/payments/initialize ──────────────────────────────────────────────────
 export const InitializeSchema = z.object({

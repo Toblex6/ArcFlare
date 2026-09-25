@@ -18,13 +18,26 @@
 // gateway's own signer. Either way, an ApiKey holder can never route pooled
 // gateway funds to an arbitrary address.
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { withApiKey } from "@/lib/middleware/withApiKey";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { privateKeyToAccount } from "viem/accounts";
 import { explorerTxUrl } from "@/lib/config/network";
+import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
+import { USDC_AMOUNT_RE, MAX_USDC_AMOUNT } from "@/lib/validation";
 
-async function withdrawHandler(request: Request) {
+// H12: only chains this settlement pool is actually provisioned for.
+const ALLOWED_CHAINS = new Set(["arcTestnet", "base", "base-sepolia"]);
+
+// SECURITY (audit H7): this route signs with the pooled SELLER_PRIVATE_KEY,
+// so it was previously reachable by any active ApiKey with no proof the
+// caller controls that seller. Now the single ownership gate
+// (verifyCallerControlsAddress) must affirmatively match the derived seller
+// EOA against the authenticated caller (merchant wallet/buyer EOA/owned
+// agent, consumer session, or the platform identity for the internal key) —
+// 403 before any funds move otherwise. The treasury allowlist check below
+// stays as the second, destination-side defense.
+async function withdrawHandler(request: NextRequest) {
   try {
     const { amount, destinationChain, destinationAddress } = await request.json();
 
@@ -37,7 +50,35 @@ async function withdrawHandler(request: Request) {
       return NextResponse.json({ success: false, error: "amount is required." }, { status: 400 });
     }
 
+    // H12: amount must be a plain decimal within the shared 10M USDC cap.
+    const amountStr = String(amount);
+    if (!USDC_AMOUNT_RE.test(amountStr) || parseFloat(amountStr) > MAX_USDC_AMOUNT) {
+      return NextResponse.json(
+        { success: false, error: "amount must be a decimal number not exceeding the maximum USDC amount." },
+        { status: 400 }
+      );
+    }
+
+    // H12: chain must be on the allowlist.
+    if (destinationChain && !ALLOWED_CHAINS.has(destinationChain)) {
+      return NextResponse.json(
+        { success: false, error: `destinationChain must be one of: ${[...ALLOWED_CHAINS].join(", ")}.` },
+        { status: 400 }
+      );
+    }
+
     const sellerAddress = privateKeyToAccount(sellerPrivateKey as `0x${string}`).address.toLowerCase();
+
+    // H7 ownership gate — MUST come before the GatewayClient is constructed
+    // or any withdrawal is initiated.
+    const actor = await verifyCallerControlsAddress(request, sellerAddress);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: "You do not control the seller wallet this withdrawal would draw from." },
+        { status: 403 }
+      );
+    }
+
     const treasuryAllowlist = (process.env.SELLER_GATEWAY_TREASURY_ADDRESSES || "")
       .split(",")
       .map((a) => a.trim().toLowerCase())

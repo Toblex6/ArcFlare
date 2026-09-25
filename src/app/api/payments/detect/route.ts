@@ -58,31 +58,80 @@ async function detectHandler(request: Request) {
       .slice(2, 8)}`;
     const sourceChain = getChainName(sourceDomain ?? 3);
 
-    // Record detection in ledger
-    await prisma.paymentLog.create({
-      data: {
-        reference,
-        amount: parseFloat(amount) || 0,
-        currency: detectCurrency.symbol,
-        tokenAddress: tokenAddressFor('USDC'),
-        chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
-        senderEmail: 'cross-chain-detect@arc.network',
-        merchant: 'FlareHQ CCTP V2 Router',
-        status: 'POLLING_CIRCLE_TESTNET_IRIS_API',
-        webhookUrl: webhookUrl || null,
-      },
-    });
+    // M2: shared amount validation (decimal string, ≤6 decimals, >0,
+    // capped) — a zero/negative/malformed amount must never create a row.
+    const amountStr = String(amount ?? "").trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(amountStr) || !Number.isFinite(parseFloat(amountStr)) || parseFloat(amountStr) <= 0 || parseFloat(amountStr) > 10_000_000) {
+      return NextResponse.json(
+        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
+        { status: 400 }
+      );
+    }
+
+    // M2: unique source-message claim at create time (cctpSourceTxHash is
+    // @unique) — the same burn can never be detected twice. P2002 → 409.
+    let created: any;
+    try {
+      created = await prisma.paymentLog.create({
+        data: {
+          reference,
+          amount: parseFloat(amountStr),
+          currency: detectCurrency.symbol,
+          tokenAddress: tokenAddressFor('USDC'),
+          chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
+          senderEmail: 'cross-chain-detect@arc.network',
+          merchant: 'FlareHQ CCTP V2 Router',
+          status: 'POLLING_CIRCLE_TESTNET_IRIS_API',
+          webhookUrl: webhookUrl || null,
+          cctpSourceTxHash: messageHash,
+        },
+      });
+    } catch (claimErr: any) {
+      if (claimErr?.code === 'P2002') {
+        return NextResponse.json(
+          { success: false, error: 'This transaction has already been detected.' },
+          { status: 409 }
+        );
+      }
+      throw claimErr;
+    }
 
     // Poll Circle Iris V2 API
     let arcTxHash: string;
+    let attestationPolled = false;
     try {
       const { message, attestation } = await pollForAttestation(messageHash);
+      attestationPolled = true;
+      // M2: decodeBurnMessage binding — the burn must cover the claimed
+      // amount and name a real recipient before anything mints. Releases the
+      // source-tx claim on mismatch so a genuine retry isn't blocked.
+      const { decodeBurnMessage } = await import('@/src/lib/cctp');
+      const { parseUnits } = await import('viem');
+      const { mintRecipient, amount: burnedAmount } = decodeBurnMessage(message);
+      if (!/^0x[a-fA-F0-9]{40}$/.test(mintRecipient)) {
+        await prisma.paymentLog.update({ where: { reference }, data: { status: 'MISMATCH', cctpSourceTxHash: null } });
+        return NextResponse.json({ success: false, error: 'This transaction does not pay a valid recipient.', reference }, { status: 400 });
+      }
+      if (burnedAmount < parseUnits(amountStr, 6)) {
+        await prisma.paymentLog.update({ where: { reference }, data: { status: 'MISMATCH', cctpSourceTxHash: null } });
+        return NextResponse.json({ success: false, error: 'This transaction does not cover the claimed amount.', reference }, { status: 400 });
+      }
       arcTxHash = await mintOnArc(message, attestation);
     } catch (cctpErr: any) {
-      await prisma.paymentLog.update({
-        where: { reference },
-        data: { status: 'ATTESTATION_FAILED' },
-      });
+      // M2 claim-release: attestation wasn't ready — free the source-tx
+      // claim so a genuine retry isn't blocked by our own earlier claim.
+      // (Binding mismatches above already returned; this path is polling.)
+      if (!attestationPolled) {
+        await prisma.paymentLog.update({
+          where: { reference },
+          data: { status: 'ATTESTATION_FAILED', cctpSourceTxHash: null },
+        });
+      } else {
+        await prisma.paymentLog.update({
+          where: { reference },
+          data: { status: 'ATTESTATION_FAILED' },
+        });
+      }
       return NextResponse.json(
         {
           success: false,

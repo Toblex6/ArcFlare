@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: MIT
+// M9 QUARANTINED — STALE, DO NOT DEPLOY OR VERIFY AGAINST THIS FILE.
+// Formerly src/app/api/contracts/ArcFlareEscrow.sol (removed from the served
+// app tree 2026-09-19: a .sol under src/app/api/ is routable surface).
+// The live escrow path is ArcFlareJobEscrow.sol + the ARCFLARE_ESCROW_CONTRACT_ADDRESS
+// deployment; this file is retained for archaeology only.
 pragma solidity ^0.8.20;
 
 // ─── FlareHQ Trustless Escrow Contract ──────────────────────────────────────

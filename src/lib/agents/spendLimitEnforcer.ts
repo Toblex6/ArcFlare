@@ -31,6 +31,61 @@ const SPEND_LIMIT_CONTRACT_ADDRESS = process.env.SPEND_LIMIT_CONTRACT_ADDRESS ??
 export const DEFAULT_AGENT_SPEND_CAP_USDC = 100;
 export const DEFAULT_AGENT_SPEND_WINDOW_SECONDS = 24 * 60 * 60;
 
+// ── H4 fail-closed suspension bookkeeping ────────────────────────────────────
+// If the default setLimit can't be confirmed on-chain, the wallet must NOT
+// sit uncapped in the contract's "no limit configured = no cap enforced"
+// state. It is marked SUSPENDED until getLimit proves owner==relayer &&
+// active; the suspension is consulted by checkSpendAllowed BEFORE any spend.
+const SUSPENSION_MAX_ATTEMPTS = 3;
+const SUSPENSION_RETRY_DELAY_MS = 1_500;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+const suspendedCache = new Set<string>();
+
+export async function isAgentSuspended(agentAddress: string): Promise<boolean> {
+  const key = agentAddress.toLowerCase();
+  if (suspendedCache.has(key)) return true;
+  try {
+    const row = await prisma.stuckSettlement.findFirst({
+      where: {
+        agentAddress,
+        jobCriteriaId: "agent-wallet-provisioning-suspended",
+        status: "PENDING_REVIEW",
+      },
+    });
+    if (row) suspendedCache.add(key);
+    return !!row;
+  } catch (e: any) {
+    console.error("[spendLimitEnforcer] suspension lookup failed (fail-closed):", e?.message ?? e);
+    return true; // fail closed — can't prove unsuspended
+  }
+}
+
+async function suspendAgent(
+  agentAddress: string,
+  failureReason: string
+): Promise<void> {
+  const key = agentAddress.toLowerCase();
+  suspendedCache.add(key);
+  await prisma.stuckSettlement
+    .create({
+      data: {
+        agentAddress,
+        amount: "0",
+        jobCriteriaId: "agent-wallet-provisioning-suspended",
+        gatewayRef: "none",
+        settlementTxHash: "none",
+        failureReason,
+        status: "PENDING_REVIEW",
+      },
+    })
+    .catch((e: any) =>
+      console.error("[spendLimitEnforcer] suspension row failed:", e?.message ?? e)
+    );
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const SPEND_LIMIT_ABI = [
   "function wouldExceedLimit(address agent, uint256 amount) external view returns (bool)",
   "function checkAndRecordSpend(address agent, uint256 amount) external",
@@ -60,41 +115,105 @@ export function getSpendLimitContract(): Contract {
  * backstopped by the setAgentPolicy front-run guard), logged loudly.
  */
 export async function ensureAgentDefaultSpendLimit(agentAddress: string): Promise<void> {
-  try {
-    const contract = getSpendLimitContract();
-    const limit = await contract.getLimit(agentAddress);
-    if (limit?.owner && limit.owner !== "0x0000000000000000000000000000000000000000") {
-      const relayer = await getRelayerSigner().getAddress();
-      if (limit.owner.toLowerCase() !== relayer.toLowerCase()) {
-        console.error(
-          `[spendLimitEnforcer] FRONT-RUN: agent ${agentAddress.slice(0, 10)}… limit owner is ${limit.owner}, not the relayer — refusing to touch it.`
-        );
-        prisma.stuckSettlement
-          .create({
-            data: {
-              agentAddress,
-              amount: "0",
-              jobCriteriaId: "agent-wallet-provisioning",
-              gatewayRef: "none",
-              settlementTxHash: "none",
-              failureReason: `spend-limit bootstrap front-run: owner is ${limit.owner}, expected the relayer`,
-            },
-          })
-          .catch(() => {});
-      }
+  const relayer = await getRelayerSigner().getAddress();
+
+  // ── Recovery pass (H4): if this wallet is currently SUSPENDED, retry the
+  // default setLimit first; only clear the suspension when getLimit
+  // PROVES owner==relayer && active. A suspended wallet is never silently
+  // reactivated by a failed attempt.
+  if (await isAgentSuspended(agentAddress)) {
+    const recovered = await trySetDefaultLimit(agentAddress, relayer);
+    if (!recovered) {
+      console.error(
+        `[spendLimitEnforcer] agent ${agentAddress.slice(0, 10)}… remains SUSPENDED — default limit still unconfirmed.`
+      );
       return;
     }
-    const cap = BigInt(DEFAULT_AGENT_SPEND_CAP_USDC) * 1_000_000n;
-    const tx = await contract.setLimit(agentAddress, cap, BigInt(DEFAULT_AGENT_SPEND_WINDOW_SECONDS));
-    await tx.wait();
-    console.log(
-      `[spendLimitEnforcer] default limit set for agent EOA ${agentAddress.slice(0, 10)}… (${DEFAULT_AGENT_SPEND_CAP_USDC} USDC / ${DEFAULT_AGENT_SPEND_WINDOW_SECONDS}s)`
-    );
-  } catch (e: any) {
-    console.error(
-      `[spendLimitEnforcer] failed to set default spend limit for ${agentAddress.slice(0, 10)}…: ${e?.message ?? e}`
+    // Recovery proven — clear the suspension row + cache.
+    await prisma.stuckSettlement
+      .updateMany({
+        where: {
+          agentAddress,
+          jobCriteriaId: "agent-wallet-provisioning-suspended",
+          status: "PENDING_REVIEW",
+        },
+        data: { status: "REFUNDED" }, // terminal "resolved" state for the audit trail
+      })
+      .catch(() => {});
+    suspendedCache.delete(agentAddress.toLowerCase());
+  }
+
+  const contract = getSpendLimitContract();
+  const limit = await contract.getLimit(agentAddress);
+  if (limit?.owner && limit.owner !== ZERO_ADDRESS) {
+    if (limit.owner.toLowerCase() !== relayer.toLowerCase()) {
+      console.error(
+        `[spendLimitEnforcer] FRONT-RUN: agent ${agentAddress.slice(0, 10)}… limit owner is ${limit.owner}, not the relayer — refusing to touch it.`
+      );
+      await suspendAgent(
+        agentAddress,
+        `spend-limit bootstrap front-run: owner is ${limit.owner}, expected the relayer`
+      );
+    } else if (!limit.active) {
+      // Owned by the relayer but deactivated — treat as uncapped-shaped and
+      // suspend until an operator reactivates via policy.
+      await suspendAgent(
+        agentAddress,
+        `spend-limit exists but active=false (owner ${limit.owner}) — wallet treated as uncapped, suspended`
+      );
+    }
+    return;
+  }
+
+  // No limit configured — the bootstrap slot is open. Attempt the default
+  // setLimit with bounded retries; on exhaustion, FAIL CLOSED by suspending
+  // the wallet (uncapped-by-default is the state an attacker front-runs).
+  const ok = await trySetDefaultLimit(agentAddress, relayer);
+  if (!ok) {
+    await suspendAgent(
+      agentAddress,
+      `provisioning failure: default setLimit unconfirmed after ${SUSPENSION_MAX_ATTEMPTS} attempts — wallet suspended rather than left uncapped`
     );
   }
+}
+
+/** Bounded-retry attempt to sign + confirm the relayer-owned default limit. */
+async function trySetDefaultLimit(
+  agentAddress: string,
+  relayer: string
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= SUSPENSION_MAX_ATTEMPTS; attempt++) {
+    try {
+      const contract = getSpendLimitContract();
+      const cap = BigInt(DEFAULT_AGENT_SPEND_CAP_USDC) * 1_000_000n;
+      const tx = await contract.setLimit(agentAddress, cap, BigInt(DEFAULT_AGENT_SPEND_WINDOW_SECONDS));
+      await tx.wait();
+
+      // H4: confirmation REQUIRES getLimit to prove owner==relayer && active
+      // — a mined tx alone is not acceptance (the recorder/owner ACL could
+      // have silently no-oped).
+      const limit = await contract.getLimit(agentAddress);
+      if (
+        limit?.owner &&
+        limit.owner.toLowerCase() === relayer.toLowerCase() &&
+        limit.active
+      ) {
+        console.log(
+          `[spendLimitEnforcer] default limit set for agent EOA ${agentAddress.slice(0, 10)}… (${DEFAULT_AGENT_SPEND_CAP_USDC} USDC / ${DEFAULT_AGENT_SPEND_WINDOW_SECONDS}s)`
+        );
+        return true;
+      }
+      console.error(
+        `[spendLimitEnforcer] attempt ${attempt}/${SUSPENSION_MAX_ATTEMPTS}: tx mined but getLimit owner=${limit?.owner} active=${limit?.active} — not accepted`
+      );
+    } catch (e: any) {
+      console.error(
+        `[spendLimitEnforcer] attempt ${attempt}/${SUSPENSION_MAX_ATTEMPTS} failed for ${agentAddress.slice(0, 10)}…: ${e?.message ?? e}`
+      );
+    }
+    if (attempt < SUSPENSION_MAX_ATTEMPTS) await sleep(SUSPENSION_RETRY_DELAY_MS);
+  }
+  return false;
 }
 
 export interface SpendCheckParams {
@@ -114,6 +233,16 @@ export interface SpendCheckResult {
  */
 export async function checkSpendAllowed(params: SpendCheckParams): Promise<SpendCheckResult> {
   const { agentAddress, amount } = params;
+
+  // H4 fail-closed: a SUSPENDED wallet (default limit unconfirmed after
+  // provisioning retries, or a front-run/bootstrap anomaly) is uncapped by
+  // definition — it never passes the pre-flight until the suspension clears.
+  if (await isAgentSuspended(agentAddress)) {
+    return {
+      allowed: false,
+      reason: "agent wallet is SUSPENDED (spend limit not confirmed active — provisioning or bootstrap failed)",
+    };
+  }
 
   const contract = getSpendLimitContract();
   const wouldExceed: boolean = await contract.wouldExceedLimit(agentAddress, amount);

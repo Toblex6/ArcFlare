@@ -73,6 +73,37 @@ function serializeSweep<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// H11: per-payer funding mutex extending the serializeSweep pattern. Spend
+// pre-flight → settle → sweep → checkAndRecordSpend → fundBatchFor must not
+// interleave for one payer: two concurrent batches could each pass the
+// pre-flight cap, settle twice, then one reverts at enforcement while the
+// other double-funds. Serializing per payer makes settle-then-record safe;
+// the PROCESSING batch row below (record-before-settle) makes retries replay
+// instead of refund-bleeding.
+const payerFundingChains = new Map<string, Promise<unknown>>();
+
+function withPayerFundingLock<T>(payer: string, fn: () => Promise<T>): Promise<T> {
+  const key = payer.toLowerCase();
+  const prev = payerFundingChains.get(key) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  payerFundingChains.set(
+    key,
+    run.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+  run.then(
+    () => {
+      if (payerFundingChains.get(key) === run) payerFundingChains.delete(key);
+    },
+    () => {
+      if (payerFundingChains.get(key) === run) payerFundingChains.delete(key);
+    }
+  );
+  return run;
+}
+
 export interface SweepResult {
   mintTxHash: string;
   balanceBefore: string; // seller gateway totalBalance (6-dec units) before withdraw
@@ -273,6 +304,60 @@ export async function fundPayrollViaX402(
   const payrollStepUp = await requireConsumerStepUpForActor(req, actor, "consumer.agent-pay");
   if (payrollStepUp) return payrollStepUp;
 
+  // H11: everything below runs under the per-payer funding lock so
+  // concurrent batches for one payer never interleave cap-check → settle →
+  // record → fund. Record-before-settle: the PROCESSING row is claimed here
+  // (idempotency on the payment signature); settle/fund update it. A retry
+  // with the same payment replays the bound row instead of settling twice
+  // (refund bleed).
+  return withPayerFundingLock(payer, async (): Promise<NextResponse> => {
+  // H11 idempotency key: the payment signature is unique per payment.
+  const { createHash } = await import("crypto");
+  const fundingKey = `payroll-x402:${payer.toLowerCase()}:${totalAmount.toString()}:${createHash("sha256").update(paymentSignatureHeader).digest("hex").slice(0, 32)}`;
+  const preExisting = await (prisma as any).payrollBatch.findUnique({ where: { batchRef: fundingKey } }).catch(() => null);
+  if (preExisting) {
+    if ((preExisting as any).status === "FUNDED") {
+      const res = (preExisting as any).results as any ?? {};
+      return NextResponse.json({
+        success: true,
+        replayed: true,
+        batchId: res.batchId ?? null,
+        txHash: res.fundTxHash ?? null,
+        sweepTxHash: res.sweepTxHash ?? null,
+        gatewayRef: res.gatewayRef ?? null,
+        recipientCount: (preExisting as any).recipientCount ?? recipients.length,
+      });
+    }
+    return NextResponse.json(
+      { success: false, error: "A payroll funding with this payment is already in progress. Retry with a new payment." },
+      { status: 409 }
+    );
+  }
+  try {
+    await (prisma as any).payrollBatch.create({
+      data: {
+        batchRef: fundingKey,
+        payerSCA: payer,
+        payerWalletId: null,
+        totalAmount: Number(totalAmount) / 1e6,
+        currency: "USDC",
+        tokenAddress: getUsdcAddress(),
+        recipientCount: recipients.length,
+        successCount: 0,
+        failedCount: 0,
+        status: "PROCESSING",
+      },
+    });
+  } catch (e: any) {
+    if (e?.code === "P2002") {
+      return NextResponse.json(
+        { success: false, error: "A payroll funding with this payment is already in progress. Retry with a new payment." },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
+
   // 4. spend-limit PRE-FLIGHT — before settle, before any funds move.
   const spendCheck = await checkSpendAllowed({ agentAddress: payer, amount: totalAmount });
   if (!spendCheck.allowed) {
@@ -314,6 +399,10 @@ export async function fundPayrollViaX402(
       settlementTxHash: settle.transaction ?? "unknown",
       failureReason: `seller sweep failed after settlement: ${sweepError.message}`,
     });
+    await (prisma as any).payrollBatch.update({
+      where: { batchRef: fundingKey },
+      data: { status: "FAILED", results: { recoveryId, gatewayRef: settle.transaction ?? null } },
+    }).catch(() => {});
     return NextResponse.json(
       {
         error: "Payroll funding failed after settlement (seller sweep).",
@@ -340,6 +429,10 @@ export async function fundPayrollViaX402(
       settlementTxHash: settle.transaction ?? "unknown",
       failureReason: spendLimitError?.message ?? "checkAndRecordSpend reverted",
     });
+    await (prisma as any).payrollBatch.update({
+      where: { batchRef: fundingKey },
+      data: { status: "FAILED", results: { refundTxHash, recoveryId, gatewayRef: settle.transaction ?? null } },
+    }).catch(() => {});
 
     return NextResponse.json(
       {
@@ -385,6 +478,10 @@ export async function fundPayrollViaX402(
       settlementTxHash: settle.transaction ?? "unknown",
       failureReason: `fundBatchFor failed after spend record: ${fundError?.message ?? "revert"}`,
     });
+    await (prisma as any).payrollBatch.update({
+      where: { batchRef: fundingKey },
+      data: { status: "FAILED", results: { refundTxHash, recoveryId, gatewayRef: settle.transaction ?? null } },
+    }).catch(() => {});
     return NextResponse.json(
       {
         error: "Payroll funding failed after settlement (batch funding).",
@@ -407,18 +504,16 @@ export async function fundPayrollViaX402(
     `[payroll/fund] batch ${batchId}: total ${Number(totalAmount) / 1e6} USDC, relayer debit ${Number(actualDebit) / 1e6} USDC, measured fee ${Number(feeMeasured) / 1e6} USDC`
   );
 
-  // DB bookkeeping (never gates the response).
-  // Phase 2C: this x402/Gateway funding path is genuinely USDC-only (the
-  // EURC gate above rejects anything else), so both rows persist the
-  // explicit USDC identity — currency AND canonical tokenAddress — rather
-  // than relying on the NULL-means-USDC legacy convention.
-  const batchRef = `payroll-x402-${batchId}`;
+  // DB bookkeeping: H11 record-before-settle — the PROCESSING row claimed
+  // above is transitioned to FUNDED (not a second fire-and-forget create),
+  // so the batch identity is stable from before settlement through funding.
+  // Phase 2C: this x402/Gateway funding path is genuinely USDC-only, so both
+  // rows persist the explicit USDC identity — currency AND canonical
+  // tokenAddress — rather than relying on the NULL-means-USDC convention.
   const usdcAddress = getUsdcAddress();
-  prisma.payrollBatch.create({
+  await (prisma as any).payrollBatch.update({
+    where: { batchRef: fundingKey },
     data: {
-      batchRef,
-      payerSCA: payer,
-      payerWalletId: null,
       totalAmount: Number(totalAmount) / 1e6,
       currency: "USDC",
       tokenAddress: usdcAddress,
@@ -436,6 +531,7 @@ export async function fundPayrollViaX402(
         relayerDebit: actualDebit.toString(),
         currency: "USDC",
         tokenAddress: usdcAddress,
+        gatewayRef: settle.transaction ?? null,
       },
     },
   }).catch((e: any) => console.error("[payroll/fund] batch row failed:", e.message));
@@ -477,6 +573,7 @@ export async function fundPayrollViaX402(
     ).toString("base64")
   );
   return response;
+  }); // end withPayerFundingLock (H11)
 }
 
 /** Executes an already-funded batch (relayer-signed). */
@@ -487,10 +584,17 @@ export async function executePayrollBatch(batchId: string): Promise<{ txHash: st
   return { txHash: receipt.hash };
 }
 
-/** Cancels a Funded batch, refunding the merchant (relayer-signed). */
-export async function cancelPayrollBatch(batchId: string): Promise<{ txHash: string }> {
-  const payroll = getPayrollContract();
-  const tx = await payroll.cancelBatch(batchId);
-  const receipt = await tx.wait();
-  return { txHash: receipt.hash };
+/** M9 (quarantined): Cancels a funded batch — merchant-signed ONLY.
+ *
+ * The contract requires `msg.sender == batch.merchant`, so the previous
+ * relayer-signed `payroll.cancelBatch(batchId)` ALWAYS reverted. It is not
+ * exposed as written: this stub fails closed with the reason instead of
+ * submitting a doomed transaction. To re-enable, sign with the merchant's
+ * Circle wallet (createContractTransaction from the merchant SCA) or add a
+ * relayer-authorized cancel path to ArcFlarePayroll.sol first.
+ */
+export async function cancelPayrollBatch(_batchId: string): Promise<{ txHash: string }> {
+  throw new Error(
+    "cancelPayrollBatch is quarantined (M9): ArcFlarePayroll.cancelBatch requires msg.sender == batch.merchant, so a relayer-signed cancel always reverts. Cancel must be signed by the merchant SCA."
+  );
 }

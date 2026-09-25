@@ -178,15 +178,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return await fail("evaluator must be distinct from the provider");
   }
 
-  // Validator Circle-serviceability gate (griefing-vector fix): a
-  // validation-required hire stores a validatorSCA that must later sign a
-  // Circle-signed validationResponse. An external/non-Circle-managed wallet
-  // could never respond, permanently blocking provider payout. This early gate
-  // runs BEFORE any side effect (no on-chain createJob, no DB writes — the
-  // claim is released via fail() so a retry can proceed). It mirrors the
-  // self-validation checks in the sibling hire routes without duplicating or
-  // weakening them, and never trusts a client-supplied
-  // merchantId/circleWalletId. Non-validation hires skip this block entirely.
+  // M1: shared validator serviceability gate (CIRCLE custody + live
+  // getWallet address match) — see src/lib/validators/serviceability.ts.
   if (body.validation && body.validation.required) {
     const earlyValidatorSCA = String(body.validation.validatorSCA || "").trim();
     if (!/^0x[a-fA-F0-9]{40}$/.test(earlyValidatorSCA)) {
@@ -198,26 +191,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (earlyValidatorSCA.toLowerCase() === providerAddress.toLowerCase()) {
       return await fail("validator cannot be the job provider (self-validation)");
     }
-    const [earlyValidatorMerchant, earlyValidatorAgent, earlyValidatorConsumer] = await Promise.all([
-      (prisma as any).merchant.findFirst({
-        where: { walletAddress: { equals: earlyValidatorSCA, mode: "insensitive" } },
-        select: { walletProvider: true, circleWalletId: true, walletAddress: true },
-      }),
-      (prisma as any).agentRegistry.findFirst({
-        where: { scaAddress: { equals: earlyValidatorSCA, mode: "insensitive" } },
-        select: { circleWalletId: true },
-      }),
-      (prisma as any).consumerAccount.findFirst({
-        where: { walletAddress: { equals: earlyValidatorSCA, mode: "insensitive" } },
-        select: { circleWalletId: true, walletAddress: true },
-      }),
-    ]);
-    const earlyValidatorServiceable =
-      (earlyValidatorMerchant?.walletProvider === "CIRCLE" && !!earlyValidatorMerchant?.circleWalletId && !!earlyValidatorMerchant?.walletAddress) ||
-      !!earlyValidatorAgent?.circleWalletId ||
-      (!!earlyValidatorConsumer?.circleWalletId && !!earlyValidatorConsumer?.walletAddress);
-    if (!earlyValidatorServiceable) {
-      return await fail("validatorSCA must be a Circle-managed wallet capable of signing a validation response — external wallets cannot respond to validation requests.");
+    const { assertValidatorServiceable } = await import("@/lib/validators/serviceability");
+    const earlyServiceable = await assertValidatorServiceable(earlyValidatorSCA);
+    if (!earlyServiceable.ok) {
+      return await fail((earlyServiceable as any).error);
     }
   }
 

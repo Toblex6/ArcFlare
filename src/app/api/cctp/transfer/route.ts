@@ -52,6 +52,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // H12: shared amount validation (decimal string, ≤6 decimals, >0,
+    // capped) + strict destination check before any bridge sink.
+    const amountStr = String(amount ?? "").trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(amountStr) || !Number.isFinite(parseFloat(amountStr)) || parseFloat(amountStr) <= 0 || parseFloat(amountStr) > 10_000_000) {
+      return NextResponse.json(
+        { success: false, error: "amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000." },
+        { status: 400 }
+      );
+    }
+
     const account = await (prisma as any).consumerAccount.findUnique({
       where: { walletAddress: consumerWalletAddress },
     });
@@ -130,7 +140,7 @@ export async function POST(req: NextRequest) {
     const { reference } = startBridge({
       fromChain,
       toChain,
-      amount,
+      amount: amountStr,
       senderAddress: getAddress(consumerWalletAddress) as `0x${string}`,
       recipientAddress: getAddress(recipient),
     });

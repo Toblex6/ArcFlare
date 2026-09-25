@@ -2,10 +2,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { issueAdminToken } from '@/src/lib/middleware/withAdminAuth';
 import { checkRateLimit } from '@/src/lib/ratelimit';
+import { timingSafeEqual, createHash } from 'crypto';
 
 export async function POST(req: NextRequest) {
     try {
-        const { allowed, response: limitResponse } = await checkRateLimit(req, 'default');
+        // M8: strict rate-limit tier on this privileged route (5/min).
+        const { allowed, response: limitResponse } = await checkRateLimit(req, 'keys');
         if (!allowed) return limitResponse;
 
         const { email, password } = await req.json().catch(() => ({}));
@@ -20,7 +22,16 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        if (email !== adminEmail || password !== adminPassword) {
+        // M8: constant-time comparison — hash both sides to a fixed length
+        // first (timingSafeEqual throws on length mismatch), then compare.
+        // A plaintext !== would leak credential-prefix timing.
+        const emailDigest = createHash('sha256').update(String(email ?? '')).digest();
+        const expectedEmailDigest = createHash('sha256').update(adminEmail).digest();
+        const passDigest = createHash('sha256').update(String(password ?? '')).digest();
+        const expectedPassDigest = createHash('sha256').update(adminPassword).digest();
+        const emailOk = timingSafeEqual(emailDigest, expectedEmailDigest);
+        const passOk = timingSafeEqual(passDigest, expectedPassDigest);
+        if (!emailOk || !passOk) {
             return NextResponse.json(
                 { success: false, error: 'Invalid credentials.' },
                 { status: 401 }

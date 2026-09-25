@@ -46,6 +46,30 @@ async function createScheduledHandler(request: Request) {
       );
     }
 
+    // M6: shared usdcAmount rule (decimal string, ≤6 decimals, >0, capped) +
+    // isAddress on every receiver/payer field; intervalDays clamped 1-3650.
+    // Float parseFloat-then-trust drift is rejected before any row exists.
+    if (!/^0x[a-fA-F0-9]{40}$/.test(String(payerSCA)) || !/^0x[a-fA-F0-9]{40}$/.test(String(receiverSCA))) {
+      return NextResponse.json(
+        { success: false, error: 'payerSCA and receiverSCA must be valid 0x addresses.' },
+        { status: 400 }
+      );
+    }
+    const schedAmountStr = String(amount).trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(schedAmountStr) || !Number.isFinite(parseFloat(schedAmountStr)) || parseFloat(schedAmountStr) <= 0 || parseFloat(schedAmountStr) > 10_000_000) {
+      return NextResponse.json(
+        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
+        { status: 400 }
+      );
+    }
+    const intervalNum = Number(intervalDays);
+    if (!Number.isInteger(intervalNum) || intervalNum < 1 || intervalNum > 3650) {
+      return NextResponse.json(
+        { success: false, error: 'intervalDays must be an integer between 1 and 3650.' },
+        { status: 400 }
+      );
+    }
+
     // Phase 2C: resolve the schedule's canonical token through the resolver
     // (rejects unsupported symbols/addresses and symbol/address mismatches).
     // Legacy callers omit both fields and schedule USDC exactly as before.
@@ -199,10 +223,10 @@ async function createScheduledHandler(request: Request) {
         payerSCA,
         payerWalletId: resolvedPayerWalletId,
         receiverSCA,
-        amount: parseFloat(amount),
+        amount: parseFloat(schedAmountStr),
         currency: token.symbol,
         tokenAddress: token.address,
-        intervalDays: parseInt(intervalDays),
+        intervalDays: intervalNum,
         nextRunAt,
         maxRuns: maxRuns ? parseInt(maxRuns) : null,
         description: description || null,

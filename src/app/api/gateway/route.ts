@@ -3,9 +3,12 @@
 // earnings to your Payout Wallet. Use this to manage FlareHQ's seller
 // revenue from any Gateway-protected endpoints.
 
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { withApiKey } from '@/lib/middleware/withApiKey';
 import { getNetworkConfig } from '@/lib/config/network';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
+import { USDC_AMOUNT_RE, MAX_USDC_AMOUNT } from '@/lib/validation';
+import { isAddress } from 'viem';
 
 // Facilitator URL + Circle chain flow from the authoritative network config
 // (was hardcoded testnet Gateway URL + 'ARC-TESTNET').
@@ -16,17 +19,30 @@ function arcChain(): string {
   return getNetworkConfig().circleBlockchain;
 }
 
-// ── GET /api/gateway?sellerAddress=0x... ──────────────────────────────────────
-// Check the Seller Wallet's Gateway Balance (accrued revenue from paid calls)
-async function getBalanceHandler(request: Request) {
+// C1 fix 4: the balance view previously leaked targeting info (which seller
+// addresses exist + their accrued revenue) to ANY ApiKey holder. It is now
+// scoped to a seller the authenticated caller actually controls, through the
+// single ownership gate (verifyCallerControlsAddress). No env fallback — an
+// explicit sellerAddress is required so the gate below always has a concrete
+// identity to verify.
+async function getBalanceHandler(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const sellerAddress = searchParams.get('sellerAddress') || process.env.SELLER_ADDRESS;
+    const sellerAddress = searchParams.get('sellerAddress');
 
     if (!sellerAddress) {
       return NextResponse.json(
         { success: false, error: 'sellerAddress is required.' },
         { status: 400 }
+      );
+    }
+
+    // Ownership gate: the caller must control this seller.
+    const actor = await verifyCallerControlsAddress(request, sellerAddress);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the seller wallet named in sellerAddress.' },
+        { status: 403 }
       );
     }
 
@@ -56,22 +72,74 @@ async function getBalanceHandler(request: Request) {
 
 export const GET = withApiKey(getBalanceHandler);
 
-// ── POST /api/gateway — withdraw Gateway revenue to Payout Wallet ─────────────
-async function withdrawHandler(request: Request) {
+// C1 fixes 1-3 on the pooled-revenue drain:
+//   1. verifyCallerControlsAddress on the resolved seller — an ApiKey that
+//      does not control the seller gets 403 before any funds move.
+//   2. No env fallback: an explicit sellerAddress is required, then verified
+//      through the gate above.
+//   3. payoutAddress is restricted to the server-side treasury allowlist
+//      already used by x402/seller/balance/withdraw
+//      (SELLER_GATEWAY_TREASURY_ADDRESSES); when the allowlist is unset the
+//      only permitted recipient is the seller's own address.
+async function withdrawHandler(request: NextRequest) {
   try {
     const { sellerAddress, payoutAddress, amount } = await request.json();
 
-    const resolvedSeller = sellerAddress || process.env.SELLER_ADDRESS;
-    const resolvedPayout = payoutAddress || process.env.PAYOUT_WALLET_ADDRESS;
-
-    if (!resolvedSeller || !resolvedPayout || !amount) {
+    if (!sellerAddress || !payoutAddress || !amount) {
       return NextResponse.json(
         {
           success: false,
-          error:
-            'sellerAddress, payoutAddress and amount are required (or set SELLER_ADDRESS / PAYOUT_WALLET_ADDRESS env vars).',
+          error: 'sellerAddress, payoutAddress and amount are required.',
         },
         { status: 400 }
+      );
+    }
+
+    const resolvedSeller = String(sellerAddress);
+    const resolvedPayout = String(payoutAddress);
+    const amountStr = String(amount);
+
+    // H12: amount must be a plain decimal within the shared 10M USDC cap.
+    if (!USDC_AMOUNT_RE.test(amountStr) || parseFloat(amountStr) > MAX_USDC_AMOUNT) {
+      return NextResponse.json(
+        { success: false, error: 'amount must be a decimal number not exceeding the maximum USDC amount.' },
+        { status: 400 }
+      );
+    }
+
+    // H12: addresses must be valid 0x addresses — both seller and payout
+    // must be valid 0x addresses before any gate or facilitator call.
+    if (!isAddress(resolvedSeller) || !isAddress(resolvedPayout)) {
+      return NextResponse.json(
+        { success: false, error: 'sellerAddress and payoutAddress must be valid 0x addresses.' },
+        { status: 400 }
+      );
+    }
+
+    const actor = await verifyCallerControlsAddress(request, resolvedSeller);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: 'You do not control the seller wallet named in sellerAddress.' },
+        { status: 403 }
+      );
+    }
+
+    const treasuryAllowlist = (process.env.SELLER_GATEWAY_TREASURY_ADDRESSES || '')
+      .split(',')
+      .map((a) => a.trim().toLowerCase())
+      .filter(Boolean);
+    const payoutAllowed = treasuryAllowlist.length > 0
+      ? treasuryAllowlist.includes(resolvedPayout.toLowerCase())
+      : resolvedPayout.toLowerCase() === resolvedSeller.toLowerCase();
+    if (!payoutAllowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: treasuryAllowlist.length > 0
+            ? 'payoutAddress is not on the SELLER_GATEWAY_TREASURY_ADDRESSES allowlist.'
+            : "payoutAddress is not allowed — configure SELLER_GATEWAY_TREASURY_ADDRESSES, or pay out to the seller's own address.",
+        },
+        { status: 403 }
       );
     }
 

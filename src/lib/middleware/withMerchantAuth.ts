@@ -200,8 +200,12 @@ export function withApiKeyOrAnySession(handler: (req: NextRequest) => Promise<Ne
     const consumerToken = req.cookies.get('consumer_token')?.value;
     if (consumerToken && CONSUMER_JWT_SECRET) {
       try {
-        await jwtVerify(consumerToken, CONSUMER_JWT_SECRET);
-        return handler(req);
+        // M5: DB-bound consumer check (M4 sessionVersion parity + aud), not a
+        // bare signature verify — a revoked/stale consumer session must not
+        // pass this union wrapper on fund-moving routes.
+        const { resolveConsumerSession } = await import('@/src/lib/middleware/withConsumerAuth');
+        const walletAddress = await resolveConsumerSession(req);
+        if (walletAddress) return handler(req);
       } catch {
         // fall through
       }

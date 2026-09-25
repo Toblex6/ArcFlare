@@ -12,14 +12,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { jwtVerify } from 'jose';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { tryJwtSecret } from '@/src/lib/auth/secrets';
 import { keccak256, toBytes, isAddress } from 'viem';
 import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
 import { publicUrl } from '@/lib/publicOrigin';
 
-const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
+// H5: central merchant auth (active + verified + sessionVersion).
 
 // Pre-funding sentinel: the Escrow model requires depositorSCA, but an
 // unfunded escrow-request link has no depositor yet. Replaced with the real
@@ -32,15 +31,13 @@ export async function POST(req: NextRequest) {
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse;
 
-    const token = req.cookies.get('merchant_token')?.value;
-    if (!token || !JWT_SECRET) {
+    // H5: resolveMerchant enforces active + verified + sessionVersion.
+    const authed = await resolveMerchant(req);
+    if (!authed) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
-
-    const merchant = await (prisma as any).merchant.findUnique({ where: { id: merchantId } });
+    const merchant = await (prisma as any).merchant.findUnique({ where: { id: authed.id } });
     if (!merchant) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
     }
@@ -51,10 +48,16 @@ export async function POST(req: NextRequest) {
     if (!beneficiarySCA || !isAddress(beneficiarySCA)) {
       return NextResponse.json({ success: false, error: 'Valid beneficiarySCA (0x…) is required.' }, { status: 400 });
     }
-    const amountFloat = parseFloat(amount);
-    if (!amountFloat || isNaN(amountFloat) || amountFloat <= 0) {
-      return NextResponse.json({ success: false, error: 'Valid amount is required.' }, { status: 400 });
+    // M6: shared usdcAmount rule (decimal string, ≤6 decimals, >0, capped) —
+    // no float drift into the escrow row.
+    const linkAmountStr = String(amount ?? "").trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(linkAmountStr) || !Number.isFinite(parseFloat(linkAmountStr)) || parseFloat(linkAmountStr) <= 0 || parseFloat(linkAmountStr) > 10_000_000) {
+      return NextResponse.json(
+        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
+        { status: 400 }
+      );
     }
+    const amountFloat = parseFloat(linkAmountStr);
     const hours = deadlineHours === undefined ? 24 : parseFloat(deadlineHours);
     if (isNaN(hours) || hours <= 0 || hours > 24 * 30) {
       return NextResponse.json({ success: false, error: 'deadlineHours must be between 0 and 720.' }, { status: 400 });
@@ -112,13 +115,11 @@ export async function POST(req: NextRequest) {
 // List this merchant's escrow request links.
 export async function GET(req: NextRequest) {
   try {
-    const token = req.cookies.get('merchant_token')?.value;
-    if (!token || !JWT_SECRET) {
+    const authed = await resolveMerchant(req);
+    if (!authed) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
-
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
+    const merchantId = authed.id;
 
     const escrows = await prisma.escrow.findMany({
       where: { merchantId },

@@ -135,6 +135,45 @@ export async function POST(request: Request) {
       );
     }
 
+    // M2: port of the cctp-settle guards — unique source-message claim
+    // (P2002 → 409) + decodeBurnMessage recipient/amount binding against the
+    // DB row's merchantSCA/amount. Claim released on binding failure.
+    try {
+      await prisma.paymentLog.update({
+        where: { reference },
+        data: { cctpSourceTxHash: messageHash },
+      });
+    } catch (claimErr: any) {
+      if (claimErr?.code === 'P2002') {
+        return NextResponse.json(
+          { success: false, error: 'This transaction has already been used to settle a different payment.' },
+          { status: 409 }
+        );
+      }
+      throw claimErr;
+    }
+    {
+      const { decodeBurnMessage } = await import('@/src/lib/cctp');
+      const { parseUnits } = await import('viem');
+      const { mintRecipient, amount: burnedAmount } = decodeBurnMessage(rawMessage);
+      const expectedRecipient = String((paymentRow as any).merchantSCA ?? '').toLowerCase();
+      const expectedAmount = parseUnits(Number((paymentRow as any).amount).toString(), 6);
+      if (!expectedRecipient || mintRecipient.toLowerCase() !== expectedRecipient) {
+        await prisma.paymentLog.update({ where: { reference }, data: { status: 'MISMATCH', cctpSourceTxHash: null } });
+        return NextResponse.json(
+          { success: false, error: 'This transaction does not pay the correct recipient for this payment.' },
+          { status: 400 }
+        );
+      }
+      if (burnedAmount < expectedAmount) {
+        await prisma.paymentLog.update({ where: { reference }, data: { status: 'MISMATCH', cctpSourceTxHash: null } });
+        return NextResponse.json(
+          { success: false, error: 'This transaction does not cover the required payment amount.' },
+          { status: 400 }
+        );
+      }
+    }
+
     // 4. Extract admin key injected by Render environment configuration
     const privateKey = process.env.ARC_ADMIN_PRIVATE_KEY;
     if (!privateKey) {

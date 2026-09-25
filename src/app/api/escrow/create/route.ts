@@ -119,7 +119,24 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       );
     }
 
-    const amountFloat = parseFloat(amount);
+    // H12: isAddress on the depositor as well as the beneficiary (the
+    // beneficiary was already gated above), plus the shared amount rule —
+    // decimal string, ≤6 decimals, >0, capped — before any escrow sink.
+    if (!isAddress(String(depositorSCA))) {
+      return NextResponse.json(
+        { success: false, error: 'depositorSCA must be a valid 0x address.' },
+        { status: 400 }
+      );
+    }
+    const amountStr = String(amount ?? "").trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(amountStr) || !Number.isFinite(parseFloat(amountStr)) || parseFloat(amountStr) <= 0 || parseFloat(amountStr) > 10_000_000) {
+      return NextResponse.json(
+        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
+        { status: 400 }
+      );
+    }
+
+    const amountFloat = parseFloat(amountStr);
     const amountWei = parseUnits(amountFloat.toFixed(6), 6);
     const hoursFloat = parseFloat(deadlineHours);
     // Match the escrow-link route's bounds — an uncapped deadline would let a

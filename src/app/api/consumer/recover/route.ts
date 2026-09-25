@@ -97,13 +97,17 @@ export async function PUT(req: NextRequest) {
     );
   }
 
+  // M4: recovery revokes all prior sessions first — the new token below
+  // carries the bumped version, so any stolen cookie dies here.
+  const { bumpConsumerSessionVersion } = await import('@/src/lib/auth/consumerSession');
+  const newVersion = await bumpConsumerSessionVersion(account.walletAddress).catch(() => (account.sessionVersion ?? 0) + 1);
   await (prisma as any).consumerAccount.update({
     where: { id: account.id },
     data: { lastSeenAt: new Date() },
   }).catch(() => {});
 
   // Same session mechanism as the login flow — no new session system.
-  const token = await issueConsumerSessionToken(account.id, account.walletAddress);
+  const token = await issueConsumerSessionToken(account.id, account.walletAddress, newVersion);
   const res = NextResponse.json({
     success: true,
     account: {

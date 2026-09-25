@@ -47,6 +47,12 @@ contract ArcFlarePayroll is ReentrancyGuard {
     address public relayer;
     address public owner;
 
+    /// @notice pending owner for the 2-step ownership transfer
+    /// (proposeOwner/acceptOwner). Single-step transfers are banned here:
+    /// a fat-fingered or front-run single tx must never hand payroll
+    /// execution control to an attacker.
+    address public pendingOwner;
+
     uint256 public nextBatchId;
     mapping(uint256 => PayrollBatch) public batches;
     // batchId => recipient => amount owed (0 once paid)
@@ -61,6 +67,8 @@ contract ArcFlarePayroll is ReentrancyGuard {
     event BatchCompleted(uint256 indexed batchId, uint256 totalPaidOut);
     event BatchCancelled(uint256 indexed batchId, uint256 refundedAmount);
     event RelayerUpdated(address indexed newRelayer);
+    event OwnershipProposed(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipAccepted(address indexed newOwner);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "not owner");
@@ -76,11 +84,32 @@ contract ArcFlarePayroll is ReentrancyGuard {
     }
 
     constructor(address _owner, address _relayer) {
+        require(_owner != address(0), "bad owner");
+        require(_relayer != address(0), "bad relayer");
         owner = _owner;
         relayer = _relayer;
     }
 
+    /// @notice Step 1 of the 2-step ownership transfer (see ArcFlareJobEscrow
+    /// for rationale). Completes only when the proposed address accepts.
+    function proposeOwner(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "bad new owner");
+        require(newOwner != owner, "already owner");
+        pendingOwner = newOwner;
+        emit OwnershipProposed(owner, newOwner);
+    }
+
+    /// @notice Step 2: the proposed address accepts control.
+    function acceptOwner() external {
+        require(msg.sender == pendingOwner, "not pending owner");
+        require(pendingOwner != address(0), "no pending owner");
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        emit OwnershipAccepted(owner);
+    }
+
     function setRelayer(address newRelayer) external onlyOwner {
+        require(newRelayer != address(0), "bad relayer");
         relayer = newRelayer;
         emit RelayerUpdated(newRelayer);
     }

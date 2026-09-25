@@ -2,19 +2,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { jwtVerify } from 'jose';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { isAddress } from 'viem';
 import { createAccountWallet } from '@/src/lib/circle/client';
-import { tryJwtSecret } from '@/src/lib/auth/secrets';
 
-const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
-
+// H5: central merchant auth (active + verified + sessionVersion).
 async function getMerchantFromCookie(req: NextRequest) {
-    const token = req.cookies.get('merchant_token')?.value;
-    if (!token || !JWT_SECRET) return null;
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
-    return prisma.merchant.findUnique({ where: { id: merchantId } });
+    const authed = await resolveMerchant(req);
+    if (!authed) return null;
+    return prisma.merchant.findUnique({ where: { id: authed.id } });
 }
 
 // GET — current wallet info for the settings page

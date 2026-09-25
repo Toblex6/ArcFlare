@@ -57,8 +57,10 @@ function issueSessionCookie(account: {
   walletType?: string | null;
   circleWalletId?: string | null;
   email?: string | null;
+  sessionVersion?: number | null;
 }) {
-  return issueConsumerSessionToken(account.id, account.walletAddress).then(
+  // M4: bind the token to the account's current sessionVersion.
+  return issueConsumerSessionToken(account.id, account.walletAddress, account.sessionVersion ?? 0).then(
     (token) => ({ token })
   );
 }

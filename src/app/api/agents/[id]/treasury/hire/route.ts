@@ -17,10 +17,14 @@ import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 const arcTestnet = getArcChain();
 import { agenticCommerceAbi } from "@/lib/contracts/erc8183";
 import { hashCriteria } from "@/lib/jobs/criteriaHash";
-import { evaluatePolicyForSpend } from "@/lib/ledger/treasuryPolicy";
+import { evaluatePolicyForSpend, withTreasurySpendLock } from "@/lib/ledger/treasuryPolicy";
 import { checkSpendAllowed } from "@/lib/agents/spendLimitEnforcer";
+import { checkRateLimit } from "@/src/lib/ratelimit";
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  // H9: payments-tier rate limit on this fund-moving POST.
+  const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
+  if (!allowed) return limitResponse!;
   const { id } = await ctx.params;
   // Canonical hirer reference: registry id, ERC-8004 tokenId, or SCA address
   // (auto, ambiguity refused). Caller-control, step-up, treasury/spend
@@ -66,6 +70,23 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
   const stepUp = await requireConsumerStepUpForActor(req, actor, "consumer.job-fund");
   if (stepUp) return stepUp;
 
+  // H10: mandatory server idempotency key — concurrent retries with the same
+  // key claim one PaymentLog row before any on-chain write; the loser replays.
+  const rawKey = req.headers.get('idempotency-key')?.trim();
+  if (!rawKey || rawKey.length > 120) {
+    return NextResponse.json({ error: 'Idempotency-Key header (1-120 chars) is required.' }, { status: 400 });
+  }
+  const hireIdemKey = `treasury-hire:${hirerId}:${rawKey}`;
+  const hireExisting = await (prisma as any).paymentLog.findUnique({ where: { idempotencyKey: hireIdemKey } }).catch(() => null);
+  if (hireExisting) {
+    return NextResponse.json({
+      success: (hireExisting as any).status === 'SUCCESS',
+      replayed: true,
+      jobId: (hireExisting as any).gatewayReference ?? null,
+      txHash: (hireExisting as any).arcTxHash ?? null,
+    });
+  }
+
   // Trust check FIRST (cheapest, no side effects) — if policy has minTrustScore, enforce before money checks
   const hirerPolicy: any = await (prisma as any).agentTreasuryPolicy.findUnique({ where: { agentRegistryId: hirerId } }).catch(() => null);
   if (hirerPolicy?.minTrustScore !== null && hirerPolicy?.minTrustScore !== undefined) {
@@ -76,8 +97,11 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     }
   }
 
-  // Treasury policy check (fail-closed)
-  const policyCheck = await evaluatePolicyForSpend({ agentRegistryId: hirerId, amount: budgetBigInt, kind: "subcontractor" });
+  // Treasury policy check (fail-closed) — H10: serialized per hirer so
+  // concurrent hires can't each read the same spentToday and both pass.
+  const policyCheck = await withTreasurySpendLock(hirerId, async () =>
+    evaluatePolicyForSpend({ agentRegistryId: hirerId, amount: budgetBigInt, kind: "subcontractor" })
+  );
   if (!policyCheck.allowed) {
     return NextResponse.json({ error: `Treasury policy blocked: ${policyCheck.reason}` }, { status: 403 });
   }
@@ -128,42 +152,17 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "self-hire not allowed: hirer and provider cannot be the same address" }, { status: 400 });
   }
 
-  // Validation optional
+  // M1: shared validator serviceability gate (CIRCLE custody + live
+  // getWallet address match) — see src/lib/validators/serviceability.ts.
   let validationPolicy: any = null;
   if (validation && validation.required) {
     const validatorSCA = String(validation.validatorSCA || "").trim();
     if (!/^0x[a-fA-F0-9]{40}$/.test(validatorSCA)) return NextResponse.json({ error: "validation.validatorSCA must be valid 0x address" }, { status: 400 });
     if (validatorSCA.toLowerCase() === clientAddress.toLowerCase()) return NextResponse.json({ error: "validator cannot be client" }, { status: 400 });
     if (validatorSCA.toLowerCase() === provider.scaAddress?.toLowerCase()) return NextResponse.json({ error: "validator cannot be provider" }, { status: 400 });
-    // Validator Circle-serviceability gate (griefing-vector fix): a
-    // validation-required hire stores a validatorSCA that must later sign a
-    // Circle-signed validationResponse. An external/non-Circle-managed wallet
-    // could never respond, permanently blocking provider payout. Resolve
-    // server-side with the repo's canonical case-insensitive lookups (never
-    // trusts a client-supplied merchantId/circleWalletId) and reject BEFORE
-    // any side effect when unresolvable. Non-validation hires are unaffected
-    // (this block only runs when validation.required is set).
-    const [validatorMerchant, validatorAgent, validatorConsumer] = await Promise.all([
-      (prisma as any).merchant.findFirst({
-        where: { walletAddress: { equals: validatorSCA, mode: "insensitive" } },
-        select: { walletProvider: true, circleWalletId: true, walletAddress: true },
-      }),
-      (prisma as any).agentRegistry.findFirst({
-        where: { scaAddress: { equals: validatorSCA, mode: "insensitive" } },
-        select: { circleWalletId: true },
-      }),
-      (prisma as any).consumerAccount.findFirst({
-        where: { walletAddress: { equals: validatorSCA, mode: "insensitive" } },
-        select: { circleWalletId: true, walletAddress: true },
-      }),
-    ]);
-    const validatorServiceable =
-      (validatorMerchant?.walletProvider === "CIRCLE" && !!validatorMerchant?.circleWalletId && !!validatorMerchant?.walletAddress) ||
-      !!validatorAgent?.circleWalletId ||
-      (!!validatorConsumer?.circleWalletId && !!validatorConsumer?.walletAddress);
-    if (!validatorServiceable) {
-      return NextResponse.json({ error: "validatorSCA must be a Circle-managed wallet capable of signing a validation response — external wallets cannot respond to validation requests." }, { status: 400 });
-    }
+    const { assertValidatorServiceable } = await import("@/lib/validators/serviceability");
+    const serviceable = await assertValidatorServiceable(validatorSCA);
+    if (!serviceable.ok) return NextResponse.json({ error: (serviceable as any).error }, { status: 400 });
     validationPolicy = { validatorSCA: validatorSCA.toLowerCase(), tag: validation.tag || null };
   }
 
@@ -182,6 +181,29 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     abiParameters: [provider.scaAddress, evaluator, expiredAt.toString(), description, "0x0000000000000000000000000000000000000000"],
     fee: { type: "level", config: { feeLevel: "MEDIUM" } },
   });
+  // H10: claim the idempotency row BEFORE waiting on-chain, so a retry
+  // racing this hire replays instead of double-hiring. P2002 → replay.
+  try {
+    await (prisma as any).paymentLog.create({
+      data: {
+        reference: `treasury_hire_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        idempotencyKey: hireIdemKey,
+        amount: Number(budgetBigInt) / 1e6,
+        currency: 'USDC',
+        chain: 'Arc Testnet v1.0',
+        senderEmail: clientAddress,
+        merchant: `treasury-hire:${hirerId}`,
+        agentSCA: hirer.scaAddress ?? null,
+        status: 'PROCESSING',
+      },
+    });
+  } catch (e: any) {
+    if (e?.code === 'P2002') {
+      const winner = await (prisma as any).paymentLog.findUnique({ where: { idempotencyKey: hireIdemKey } }).catch(() => null);
+      return NextResponse.json({ success: (winner as any)?.status === 'SUCCESS', replayed: true, jobId: (winner as any)?.gatewayReference ?? null, txHash: (winner as any)?.arcTxHash ?? null });
+    }
+    throw e;
+  }
   const txHash = await waitForTransaction(createTx.data?.id!, "create job (treasury hire)");
   const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as `0x${string}` });
@@ -215,6 +237,12 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     const { createJobValidationPolicy } = await import("@/lib/jobs/jobValidationPolicy");
     try { await createJobValidationPolicy(jobId, validationPolicy.validatorSCA, validationPolicy.tag); } catch (e: any) { console.error("validation policy create failed:", e.message); }
   }
+
+  // H10: bind the idempotency row to the created job for replays.
+  await (prisma as any).paymentLog.update({
+    where: { idempotencyKey: hireIdemKey },
+    data: { status: 'SUCCESS', arcTxHash: txHash, gatewayReference: jobId.toString() },
+  }).catch(() => {});
 
   // Ledger: hirer subcontractor spend is not recorded until funded/released (escrow lock at fund, spend at release).
   // We record a pending intent as metadata only if needed; for now the hire itself is not a ledger event.

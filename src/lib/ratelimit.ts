@@ -1,6 +1,8 @@
 // src/lib/ratelimit.ts
 // Rate limiting middleware using Upstash Redis.
-// Falls back gracefully if env vars are not set (dev/testnet mode).
+// H9: fail-closed — when Upstash is unreachable the bounded in-memory
+// fallback below STILL enforces the same limit (never fail-open to
+// unlimited). Spend paths use the 'payments' tier via checkRateLimit.
 
 import { NextRequest, NextResponse } from 'next/server';
 

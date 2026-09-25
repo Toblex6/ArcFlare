@@ -2,30 +2,27 @@
 // Authenticated merchants create shareable payment links
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { jwtVerify } from 'jose';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { tryJwtSecret } from '@/src/lib/auth/secrets';
 import { resolveCurrency, resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preference';
 import { getNetworkConfig } from '@/lib/config/network';
 import { publicUrl } from '@/lib/publicOrigin';
 
-const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
+// H5: central merchant auth (active + verified + sessionVersion).
 
 export async function POST(req: NextRequest) {
   try {
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse;
 
-    const sessionToken = req.cookies.get('merchant_token')?.value;
-    if (!sessionToken || !JWT_SECRET) {
+    // H5: resolveMerchant enforces active + verified + sessionVersion.
+    const authed = await resolveMerchant(req);
+    if (!authed) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(sessionToken, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
-
-    const merchant = await (prisma as any).merchant.findUnique({ where: { id: merchantId } });
+    const merchant = await (prisma as any).merchant.findUnique({ where: { id: authed.id } });
     if (!merchant) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
     }
@@ -33,9 +30,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { amount, currency, description, webhookUrl } = body;
 
-    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+    // M6: shared usdcAmount rule (decimal string, ≤6 decimals, >0, capped) —
+    // no float drift into the frozen invoice row.
+    const linkAmountStr = String(amount ?? "").trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(linkAmountStr) || !Number.isFinite(parseFloat(linkAmountStr)) || parseFloat(linkAmountStr) <= 0 || parseFloat(linkAmountStr) > 10_000_000) {
       return NextResponse.json(
-        { success: false, error: 'Valid amount is required.' },
+        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
         { status: 400 }
       );
     }
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     await prisma.paymentLog.create({
       data: {
         reference,
-        amount: parseFloat(amount),
+        amount: parseFloat(linkAmountStr),
         currency: token.symbol,
         tokenAddress: token.address,
         chain: getNetworkConfig().name === 'mainnet' ? 'Arc v1.0' : 'Arc Testnet v1.0',
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
       success: true,
       reference,
       checkoutUrl,
-      amount: parseFloat(amount),
+      amount: parseFloat(linkAmountStr),
       currency: token.symbol,
       token: {
         symbol: token.symbol,
@@ -123,14 +123,11 @@ export async function POST(req: NextRequest) {
 // List merchant's payment links
 export async function GET(req: NextRequest) {
   try {
-    const token = req.cookies.get('merchant_token')?.value;
-    if (!token || !JWT_SECRET) {
+    const authed = await resolveMerchant(req);
+    if (!authed) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
-
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
-    const merchant = await (prisma as any).merchant.findUnique({ where: { id: merchantId } });
+    const merchant = await (prisma as any).merchant.findUnique({ where: { id: authed.id } });
     if (!merchant) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
     }

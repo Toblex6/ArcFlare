@@ -1,20 +1,10 @@
 import { withSentryConfig } from '@sentry/nextjs';
 import { ethers } from 'ethers';
 
-// 📡 Diagnostic Log: prints the public address derived from the admin key.
-// Dev-only — printing it in production logs tells anyone with log access
-// that an admin signer exists and which address it controls.
-if (process.env.NODE_ENV !== 'production' && process.env.ARC_ADMIN_PRIVATE_KEY) {
-  try {
-    const wallet = new ethers.Wallet(process.env.ARC_ADMIN_PRIVATE_KEY);
-    console.log('\n==============================================');
-    console.log('👉 YOUR DEVELOPER WALLET ADDRESS IS:');
-    console.log(`   ${wallet.address}`);
-    console.log('==============================================\n');
-  } catch (e) {
-    console.log('\n❌ Private key found in .env is invalid. Ensure it starts with 0x\n');
-  }
-}
+// M9: no address logging. A previous revision derived and printed the admin
+// signer address at build time; even dev-only, log lines naming privileged
+// signers don't belong in build config. Key validity is surfaced without
+// ever printing the address.
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

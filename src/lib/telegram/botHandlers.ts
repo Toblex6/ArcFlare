@@ -36,6 +36,7 @@ import { retryGasSponsorship } from '@/lib/wallet/circleWalletProvisioning';
 import { prisma } from '@/lib/prisma';
 import { getUsdcBalance } from '@/lib/wallet/usdcBalance';
 import { transferUsdc } from '@/lib/circle/transfers';
+import { resolveConsumerWallet, requireServerSigning, ConsumerFeatureError } from '@/src/lib/auth/consumerWallet';
 import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
 import { CONSUMER_PIN_HEADER, verifyConsumerPinForBot } from '@/lib/auth/consumerStepUp';
 import { NextRequest } from 'next/server';
@@ -264,13 +265,16 @@ export async function handleAccept(
   }
 
   const account = await prisma.consumerAccount.findUnique({ where: { walletAddress: session.walletAddress } });
-  if (!account?.circleWalletId) {
+  // H8: canonical custody check (presence alone is not authority — the
+  // accept route re-verifies live before anything signs).
+  if (!account || !resolveConsumerWallet(account)?.canServerSign) {
     return { text: `Your account has no Circle wallet to sign the budget.` };
   }
 
   try {
     const { POST } = await import('@/app/api/jobs/[jobId]/accept/route');
-    const token = await issueConsumerSessionToken(account.id, account.walletAddress);
+    // M4: bind the token to the account's current sessionVersion.
+    const token = await issueConsumerSessionToken(account.id, account.walletAddress, (account as any).sessionVersion ?? 0);
     const headers: Record<string, string> = { cookie: `consumer_token=${token}`, 'content-type': 'application/json' };
     // Forward the step-up credential (if supplied) so the route's canonical
     // gate sees the same proof — the PIN travels in the header only.
@@ -333,12 +337,15 @@ export async function handleDeliver(
 
   try {
     const account = await prisma.consumerAccount.findUnique({ where: { walletAddress: session.walletAddress } });
-    if (!account?.circleWalletId) {
+    // H8: canonical custody check (presence alone is not authority — the
+    // submit route re-verifies live before anything signs).
+    if (!account || !resolveConsumerWallet(account)?.canServerSign) {
       return { text: `Your account has no Circle wallet to sign the submission.` };
     }
 
     const { POST } = await import('@/app/api/jobs/submit/route');
-    const token = await issueConsumerSessionToken(account.id, account.walletAddress);
+    // M4: bind the token to the account's current sessionVersion.
+    const token = await issueConsumerSessionToken(account.id, account.walletAddress, (account as any).sessionVersion ?? 0);
     const headers: Record<string, string> = { cookie: `consumer_token=${token}`, 'content-type': 'application/json' };
     // Forward the step-up credential (if supplied) — header only.
     if (pin) headers[CONSUMER_PIN_HEADER] = pin;
@@ -489,14 +496,24 @@ export async function handleConfirmWithdraw(telegramUserId: string, pin?: string
   }
 
   const account = await prisma.consumerAccount.findFirst({ where: { telegramUserId } });
-  if (!account?.circleWalletId || !account.walletAddress) {
-    await prisma.telegramWithdrawalIntent.delete({ where: { telegramUserId } });
+  // H8: custody is decided by the canonical resolver + server-signing gate —
+  // circleWalletId presence alone is NOT authority. EXTERNAL rows (or CIRCLE
+  // rows missing their binding) fail closed here and never reach transferUsdc.
+  // Invariant (regression-tested): no EXTERNAL row may carry circleWalletId.
+  let signing: { walletAddress: string; circleWalletId: string };
+  try {
+    signing = requireServerSigning(resolveConsumerWallet(account));
+  } catch (e: any) {
+    await prisma.telegramWithdrawalIntent.delete({ where: { telegramUserId } }).catch(() => {});
+    if (e instanceof ConsumerFeatureError) {
+      return { text: `${e.message} — withdrawals aren't available for this account.` };
+    }
     return { text: `Your account has no Circle wallet — withdrawals aren't available for this account.` };
   }
 
   let amount = intent.amount;
   if (amount === 'ALL') {
-    const balance = await getUsdcBalance(account.walletAddress);
+    const balance = await getUsdcBalance(signing.walletAddress);
     if (balance <= 0) {
       await prisma.telegramWithdrawalIntent.delete({ where: { telegramUserId } });
       return { text: `You have no USDC balance to withdraw.` };
@@ -506,8 +523,8 @@ export async function handleConfirmWithdraw(telegramUserId: string, pin?: string
 
   try {
     const { arcTxHash, circleTxId } = await transferUsdc({
-      walletId: account.circleWalletId,
-      walletAddress: account.walletAddress,
+      walletId: signing.circleWalletId,
+      walletAddress: signing.walletAddress,
       destinationAddress: intent.destinationAddress,
       amount,
       idempotencyKey: `telegram-withdraw-${telegramUserId}-${intent.createdAt.getTime()}`,

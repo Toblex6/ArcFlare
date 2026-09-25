@@ -20,11 +20,13 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 ///   ESCROWED funds between poster-refund-address... NO — see above, there is no refund path.
 ///   An arbiter split only ever divides funds between the worker and a burn/treasury
 ///   sink, never back to the poster. If you need poster-refundable jobs, that is a
-///   DIFFERENT product (use the existing mutual-confirm ArcFlareEscrow.sol instead).
+///   DIFFERENT product (the mutual-confirm escrow design, whose stale source is
+///   quarantined at contracts/stale/ArcFlareEscrow.stale.sol — do not revive it
+///   without a reviewed plan).
 ///
 /// If a job should be cancelable with funds returned to the poster, do not use this
-/// contract — use the existing ArcFlareEscrow.sol, which is mutual-confirm and does
-/// support a refund path. This contract is specifically for the "worker must be able
+/// contract — the mutual-confirm escrow design supports a refund path (stale source
+/// quarantined at contracts/stale/ArcFlareEscrow.stale.sol). This contract is specifically for the "worker must be able
 /// to trust the job" use case.
 contract ArcFlareJobEscrow is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -75,6 +77,12 @@ contract ArcFlareJobEscrow is ReentrancyGuard {
 
     address public owner;
 
+    /// @notice pending owner for the 2-step ownership transfer
+    /// (proposeOwner/acceptOwner). Single-step transfers are banned here:
+    /// a fat-fingered or front-run single tx must never be able to hand
+    /// control of escrowed funds' arbiter/relayer roles to an attacker.
+    address public pendingOwner;
+
     uint256 public nextJobId;
     mapping(uint256 => Job) public jobs;
 
@@ -87,6 +95,8 @@ contract ArcFlareJobEscrow is ReentrancyGuard {
     event JobResolved(uint256 indexed jobId, uint256 workerAmount, uint256 treasuryAmount);
     event ArbiterUpdated(address indexed newArbiter);
     event RelayerUpdated(address indexed newRelayer);
+    event OwnershipProposed(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipAccepted(address indexed newOwner);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "not owner");
@@ -104,19 +114,47 @@ contract ArcFlareJobEscrow is ReentrancyGuard {
     }
 
     constructor(address _owner, address _arbiter, address _treasurySink, address _relayer) {
+        require(_owner != address(0), "bad owner");
+        require(_arbiter != address(0), "bad arbiter");
         require(_treasurySink != address(0), "bad treasury");
+        require(_relayer != address(0), "bad relayer");
         owner = _owner;
         arbiter = _arbiter;
         treasurySink = _treasurySink;
         relayer = _relayer;
     }
 
+    /// @notice Step 1 of the 2-step ownership transfer. Only the current
+    /// owner can propose; the transfer completes ONLY when the proposed
+    /// address calls acceptOwner(). A wrong proposal is harmless until
+    /// accepted and can be overwritten by proposing again (or to address(0)
+    /// is rejected — propose a burn only by deliberation, never by typo).
+    function proposeOwner(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "bad new owner");
+        require(newOwner != owner, "already owner");
+        pendingOwner = newOwner;
+        emit OwnershipProposed(owner, newOwner);
+    }
+
+    /// @notice Step 2: the proposed address accepts control. Anyone can call,
+    /// but it reverts unless msg.sender is the currently-proposed owner, so
+    /// a mistyped proposal can never be claimed by a third party.
+    function acceptOwner() external {
+        require(msg.sender == pendingOwner, "not pending owner");
+        require(pendingOwner != address(0), "no pending owner");
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        emit OwnershipAccepted(owner);
+    }
+
     function setArbiter(address newArbiter) external onlyOwner {
+        require(newArbiter != address(0), "bad arbiter");
         arbiter = newArbiter;
         emit ArbiterUpdated(newArbiter);
     }
 
     function setRelayer(address newRelayer) external onlyOwner {
+        require(newRelayer != address(0), "bad relayer");
         relayer = newRelayer;
         emit RelayerUpdated(newRelayer);
     }

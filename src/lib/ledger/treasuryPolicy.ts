@@ -5,6 +5,38 @@
 import { prisma } from "@/lib/prisma";
 import { computeTreasuryView } from "./treasuryService";
 
+// H10: per-agent spend serialization. Daily-cap evaluation is read-then-
+// debit (sum DEBIT entries, then the caller appends a new DEBIT). Two
+// concurrent spends for one agent could each read the same spentToday and
+// both pass the cap. Spenders MUST wrap evaluatePolicyForSpend + their debit
+// write in withTreasurySpendLock(agentRegistryId, fn) so the read and the
+// write are atomic per agent. Server idempotency keys on the debit row
+// (PaymentLog/AgentLedgerEntry idempotencyKey unique) make retries replay
+// instead of double-debit.
+const treasurySpendChains = new Map<number, Promise<unknown>>();
+
+export function withTreasurySpendLock<T>(agentRegistryId: number, fn: () => Promise<T>): Promise<T> {
+  const prev = treasurySpendChains.get(agentRegistryId) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  treasurySpendChains.set(
+    agentRegistryId,
+    run.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+  // Prune settled tails so the map can't grow forever.
+  run.then(
+    () => {
+      if (treasurySpendChains.get(agentRegistryId) === run) treasurySpendChains.delete(agentRegistryId);
+    },
+    () => {
+      if (treasurySpendChains.get(agentRegistryId) === run) treasurySpendChains.delete(agentRegistryId);
+    }
+  );
+  return run;
+}
+
 export interface PolicyInput {
   reserveMinimum?: string; // 6-dec bigint string
   maxSpendPerJob?: string;

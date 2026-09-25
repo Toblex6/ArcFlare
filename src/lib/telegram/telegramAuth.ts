@@ -36,7 +36,8 @@ export async function authenticateOrCreateTelegramConsumer(
   const existing = await prisma.consumerAccount.findFirst({ where: { telegramUserId } });
 
   if (existing) {
-    const consumerToken = await issueConsumerToken(existing.id, existing.walletAddress);
+    // M4: bind the token to the account's current sessionVersion.
+    const consumerToken = await issueConsumerToken(existing.id, existing.walletAddress, (existing as any).sessionVersion ?? 0);
     return {
       consumerToken,
       consumerId: existing.id,
@@ -76,8 +77,8 @@ export async function authenticateOrCreateTelegramConsumer(
  * src/app/api/consumer/session/route.ts). Fail-closed via
  * requireJwtSecret('CONSUMER_JWT_SECRET').
  */
-async function issueConsumerToken(consumerId: string, walletAddress: string): Promise<string> {
-  return issueConsumerSessionToken(consumerId, walletAddress);
+async function issueConsumerToken(consumerId: string, walletAddress: string, sessionVersion: number = 0): Promise<string> {
+  return issueConsumerSessionToken(consumerId, walletAddress, sessionVersion);
 }
 
 /**

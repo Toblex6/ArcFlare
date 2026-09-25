@@ -2,28 +2,25 @@
 // Returns current merchant profile + their payments + API key hint
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { jwtVerify } from 'jose';
-import { tryJwtSecret } from '@/src/lib/auth/secrets';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { parseBody, SettlementPreferenceSchema } from '@/src/lib/validation';
 import { resolveMerchantSettlementPreference, resolvePreferenceUpdate } from '@/src/lib/routing/preference';
 import { getTokenByAddress, getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
 import { publicUrl } from '@/lib/publicOrigin';
 
-const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
+// H5: central merchant auth (active + verified + sessionVersion).
 
 export async function GET(req: NextRequest) {
   try {
-    const token = req.cookies.get('merchant_token')?.value;
-    if (!token || !JWT_SECRET) {
+    // H5: resolveMerchant enforces active + verified + sessionVersion.
+    const authed = await resolveMerchant(req);
+    if (!authed) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
-
     const merchant = await (prisma as any).merchant.findUnique({
-      where: { id: merchantId },
+      where: { id: authed.id },
     });
 
     if (!merchant) {
@@ -121,15 +118,12 @@ export async function PATCH(req: NextRequest) {
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse as NextResponse;
 
-    const token = req.cookies.get('merchant_token')?.value;
-    if (!token || !JWT_SECRET) {
+    const authed = await resolveMerchant(req);
+    if (!authed) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    const merchantId = payload.merchantId as string;
-
-    const merchant = await (prisma as any).merchant.findUnique({ where: { id: merchantId } });
+    const merchant = await (prisma as any).merchant.findUnique({ where: { id: authed.id } });
     if (!merchant) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
     }
@@ -151,7 +145,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const updated = await (prisma as any).merchant.update({
-      where: { id: merchantId },
+      where: { id: authed.id },
       data: { settlementTokenAddress: canonicalAddress },
     });
     const view = getTokenByAddress(canonicalAddress)!;

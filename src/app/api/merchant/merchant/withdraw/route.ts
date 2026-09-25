@@ -6,31 +6,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { jwtVerify } from 'jose';
+import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { isAddress, parseUnits } from 'viem';
 import { createContractTransaction, getWalletBalance } from '@/src/lib/circle/client';
 import { erc20TransferAbi, USDC_CONTRACT, USDC_DECIMALS } from '@/src/lib/wallet/erc20';
-import { tryJwtSecret } from "@/src/lib/auth/secrets";
 import { explorerTxUrl } from "@/lib/config/network";
 
-const JWT_SECRET = tryJwtSecret('MERCHANT_JWT_SECRET');
+// H5: central merchant auth (active + verified + sessionVersion). H6:
+// Idempotency-Key dedupe via PaymentLog.idempotencyKey (unique) — the claim
+// row is created BEFORE the on-chain transfer so a retry can never
+// double-spend; replays return the bound txHash.
 
 export async function POST(req: NextRequest) {
     try {
         const { allowed, response: limitResponse } = await checkRateLimit(req, 'withdraw');
         if (!allowed) return limitResponse;
 
-        const token = req.cookies.get('merchant_token')?.value;
-        if (!token || !JWT_SECRET) {
+        const authed = await resolveMerchant(req);
+        if (!authed) {
             return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
         }
 
-        const { payload } = await jwtVerify(token, JWT_SECRET);
-        const merchantId = payload.merchantId as string;
-
-        const merchant = await (prisma as any).merchant.findUnique({ where: { id: merchantId } });
+        const merchant = await (prisma as any).merchant.findUnique({ where: { id: authed.id } });
         if (!merchant) {
             return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
+        }
+
+        // H6: mandatory server idempotency key.
+        const rawKey = req.headers.get('idempotency-key')?.trim();
+        if (!rawKey || rawKey.length > 120) {
+            return NextResponse.json(
+                { success: false, error: 'Idempotency-Key header (1-120 chars) is required.' },
+                { status: 400 }
+            );
+        }
+        const idempotencyKey = `merchant-withdraw:${merchant.id}:${rawKey}`;
+        const existing = await prisma.paymentLog.findUnique({ where: { idempotencyKey } }).catch(() => null);
+        if (existing) {
+            if ((existing as any).merchantId && (existing as any).merchantId !== merchant.id) {
+                return NextResponse.json({ success: false, error: 'Idempotency key already in use.' }, { status: 409 });
+            }
+            return NextResponse.json({
+                success: (existing as any).status === 'SUCCESS',
+                replayed: true,
+                txHash: (existing as any).arcTxHash ?? null,
+                explorerUrl: (existing as any).arcTxHash ? explorerTxUrl((existing as any).arcTxHash) : null,
+                amount: (existing as any).amount,
+                currency: 'USDC',
+            });
         }
 
         if (merchant.walletProvider !== 'CIRCLE' || !merchant.circleWalletId || !merchant.walletAddress) {
@@ -64,6 +87,38 @@ export async function POST(req: NextRequest) {
 
         const amountUnits = parseUnits(amount.toString(), USDC_DECIMALS);
 
+        // H6: claim BEFORE the on-chain write. Concurrent retries with the
+        // same key race here; the loser gets P2002 and replays the winner.
+        const claimRef = `withdraw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        try {
+            await prisma.paymentLog.create({
+                data: {
+                    reference: claimRef,
+                    idempotencyKey,
+                    amount: amountNum,
+                    currency: 'USDC',
+                    chain: 'Arc Testnet v1.0',
+                    senderEmail: merchant.email ?? 'merchant@withdraw',
+                    merchant: merchant.businessName,
+                    merchantId: merchant.id,
+                    merchantSCA: merchant.walletAddress,
+                    status: 'PROCESSING',
+                },
+            });
+        } catch (e: any) {
+            if (e?.code === 'P2002') {
+                const winner = await prisma.paymentLog.findUnique({ where: { idempotencyKey } }).catch(() => null);
+                return NextResponse.json({
+                    success: (winner as any)?.status === 'SUCCESS',
+                    replayed: true,
+                    txHash: (winner as any)?.arcTxHash ?? null,
+                    amount: (winner as any)?.amount ?? amountNum,
+                    currency: 'USDC',
+                });
+            }
+            throw e;
+        }
+
         const txHash = await createContractTransaction(
             merchant.walletAddress,
             USDC_CONTRACT,
@@ -71,6 +126,11 @@ export async function POST(req: NextRequest) {
             [destinationAddress, amountUnits.toString()],
             `Merchant withdrawal — ${merchant.businessName}`
         );
+
+        await prisma.paymentLog.update({
+            where: { idempotencyKey },
+            data: { status: 'SUCCESS', arcTxHash: txHash },
+        }).catch(() => {});
 
         return NextResponse.json({
             success: true,

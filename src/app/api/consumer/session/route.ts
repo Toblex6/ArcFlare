@@ -59,10 +59,11 @@ function buildChallengeMessage(domain: string, address: string, nonce: string): 
 }
 
 async function issueSession(
-  account: { id: string; walletAddress: string; walletType?: string | null; circleWalletId?: string | null },
+  account: { id: string; walletAddress: string; walletType?: string | null; circleWalletId?: string | null; sessionVersion?: number | null },
   extra?: { isNew?: boolean }
 ) {
-  const token = await issueConsumerSessionToken(account.id, account.walletAddress);
+  // M4: bind the token to the account's current sessionVersion.
+  const token = await issueConsumerSessionToken(account.id, account.walletAddress, account.sessionVersion ?? 0);
 
   // Canonical wallet view (mode + server-signing capability): lets callers
   // distinguish a fully-bound CIRCLE wallet from one whose signing identity
