@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { arcLabel } from '@/lib/arcLabel';
 
 type Step = 'form' | 'verify' | 'done';
 
@@ -319,7 +320,7 @@ export default function MerchantSignup() {
         </div>
 
         <p style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: 'var(--border)', fontFamily: 'monospace', letterSpacing: 1 }}>
-          FLAREHQ PAYMENT INFRASTRUCTURE • ARC TESTNET
+          FLAREHQ PAYMENT INFRASTRUCTURE • {arcLabel().toUpperCase()}
         </p>
       </div>
     </main>

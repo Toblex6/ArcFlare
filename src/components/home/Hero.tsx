@@ -3,11 +3,12 @@
 import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
+import { arcLabel } from '@/lib/arcLabel';
 
 // The actual money path through FlareHQ — the hero visual.
 // USDC payment → checkout → escrow → agent → validation → settlement.
 const FLOW = [
-  { label: 'USDC payment', detail: '$12.00 · Arc Testnet', icon: '💵' },
+  { label: 'USDC payment', detail: `$12.00 · ${arcLabel()}`, icon: '💵' },
   { label: 'Checkout', detail: 'link + embed · settled to merchant', icon: '🧾' },
   { label: 'Escrow', detail: '#4821 · held $250 · milestone 1/3', icon: '🔐' },
   { label: 'Agent hired', detail: 'agent-07 · ERC-8004 · rep 92', icon: '🤖' },
@@ -45,7 +46,7 @@ export default function Hero() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
             </span>
-            <span className="text-[var(--text)]">Live on Arc Testnet</span>
+            <span className="text-[var(--text)]">Live on {arcLabel()}</span>
             <span className="text-[var(--text-secondary)]">· USDC · checkout is non-custodial</span>
           </motion.div>
 

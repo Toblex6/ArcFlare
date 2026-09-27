@@ -42,7 +42,7 @@ const TABS = [
     label: 'Developers',
     title: 'One API for all money movement',
     desc: 'Init, verify, stream, escrow, schedule. APIs, docs and webhooks included.',
-    points: ['APIs + docs', 'Webhooks for settlement', 'Testnet → mainnet path'],
+    points: ['APIs + docs', 'Webhooks for settlement', 'Mainnet-ready APIs'],
     cta: 'Read the docs',
     href: 'https://docs.flarehq.xyz',
   },

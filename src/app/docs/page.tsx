@@ -93,7 +93,7 @@ export default function DocsPage() {
               { l: 'Frontend', t: 'Next.js 16' },
               { l: 'Backend', t: 'Next.js API Routes' },
               { l: 'Database', t: 'PostgreSQL + Prisma' },
-              { l: 'Blockchain', t: 'Arc Testnet' },
+              { l: 'Blockchain', t: network.name === "mainnet" ? "Arc" : "Arc Testnet" },
               { l: 'Payments', t: 'Circle Developer Platform' },
               { l: 'Contracts', t: 'Solidity 0.8.20' },
             ].map((item, i) => (

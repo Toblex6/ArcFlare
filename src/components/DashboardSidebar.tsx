@@ -269,7 +269,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
                 <div style={{ marginTop: 12, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: 10, padding: '8px 12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
-                        <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Arc Testnet Mode</span>
+                        <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{IS_TESTNET ? 'Arc Testnet Mode' : 'Arc Mode'}</span>
                     </div>
                 </div>
             </aside>

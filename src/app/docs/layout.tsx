@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
+import { arcLabel } from '@/lib/arcLabel';
 
 const docsLinks = [
   { href: '/docs', label: 'Overview' },
@@ -17,7 +18,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             <Image src="/arcflare-logo.png" alt="FlareHQ" width={38} height={38} />
             <div>
               <p className="text-lg font-bold leading-tight">FlareHQ Docs</p>
-              <p className="text-xs text-gray-500">Built on Arc Testnet</p>
+              <p className="text-xs text-gray-500">Built on {arcLabel()}</p>
             </div>
           </Link>
 

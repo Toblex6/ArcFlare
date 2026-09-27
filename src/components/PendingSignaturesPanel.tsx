@@ -18,6 +18,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAccount, useChainId, useSwitchChain, useWriteContract } from 'wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
+import { arcLabel } from '@/lib/arcLabel';
 
 interface TransactionIntent {
   description?: string;
@@ -126,7 +127,7 @@ export default function PendingSignaturesPanel() {
     // friendly copy (never raw chain-id text) and broadcasts nothing.
     if (chainId !== intent.chainId) {
       setBroadcastId(req.id);
-      setError('Switching your wallet to Arc Testnet…');
+      setError(`Switching your wallet to ${arcLabel()}…`);
       const getProvider = async () => {
         try {
           return await (activeConnector as unknown as { getProvider?: () => Promise<unknown> })?.getProvider?.();

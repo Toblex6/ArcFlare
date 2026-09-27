@@ -115,7 +115,7 @@ export default function EscrowPayPage() {
     setExplorerUrl(null);
     try {
       if (chainId !== arcTestnet.id) {
-        setStatusText('Switching your wallet to Arc Testnet…');
+        setStatusText(`Switching your wallet to ${arcTestnet.name}…`);
         const getter = async () => { try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; } };
         const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter });
         if (!net.ok) {
@@ -284,7 +284,7 @@ export default function EscrowPayPage() {
             </p>
             <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 10, padding: 10, marginBottom: 10, textAlign: 'center' }}>
               <p style={{ color: '#b45309', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Wrong network</p>
-              <p style={{ color: '#8A8275', fontSize: 11, margin: 0 }}>This escrow uses Arc Testnet. Switch your wallet to Arc to continue.</p>
+              <p style={{ color: '#8A8275', fontSize: 11, margin: 0 }}>This escrow uses {arcTestnet.name}. Switch your wallet to Arc to continue.</p>
             </div>
             <button
               onClick={async () => {
@@ -293,14 +293,14 @@ export default function EscrowPayPage() {
                 if (!net.ok) { setStep('error'); setStatusText(net.message); }
               }}
               style={{ width: '100%', padding: '12px 18px', borderRadius: 10, border: '1px solid #5C7A5C', background: '#fff', color: '#5C7A5C', fontWeight: 700, cursor: 'pointer' }}>
-              Switch to Arc Testnet
+              Switch to {arcTestnet.name}
             </button>
-            <p style={{ fontSize: 10, color: '#8A8275', margin: '6px 0 0', textAlign: 'center' }}>Funding is blocked until Arc Testnet is selected.</p>
+            <p style={{ fontSize: 10, color: '#8A8275', margin: '6px 0 0', textAlign: 'center' }}>Funding is blocked until {arcTestnet.name} is selected.</p>
           </div>
         ) : (
           <div>
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 10px' }}>
-              Paying from <strong>{address ? `${address.slice(0, 10)}…${address.slice(-6)}` : 'wallet'}</strong> · Arc Testnet ✓ · <button onClick={() => disconnect()} style={{ border: 'none', background: 'none', color: '#E8714A', cursor: 'pointer', padding: 0, fontSize: 12 }}>disconnect</button>
+              Paying from <strong>{address ? `${address.slice(0, 10)}…${address.slice(-6)}` : 'wallet'}</strong> · {arcTestnet.name} ✓ · <button onClick={() => disconnect()} style={{ border: 'none', background: 'none', color: '#E8714A', cursor: 'pointer', padding: 0, fontSize: 12 }}>disconnect</button>
             </p>
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 12px' }}>
               Two wallet confirmations: an ERC-20 approve, then the on-chain escrow deposit — exactly like checkout.

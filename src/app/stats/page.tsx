@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { explorerAddressUrl } from "@/lib/config/network";
+import { arcLabel } from "@/lib/arcLabel";
 
 interface Metrics {
   totalVolume: number;
@@ -116,7 +117,7 @@ export default function PublicStatsPage() {
           <div>
             <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>FlareHQ</p>
             <p style={{ fontSize: 10, color: '#6b5a45', margin: 0 }}>
-              Public Analytics — Arc Testnet
+              Public Analytics — {arcLabel()}
             </p>
           </div>
         </div>
@@ -143,7 +144,7 @@ export default function PublicStatsPage() {
           <span
             style={{ fontSize: 10, color: '#10b981', fontWeight: 600, fontFamily: 'monospace' }}
           >
-            LIVE — Arc Testnet
+            LIVE — {arcLabel()}
           </span>
         </div>
       </header>
@@ -154,7 +155,7 @@ export default function PublicStatsPage() {
             FlareHQ Network Stats
           </h1>
           <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>
-            Real-time onchain metrics from FlareHQ's payment infrastructure on Arc Testnet
+            Real-time onchain metrics from FlareHQ's payment infrastructure on {arcLabel()}
           </p>
         </div>
 
@@ -262,7 +263,7 @@ export default function PublicStatsPage() {
             {/* Contracts */}
             <div style={{ ...S.card, marginBottom: 24 }}>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: '#c8975a', margin: '0 0 16px' }}>
-                📜 Deployed Contracts — Arc Testnet
+                📜 Deployed Contracts — {arcLabel()}
               </h3>
               {[
                 {
@@ -341,8 +342,7 @@ export default function PublicStatsPage() {
             fontFamily: 'monospace',
           }}
         >
-          Last updated: {lastUpdated} — Auto-refreshes every 60s — Powered by Circle CCTP V2 on Arc
-          Testnet
+          Last updated: {lastUpdated} — Auto-refreshes every 60s — Powered by Circle CCTP V2 on {arcLabel()}
         </p>
       </div>
     </div>

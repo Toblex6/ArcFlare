@@ -2,6 +2,7 @@
 
 import Reveal from './Reveal';
 import SectionHeading from './SectionHeading';
+import { arcLabel } from '@/lib/arcLabel';
 
 const CODE = `// Pay-per-call with x402 — <5 min
 const res = await fetch(api + "/expensive", {
@@ -40,7 +41,7 @@ export default function DevSplit() {
               <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-extrabold text-sm">Payment settled · $18.40 USDC</p>
-                  <p className="text-xs text-[var(--text-secondary)] font-mono mt-0.5">arc testnet · 0x7f…3a91 → merchant</p>
+                  <p className="text-xs text-[var(--text-secondary)] font-mono mt-0.5">{arcLabel().toLowerCase()} · 0x7f…3a91 → merchant</p>
                 </div>
                 <span className="text-2xl">✅</span>
               </div>

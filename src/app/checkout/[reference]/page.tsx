@@ -42,6 +42,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import { arcTestnet } from '@/src/lib/wagmi';
+import { arcLabel } from '@/lib/arcLabel';
 import CheckoutWidget, { CheckoutEvent } from '@/src/components/CheckoutWidget';
 import Invoice, { InvoiceData } from '@/src/components/Invoice';
 import { CheckoutLoading } from '@/src/components/checkout/CheckoutLoading';
@@ -57,7 +58,7 @@ const STEPS: { key: Phase; label: string; description: string }[] = [
   { key: 'awaiting', label: 'Awaiting Payment', description: 'Connect a wallet to begin.' },
   { key: 'wallet_connected', label: 'Wallet Connected', description: 'Ready to send payment.' },
   { key: 'confirming', label: 'Confirming Payment', description: "Follow your wallet's prompts, then wait for on-chain confirmation." },
-  { key: 'settled', label: 'Settled', description: 'Payment confirmed on Arc Testnet.' },
+  { key: 'settled', label: 'Settled', description: `Payment confirmed on ${arcLabel()}.` },
 ];
 
 type StepStatus = 'complete' | 'active' | 'upcoming' | 'error';
@@ -233,7 +234,7 @@ export default function CheckoutPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {[
             { label: 'Non-custodial', dot: '#06b6d4' },
-            { label: payment?.chain || 'Arc Testnet', dot: '#c8975a' },
+            { label: payment?.chain || arcTestnet.name, dot: '#c8975a' },
             { label: 'On-chain verified', dot: '#0d7c5f' },
           ].map((badge) => (
             <div

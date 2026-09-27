@@ -5,6 +5,7 @@ import DashboardSidebar from '@/src/components/DashboardSidebar';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
+import { arcLabel } from '@/lib/arcLabel';
 
 interface EscrowItem {
   id: string;
@@ -412,7 +413,7 @@ export default function EscrowDashboard() {
               Escrow Management
             </h1>
             <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-              Trustless USDC escrow on Arc Testnet via ArcFlareEscrow contract
+              Trustless USDC escrow on {arcLabel()} via ArcFlareEscrow contract
             </p>
           </div>
           <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

@@ -225,7 +225,7 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
           {isMobile && !hasProvider && walletConnectConnector && (
             <>
               <p style={{ fontSize: 'clamp(12px, 1vw, 14px)', color: 'var(--text)', margin: '4px 0 0', fontWeight: 600, lineHeight: 1.5 }}>
-                Connect your wallet to pay on Arc Testnet.
+                Connect your wallet to pay on {arcTestnet.name}.
               </p>
               <p style={{ fontSize: 'clamp(11px, 1vw, 13px)', color: 'var(--text-secondary)', margin: '0', lineHeight: 1.5 }}>
                 Open this page in your wallet app, or copy the link below and open it there.
@@ -345,8 +345,8 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
       {networkMismatch && (
         <div style={{ background: 'var(--surface-secondary)', border: '1px solid var(--border)', borderRadius: 12, padding: 'clamp(10px, 1.5vw, 14px)' }}>
           <p style={{ color: 'var(--text)', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 600, margin: '0 0 6px', lineHeight: 1.5 }}>
-            FlareHQ uses Arc Testnet for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet and select/add{' '}
-            <strong>Arc Testnet</strong>, then return here and try again.
+            FlareHQ uses {arcTestnet.name} for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet and select/add{' '}
+            <strong>{arcTestnet.name}</strong>, then return here and try again.
           </p>
           <button
             onClick={() => setShowTechnical((v) => !v)}
@@ -365,7 +365,7 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
           {showTechnical && (
             <div style={{ marginTop: 10 }}>
               {[
-                ['Network Name', 'Arc Testnet'],
+                ['Network Name', arcTestnet.name],
                 ['Chain ID', String(arcTestnet.id)],
                 ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
                 ['Currency Symbol', 'ARC'],

@@ -7,6 +7,7 @@ import Image from "next/image";
 import { useAccount, useSignMessage } from "wagmi";
 import type { Address } from "viem";
 import { getNetworkConfig } from "@/lib/config/network";
+import { arcLabel } from "@/lib/arcLabel";
 import { friendlyWalletError } from "@/lib/wallet/walletErrors";
 import { friendlyConnectorLabel, hasInjectedProvider } from "@/lib/wallet/walletLabels";
 import { useGuardedConnect } from "@/hooks/useGuardedConnect";
@@ -2106,7 +2107,7 @@ function ConsumerAppInner() {
                     )}
                     {view === "request" && (
                       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--flow-text-faint)" }}>
-                        They will pay you {amount || "…"} {requestCurrency} on Arc Testnet.
+                        They will pay you {amount || "…"} {requestCurrency} on {arcLabel()}.
                       </p>
                     )}
                   </div>

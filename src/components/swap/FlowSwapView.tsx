@@ -56,6 +56,7 @@ import {
 } from 'wagmi';
 import type { Address } from 'viem';
 import { getNetworkConfig, explorerTxUrl } from '@/lib/config/network';
+import { arcLabel } from '@/lib/arcLabel';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import {
@@ -332,7 +333,7 @@ export function FlowSwapView({
       // then proceeds automatically — never a manual retry, never a silent
       // failure after the fact.
       ...(chainId !== ARC_CHAIN_ID
-        ? [{ key: 'network', label: 'Switch to Arc Testnet', status: 'pending' as const, hash: null as string | null }]
+        ? [{ key: 'network', label: `Switch to ${arcLabel()}`, status: 'pending' as const, hash: null as string | null }]
         : []),
       ...live.unsigned.approvals.map((a, i) => ({
         key: `approve-${i}`,
@@ -828,7 +829,7 @@ export function FlowSwapView({
   const confirmHint = !walletsMatch
     ? 'Connect the matching wallet to continue.'
     : wrongNetwork
-      ? 'Switch to Arc Testnet to continue — confirming switches your wallet automatically.'
+      ? `Switch to ${arcLabel()} to continue — confirming switches your wallet automatically.`
       : insufficientBalance
         ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
         : quote.status === 'error' || quote.status === 'expired'
@@ -927,7 +928,7 @@ export function FlowSwapView({
           )}
           {walletsMatch && wrongNetwork && (
             <div style={styles.noticeBox}>
-              <p style={styles.boxText}>Your wallet is on the wrong network. Flow Swap settles on Arc Testnet.</p>
+              <p style={styles.boxText}>Your wallet is on the wrong network. Flow Swap settles on {arcLabel()}.</p>
               <button
                 style={styles.secondaryButton}
                 disabled={isSending}
@@ -948,7 +949,7 @@ export function FlowSwapView({
                   })
                 }
               >
-                Switch to Arc Testnet
+                Switch to {arcLabel()}
               </button>
             </div>
           )}

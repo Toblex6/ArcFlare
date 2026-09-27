@@ -4,6 +4,7 @@
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 import AppDialog from '@/components/AppDialog';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
+import { arcLabel } from '@/lib/arcLabel';
 
 import { useRouter } from 'next/navigation';
 
@@ -1152,7 +1153,7 @@ export default function JobsPage() {
                           else if (s.num === 6) runStep('complete', { jobId, clientSCA });
                         }}
                       >
-                        {stepLoading ? 'Sending to Arc Testnet...' : `Execute: ${s.label}`}
+                        {stepLoading ? `Sending to ${arcLabel()}...` : `Execute: ${s.label}`}
                       </button>
                     </div>
                   )}

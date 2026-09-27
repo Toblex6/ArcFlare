@@ -715,7 +715,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 <div style={{ background: isEurc ? 'rgba(6,182,212,0.06)' : 'rgba(200,151,90,0.06)', border: `1px solid ${isEurc ? 'rgba(6,182,212,0.2)' : 'rgba(200,151,90,0.25)'}`, borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
                     <p style={{ color: isEurc ? '#06b6d4' : '#c8975a', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Paying in {invoiceSymbol}</p>
                     <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
-                        This invoice settles in {invoiceSymbol} on Arc Testnet ({shortTokenAddress(invoiceToken.address)}).
+                        This invoice settles in {invoiceSymbol} on {arcTestnet.name} ({shortTokenAddress(invoiceToken.address)}).
                         Your wallet will submit {isEurc ? 'an' : 'a'} {invoiceSymbol} transfer of {payment.amount} {invoiceSymbol}, verified on-chain before confirmation.
                     </p>
                     <p style={{ color: '#a89684', fontSize: 11, margin: '6px 0 0' }}>
@@ -866,7 +866,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             </div>
                             <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
                                 <p style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Wrong network</p>
-                                <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This payment uses Arc Testnet. Switch your wallet to Arc to continue.</p>
+                                <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This payment uses {arcTestnet.name}. Switch your wallet to Arc to continue.</p>
                             </div>
                             <button
                                 onClick={async () => {
@@ -883,14 +883,14 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 disabled={switching}
                                 style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #c8975a', fontSize: 14, fontWeight: 800, cursor: switching ? 'not-allowed' : 'pointer', background: switching ? '#6b5a45' : 'transparent', color: '#c8975a' }}
                             >
-                                {switching ? 'Switching...' : 'Switch to Arc Testnet'}
+                                {switching ? 'Switching...' : `Switch to ${arcTestnet.name}`}
                             </button>
-                            <p style={{ color: '#6b5a45', fontSize: 10, margin: '6px 0 0', textAlign: 'center' }}>Pay is blocked until Arc Testnet is selected — no “Pay anyway”.</p>
+                            <p style={{ color: '#6b5a45', fontSize: 10, margin: '6px 0 0', textAlign: 'center' }}>Pay is blocked until {arcTestnet.name} is selected — no “Pay anyway”.</p>
                         </>
                     ) : (
                         <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11, color: '#6b5a45' }}>
-                                <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)} · Arc Testnet ✓</span>
+                                <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)} · {arcTestnet.name} ✓</span>
                                 <button onClick={() => disconnect()} style={{ background: 'none', border: 'none', color: '#c8975a', cursor: 'pointer', fontSize: 'inherit' }}>
                                     Disconnect
                                 </button>
@@ -1073,8 +1073,8 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             {networkMismatch && (
                 <div style={{ marginTop: 12, background: '#1a1410', border: '1px solid #2d2015', borderRadius: 12, padding: 14 }}>
                     <p style={{ color: '#f0ece6', fontSize: 12, fontWeight: 600, margin: '0 0 6px', lineHeight: 1.5 }}>
-                        FlareHQ uses <strong>Arc Testnet</strong> for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet
-                        and select/add <strong>Arc Testnet</strong>, then return here and try again.
+                        FlareHQ uses <strong>{arcTestnet.name}</strong> for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet
+                        and select/add <strong>{arcTestnet.name}</strong>, then return here and try again.
                     </p>
                     <button
                         onClick={() => setShowTechnical((v) => !v)}
@@ -1085,7 +1085,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                     {showTechnical && (
                         <div style={{ marginTop: 10 }}>
                             {[
-                                ['Network Name', 'Arc Testnet'],
+                                ['Network Name', arcTestnet.name],
                                 ['Chain ID', String(arcTestnet.id)],
                                 ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
                                 ['Currency Symbol', 'ARC'],
@@ -1121,7 +1121,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             />
                         </div>
                     )}
-                    <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>✓ Payment settled on Arc Testnet in {invoiceSymbol}</p>
+                    <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>✓ Payment settled on {arcTestnet.name} in {invoiceSymbol}</p>
                     <p style={{ color: '#4b4035', fontSize: 10, margin: 0 }}>Ledger updated · {payment.amount} {invoiceSymbol} confirmed on-chain · Dashboard synced</p>
                 </div>
             )}
