@@ -7,8 +7,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { explorerAddressUrl } from "@/lib/config/network";
-import { arcLabel } from "@/lib/arcLabel";
+import { useArcLabel } from "@/src/components/NetworkContext";
+import { useExplorer } from "@/src/components/NetworkContext";
 
 interface Metrics {
   totalVolume: number;
@@ -22,6 +22,10 @@ interface Metrics {
 }
 
 export default function PublicStatsPage() {
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
+  const { addressUrl: explorerAddress } = useExplorer();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +121,7 @@ export default function PublicStatsPage() {
           <div>
             <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>FlareHQ</p>
             <p style={{ fontSize: 10, color: '#6b5a45', margin: 0 }}>
-              Public Analytics — {arcLabel()}
+              Public Analytics — {arcName}
             </p>
           </div>
         </div>
@@ -144,7 +148,7 @@ export default function PublicStatsPage() {
           <span
             style={{ fontSize: 10, color: '#10b981', fontWeight: 600, fontFamily: 'monospace' }}
           >
-            LIVE — {arcLabel()}
+            LIVE — {arcName}
           </span>
         </div>
       </header>
@@ -155,7 +159,7 @@ export default function PublicStatsPage() {
             FlareHQ Network Stats
           </h1>
           <p style={{ color: '#6b5a45', fontSize: 14, margin: 0 }}>
-            Real-time onchain metrics from FlareHQ's payment infrastructure on {arcLabel()}
+            Real-time onchain metrics from FlareHQ's payment infrastructure on {arcName}
           </p>
         </div>
 
@@ -263,7 +267,7 @@ export default function PublicStatsPage() {
             {/* Contracts */}
             <div style={{ ...S.card, marginBottom: 24 }}>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: '#c8975a', margin: '0 0 16px' }}>
-                📜 Deployed Contracts — {arcLabel()}
+                📜 Deployed Contracts — {arcName}
               </h3>
               {[
                 {
@@ -287,7 +291,7 @@ export default function PublicStatsPage() {
                 >
                   <span style={{ fontSize: 13, color: '#f0ece6', fontWeight: 600 }}>{c.name}</span>
                   <a
-                    href={`${explorerAddressUrl(c.address)}`}
+                    href={`${explorerAddress(c.address)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ fontSize: 11, color: '#c8975a', fontFamily: 'monospace' }}
@@ -342,7 +346,7 @@ export default function PublicStatsPage() {
             fontFamily: 'monospace',
           }}
         >
-          Last updated: {lastUpdated} — Auto-refreshes every 60s — Powered by Circle CCTP V2 on {arcLabel()}
+          Last updated: {lastUpdated} — Auto-refreshes every 60s — Powered by Circle CCTP V2 on {arcName}
         </p>
       </div>
     </div>

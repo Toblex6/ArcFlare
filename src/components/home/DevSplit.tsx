@@ -2,7 +2,7 @@
 
 import Reveal from './Reveal';
 import SectionHeading from './SectionHeading';
-import { arcLabel } from '@/lib/arcLabel';
+import { useArcLabel } from '@/src/components/NetworkContext';
 
 const CODE = `// Pay-per-call with x402 — <5 min
 const res = await fetch(api + "/expensive", {
@@ -15,6 +15,9 @@ const res = await fetch(api + "/expensive", {
 // Webhook: payment.settled → ship it`;
 
 export default function DevSplit() {
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   return (
     <section id="developers" className="max-w-7xl mx-auto px-4 sm:px-6 py-16 md:py-24 scroll-mt-24">
       <SectionHeading
@@ -41,7 +44,7 @@ export default function DevSplit() {
               <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-extrabold text-sm">Payment settled · $18.40 USDC</p>
-                  <p className="text-xs text-[var(--text-secondary)] font-mono mt-0.5">{arcLabel().toLowerCase()} · 0x7f…3a91 → merchant</p>
+                  <p className="text-xs text-[var(--text-secondary)] font-mono mt-0.5">{arcName.toLowerCase()} · 0x7f…3a91 → merchant</p>
                 </div>
                 <span className="text-2xl">✅</span>
               </div>

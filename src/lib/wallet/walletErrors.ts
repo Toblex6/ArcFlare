@@ -96,14 +96,14 @@ export function mapWalletError(err: unknown): { kind: WalletErrorKind; message: 
   ) {
     return {
       kind: 'UNSUPPORTED_NETWORK',
-      message: 'This payment uses Arc Testnet. We\'ll try to switch your wallet automatically.',
+      message: 'This payment uses Arc. We\'ll try to switch your wallet automatically.',
     };
   }
 
   // 5b. Wallet on the wrong chain (viem chain-mismatch, e.g. "The current
   // chain of the wallet (id: 42161) does not match the target chain for the
   // transaction"). Every transaction-building surface must switch to Arc
-  // Testnet BEFORE sending; this mapping is the safety net for a chain
+  // BEFORE sending; this mapping is the safety net for a chain
   // change between the switch and the send. The raw chain-id text is never
   // surfaced — the user gets the same switch prompt as the proactive path.
   if (
@@ -115,7 +115,7 @@ export function mapWalletError(err: unknown): { kind: WalletErrorKind; message: 
   ) {
     return {
       kind: 'UNSUPPORTED_NETWORK',
-      message: 'Please switch your wallet to Arc Testnet to continue.',
+      message: 'Please switch your wallet to Arc to continue.',
     };
   }
 

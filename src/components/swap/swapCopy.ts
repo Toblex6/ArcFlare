@@ -278,7 +278,7 @@ export function friendlySwapWalletError(err: unknown): string {
   // Wrong-chain race (the wallet moved chains between the proactive switch
   // and the send, so viem refused with a chain-mismatch). Never surface the
   // raw "current chain of the wallet (id: …) does not match the target
-  // chain" text — prompt the same Arc Testnet switch as the proactive path.
+  // chain" text — prompt the same Arc switch as the proactive path.
   if (
     lower.includes('does not match the target chain') ||
     lower.includes('current chain of the wallet') ||
@@ -286,7 +286,7 @@ export function friendlySwapWalletError(err: unknown): string {
     lower.includes('chain mismatch') ||
     lower.includes('chain id mismatch')
   ) {
-    return 'Please switch your wallet to Arc Testnet to continue.';
+    return 'Please switch your wallet to Arc to continue.';
   }
   if (
     lower.includes('user rejected') ||

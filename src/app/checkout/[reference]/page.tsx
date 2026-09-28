@@ -42,7 +42,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import { arcTestnet } from '@/src/lib/wagmi';
-import { arcLabel } from '@/lib/arcLabel';
+import { useNetwork, displayChain } from '@/src/components/NetworkContext';
 import CheckoutWidget, { CheckoutEvent } from '@/src/components/CheckoutWidget';
 import Invoice, { InvoiceData } from '@/src/components/Invoice';
 import { CheckoutLoading } from '@/src/components/checkout/CheckoutLoading';
@@ -53,13 +53,6 @@ import { usePaymentVerify, EnrichedPayment } from '@/src/components/checkout/use
 type Phase = 'awaiting' | 'wallet_connected' | 'confirming' | 'settled';
 
 const PHASE_ORDER: Phase[] = ['awaiting', 'wallet_connected', 'confirming', 'settled'];
-
-const STEPS: { key: Phase; label: string; description: string }[] = [
-  { key: 'awaiting', label: 'Awaiting Payment', description: 'Connect a wallet to begin.' },
-  { key: 'wallet_connected', label: 'Wallet Connected', description: 'Ready to send payment.' },
-  { key: 'confirming', label: 'Confirming Payment', description: "Follow your wallet's prompts, then wait for on-chain confirmation." },
-  { key: 'settled', label: 'Settled', description: `Payment confirmed on ${arcLabel()}.` },
-];
 
 type StepStatus = 'complete' | 'active' | 'upcoming' | 'error';
 
@@ -82,6 +75,17 @@ export default function CheckoutPage() {
   // Bootstrap resolve lives here (not in the widget) — the widget only
   // mounts once `payment` exists, so page state can never depend on it.
   const { payment, setPayment, hasError, setHasError, errorMessage, setErrorMessage } = usePaymentVerify(reference);
+  // Server-resolved display state (production-safe "Arc" default until
+  // /api/network resolves). Explorer/chain mechanics keep arcTestnet.* below.
+  const { label: arcName, explorerBaseUrl: serverExplorerBase } = useNetwork();
+  // Timeline steps (settled description uses the server-resolved label —
+  // module scope cannot, it would read client env with its testnet fallback).
+  const STEPS: { key: Phase; label: string; description: string }[] = [
+    { key: 'awaiting', label: 'Awaiting Payment', description: 'Connect a wallet to begin.' },
+    { key: 'wallet_connected', label: 'Wallet Connected', description: 'Ready to send payment.' },
+    { key: 'confirming', label: 'Confirming Payment', description: "Follow your wallet's prompts, then wait for on-chain confirmation." },
+    { key: 'settled', label: 'Settled', description: `Payment confirmed on ${arcName}.` },
+  ];
 
   useEffect(() => {
     if (typeof document !== 'undefined' && document.referrer) {
@@ -184,8 +188,8 @@ export default function CheckoutPage() {
       settledAt: payment.settledAt ?? null,
       expiresAt: payment.expiresAt ?? null,
       explorerUrl: payment.arcTxHash
-        ? `${arcTestnet.blockExplorers.default.url}/tx/${payment.arcTxHash}`
-        : arcTestnet.blockExplorers.default.url,
+        ? `${serverExplorerBase ?? arcTestnet.blockExplorers.default.url}/tx/${payment.arcTxHash}`
+        : (serverExplorerBase ?? arcTestnet.blockExplorers.default.url),
       token: payment.token ?? null,
       // Phase 6: routed-vs-direct receipt split (backend-authoritative X).
       payToken: payment.payToken ?? null,
@@ -234,7 +238,7 @@ export default function CheckoutPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {[
             { label: 'Non-custodial', dot: '#06b6d4' },
-            { label: payment?.chain || arcTestnet.name, dot: '#c8975a' },
+            { label: payment?.chain ? displayChain(payment.chain) : arcName, dot: '#c8975a' },
             { label: 'On-chain verified', dot: '#0d7c5f' },
           ].map((badge) => (
             <div

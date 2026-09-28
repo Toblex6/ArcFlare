@@ -5,17 +5,7 @@ import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { getNetworkConfig } from "@/lib/config/network";
-
-// Network badge follows the selected network (testnet shows the testnet
-// mode badge; mainnet shows the plain Arc badge).
-const IS_TESTNET = (() => {
-  try {
-    return getNetworkConfig().name === "testnet";
-  } catch {
-    return true;
-  }
-})();
+import { useNetwork } from "@/src/components/NetworkContext";
 
 interface NavItem {
   label: string;
@@ -37,6 +27,10 @@ export default function ResponsiveSidebar({ navSections, children }: ResponsiveS
   const [isOpen, setIsOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const pathname = usePathname();
+  // Server-resolved network state (production-safe defaults until
+  // /api/network resolves) — the badge must never show a test label on
+  // mainnet, including while loading or when client env is missing.
+  const { label: networkLabel, isTestnet: IS_TESTNET } = useNetwork();
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -123,7 +117,7 @@ export default function ResponsiveSidebar({ navSections, children }: ResponsiveS
           <div style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 10, padding: "8px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
-              <span style={{ fontSize: 9, color: "#f59e0b", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>{IS_TESTNET ? "Arc Testnet Mode" : "Arc Mode"}</span>
+              <span style={{ fontSize: 9, color: "#f59e0b", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>{IS_TESTNET ? "Arc Testnet Mode" : `${networkLabel} Mode`}</span>
             </div>
           </div>
         </div>

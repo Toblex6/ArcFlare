@@ -40,7 +40,7 @@ const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
 
 const arcTestnet = {
   id: getNetworkConfig().chainId,
-  name: "Arc Testnet",
+  name: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
   rpcUrls: { default: { http: [getNetworkConfig().primaryRpc] } },
 } as const;
@@ -1135,7 +1135,7 @@ const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
         tokenId: process.env.AGENT_TOKEN_ID || "847277",
         address: process.env.AGENT_OWNER_WALLET_ADDRESS,
         standard: "ERC-8004",
-        network: "Arc Testnet",
+        network: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
       },
     });
   } catch (e: any) {

@@ -3,9 +3,12 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import Reveal from './Reveal';
-import { arcLabel } from '@/lib/arcLabel';
+import { useArcLabel } from '@/src/components/NetworkContext';
 
 export default function ClosingCTA() {
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   return (
     <>
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pb-14 md:pb-20">
@@ -69,7 +72,7 @@ export default function ClosingCTA() {
               <Image src="/arcflare-logo.png" alt="FlareHQ" width={26} height={26} />
               <span className="font-extrabold tracking-tight">FlareHQ</span>
             </div>
-            <p className="text-[var(--text-secondary)] text-xs font-medium">© {new Date().getFullYear()} FlareHQ · Checkout is non-custodial · {arcLabel()}</p>
+            <p className="text-[var(--text-secondary)] text-xs font-medium">© {new Date().getFullYear()} FlareHQ · Checkout is non-custodial · {arcName}</p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm font-semibold text-[var(--text-secondary)]">
             <a href="https://docs.flarehq.xyz" target="_blank" rel="noopener noreferrer" className="hover:text-[var(--text)] transition">Docs</a>

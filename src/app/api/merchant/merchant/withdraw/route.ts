@@ -10,7 +10,7 @@ import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { isAddress, parseUnits } from 'viem';
 import { createContractTransaction, getWalletBalance } from '@/src/lib/circle/client';
 import { erc20TransferAbi, USDC_CONTRACT, USDC_DECIMALS } from '@/src/lib/wallet/erc20';
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
 // H5: central merchant auth (active + verified + sessionVersion). H6:
 // Idempotency-Key dedupe via PaymentLog.idempotencyKey (unique) — the claim
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
                     idempotencyKey,
                     amount: amountNum,
                     currency: 'USDC',
-                    chain: 'Arc Testnet v1.0',
+                    chain: getNetworkConfig().name === 'mainnet' ? 'Arc v1.0' : 'Arc Testnet v1.0',
                     senderEmail: merchant.email ?? 'merchant@withdraw',
                     merchant: merchant.businessName,
                     merchantId: merchant.id,

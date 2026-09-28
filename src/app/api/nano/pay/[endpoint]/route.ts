@@ -91,7 +91,7 @@ async function handleJobStatus(req: NextRequest): Promise<NextResponse> {
 
   const arcTestnet = {
     id: getNetworkConfig().chainId,
-    name: "Arc Testnet",
+    name: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
     nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
     rpcUrls: { default: { http: [getNetworkConfig().primaryRpc] }, public: { http: [getNetworkConfig().primaryRpc] } },
   } as const;

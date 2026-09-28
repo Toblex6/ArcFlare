@@ -4,13 +4,12 @@
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 import AppDialog from '@/components/AppDialog';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
-import { arcLabel } from '@/lib/arcLabel';
 
 import { useRouter } from 'next/navigation';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { explorerAddressUrl, getNetworkConfig } from "@/lib/config/network";
+import { useNetwork, useExplorer, useArcLabel } from "@/src/components/NetworkContext";
 import {
   formatBudgetUsdc,
   getProviderNextAction,
@@ -87,6 +86,14 @@ interface JobResult {
 
 export default function JobsPage() {
   const _router = useRouter();
+  // Server-resolved network state (production-safe defaults until
+  // /api/network resolves): the protocol address display + explorer link
+  // must reflect the server's network, never client-side env.
+  const { erc8183Address: resolvedErc8183 } = useNetwork();
+  const { addressUrl: explorerAddress } = useExplorer();
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   React.useEffect(() => {
     // Anonymous homepage visitors keep their destination: the login gate
     // returns them here after sign-in.
@@ -821,11 +828,11 @@ export default function JobsPage() {
                   wordBreak: 'break-all',
                 }}
               >
-                {getNetworkConfig().erc8183Address ?? 'ERC-8183 unavailable on this network (external protocol address unconfigured)'}
+                {resolvedErc8183 ?? 'ERC-8183 unavailable on this network (external protocol address unconfigured)'}
               </p>
-              {getNetworkConfig().erc8183Address ? (
+              {resolvedErc8183 ? (
               <a
-                href={`${explorerAddressUrl(getNetworkConfig().erc8183Address as string)}`}
+                href={`${explorerAddress(resolvedErc8183)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--primary)', fontSize: 11 }}
@@ -1153,7 +1160,7 @@ export default function JobsPage() {
                           else if (s.num === 6) runStep('complete', { jobId, clientSCA });
                         }}
                       >
-                        {stepLoading ? `Sending to ${arcLabel()}...` : `Execute: ${s.label}`}
+                        {stepLoading ? `Sending to ${arcName}...` : `Execute: ${s.label}`}
                       </button>
                     </div>
                   )}

@@ -194,7 +194,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
         idempotencyKey: hireIdemKey,
         amount: Number(budgetBigInt) / 1e6,
         currency: 'USDC',
-        chain: 'Arc Testnet v1.0',
+        chain: getNetworkConfig().name === 'mainnet' ? 'Arc v1.0' : 'Arc Testnet v1.0',
         senderEmail: clientAddress,
         merchant: `treasury-hire:${hirerId}`,
         agentSCA: hirer.scaAddress ?? null,

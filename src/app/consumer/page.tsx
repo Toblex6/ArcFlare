@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useAccount, useSignMessage } from "wagmi";
 import type { Address } from "viem";
-import { getNetworkConfig } from "@/lib/config/network";
-import { arcLabel } from "@/lib/arcLabel";
+import { useNetwork, useExplorer, useArcLabel } from "@/src/components/NetworkContext";
 import { friendlyWalletError } from "@/lib/wallet/walletErrors";
 import { friendlyConnectorLabel, hasInjectedProvider } from "@/lib/wallet/walletLabels";
 import { useGuardedConnect } from "@/hooks/useGuardedConnect";
@@ -24,7 +23,6 @@ import {
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
-import { explorerTxUrl } from "@/lib/config/network";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
 import ExternalBridge from "@/components/bridge/ExternalBridge";
 import { signingModelForWallet } from "@/lib/wallet/signingModel";
@@ -126,8 +124,16 @@ interface ActivityItem {
 }
 
 function ConsumerAppInner() {
-  // Testnet faucet is only offered on testnet; hidden on mainnet.
-  const isTestnet = getNetworkConfig().name === 'testnet';
+  // Faucet affordances are testnet-only (hidden on mainnet). Server-resolved
+  // via NetworkProvider: production-safe hidden until /api/network proves
+  // testnet — never a test label on the live site.
+  const { isTestnet } = useNetwork();
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
+  // Server-resolved explorer base (production-safe fallback until
+  // /api/network resolves) for tx links.
+  const { txUrl: explorerTx } = useExplorer();
   const router = useRouter();
   const { signMessageAsync } = useSignMessage();
   // Consumer auth is the backend consumer_token session (+ walletType /
@@ -638,7 +644,7 @@ function ConsumerAppInner() {
         criteria: { requirements: [hireDescription || "Deliver as described"] },
         budget: Number(hireBudget) || 1,
       });
-      setHireResult({ success: true, message: `Hire started — job ${data.jobId} created`, reference: data.jobId, txHash: data.txHash, explorerUrl: `${explorerTxUrl(data.txHash)}` });
+      setHireResult({ success: true, message: `Hire started — job ${data.jobId} created`, reference: data.jobId, txHash: data.txHash, explorerUrl: `${explorerTx(data.txHash)}` });
     } catch (e: any) {
       setHireResult({ success: false, error: e.message });
     } finally {
@@ -2107,7 +2113,7 @@ function ConsumerAppInner() {
                     )}
                     {view === "request" && (
                       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--flow-text-faint)" }}>
-                        They will pay you {amount || "…"} {requestCurrency} on {arcLabel()}.
+                        They will pay you {amount || "…"} {requestCurrency} on {arcName}.
                       </p>
                     )}
                   </div>

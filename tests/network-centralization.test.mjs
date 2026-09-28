@@ -121,9 +121,12 @@ test('B: ARC_NETWORK=mainnet resolves the configured mainnet values', async () =
 test('C: no money path imports AGENTIC_COMMERCE_CONTRACT from erc8183.ts (network config is the authority)', () => {
   for (const p of MONEY_PATHS) {
     const src = read(p);
+    // Client components cannot read server env; the sanctioned path is the
+    // server-resolved NetworkContext transport (useNetwork().erc8183Address,
+    // populated solely from getNetworkConfig() via GET /api/network).
     assert.match(
       src,
-      /getNetworkConfig\(\)\.erc8183Address|erc8183AddressOr503\(\)|requireErc8183Address\(\)/,
+      /getNetworkConfig\(\)\.erc8183Address|erc8183AddressOr503\(\)|requireErc8183Address\(\)|\{[^}]*erc8183Address[^}]*\}\s*=\s*useNetwork\(\)/,
       `${p} must resolve the ERC-8183 address from getNetworkConfig() or the fail-closed guard`
     );
     // The old module-level non-null assertion pattern is banned: on mainnet

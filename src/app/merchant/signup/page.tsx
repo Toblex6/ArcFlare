@@ -4,12 +4,15 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { arcLabel } from '@/lib/arcLabel';
+import { useArcLabel } from '@/src/components/NetworkContext';
 
 type Step = 'form' | 'verify' | 'done';
 
 export default function MerchantSignup() {
   const router = useRouter();
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   const [step, setStep] = useState<Step>('form');
   const [form, setForm] = useState({ email: '', businessName: '', password: '', confirm: '' });
   const [code, setCode] = useState('');
@@ -320,7 +323,7 @@ export default function MerchantSignup() {
         </div>
 
         <p style={{ textAlign: 'center', marginTop: 20, fontSize: 11, color: 'var(--border)', fontFamily: 'monospace', letterSpacing: 1 }}>
-          FLAREHQ PAYMENT INFRASTRUCTURE • {arcLabel().toUpperCase()}
+          FLAREHQ PAYMENT INFRASTRUCTURE • {arcName.toUpperCase()}
         </p>
       </div>
     </main>

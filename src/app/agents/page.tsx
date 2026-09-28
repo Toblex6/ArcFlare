@@ -3,7 +3,7 @@
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
-import { arcLabel } from '@/lib/arcLabel';
+import { useArcLabel } from '@/src/components/NetworkContext';
 
 import { useRouter } from 'next/navigation';
 
@@ -78,6 +78,9 @@ interface ValidationResult {
 
 export default function AgentsPage() {
   const _router = useRouter();
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   React.useEffect(() => {
     // Anonymous homepage visitors keep their destination: the login gate
     // returns them here after sign-in.
@@ -553,7 +556,7 @@ export default function AgentsPage() {
             Agent Hub
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0 }}>
-            ERC-8004 agent identity, reputation and validation on {arcLabel()}
+            ERC-8004 agent identity, reputation and validation on {arcName}
           </p>
         </div>
 
@@ -1564,7 +1567,7 @@ export default function AgentsPage() {
               Deploy New ERC-8004 Agent
             </h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 20px' }}>
-              Creates a Circle SCA wallet and registers an ERC-8004 identity on {arcLabel()}.
+              Creates a Circle SCA wallet and registers an ERC-8004 identity on {arcName}.
               This is the primary setup flow — every attempt carries a fresh idempotency
               key and server-side duplicate protection stays authoritative.
             </p>
@@ -1588,7 +1591,7 @@ export default function AgentsPage() {
                     disabled={ctl.disabled}
                     onClick={deployAgent}
                   >
-                    {deploying ? `Deploying to ${arcLabel()}...` : '⚡ Deploy Agent'}
+                    {deploying ? `Deploying to ${arcName}...` : '⚡ Deploy Agent'}
                   </button>
                   {ctl.hint && (
                     <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '8px 0 0' }}>

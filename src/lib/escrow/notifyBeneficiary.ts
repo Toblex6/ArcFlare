@@ -45,12 +45,12 @@ export async function notifyBeneficiary(input: {
   const amountLabel = `${amount} ${currency}`;
   // Network-aware chain label. Best-effort module: getNetworkConfig throws
   // on a misconfigured mainnet, which must never fail the escrow creation —
-  // fall back to the testnet label in that case.
-  let chainLabel = "Arc Testnet";
+  // fall back to the production label in that case.
+  let chainLabel = "Arc";
   try {
     chainLabel = getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet";
   } catch {
-    // keep testnet label — notification copy only, never fund-moving
+    // keep production label — notification copy only, never fund-moving
   }
   const base = `You are the beneficiary of escrow ${reference} for ${amountLabel} on ${chainLabel}.`;
 

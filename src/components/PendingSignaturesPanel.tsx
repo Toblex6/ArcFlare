@@ -18,7 +18,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAccount, useChainId, useSwitchChain, useWriteContract } from 'wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { arcLabel } from '@/lib/arcLabel';
+import { useArcLabel } from '@/src/components/NetworkContext';
 
 interface TransactionIntent {
   description?: string;
@@ -78,6 +78,9 @@ function coerceArgs(args: unknown[]): unknown[] {
 }
 
 export default function PendingSignaturesPanel() {
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   const { address, isConnected, connector: activeConnector } = useAccount();
   const { writeContractAsync, isPending: isBroadcasting } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
@@ -122,12 +125,12 @@ export default function PendingSignaturesPanel() {
     }
     // Chain enforcement before building the transaction: when the wallet is
     // on the wrong chain, proactively request the switch to the intent's
-    // chain (Arc Testnet) and — on success — fall through to the broadcast
+    // chain (Arc) and — on success — fall through to the broadcast
     // automatically with no manual retry. A rejected switch surfaces
     // friendly copy (never raw chain-id text) and broadcasts nothing.
     if (chainId !== intent.chainId) {
       setBroadcastId(req.id);
-      setError(`Switching your wallet to ${arcLabel()}…`);
+      setError(`Switching your wallet to ${arcName}…`);
       const getProvider = async () => {
         try {
           return await (activeConnector as unknown as { getProvider?: () => Promise<unknown> })?.getProvider?.();

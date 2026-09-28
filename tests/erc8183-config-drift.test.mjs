@@ -82,10 +82,13 @@ test('production money paths resolve the ERC-8183 address from network config (n
     const src = read(path.join(ROOT, c));
     // Resolve the address from the authoritative network config — directly,
     // or via the fail-closed per-request guard (2026-09-23: external
-    // protocol dependency, no verified mainnet address).
+    // protocol dependency, no verified mainnet address), or via the
+    // server-resolved NetworkContext transport (client components cannot
+    // read server env; useNetwork().erc8183Address is populated solely
+    // from getNetworkConfig() via GET /api/network — never a static pin).
     assert.match(
       src,
-      /getNetworkConfig\(\)\.erc8183Address|erc8183AddressOr503\(\)|requireErc8183Address\(\)/,
+      /getNetworkConfig\(\)\.erc8183Address|erc8183AddressOr503\(\)|requireErc8183Address\(\)|\{[^}]*erc8183Address[^}]*\}\s*=\s*useNetwork\(\)/,
       `${c} must resolve the ERC-8183 address from the network config or the fail-closed guard`
     );
     // No module-level non-null assertion over a possibly-null address.

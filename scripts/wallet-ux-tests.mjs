@@ -288,11 +288,12 @@ ok('dedupe keys by id+type+name when uid missing', (() => {
     const RAW_MISMATCH = 'The current chain of the wallet (id: 42161) does not match the target chain for the transaction (id: 5042002 – Arc Testnet).';
     const mapped = mapWalletError(RAW_MISMATCH);
     ok('viem chain-mismatch -> UNSUPPORTED_NETWORK (never raw)', mapped.kind === 'UNSUPPORTED_NETWORK', `got ${mapped.kind}`);
-    ok('viem chain-mismatch -> Arc Testnet switch copy', mapped.message === 'Please switch your wallet to Arc Testnet to continue.', `got "${mapped.message}"`);
+    ok('viem chain-mismatch -> Arc switch copy (production-safe, no test label)', mapped.message === 'Please switch your wallet to Arc to continue.', `got "${mapped.message}"`);
     ok('chain-mismatch copy leaks no chain ids or package names', !/42161|5042002|viem|wagmi/i.test(mapped.message));
+    ok('chain-mismatch copy leaks no testnet label', !/testnet/i.test(mapped.message));
     const { friendlySwapWalletError } = await import('../src/components/swap/swapCopy.ts');
     const swapCopy = friendlySwapWalletError(new Error(RAW_MISMATCH));
-    ok('swap wallet error maps chain-mismatch to switch copy', swapCopy === 'Please switch your wallet to Arc Testnet to continue.', `got "${swapCopy}"`);
+    ok('swap wallet error maps chain-mismatch to switch copy', swapCopy === 'Please switch your wallet to Arc to continue.', `got "${swapCopy}"`);
     const rej = await ensureArcNetwork({ chainId: 1, switchChainAsync: async () => { throw new Error('User rejected the request.'); } });
     ok('switch rejection -> friendly copy, no raw chain text', rej.ok === false && /cancelled|try again/i.test(rej.message) && !/42161|5042002/i.test(rej.message));
   }
@@ -341,7 +342,7 @@ ok('dedupe keys by id+type+name when uid missing', (() => {
       const sendIdx = swap.indexOf('await sendAndMine', hcIdx);
       return hcIdx !== -1 && ensureIdx !== -1 && sendIdx !== -1 && ensureIdx < sendIdx;
     })());
-    ok('swap shows a Switch-to-Arc step while switching', swap.includes("markStep('network'") && swap.includes("label: 'Switch to Arc Testnet'"));
+    ok('swap shows a server-resolved Switch-to-Arc step while switching', swap.includes("markStep('network'") && swap.includes('Switch to ${arcName}'));
     ok('pending-signatures panel proactively switches (ensureArcNetwork)', pending.includes('ensureArcNetwork') && pending.includes('switchChainAsync'));
     ok('pending-signatures panel no longer errors without attempting a switch', !pending.includes('Switch networks and try again'));
 

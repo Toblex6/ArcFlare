@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import DashboardSidebar from '@/components/DashboardSidebar';
-import { arcLabel } from '@/lib/arcLabel';
+import { useArcLabel } from '@/src/components/NetworkContext';
 
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY || "";
 
@@ -228,6 +228,9 @@ const payResultBoxStyle = (success: boolean): React.CSSProperties => ({
 });
 
 export default function NanoPaymentsPage() {
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   const [activeTab, setActiveTab] = useState<"record" | "x402">("record");
 
   // ── Traditional Nanopayments State ──────────────────────────────────
@@ -579,7 +582,7 @@ export default function NanoPaymentsPage() {
                 Settle Batch Onchain
               </h3>
               <p style={{ color: "var(--text-secondary)", fontSize: 12, margin: "0 0 16px" }}>
-                Moves real USDC for this agent-merchant pair on {arcLabel()}.
+                Moves real USDC for this agent-merchant pair on {arcName}.
               </p>
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, cursor: "pointer" }}>
                 <input type="checkbox" checked={forceSettle} onChange={(e) => setForceSettle(e.target.checked)} />

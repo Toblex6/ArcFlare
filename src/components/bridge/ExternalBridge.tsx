@@ -1,7 +1,7 @@
 // src/components/bridge/ExternalBridge.tsx
 //
 // EXTERNAL multi-chain Bridge UI: source-chain USDC in the user's own
-// browser wallet -> Circle CCTP / BridgeKit -> Arc Testnet -> the user's
+// browser wallet -> Circle CCTP / BridgeKit -> Arc -> the user's
 // own FlareHQ CIRCLE wallet.
 //
 // Non-custodial throughout: the browser wallet signs the source-chain
@@ -43,6 +43,7 @@ import {
 } from '@/lib/bridge/preflight';
 import { ensureEvmNetwork } from '@/lib/wallet/ensureEvmNetwork';
 import { friendlyBridgeError } from '@/lib/wallet/walletErrors';
+import { useNetwork } from '@/src/components/NetworkContext';
 
 const USDC_ABI = parseAbi([
   'function balanceOf(address owner) view returns (uint256)',
@@ -225,6 +226,12 @@ export default function ExternalBridge({
   const { address: connectedAddress, isConnected, connector: activeConnector } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
+  // External bridging is a testnet-only flow (the intent route refuses on
+  // mainnet). The source picker names Sepolia/Amoy test chains, so on the
+  // production site the whole form is replaced by a neutral unavailable
+  // note — server-resolved via NetworkProvider, defaulting to unavailable
+  // (production-safe) until /api/network proves testnet.
+  const { isTestnet: bridgeAvailable } = useNetwork();
 
   const [amount, setAmount] = useState('');
   const [balanceUnits, setBalanceUnits] = useState<bigint | null>(null);
@@ -1069,6 +1076,19 @@ export default function ExternalBridge({
   }
 
   const working = phase === 'working';
+
+  if (!bridgeAvailable) {
+    return (
+      <div>
+        <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: '0 0 16px' }}>
+          Bridging from an external wallet is unavailable on Arc right now.
+        </p>
+        <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: 0 }}>
+          To get funds in, send USDC directly to your FlareHQ wallet on Arc.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>

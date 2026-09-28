@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 
 import React, { useState } from 'react';
 import Image from 'next/image';
-import { explorerTxUrl } from "@/lib/config/network";
+import { useExplorer } from "@/src/components/NetworkContext";
 import { deriveReturnTo, loginRedirectUrl } from "@/lib/auth/returnTo";
 
 
@@ -29,6 +29,9 @@ export default function PayrollPage() {
   // Payer fields are display-only: POST /api/payroll/run resolves the real
   // payer from the authenticated session (body values are ignored).
   const [payerSCA, setPayerSCA] = useState('');
+  // Server-resolved explorer base (production-safe fallback until
+  // /api/network resolves) for tx links.
+  const { txUrl: explorerTx } = useExplorer();
   const [payerWalletId, setPayerWalletId] = useState('');
   const [walletBalance, setWalletBalance] = useState<string | null>(null);
 
@@ -484,7 +487,7 @@ export default function PayrollPage() {
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #2d2015', fontSize: 11 }}>
                       <span style={{ fontFamily: 'monospace', color: '#f0ece6' }}>{r.recipientSCA?.slice(0, 10)}...{r.recipientSCA?.slice(-4)} — {r.amount} USDC</span>
                       <span style={{ color: r.status === 'SUCCESS' ? '#10b981' : r.status === 'PENDING_SIGNATURE' ? '#c8975a' : '#f87171' }}>{r.status}</span>
-                      {r.txHash && <a href={`${explorerTxUrl(r.txHash)}`} target="_blank" rel="noopener noreferrer" style={{ color: '#c8975a' }}>View ↗</a>}
+                      {r.txHash && <a href={`${explorerTx(r.txHash)}`} target="_blank" rel="noopener noreferrer" style={{ color: '#c8975a' }}>View ↗</a>}
                       {r.requestId && !r.txHash && <span style={{ color: '#6b5a45' }}>Req {String(r.requestId).slice(0, 8)}</span>}
                     </div>
                   ))}

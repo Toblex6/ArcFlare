@@ -176,7 +176,7 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
           idempotencyKey,
           amount: Number(amount) / 1e6,
           currency: "USDC",
-          chain: "Arc Testnet",
+          chain: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
           senderEmail: "pending-agent-pay",
           merchant: agent.name,
           agentSCA: agent.scaAddress ?? null,
@@ -246,7 +246,7 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
 const errorRow: any = {
       amount: Number(amount) / 1e6,
       currency: "USDC",
-      chain: "Arc Testnet",
+      chain: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
       senderEmail: agentEoa,
       merchant: agent.name,
       agentSCA: agent.scaAddress ?? null,
@@ -297,7 +297,7 @@ const errorRow: any = {
 const creditErrorRow: any = {
       amount: Number(amount) / 1e6,
       currency: "USDC",
-      chain: "Arc Testnet",
+      chain: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
       senderEmail: agentEoa,
       merchant: agent.name,
       agentSCA: agent.scaAddress ?? null,
@@ -335,7 +335,7 @@ const creditErrorRow: any = {
   const successRow: any = {
     amount: Number(amount) / 1e6,
     currency: "USDC",
-    chain: "Arc Testnet",
+    chain: getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet",
     senderEmail: agentEoa,
     merchant: agent.name,
     agentSCA: agent.scaAddress ?? null,

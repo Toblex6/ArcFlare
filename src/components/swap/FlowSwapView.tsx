@@ -55,8 +55,8 @@ import {
   useSwitchChain,
 } from 'wagmi';
 import type { Address } from 'viem';
-import { getNetworkConfig, explorerTxUrl } from '@/lib/config/network';
-import { arcLabel } from '@/lib/arcLabel';
+import { getNetworkConfig } from '@/lib/config/network';
+import { useExplorer, useArcLabel } from '@/src/components/NetworkContext';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import {
@@ -166,6 +166,12 @@ export function FlowSwapView({
   const { connectors, connectAsync: guardedConnectAsync, isConnecting, dedupedConnectors } = useGuardedConnect();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
+  // Server-resolved explorer base (production-safe fallback until
+  // /api/network resolves) for tx links.
+  const { txUrl: explorerTx } = useExplorer();
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID });
   const { sendTransactionAsync, isPending: isSending } = useSendTransaction();
 
@@ -329,11 +335,11 @@ export function FlowSwapView({
 
     const initialSteps: ExecStepState[] = [
       // Wrong-chain start: the switch is the first visible step, so tapping
-      // Confirm on another chain shows "Switch to Arc Testnet" progress and
+      // Confirm on another chain shows "Switch to Arc" progress and
       // then proceeds automatically — never a manual retry, never a silent
       // failure after the fact.
       ...(chainId !== ARC_CHAIN_ID
-        ? [{ key: 'network', label: `Switch to ${arcLabel()}`, status: 'pending' as const, hash: null as string | null }]
+        ? [{ key: 'network', label: `Switch to ${arcName}`, status: 'pending' as const, hash: null as string | null }]
         : []),
       ...live.unsigned.approvals.map((a, i) => ({
         key: `approve-${i}`,
@@ -809,7 +815,7 @@ export function FlowSwapView({
   };
 
   // Confirm stays enabled on the wrong network: tapping it runs the
-  // automatic Arc Testnet switch inside handleConfirm and then proceeds
+  // automatic Arc switch inside handleConfirm and then proceeds
   // with the swap (no manual retry). Blocking the button would force the
   // manual switch-button round-trip instead.
   const confirmDisabled =
@@ -829,7 +835,7 @@ export function FlowSwapView({
   const confirmHint = !walletsMatch
     ? 'Connect the matching wallet to continue.'
     : wrongNetwork
-      ? `Switch to ${arcLabel()} to continue — confirming switches your wallet automatically.`
+      ? `Switch to ${arcName} to continue — confirming switches your wallet automatically.`
       : insufficientBalance
         ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
         : quote.status === 'error' || quote.status === 'expired'
@@ -928,7 +934,7 @@ export function FlowSwapView({
           )}
           {walletsMatch && wrongNetwork && (
             <div style={styles.noticeBox}>
-              <p style={styles.boxText}>Your wallet is on the wrong network. Flow Swap settles on {arcLabel()}.</p>
+              <p style={styles.boxText}>Your wallet is on the wrong network. Flow Swap settles on {arcName}.</p>
               <button
                 style={styles.secondaryButton}
                 disabled={isSending}
@@ -949,7 +955,7 @@ export function FlowSwapView({
                   })
                 }
               >
-                Switch to {arcLabel()}
+                Switch to {arcName}
               </button>
             </div>
           )}
@@ -1141,7 +1147,7 @@ export function FlowSwapView({
                   {minedExecHash && (
                     <p style={styles.hashLine}>
                       Transaction:{' '}
-                      <a href={explorerTxUrl(minedExecHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                      <a href={explorerTx(minedExecHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
                         {shortHash(minedExecHash)} ↗
                       </a>
                     </p>
@@ -1200,7 +1206,7 @@ export function FlowSwapView({
                         </span>
                         <span style={styles.stepLabel}>{s.label}</span>
                         {s.hash && (
-                          <a href={explorerTxUrl(s.hash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                          <a href={explorerTx(s.hash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
                             {shortHash(s.hash)} ↗
                           </a>
                         )}
@@ -1230,7 +1236,7 @@ export function FlowSwapView({
               {verified.executionTxHash && (
                 <p style={styles.hashLine}>
                   Swap transaction:{' '}
-                  <a href={explorerTxUrl(verified.executionTxHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                  <a href={explorerTx(verified.executionTxHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
                     {shortHash(verified.executionTxHash)} ↗
                   </a>
                 </p>
@@ -1238,7 +1244,7 @@ export function FlowSwapView({
               {verified.wrapTxHash && (
                 <p style={styles.hashLine}>
                   Preparation transaction:{' '}
-                  <a href={explorerTxUrl(verified.wrapTxHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                  <a href={explorerTx(verified.wrapTxHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
                     {shortHash(verified.wrapTxHash)} ↗
                   </a>
                 </p>
@@ -1246,7 +1252,7 @@ export function FlowSwapView({
               {verified.unwrapTxHash && (
                 <p style={styles.hashLine}>
                   Settlement transaction:{' '}
-                  <a href={explorerTxUrl(verified.unwrapTxHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                  <a href={explorerTx(verified.unwrapTxHash)} target="_blank" rel="noopener noreferrer" style={styles.link}>
                     {shortHash(verified.unwrapTxHash)} ↗
                   </a>
                 </p>

@@ -34,7 +34,7 @@ export interface InvoiceData {
     issuedAt: string | null;
     settledAt: string | null;
     expiresAt: string | null;
-    explorerUrl: string; // caller builds this (page already has arcTestnet's block explorer base) — keeps this component chain-agnostic
+    explorerUrl: string; // caller builds this (page already has the block explorer base) — keeps this component chain-agnostic
     /** Canonical settlement-token identity when the caller has it (verify API
         returns it; legacy rows read as USDC). Display-only: amount + currency
         remain the record of what moved. */

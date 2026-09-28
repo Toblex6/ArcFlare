@@ -2,6 +2,7 @@
 'use client';
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
+import { displayChain } from '@/src/components/NetworkContext';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
@@ -132,7 +133,7 @@ export default function TransactionsPage() {
                         <td className="py-4 pr-4 text-slate-700">{payment.sender_email || '—'}</td>
                         <td className="py-4 pr-4">
                           <span className="bg-cyan-50 text-cyan-700 px-2 py-0.5 rounded border border-cyan-100 text-[10px]">
-                            {payment.chain.length > 20 ? 'Arc-L1' : payment.chain}
+                            {payment.chain.length > 20 ? 'Arc-L1' : displayChain(payment.chain)}
                           </span>
                         </td>
                         <td className="py-4 pr-4 text-slate-900 font-bold">

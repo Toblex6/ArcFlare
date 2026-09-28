@@ -54,12 +54,15 @@ import { useRoutingQuote } from '@/src/components/checkout/routing/useRoutingQuo
 import { erc20ApproveAbi, paymentRouterRouteAbi } from '@/src/components/checkout/routing/routerAbi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { getNetworkConfig } from '@/lib/config/network';
+import { useNetwork } from '@/src/components/NetworkContext';
 import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
 import { useGuardedConnect } from '@/hooks/useGuardedConnect';
 
-// The testnet faucet link is only shown on testnet; hidden on mainnet.
-const IS_TESTNET = getNetworkConfig().name === 'testnet';
+// User-visible network display comes from the server-resolved NetworkProvider
+// (GET /api/network) — never from client-side env (which falls back to
+// testnet when the server runs mainnet) and never from the wagmi chain
+// object below (chain mechanics only). The faucet link stays testnet-gated;
+// hidden on mainnet via the same server-resolved state.
 
 export interface PaymentLogData {
     reference: string;
@@ -174,6 +177,10 @@ interface CheckoutWidgetProps {
 }
 
 export default function CheckoutWidget({ reference, compact = false, onEvent }: CheckoutWidgetProps) {
+    // Server-resolved display state (production-safe "Arc" default until
+    // /api/network resolves). Chain COMPARISONS/switching below still use
+    // arcTestnet.id (wallet mechanics, unchanged).
+    const { label: arcName, isTestnet: IS_TESTNET, explorerBaseUrl: serverExplorerBase, chainId: serverChainId } = useNetwork();
     const [payment, setPayment] = useState<PaymentLogData | null>(null);
     const [agent, setAgent] = useState<AgentData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -661,7 +668,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         !!successPayToken &&
         !!payment.token &&
         successPayToken.address.toLowerCase() !== payment.token.address.toLowerCase();
-    const explorerBase = arcTestnet.blockExplorers.default.url;
+    const explorerBase = serverExplorerBase ?? arcTestnet.blockExplorers.default.url;
 
     return (
         <div style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: compact ? 20 : 'clamp(20px, 3vw, 32px)', maxWidth: compact ? 440 : undefined, width: '100%', boxSizing: 'border-box', fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -705,7 +712,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
             {/* Phase 2B: token identity is always explicit — the user sees
                 exactly which token they are about to sign BEFORE signing.
-                USDC and EURC both settle natively on Arc Testnet; the transfer
+                USDC and EURC both settle natively on Arc; the transfer
                 below signs the invoice token and verify-onchain enforces it.
                 Phase 6: this direct-pay banner renders only when the selected
                 pay token IS the settlement token. A routed selection (X != Y)
@@ -715,7 +722,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                 <div style={{ background: isEurc ? 'rgba(6,182,212,0.06)' : 'rgba(200,151,90,0.06)', border: `1px solid ${isEurc ? 'rgba(6,182,212,0.2)' : 'rgba(200,151,90,0.25)'}`, borderRadius: 12, padding: 12, marginBottom: 16, textAlign: 'center' }}>
                     <p style={{ color: isEurc ? '#06b6d4' : '#c8975a', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Paying in {invoiceSymbol}</p>
                     <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
-                        This invoice settles in {invoiceSymbol} on {arcTestnet.name} ({shortTokenAddress(invoiceToken.address)}).
+                        This invoice settles in {invoiceSymbol} on {arcName} ({shortTokenAddress(invoiceToken.address)}).
                         Your wallet will submit {isEurc ? 'an' : 'a'} {invoiceSymbol} transfer of {payment.amount} {invoiceSymbol}, verified on-chain before confirmation.
                     </p>
                     <p style={{ color: '#a89684', fontSize: 11, margin: '6px 0 0' }}>
@@ -866,7 +873,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             </div>
                             <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
                                 <p style={{ color: '#f59e0b', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Wrong network</p>
-                                <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This payment uses {arcTestnet.name}. Switch your wallet to Arc to continue.</p>
+                                <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>This payment uses {arcName}. Switch your wallet to Arc to continue.</p>
                             </div>
                             <button
                                 onClick={async () => {
@@ -883,14 +890,14 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 disabled={switching}
                                 style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #c8975a', fontSize: 14, fontWeight: 800, cursor: switching ? 'not-allowed' : 'pointer', background: switching ? '#6b5a45' : 'transparent', color: '#c8975a' }}
                             >
-                                {switching ? 'Switching...' : `Switch to ${arcTestnet.name}`}
+                                {switching ? 'Switching...' : `Switch to ${arcName}`}
                             </button>
-                            <p style={{ color: '#6b5a45', fontSize: 10, margin: '6px 0 0', textAlign: 'center' }}>Pay is blocked until {arcTestnet.name} is selected — no “Pay anyway”.</p>
+                            <p style={{ color: '#6b5a45', fontSize: 10, margin: '6px 0 0', textAlign: 'center' }}>Pay is blocked until {arcName} is selected — no “Pay anyway”.</p>
                         </>
                     ) : (
                         <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11, color: '#6b5a45' }}>
-                                <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)} · {arcTestnet.name} ✓</span>
+                                <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)} · {arcName} ✓</span>
                                 <button onClick={() => disconnect()} style={{ background: 'none', border: 'none', color: '#c8975a', cursor: 'pointer', fontSize: 'inherit' }}>
                                     Disconnect
                                 </button>
@@ -1073,8 +1080,8 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             {networkMismatch && (
                 <div style={{ marginTop: 12, background: '#1a1410', border: '1px solid #2d2015', borderRadius: 12, padding: 14 }}>
                     <p style={{ color: '#f0ece6', fontSize: 12, fontWeight: 600, margin: '0 0 6px', lineHeight: 1.5 }}>
-                        FlareHQ uses <strong>{arcTestnet.name}</strong> for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet
-                        and select/add <strong>{arcTestnet.name}</strong>, then return here and try again.
+                        FlareHQ uses <strong>{arcName}</strong> for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet
+                        and select/add <strong>{arcName}</strong>, then return here and try again.
                     </p>
                     <button
                         onClick={() => setShowTechnical((v) => !v)}
@@ -1085,11 +1092,11 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                     {showTechnical && (
                         <div style={{ marginTop: 10 }}>
                             {[
-                                ['Network Name', arcTestnet.name],
-                                ['Chain ID', String(arcTestnet.id)],
+                                ['Network Name', arcName],
+                                ['Chain ID', String(serverChainId ?? arcTestnet.id)],
                                 ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
                                 ['Currency Symbol', 'ARC'],
-                                ['Block Explorer', arcTestnet.blockExplorers.default.url],
+                                ['Block Explorer', serverExplorerBase ?? arcTestnet.blockExplorers.default.url],
                             ].map(([label, value]) => (
                                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: '#a89684', padding: '4px 0', borderBottom: '1px solid #2d2015' }}>
                                     <span>{label}</span>
@@ -1121,7 +1128,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                             />
                         </div>
                     )}
-                    <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>✓ Payment settled on {arcTestnet.name} in {invoiceSymbol}</p>
+                    <p style={{ color: '#06b6d4', fontWeight: 700, fontSize: 13, margin: '0 0 4px' }}>✓ Payment settled on {arcName} in {invoiceSymbol}</p>
                     <p style={{ color: '#4b4035', fontSize: 10, margin: 0 }}>Ledger updated · {payment.amount} {invoiceSymbol} confirmed on-chain · Dashboard synced</p>
                 </div>
             )}

@@ -10,6 +10,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAccount, useDisconnect, useSignMessage, useChainId, useSwitchChain } from 'wagmi';
 import { arcTestnet } from '@/lib/wagmi';
+import { useNetwork } from '@/src/components/NetworkContext';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
@@ -49,6 +50,10 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
   const { signMessageAsync, isPending: isSigning } = useSignMessage();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
+  // Server-resolved display label (production-safe "Arc" default until
+  // /api/network resolves). Chain COMPARISONS/switching keep arcTestnet.id
+  // (wallet mechanics, unchanged).
+  const { label: arcName, explorerBaseUrl: serverExplorerBase, chainId: serverChainId } = useNetwork();
 
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -225,7 +230,7 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
           {isMobile && !hasProvider && walletConnectConnector && (
             <>
               <p style={{ fontSize: 'clamp(12px, 1vw, 14px)', color: 'var(--text)', margin: '4px 0 0', fontWeight: 600, lineHeight: 1.5 }}>
-                Connect your wallet to pay on {arcTestnet.name}.
+                Connect your wallet to pay on {arcName}.
               </p>
               <p style={{ fontSize: 'clamp(11px, 1vw, 13px)', color: 'var(--text-secondary)', margin: '0', lineHeight: 1.5 }}>
                 Open this page in your wallet app, or copy the link below and open it there.
@@ -345,8 +350,8 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
       {networkMismatch && (
         <div style={{ background: 'var(--surface-secondary)', border: '1px solid var(--border)', borderRadius: 12, padding: 'clamp(10px, 1.5vw, 14px)' }}>
           <p style={{ color: 'var(--text)', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 600, margin: '0 0 6px', lineHeight: 1.5 }}>
-            FlareHQ uses {arcTestnet.name} for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet and select/add{' '}
-            <strong>{arcTestnet.name}</strong>, then return here and try again.
+            FlareHQ uses {arcName} for this payment. Your wallet couldn&apos;t switch automatically. Open your wallet and select/add{' '}
+            <strong>{arcName}</strong>, then return here and try again.
           </p>
           <button
             onClick={() => setShowTechnical((v) => !v)}
@@ -365,11 +370,11 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
           {showTechnical && (
             <div style={{ marginTop: 10 }}>
               {[
-                ['Network Name', arcTestnet.name],
-                ['Chain ID', String(arcTestnet.id)],
+                ['Network Name', arcName],
+                ['Chain ID', String(serverChainId ?? arcTestnet.id)],
                 ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
                 ['Currency Symbol', 'ARC'],
-                ['Block Explorer', arcTestnet.blockExplorers.default.url],
+                ['Block Explorer', serverExplorerBase ?? arcTestnet.blockExplorers.default.url],
               ].map(([label, value]) => (
                 <div
                   key={label}

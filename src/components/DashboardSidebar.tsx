@@ -6,13 +6,10 @@
 // nav — no per-page copies, no drift.
 'use client';
 
-import { getNetworkConfig } from "@/lib/config/network";
+import { useNetwork } from "@/src/components/NetworkContext";
 import Image from 'next/image';
 import { useEffect, useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
-
-// The testnet faucet is only worth offering on testnet; hidden on mainnet.
-const IS_TESTNET = getNetworkConfig().name === 'testnet';
 
 interface NavItem {
     label: string;
@@ -27,7 +24,7 @@ interface NavSection {
     items: NavItem[];
 }
 
-const SECTIONS: NavSection[] = [
+const BASE_SECTIONS: NavSection[] = [
     {
         group: 'OVERVIEW',
         items: [
@@ -36,9 +33,6 @@ const SECTIONS: NavSection[] = [
             { label: 'Homepage', href: '/' },
         ],
     },
-    ...(IS_TESTNET
-        ? [{ group: 'FAUCET', items: [{ label: 'Get Test Tokens', href: 'https://faucet.circle.com/', external: true }] }]
-        : []),
     {
         group: 'PAYMENTS',
         items: [
@@ -93,6 +87,17 @@ export default function DashboardSidebar({ active }: { active: string }) {
     const [open, setOpen] = useState(false);
     const [merchant, setMerchant] = useState<{ businessName: string; email: string } | null>(null);
     const [incomingCount, setIncomingCount] = useState(0);
+    // Server-resolved network state (production-safe defaults until
+    // /api/network resolves): the faucet entry is testnet-only and the
+    // badge shows the resolved network — never a test label on mainnet.
+    const { label: networkLabel, isTestnet: IS_TESTNET } = useNetwork();
+    const SECTIONS: NavSection[] = IS_TESTNET
+        ? [
+            BASE_SECTIONS[0]!,
+            { group: 'FAUCET', items: [{ label: 'Get Test Tokens', href: 'https://faucet.circle.com/', external: true }] },
+            ...BASE_SECTIONS.slice(1),
+        ]
+        : BASE_SECTIONS;
 
     useEffect(() => {
         const check = () => setIsMobile(window.innerWidth < 768);
@@ -269,7 +274,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
                 <div style={{ marginTop: 12, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: 10, padding: '8px 12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
-                        <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{IS_TESTNET ? 'Arc Testnet Mode' : 'Arc Mode'}</span>
+                        <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{IS_TESTNET ? 'Arc Testnet Mode' : `${networkLabel} Mode`}</span>
                     </div>
                 </div>
             </aside>

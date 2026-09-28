@@ -5,7 +5,7 @@ import DashboardSidebar from '@/src/components/DashboardSidebar';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
-import { arcLabel } from '@/lib/arcLabel';
+import { useArcLabel } from '@/src/components/NetworkContext';
 
 interface EscrowItem {
   id: string;
@@ -116,6 +116,9 @@ const labelStyle: React.CSSProperties = {
 
 export default function EscrowDashboard() {
   const _router = useRouter();
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   React.useEffect(() => {
     // Anonymous visitors land here from the homepage product grid — preserve
     // the destination through the login gate so sign-in returns them here.
@@ -413,7 +416,7 @@ export default function EscrowDashboard() {
               Escrow Management
             </h1>
             <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-              Trustless USDC escrow on {arcLabel()} via ArcFlareEscrow contract
+              Trustless USDC escrow on {arcName} via ArcFlareEscrow contract
             </p>
           </div>
           <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

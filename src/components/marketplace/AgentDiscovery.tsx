@@ -16,7 +16,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { arcLabel } from "@/lib/arcLabel";
+import { useArcLabel } from "@/src/components/NetworkContext";
 import {
   AgentCardView,
   DiscoverAgentView,
@@ -211,6 +211,9 @@ interface HireSuccess {
 }
 
 export default function AgentDiscovery() {
+  // Server-resolved network label (production-safe "Arc" default until
+  // /api/network resolves) — never client-side env (testnet fallback).
+  const arcName = useArcLabel();
   // ── Browse / filter state ──
   const [agents, setAgents] = useState<DiscoverAgentView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -669,7 +672,7 @@ export default function AgentDiscovery() {
       return (
         <div style={STYLE.modalBody}>
           <div style={STYLE.successBox}>
-            <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 13 }}>Job opened on {arcLabel()}</p>
+            <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 13 }}>Job opened on {arcName}</p>
             <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
               {hireResult.agent?.name ? `${hireResult.agent.name} · ` : ""}Job {hireResult.jobId} · status {hireResult.status}
             </p>
@@ -688,7 +691,7 @@ export default function AgentDiscovery() {
       <div style={STYLE.modalBody}>
         <p style={STYLE.sectionTitle}>Hire {detailName} for a job</p>
         <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)" }}>
-          Creates an escrowed job on {arcLabel()} from your business wallet. The provider is only paid when the acceptance criteria pass.
+          Creates an escrowed job on {arcName} from your business wallet. The provider is only paid when the acceptance criteria pass.
         </p>
         <div>
           <span style={STYLE.label}>What needs doing?</span>
