@@ -654,7 +654,7 @@ async function mergedNanoSettleHandler(request: NextRequest) {
         success: false,
         error: error.message,
         hint: error.message.includes('balance')
-          ? 'Fund the Agent SCA wallet with USDC on Arc Testnet.'
+          ? `Fund the Agent SCA wallet with USDC on ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'}.`
           : undefined,
       },
       { status: 500 }

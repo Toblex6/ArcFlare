@@ -418,7 +418,7 @@ export function deployControlView(input: DeployControlInput): DeployControlView 
   if (input.deploying) {
     return {
       disabled: true,
-      label: "Deploying to Arc Testnet…",
+      label: "Deploying…",
       hint: "Deploy in progress — double-submits are blocked server-side by the idempotency guard.",
     };
   }

@@ -54,20 +54,6 @@ export default function DevSplit() {
             </div>
           </Reveal>
           <Reveal delay={0.16}>
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                ['<5min', 'quickstart'],
-                ['fhq_sec_', 'API keys'],
-                ['402', 'x402 native'],
-              ].map(([v, l]) => (
-                <div key={l} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-center shadow-sm hover:-translate-y-1 transition duration-300">
-                  <p className="font-extrabold">{v}</p>
-                  <p className="text-[11px] text-[var(--text-secondary)] font-bold uppercase tracking-wider mt-0.5">{l}</p>
-                </div>
-              ))}
-            </div>
-          </Reveal>
-          <Reveal delay={0.22}>
             <a
               href="https://docs.flarehq.xyz"
               target="_blank"

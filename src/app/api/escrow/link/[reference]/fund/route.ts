@@ -45,6 +45,7 @@ import {
   escrowEvents,
 } from '@/lib/wallet/flarehqContracts';
 import { getReceiptReliable, readContractReliable } from '@/lib/wallet/chainClient';
+import { getNetworkConfig } from '@/lib/config/network';
 import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
 import { notifyBeneficiary } from '@/lib/escrow/notifyBeneficiary';
 import { explorerTxUrl } from "@/lib/config/network";
@@ -256,7 +257,7 @@ export async function POST(
       txHash,
       escrowId: onchainId,
       explorerUrl: `${explorerTxUrl(txHash)}`,
-      message: `Escrow funded. ${escrow.amount} USDC is now locked on Arc Testnet for ${escrow.beneficiarySCA}.`,
+      message: `Escrow funded. ${escrow.amount} USDC is now locked on ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'} for ${escrow.beneficiarySCA}.`,
     });
   } catch (error: any) {
     console.error('Escrow link fund error:', error);

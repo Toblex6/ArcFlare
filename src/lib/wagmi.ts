@@ -10,11 +10,20 @@ import { defineChain } from 'viem';
 import { arbitrumSepolia, baseSepolia, optimismSepolia, sepolia, polygonAmoy } from 'viem/chains';
 
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+import { arcMainnet } from '@/lib/wallet/arcChains';
 
 // Chain definition now flows from the authoritative network config (testnet:
 // chainId 5042002 verified live; mainnet: ARC_MAINNET_* inputs, fail-closed).
 // The exported name is kept so existing importers (ensureArcNetwork,
 // routing/canonical) keep working unchanged.
+//
+// PRODUCTION NOTE: this object is evaluated at BUNDLE BUILD time from
+// NEXT_PUBLIC_ARC_NETWORK, which the browser cannot see from the server's
+// ARC_NETWORK. Wallet-switching call sites must therefore NOT rely on this
+// object alone — they select their target via useActiveArcChain()
+// (server-resolved chain id, production-safe mainnet default). The static
+// arcMainnet below guarantees chain 5042 is always registered even when the
+// bundle was built without the public network variable.
 const arcChainDef = getArcChain();
 
 export const arcTestnet = defineChain({
@@ -76,12 +85,20 @@ if (typeof window !== 'undefined' && !walletConnectProjectId) {
 const isBrowser = typeof window !== 'undefined';
 
 export const config = createConfig({
-  // Arc is first (default chain for Swap/checkout/Send). The Sepolia/Amoy
-  // entries exist so EXTERNAL Bridge wallets can switch to a supported
-  // source chain and read USDC balances there — they do NOT make those
-  // chains payment chains. The Bridge UI only offers the canonical
+  // Arc is first (default chain for Swap/checkout/Send). arcTestnet is the
+  // env-resolved chain (testnet 5042002 unless the bundle was built with
+  // NEXT_PUBLIC_ARC_NETWORK=mainnet); arcMainnet is the STATIC mainnet
+  // definition (5042) so production browsers always carry the mainnet chain
+  // even when the bundle was built without the public network variable.
+  // Deduped by id: a mainnet-built bundle keeps the env-resolved entry.
+  // The Sepolia/Amoy entries exist so EXTERNAL Bridge wallets can switch to
+  // a supported source chain and read USDC balances there — they do NOT make
+  // those chains payment chains. The Bridge UI only offers the canonical
   // supported set from src/lib/bridge/sourceChains.ts.
-  chains: [arcTestnet, arbitrumSepolia, baseSepolia, optimismSepolia, sepolia, polygonAmoy],
+  chains: (() => {
+    const all = [arcTestnet, arcMainnet, arbitrumSepolia, baseSepolia, optimismSepolia, sepolia, polygonAmoy] as const;
+    return all.filter((c, i) => all.findIndex((x) => x.id === c.id) === i) as unknown as [typeof arcTestnet, ...typeof arcTestnet[]];
+  })(),
 
   connectors: [
     // EIP-6963 multi-wallet discovery enabled by default in wagmi 3.x's
@@ -103,7 +120,7 @@ export const config = createConfig({
             // WalletConnect Cloud for this projectId (production host +
             // preview hosts). Mismatch disables deep-link "Open" on mobile.
             url: typeof window !== 'undefined' ? window.location.origin : 'https://flarehq.xyz',
-            icons: ['https://flarehq.xyz/flarehq-logo.png'],
+            icons: ['https://flarehq.xyz/arcflare-logo.png'],
           },
           showQrModal: true,
         }),
@@ -113,6 +130,7 @@ export const config = createConfig({
 
   transports: {
     [arcTestnet.id]: http(),
+    [arcMainnet.id]: http(),
     [arbitrumSepolia.id]: http(),
     [baseSepolia.id]: http(),
     [optimismSepolia.id]: http(),

@@ -118,7 +118,7 @@ async function formatResponse(payment: any) {
     reference: payment.reference,
     amount: payment.amount,
     currency: payment.currency,
-    chain: payment.chain || 'Arc Testnet',
+    chain: payment.chain || 'Arc',
     gateway_response: hasSettled ? 'Successful' : 'Pending',
     status: payment.status,
     sender_email: payment.senderEmail || null,

@@ -65,7 +65,7 @@ const USDC_ADDRESS = getNetworkConfig().usdcAddress as `0x${string}`;
 
 const arcTestnet = {
   id: getNetworkConfig().chainId,
-  name: 'Arc Testnet',
+  name: getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet',
   nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
     default: { http: [getNetworkConfig().primaryRpc] },
@@ -155,7 +155,7 @@ async function requireJob(erc8183Address: `0x${string}`, jobId: string | number)
       notFound ? 404 : 502,
       notFound
         ? `Job #${jobId} does not exist on the ERC-8183 contract (${erc8183Address}) — check the jobId.`
-        : `Could not read job #${jobId} state from Arc Testnet RPC: ${e.message}`
+        : `Could not read job #${jobId} state from ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'} RPC: ${e.message}`
     );
   }
 }
@@ -511,7 +511,7 @@ async function jobsHandler(request: Request) {
         explorerUrl: `${explorerTxUrl(txHash)}`,
         ...(balanceWarning ? { warning: balanceWarning } : {}),
         nextStep: `POST /api/jobs/${jobId}/accept { budget: '${amountUSDC}' }`,
-        message: `Job #${jobId} created on Arc Testnet — status: Open`,
+        message: `Job #${jobId} created on ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'} — status: Open`,
       });
     }
 
@@ -735,7 +735,7 @@ async function jobsHandler(request: Request) {
       try {
         clientBalance = await readUsdcBalance(clientSCA);
       } catch (e: any) {
-        throw new PreflightError(502, `Could not read USDC balance from Arc Testnet RPC: ${e.message}`);
+        throw new PreflightError(502, `Could not read USDC balance from ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'} RPC: ${e.message}`);
       }
       if (clientBalance < budget) {
         throw new PreflightError(
@@ -747,7 +747,7 @@ async function jobsHandler(request: Request) {
       try {
         allowance = await readUsdcAllowance(clientSCA, ERC8183_ADDRESS);
       } catch (e: any) {
-        throw new PreflightError(502, `Could not read USDC allowance from Arc Testnet RPC: ${e.message}`);
+        throw new PreflightError(502, `Could not read USDC allowance from ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'} RPC: ${e.message}`);
       }
       if (allowance < budget) {
         throw new PreflightError(

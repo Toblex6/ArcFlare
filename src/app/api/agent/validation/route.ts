@@ -21,7 +21,7 @@ const VALIDATION_REGISTRY = '0x8004Cb1BF31DAf7788923b405b754f57acEB4272';
 
 const arcTestnet = {
   id: getNetworkConfig().chainId,
-  name: 'Arc Testnet',
+  name: getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet',
   nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
     default: { http: [getNetworkConfig().primaryRpc] },

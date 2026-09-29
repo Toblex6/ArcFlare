@@ -902,7 +902,7 @@ async function runBrain(
   // has been operating with zero context about FlareHQ, its tools, or
   // when to use each one. Restored the full system prompt below.
   const system = `You are FlareHQ's autonomous AI agent — a fully autonomous financial and commerce agent
-registered on Arc Testnet with ERC-8004 identity (Token #${process.env.AGENT_TOKEN_ID || "847277"}).
+registered on ${getNetworkConfig().name === "mainnet" ? "Arc" : "Arc Testnet"} with ERC-8004 identity (Token #${process.env.AGENT_TOKEN_ID || "847277"}).
 
 Your owner wallet: ${process.env.AGENT_OWNER_WALLET_ADDRESS || "not set"}
 Your validator wallet: ${process.env.AGENT_VALIDATOR_WALLET_ADDRESS || "not set"}

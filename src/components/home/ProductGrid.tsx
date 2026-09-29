@@ -10,7 +10,6 @@ const PRODUCTS: {
   desc: string;
   href: string;
   tag: string;
-  secondary?: { label: string; href: string };
 }[] = [
   {
     icon: '🧾',
@@ -53,7 +52,6 @@ const PRODUCTS: {
     desc: 'Move USDC from supported chains into your Arc wallet, inside the Flow app.',
     href: '/consumer?view=crosschain',
     tag: 'Bridge',
-    secondary: { label: 'Browse x402 APIs', href: '/marketplace' },
   },
 ];
 
@@ -80,11 +78,6 @@ export default function ProductGrid() {
               <Link href={p.href} className="mt-5 text-sm font-bold text-cyan-600 dark:text-cyan-300 inline-flex items-center gap-2 hover:gap-3 transition-all">
                 Open live →
               </Link>
-              {p.secondary && (
-                <Link href={p.secondary.href} className="mt-2 text-sm font-semibold text-[var(--text-secondary)] inline-flex items-center gap-2 hover:gap-3 transition-all">
-                  {p.secondary.label} →
-                </Link>
-              )}
             </div>
           </Reveal>
         ))}

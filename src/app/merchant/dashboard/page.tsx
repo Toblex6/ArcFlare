@@ -5,6 +5,7 @@ import Image from "next/image";
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardSidebar from "@/src/components/DashboardSidebar";
+import { displayChain } from "@/src/components/NetworkContext";
 import {
   AreaChart,
   Area,
@@ -51,12 +52,14 @@ interface DashboardMetrics {
   totalTransactions: number;
 }
 
-// "12.50 USDC · 3.00 EURC" — never a mixed-unit scalar. Falls back to the
+// "12.50 USDC" — merchant balances are USDC-only. Falls back to the
 // legacy scalar as USDC-only when buckets are absent (stale cache).
+// (volumeByCurrency.EURC is still computed server-side for back-compat but
+// is never rendered in any merchant view.)
 function formatVolume(m: DashboardMetrics): { value: string; unit: string } {
   const b = m.volumeByCurrency;
   if (!b) return { value: m.totalVolume.toFixed(2), unit: 'USDC' };
-  return { value: `${b.USDC.toFixed(2)} USDC · ${b.EURC.toFixed(2)} EURC`, unit: '' };
+  return { value: `${b.USDC.toFixed(2)}`, unit: 'USDC' };
 }
 
 interface MerchantInfo {
@@ -114,13 +117,10 @@ export default function MerchantDashboard() {
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
 
-  // Payment link creation state
+  // Payment link creation state — merchant settlement is USDC-only.
+  // There is no currency selector: new links always settle USDC.
   const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState<'USDC' | 'EURC'>('USDC');
-  // Default settlement currency for NEW links (Settings → Wallet &
-  // Payouts). The selector stays explicit per invoice — the backend lets
-  // explicit input win; this default only pre-selects it.
-  const [settlementDefault, setSettlementDefault] = useState<'USDC' | 'EURC'>('USDC');
+  const [currency] = useState<'USDC'>('USDC');
   const [description, setDescription] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [creating, setCreating] = useState(false);
@@ -167,12 +167,8 @@ export default function MerchantDashboard() {
           walletProvider: data.merchant.walletProvider,
           walletAddress: data.merchant.walletAddress,
         });
-        // Pre-select the merchant's default settlement currency for new
-        // links (Phase 6). Unknown shapes fall back to USDC — never guess.
-        const pref = data.settlementPreference?.symbol;
-        const nextDefault = pref === 'EURC' ? 'EURC' : 'USDC';
-        setSettlementDefault(nextDefault);
-        setCurrency(nextDefault);
+        // Merchant settlement is USDC-only: new links always settle USDC,
+        // regardless of any stored legacy preference. Nothing to pre-select.
       })
       .catch(() => router.replace("/merchant/login"))
       .finally(() => setCheckingAuth(false));
@@ -289,9 +285,7 @@ export default function MerchantDashboard() {
       if (!data.success) throw new Error(data.error);
       setNewLink(data);
       setAmount('');
-      // Reset to the settlement default (not hardcoded USDC) so the next
-      // link keeps settling in the merchant's chosen currency.
-      setCurrency(settlementDefault);
+      // Merchant settlement is USDC-only — currency stays USDC for the next link.
       setDescription('');
       setWebhookUrl('');
     } catch (err: any) {
@@ -386,15 +380,16 @@ export default function MerchantDashboard() {
   const pendingCount = payments.filter(
     (p) => !TERMINAL_FAILURES.has(p.status) && p.status !== "SUCCESS"
   ).length;
-  // Per-currency average over successful payments — never a mixed-unit mean.
+  // USDC-only average over successful payments — merchant balances never
+  // mix units. Legacy non-USDC rows are excluded from the merchant average.
   const successfulPayments = payments.filter((p) => p.status === "SUCCESS");
-  const avgByCurrency = (sym: 'USDC' | 'EURC'): number => {
+  const avgUsdc = (() => {
     const rows = successfulPayments.filter(
-      (p) => String(p.currency ?? 'USDC').trim().toUpperCase() === sym
+      (p) => String(p.currency ?? 'USDC').trim().toUpperCase() === 'USDC'
     );
     return rows.length > 0 ? rows.reduce((s, p) => s + (p.amount || 0), 0) / rows.length : 0;
-  };
-  const avgTxDisplay = `${avgByCurrency('USDC').toFixed(2)} USDC · ${avgByCurrency('EURC').toFixed(2)} EURC`;
+  })();
+  const avgTxDisplay = `${avgUsdc.toFixed(2)} USDC`;
   const totalVolumeDisplay = formatVolume(metrics);
 
   if (checkingAuth || loading) {
@@ -608,16 +603,14 @@ export default function MerchantDashboard() {
               <label style={{ display: "block", color: "var(--text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
                 Currency
               </label>
-              <select
-                value={currency} onChange={(e) => setCurrency(e.target.value as 'USDC' | 'EURC')}
+              <div
                 aria-label="Payment link currency"
-                style={{ width: "100%", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", color: "var(--text)", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+                style={{ width: "100%", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", color: "var(--text)", fontSize: 14, outline: "none", boxSizing: "border-box", fontWeight: 700 }}
               >
-                <option value="USDC">USDC</option>
-                <option value="EURC">EURC</option>
-              </select>
+                USDC
+              </div>
               <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "6px 0 0 0", lineHeight: 1.5 }}>
-                New links settle in {settlementDefault} by default. Existing links are unchanged — change the default in Settings → Wallet &amp; Payouts.
+                New links settle in USDC. Merchant settlement is USDC-only.
               </p>
             </div>
             <div>
@@ -779,10 +772,9 @@ export default function MerchantDashboard() {
                     contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
                     labelStyle={{ color: "var(--text-secondary)" }}
                     itemStyle={{ color: "var(--primary)" }}
-                    formatter={(val: any, name: any) => [`${val} ${name === 'volumeEURC' ? 'EURC' : 'USDC'}`, name === 'volumeEURC' ? 'Volume (EURC)' : 'Volume (USDC)']}
+                    formatter={(val: any) => [`${val} USDC`, 'Volume (USDC)']}
                   />
                   <Area type="monotone" dataKey="volumeUSDC" name="volumeUSDC" stroke="var(--primary)" strokeWidth={2.5} fill="url(#mainGrad)" dot={{ fill: "var(--primary)", r: 4, strokeWidth: 0 }} activeDot={{ r: 6, fill: "var(--primary)" }} />
-                  <Area type="monotone" dataKey="volumeEURC" name="volumeEURC" stroke="#7c3aed" strokeWidth={2} fill="transparent" dot={false} activeDot={{ r: 5, fill: "#7c3aed" }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -921,7 +913,7 @@ export default function MerchantDashboard() {
                         <div style={{ color: "var(--text)", fontSize: 12 }}>{payment.sender_email ? `${payment.sender_email.slice(0, 10)}...` : '—'}</div>
                       </td>
                       <td style={{ padding: "12px 12px 12px 0" }}>
-                        <span style={{ color: "var(--primary)", fontSize: 10 }}>{payment.chain}</span>
+                        <span style={{ color: "var(--primary)", fontSize: 10 }}>{displayChain(payment.chain)}</span>
                       </td>
                       <td style={{ padding: "12px 12px 12px 0" }}>
                         <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 12 }}>{payment.amount.toFixed(2)}</div>

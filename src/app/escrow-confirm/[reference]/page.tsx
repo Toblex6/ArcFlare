@@ -20,8 +20,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAccount, useDisconnect, useWriteContract, useChainId, useSwitchChain } from 'wagmi';
-import { arcTestnet } from '@/lib/wagmi';
-import { useNetwork, useExplorer } from '@/src/components/NetworkContext';
+import { useNetwork, useExplorer, useActiveArcChain } from '@/src/components/NetworkContext';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
@@ -77,9 +76,10 @@ export default function EscrowConfirmPage() {
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
   // Server-resolved display label (production-safe "Arc" default until
-  // /api/network resolves). Chain COMPARISONS/switching keep arcTestnet.id
-  // (wallet mechanics, unchanged).
+  // /api/network resolves) + server-driven wallet target (production-safe
+  // mainnet default — never a build-time chain object).
   const { label: arcName } = useNetwork();
+  const { chainId: activeChainId, chain: activeChain } = useActiveArcChain();
   const { txUrl: explorerTx } = useExplorer();
 
   useEffect(() => {
@@ -105,9 +105,9 @@ export default function EscrowConfirmPage() {
     setStep('confirm');
     setExplorerUrl(null);
     try {
-      if (chainId !== arcTestnet.id) {
+      if (chainId !== activeChainId) {
         setStatusText(`Switching your wallet to ${arcName}…`);
-        const net = await ensureArcNetwork({ chainId, switchChainAsync });
+        const net = await ensureArcNetwork({ chainId, switchChainAsync, chain: activeChain });
         if (!net.ok) {
           setStep('error');
           setStatusText(net.message);
@@ -278,7 +278,7 @@ export default function EscrowConfirmPage() {
               Disconnect and switch wallet
             </button>
           </div>
-        ) : chainId !== arcTestnet.id ? (
+        ) : chainId !== activeChainId ? (
           <div>
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 10px' }}>
               Confirming from <strong>{address ? `${address.slice(0, 10)}…${address.slice(-6)}` : 'wallet'}</strong> · <button onClick={() => disconnect()} style={{ border: 'none', background: 'none', color: '#E8714A', cursor: 'pointer', padding: 0, fontSize: 12 }}>disconnect</button>
@@ -289,7 +289,7 @@ export default function EscrowConfirmPage() {
             </div>
             <button
               onClick={async () => {
-                const net = await ensureArcNetwork({ chainId, switchChainAsync });
+                const net = await ensureArcNetwork({ chainId, switchChainAsync, chain: activeChain });
                 if (!net.ok) { setStep('error'); setStatusText(net.message); }
               }}
               style={{ width: '100%', padding: '12px 18px', borderRadius: 10, border: '1px solid #5C7A5C', background: '#fff', color: '#5C7A5C', fontWeight: 700, cursor: 'pointer' }}>

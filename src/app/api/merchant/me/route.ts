@@ -7,6 +7,8 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { parseBody, SettlementPreferenceSchema } from '@/src/lib/validation';
 import { resolveMerchantSettlementPreference, resolvePreferenceUpdate } from '@/src/lib/routing/preference';
 import { getTokenByAddress, getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
+import { getArcNetworkName } from '@/lib/config/network';
+import { filterRowsForNetwork } from '@/src/lib/payments/chainFilter';
 import { publicUrl } from '@/lib/publicOrigin';
 
 // H5: central merchant auth (active + verified + sessionVersion).
@@ -27,12 +29,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
     }
 
-    // Get their payments (matched by businessName in merchant field)
-    const payments = await prisma.paymentLog.findMany({
-      where: { merchant: merchant.businessName },
-      orderBy: { timestamp: 'desc' },
-      take: 50,
-    });
+    // Get their payments (matched by businessName in merchant field).
+    // Production views (mainnet server) exclude historical testnet-chain
+    // rows — preserved in the database, never shown as current activity.
+    const payments = filterRowsForNetwork(
+      await prisma.paymentLog.findMany({
+        where: { merchant: merchant.businessName },
+        orderBy: { timestamp: 'desc' },
+        take: 50,
+      }),
+      getArcNetworkName()
+    );
 
     // Explicit per-currency buckets — USDC and EURC are never summed as
     // fungible units. `totalVolume` is a DEPRECATED mixed-unit sum kept
@@ -134,6 +141,11 @@ export async function PATCH(req: NextRequest) {
 
     // Resolver-canonical: unsupported symbols, arbitrary addresses, and
     // symbol/address mismatches are rejected — never persisted.
+    //
+    // Production merchant product: USDC-only settlement. Any resolved
+    // non-USDC preference (EURC symbol, EURC address, or both) is refused —
+    // EURC can never be (re-)selected. A stored legacy EURC value is left
+    // untouched (never blindly mutated).
     let canonicalAddress: string;
     try {
       canonicalAddress = resolvePreferenceUpdate({
@@ -142,6 +154,21 @@ export async function PATCH(req: NextRequest) {
       });
     } catch (prefErr: any) {
       return NextResponse.json({ success: false, error: prefErr.message }, { status: 400 });
+    }
+    let usdcAddress: string;
+    try {
+      usdcAddress = getTokenBySymbol('USDC').address;
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'USDC settlement is unavailable on this network.' },
+        { status: 500 }
+      );
+    }
+    if (canonicalAddress.toLowerCase() !== usdcAddress.toLowerCase()) {
+      return NextResponse.json(
+        { success: false, error: 'Merchant settlement is USDC-only.' },
+        { status: 400 }
+      );
     }
 
     const updated = await (prisma as any).merchant.update({

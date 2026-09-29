@@ -9,8 +9,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useAccount, useDisconnect, useSignMessage, useChainId, useSwitchChain } from 'wagmi';
-import { arcTestnet } from '@/lib/wagmi';
-import { useNetwork } from '@/src/components/NetworkContext';
+import { useNetwork, useActiveArcChain } from '@/src/components/NetworkContext';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
@@ -51,9 +50,10 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
   // Server-resolved display label (production-safe "Arc" default until
-  // /api/network resolves). Chain COMPARISONS/switching keep arcTestnet.id
-  // (wallet mechanics, unchanged).
+  // /api/network resolves) + server-driven wallet target (production-safe
+  // mainnet default — never a build-time chain object).
   const { label: arcName, explorerBaseUrl: serverExplorerBase, chainId: serverChainId } = useNetwork();
+  const { chainId: activeChainId, chain: activeChain } = useActiveArcChain();
 
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +94,7 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
     setNetworkMismatch(false);
     setShowTechnical(false);
     try {
-      if (chainId !== arcTestnet.id) {
+      if (chainId !== activeChainId) {
         const getProvider = async () => {
           try {
             return await (activeConnector as any)?.getProvider?.();
@@ -102,7 +102,7 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
             return null;
           }
         };
-        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider });
+        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider, chain: activeChain });
         if (!net.ok) {
           setNetworkMismatch(true);
           setError(net.message);
@@ -371,10 +371,10 @@ export default function WalletConnectPanel({ onConnected }: WalletConnectPanelPr
             <div style={{ marginTop: 10 }}>
               {[
                 ['Network Name', arcName],
-                ['Chain ID', String(serverChainId ?? arcTestnet.id)],
-                ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
+                ['Chain ID', String(serverChainId ?? activeChainId)],
+                ['RPC URL', activeChain.rpcUrls.default.http[0]],
                 ['Currency Symbol', 'ARC'],
-                ['Block Explorer', serverExplorerBase ?? arcTestnet.blockExplorers.default.url],
+                ['Block Explorer', serverExplorerBase ?? activeChain.blockExplorers.default.url],
               ].map(([label, value]) => (
                 <div
                   key={label}

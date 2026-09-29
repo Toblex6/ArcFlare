@@ -111,14 +111,6 @@ export default function HomeNavbar() {
 
         <div className="hidden md:flex items-center gap-3">
           <ThemeToggle />
-          <a
-            href="https://docs.flarehq.xyz"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] transition px-2"
-          >
-            Docs ↗
-          </a>
           <Link
             href="/merchant/login"
             className="text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text)] transition whitespace-nowrap"
@@ -173,14 +165,6 @@ export default function HomeNavbar() {
           <Link href="/consumer" onClick={() => setOpen(false)} className="p-2.5 rounded-xl hover:bg-[var(--surface-secondary)] transition">
             Individual app
           </Link>
-          <a
-            href="https://docs.flarehq.xyz"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2.5 rounded-xl hover:bg-[var(--surface-secondary)] transition"
-          >
-            Docs ↗
-          </a>
           {SECTIONS.map(({ id, label }) => (
             <a
               key={id}

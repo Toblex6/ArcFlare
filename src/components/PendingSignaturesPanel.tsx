@@ -17,6 +17,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAccount, useChainId, useSwitchChain, useWriteContract } from 'wagmi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
+import { arcMainnet, ARC_TESTNET_CHAIN_ID } from '@/lib/wallet/arcChains';
+import { arcTestnet } from '@/lib/wagmi';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import { useArcLabel } from '@/src/components/NetworkContext';
 
@@ -138,7 +140,16 @@ export default function PendingSignaturesPanel() {
           return null;
         }
       };
-      const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider });
+      // Target the intent's own Arc chain when it names one (5042 mainnet /
+      // 5042002 testnet); anything else resolves to mainnet (production-safe,
+      // never silently testnet). The intent is server-issued, so a mainnet
+      // server's intents already carry 5042.
+      const net = await ensureArcNetwork({
+        chainId,
+        switchChainAsync,
+        getProvider,
+        chain: intent.chainId === ARC_TESTNET_CHAIN_ID ? arcTestnet : arcMainnet,
+      });
       if (!net.ok) {
         setError(net.message);
         setBroadcastId(null);

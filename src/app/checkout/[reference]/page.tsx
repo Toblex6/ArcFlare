@@ -41,8 +41,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
-import { arcTestnet } from '@/src/lib/wagmi';
-import { useNetwork, displayChain } from '@/src/components/NetworkContext';
+import { useNetwork, displayChain, useActiveArcChain } from '@/src/components/NetworkContext';
 import CheckoutWidget, { CheckoutEvent } from '@/src/components/CheckoutWidget';
 import Invoice, { InvoiceData } from '@/src/components/Invoice';
 import { CheckoutLoading } from '@/src/components/checkout/CheckoutLoading';
@@ -76,8 +75,10 @@ export default function CheckoutPage() {
   // mounts once `payment` exists, so page state can never depend on it.
   const { payment, setPayment, hasError, setHasError, errorMessage, setErrorMessage } = usePaymentVerify(reference);
   // Server-resolved display state (production-safe "Arc" default until
-  // /api/network resolves). Explorer/chain mechanics keep arcTestnet.* below.
+  // /api/network resolves) + server-driven explorer fallback (never a
+  // build-time chain object).
   const { label: arcName, explorerBaseUrl: serverExplorerBase } = useNetwork();
+  const { chain: activeChain } = useActiveArcChain();
   // Timeline steps (settled description uses the server-resolved label —
   // module scope cannot, it would read client env with its testnet fallback).
   const STEPS: { key: Phase; label: string; description: string }[] = [
@@ -188,8 +189,8 @@ export default function CheckoutPage() {
       settledAt: payment.settledAt ?? null,
       expiresAt: payment.expiresAt ?? null,
       explorerUrl: payment.arcTxHash
-        ? `${serverExplorerBase ?? arcTestnet.blockExplorers.default.url}/tx/${payment.arcTxHash}`
-        : (serverExplorerBase ?? arcTestnet.blockExplorers.default.url),
+        ? `${serverExplorerBase ?? activeChain.blockExplorers.default.url}/tx/${payment.arcTxHash}`
+        : (serverExplorerBase ?? activeChain.blockExplorers.default.url),
       token: payment.token ?? null,
       // Phase 6: routed-vs-direct receipt split (backend-authoritative X).
       payToken: payment.payToken ?? null,

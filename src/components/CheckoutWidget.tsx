@@ -42,19 +42,17 @@ import {
     shortTokenAddress,
     type SupportedCurrency,
 } from '@/src/lib/tokens/clientTokens';
-import { arcTestnet } from '@/src/lib/wagmi';
-// Phase 6 (routing presentation): pay-in selector, live conversion quote,
-// and routed approve→route execution. The router/pool/token ADDRESSES the
-// widget signs all arrive in the server-issued quote — the UI only ever
-// offers the USDC/EURC symbols and canonical metadata from clientTokens.
-import { PayTokenSelector } from '@/src/components/checkout/routing/PayTokenSelector';
-import { QuotePanel, type QuotePanelState } from '@/src/components/checkout/routing/QuotePanel';
+// Phase 6 (routing presentation): the routed approve→route execution path
+// below is preserved (UnitFlow executor untouched), but the production
+// merchant product offers USDC direct settlement only — no EURC pay-in
+// selector (see the wallet-tab render section). The quote hook stays wired
+// so a same-token selection resolves to 'direct' with zero network calls.
 import { RoutedReceipt } from '@/src/components/checkout/routing/RoutedReceipt';
 import { useRoutingQuote } from '@/src/components/checkout/routing/useRoutingQuote';
 import { erc20ApproveAbi, paymentRouterRouteAbi } from '@/src/components/checkout/routing/routerAbi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
-import { useNetwork } from '@/src/components/NetworkContext';
+import { useNetwork, useActiveArcChain } from '@/src/components/NetworkContext';
 import { friendlyConnectorLabel, hasInjectedProvider, isMobileViewport } from '@/lib/wallet/walletLabels';
 import { useGuardedConnect } from '@/hooks/useGuardedConnect';
 
@@ -178,9 +176,12 @@ interface CheckoutWidgetProps {
 
 export default function CheckoutWidget({ reference, compact = false, onEvent }: CheckoutWidgetProps) {
     // Server-resolved display state (production-safe "Arc" default until
-    // /api/network resolves). Chain COMPARISONS/switching below still use
-    // arcTestnet.id (wallet mechanics, unchanged).
+    // /api/network resolves). Chain COMPARISONS/switching use the
+    // server-driven active chain below (useActiveArcChain) — never a
+    // build-time chain object, which would fall back to testnet when the
+    // bundle was built without NEXT_PUBLIC_ARC_NETWORK.
     const { label: arcName, isTestnet: IS_TESTNET, explorerBaseUrl: serverExplorerBase, chainId: serverChainId } = useNetwork();
+    const { chainId: activeChainId, chain: activeChain } = useActiveArcChain();
     const [payment, setPayment] = useState<PaymentLogData | null>(null);
     const [agent, setAgent] = useState<AgentData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -250,11 +251,12 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         payment.status !== 'SUCCESS' &&
         payerTokenBalance < Number(payment.amount);
 
-    // ── Phase 6: pay-in token selection + conversion quote ───────────────
-    // The customer chooses USDC or EURC ("Pay with"). Same-as-settlement
-    // keeps the direct flow above; the other token fetches a live
-    // conversion quote ("You pay X → merchant receives Y"). Selection
-    // resets to the settlement token whenever a new invoice loads.
+    // ── Phase 6: pay-in token selection ─────────────────────────────────
+    // Production merchant checkout settles USDC directly: the pay token is
+    // ALWAYS the invoice token (no EURC pay-in option, no conversion claim).
+    // The routed execution path below is preserved for the executor, but the
+    // UI never offers a cross-token selection — paySymbol is pinned to the
+    // invoice symbol on every invoice load and there is no selector control.
     const [paySymbol, setPaySymbol] = useState<SupportedCurrency>('USDC');
     const [routeStep, setRouteStep] = useState<'idle' | 'approve' | 'route' | 'verifying'>('idle');
     const [routeError, setRouteError] = useState<string | null>(null);
@@ -402,11 +404,11 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             setIsTxPending(true);
             onEvent?.({ type: 'payment_pending' });
 
-            if (chainId !== arcTestnet.id) {
+            if (chainId !== activeChainId) {
                 const providerGetter = async () => {
                     try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; }
                 };
-                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter });
+                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter, chain: activeChain });
                 if (!net.ok) {
                     setIsTxPending(false);
                     setNetworkMismatch(true);
@@ -512,11 +514,11 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             setRouteStep('approve');
             onEvent?.({ type: 'payment_pending' });
 
-            if (chainId !== arcTestnet.id) {
+            if (chainId !== activeChainId) {
                 const providerGetter = async () => {
                     try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; }
                 };
-                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter });
+                const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter, chain: activeChain });
                 if (!net.ok) {
                     setRouteStep('idle');
                     setNetworkMismatch(true);
@@ -645,18 +647,10 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const displayName = agent?.name || 'Autonomous Agent';
 
     // ── Phase 6 render helpers ───────────────────────────────────────────
-    // Map the quote hook state onto the presentational panel states. While
-    // the selection is direct, no panel renders at all.
-    const panelState: QuotePanelState =
-        routing.status === 'loading'
-            ? { status: 'loading' }
-            : routing.status === 'refreshing'
-                ? { status: 'refreshing' }
-                : routing.status === 'error'
-                    ? { status: 'error', headline: routing.headline ?? 'Could not get a conversion quote. Please try again.', raw: routing.rawError }
-                    : routing.status === 'ready' && routing.quote
-                        ? { status: 'ready', quote: routing.quote, secondsLeft: routing.secondsLeft }
-                        : { status: 'loading' };
+    // Production merchant checkout never offers a cross-token selection, so
+    // no quote panel renders. The quote hook above stays wired (same-token
+    // resolves to 'direct' with zero network calls) and the routed
+    // approve→route execution path below is preserved for the executor.
     const routeBusy = routeStep !== 'idle';
     // Settled-payment receipt split: backend-authoritative X vs Y. Direct
     // payments (payToken == settlement token, or legacy rows without pay
@@ -668,7 +662,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         !!successPayToken &&
         !!payment.token &&
         successPayToken.address.toLowerCase() !== payment.token.address.toLowerCase();
-    const explorerBase = serverExplorerBase ?? arcTestnet.blockExplorers.default.url;
+    const explorerBase = serverExplorerBase ?? activeChain.blockExplorers.default.url;
 
     return (
         <div style={{ background: '#1a1410', border: '1px solid #2d2015', borderRadius: 24, padding: compact ? 20 : 'clamp(20px, 3vw, 32px)', maxWidth: compact ? 440 : undefined, width: '100%', boxSizing: 'border-box', fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -770,21 +764,13 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
 
             {method === 'wallet' && (
                 <>
-                    {/* Phase 6: pay-in token choice. Visible before connect —
-                        quotes need no wallet — for unpaid invoices only. */}
-                    {!isConfirmed && (
-                        <PayTokenSelector
-                            settlementSymbol={invoiceSymbol}
-                            selected={paySymbol}
-                            onSelect={(s) => { setPaySymbol(s); setRouteError(null); }}
-                            disabled={isTxPending || routeBusy || isVerifying}
-                        />
-                    )}
-                    {/* Routed selection: live conversion quote with expiry +
-                        automatic recoverable re-quote (see useRoutingQuote). */}
-                    {!isConfirmed && isRoutedSelection && (
-                        <QuotePanel state={panelState} onRefresh={routing.refresh} compact={compact} />
-                    )}
+                    {/* Production merchant checkout: USDC direct settlement
+                        only. No pay-token selector is rendered — the invoice
+                        token is authoritative and the transfer below signs it
+                        directly. (The routed approve→route execution path is
+                        preserved in code for the executor; the UI never
+                        offers a cross-token selection or claims a
+                        conversion.) */}
                     {!isConnected ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             {(() => {
@@ -863,7 +849,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                 </p>
                             )}
                         </div>
-                    ) : chainId !== arcTestnet.id ? (
+                    ) : chainId !== activeChainId ? (
                         <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 11, color: '#6b5a45' }}>
                                 <span>Connected: {address?.slice(0, 6)}...{address?.slice(-4)}</span>
@@ -882,7 +868,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                     setSettleError(null);
                                     try {
                                         const getter = async () => { try { return await (activeConnector as any)?.getProvider?.(); } catch { return null; } };
-                                        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter });
+                                        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: getter, chain: activeChain });
                                         if (!net.ok) { setNetworkMismatch(true); setSettleError(net.message); }
                                     } catch (e: any) { setSettleError(friendlyWalletError(e)); setNetworkMismatch(true); }
                                     finally { setSwitching(false); }
@@ -922,7 +908,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                                         <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 12, padding: 12, marginBottom: 10, textAlign: 'center' }}>
                                             <p style={{ color: '#f87171', fontSize: 12, fontWeight: 700, margin: '0 0 4px' }}>Insufficient {invoiceSymbol} balance</p>
                                             <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>
-                                                You need {payment.amount} {invoiceSymbol} but your wallet holds {payerTokenBalance} {invoiceSymbol}. Top up {invoiceSymbol} before paying — a {invoiceSymbol === 'EURC' ? 'USDC' : 'EURC'} balance cannot pay this invoice.
+                                                You need {payment.amount} {invoiceSymbol} but your wallet holds {payerTokenBalance} {invoiceSymbol}. Top up {invoiceSymbol} before paying.
                                             </p>
                                         </div>
                                     )}
@@ -1093,10 +1079,10 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                         <div style={{ marginTop: 10 }}>
                             {[
                                 ['Network Name', arcName],
-                                ['Chain ID', String(serverChainId ?? arcTestnet.id)],
-                                ['RPC URL', arcTestnet.rpcUrls.default.http[0]],
+                                ['Chain ID', String(serverChainId ?? activeChainId)],
+                                ['RPC URL', activeChain.rpcUrls.default.http[0]],
                                 ['Currency Symbol', 'ARC'],
-                                ['Block Explorer', serverExplorerBase ?? arcTestnet.blockExplorers.default.url],
+                                ['Block Explorer', serverExplorerBase ?? activeChain.blockExplorers.default.url],
                             ].map(([label, value]) => (
                                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: '#a89684', padding: '4px 0', borderBottom: '1px solid #2d2015' }}>
                                     <span>{label}</span>

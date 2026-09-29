@@ -4,9 +4,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { resolveCurrency, resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
-import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preference';
-import { getNetworkConfig } from '@/lib/config/network';
+import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
+import { getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
+import { getNetworkConfig, getArcNetworkName } from '@/lib/config/network';
+import { filterRowsForNetwork } from '@/src/lib/payments/chainFilter';
 import { publicUrl } from '@/lib/publicOrigin';
 
 // H5: central merchant auth (active + verified + sessionVersion).
@@ -40,24 +41,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Multicurrency Phase 2B: the merchant names the invoice token
-    // (USDC | EURC — both natively settleable via verify-onchain/settle
-    // Path B). The canonical resolver is authoritative: unsupported symbols
-    // are rejected, never converted, never silently substituted.
-    //
-    // Routing v1: when the merchant names no token, the invoice inherits
-    // their default settlement preference (NULL = USDC). Explicit input
-    // always wins. Per-invoice token stays frozen at creation.
+    // Production merchant product: USDC-only settlement. Any client-supplied
+    // currency (including a stored legacy EURC preference) is ignored — new
+    // merchant links ALWAYS settle USDC at the canonical, network-correct
+    // address. Internal multicurrency paths (consumer/agent initialize) are
+    // untouched. Per-invoice token stays frozen at creation.
     let token: { symbol: 'USDC' | 'EURC'; address: string; decimals: number };
     try {
-      token =
-        currency === undefined
-          ? resolveMerchantSettlementPreference(merchant)
-          : resolveCurrency({ currency });
+      const usdc = getTokenBySymbol('USDC');
+      token = { symbol: 'USDC', address: usdc.address, decimals: usdc.decimals };
     } catch (tokenErr: any) {
       return NextResponse.json(
-        { success: false, error: `Unsupported currency: ${tokenErr.message}` },
-        { status: 400 }
+        { success: false, error: 'USDC settlement is unavailable on this network.' },
+        { status: 500 }
       );
     }
 
@@ -132,11 +128,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
     }
 
-    const payments = await prisma.paymentLog.findMany({
-      where: { merchant: merchant.businessName },
-      orderBy: { timestamp: 'desc' },
-      take: 100,
-    });
+    // Production views (mainnet server) exclude historical testnet-chain
+    // rows — preserved in the database, never shown as current links.
+    const payments = filterRowsForNetwork(
+      await prisma.paymentLog.findMany({
+        where: { merchant: merchant.businessName },
+        orderBy: { timestamp: 'desc' },
+        take: 100,
+      }),
+      getArcNetworkName()
+    );
 
     const now = Date.now();
     return NextResponse.json({

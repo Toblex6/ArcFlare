@@ -78,14 +78,15 @@ function GeneralTab({ merchant }: { merchant: MerchantInfo | null }) {
 }
 
 // ── Settlement currency (Payment Routing v1) ───────────────────────────
-// Default settlement token for FUTURE payment links/invoices. Self-
-// contained card inside the existing Wallet & Payouts tab — no new
-// settings architecture. Reads/writes the canonical preference via
-// GET/PATCH /api/merchant/me (symbol only; the server persists the
-// canonical address and rejects anything non-canonical).
+// Merchant settlement is USDC-only: this card shows the fixed USDC
+// settlement for FUTURE payment links/invoices. A stored legacy EURC value
+// (from before the USDC-only product cutover) is surfaced honestly with a
+// one-way "Switch to USDC" action — EURC can never be (re-)selected. Reads
+// the canonical preference via GET /api/merchant/me; writes via PATCH (which
+// accepts USDC only). Existing invoices are unchanged.
 function SettlementPreferenceCard() {
   const [preference, setPreference] = useState<'USDC' | 'EURC' | null>(null);
-  const [saving, setSaving] = useState<'USDC' | 'EURC' | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -99,25 +100,25 @@ function SettlementPreferenceCard() {
       .catch(() => setPreference('USDC'));
   }, []);
 
-  const save = async (symbol: 'USDC' | 'EURC') => {
-    if (symbol === preference || saving) return;
-    setSaving(symbol);
+  const switchToUsdc = async () => {
+    if (preference === 'USDC' || saving) return;
+    setSaving(true);
     setError(null);
     setSaved(false);
     try {
       const res = await fetch('/api/merchant/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settlementToken: symbol }),
+        body: JSON.stringify({ settlementToken: 'USDC' }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Could not save settlement currency.');
-      setPreference(data.settlementPreference?.symbol === 'EURC' ? 'EURC' : 'USDC');
+      setPreference('USDC');
       setSaved(true);
     } catch (err: any) {
       setError(err.message || 'Could not save settlement currency.');
     } finally {
-      setSaving(null);
+      setSaving(false);
     }
   };
 
@@ -125,48 +126,44 @@ function SettlementPreferenceCard() {
     <div style={cardStyle}>
       <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', margin: '0 0 4px' }}>Settlement currency</h3>
       <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 16px' }}>
-        New payment links and invoices settle in this currency. Existing invoices are unchanged.
+        New payment links and invoices settle in USDC. Merchant settlement is USDC-only. Existing invoices are unchanged.
       </p>
       {preference === null && !error ? (
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Loading settlement currency...</p>
-      ) : (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }} role="radiogroup" aria-label="Settlement currency">
-          {(['USDC', 'EURC'] as const).map((symbol) => {
-            const selected = preference === symbol;
-            const busy = saving === symbol;
-            return (
-              <button
-                key={symbol}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => save(symbol)}
-                disabled={saving !== null}
-                style={{
-                  flex: '1 1 140px',
-                  minHeight: 48,
-                  padding: '10px 16px',
-                  borderRadius: 10,
-                  border: selected ? '2px solid var(--primary)' : '1px solid var(--border)',
-                  background: selected ? 'rgba(200,151,90,0.1)' : 'var(--surface-secondary)',
-                  color: 'var(--text)',
-                  fontSize: 14,
-                  fontWeight: 800,
-                  cursor: saving !== null ? 'not-allowed' : 'pointer',
-                  opacity: saving !== null && !busy ? 0.6 : 1,
-                  boxSizing: 'border-box',
-                }}
-              >
-                {busy ? 'Saving...' : symbol}
-              </button>
-            );
-          })}
+      ) : preference === 'EURC' ? (
+        <div>
+          <p style={{ fontSize: 13, color: 'var(--text)', margin: '0 0 12px 0' }}>
+            Stored preference: <strong>EURC</strong> (legacy — new links now settle in <strong>USDC</strong>).
+          </p>
+          <button
+            type="button"
+            onClick={switchToUsdc}
+            disabled={saving}
+            style={{
+              padding: '10px 16px',
+              borderRadius: 10,
+              border: '1px solid var(--primary)',
+              background: 'var(--surface-secondary)',
+              color: 'var(--text)',
+              fontSize: 14,
+              fontWeight: 800,
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.6 : 1,
+              boxSizing: 'border-box',
+            }}
+          >
+            {saving ? 'Saving...' : 'Switch to USDC'}
+          </button>
         </div>
+      ) : (
+        <p style={{ fontSize: 14, color: 'var(--text)', fontWeight: 800, margin: 0 }}>
+          USDC <span style={{ fontSize: 12, color: 'var(--success)', fontWeight: 400 }}>✓ settlement currency</span>
+        </p>
       )}
       {error && <p style={{ color: 'var(--danger)', fontSize: 12, margin: '12px 0 0 0', wordBreak: 'break-word' }}>❌ {error}</p>}
       {saved && !error && (
         <p style={{ color: 'var(--success)', fontSize: 12, margin: '12px 0 0 0' }}>
-          ✓ Saved — new payment links will settle in {preference}. Existing invoices are unchanged.
+          ✓ Saved — new payment links will settle in USDC. Existing invoices are unchanged.
         </p>
       )}
     </div>

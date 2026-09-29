@@ -61,7 +61,7 @@ export default function ApiDocsPage() {
         <div className="rounded-3xl border border-[#2d2019] bg-[#1a120d] p-8">
           <h2 className="text-2xl font-bold">Base URL</h2>
           <pre className="mt-5 overflow-x-auto rounded-2xl border border-[#3a2a22] bg-[#241913] p-4 text-sm text-cyan-300">
-            <code>https://arcflare-gateway.onrender.com</code>
+            <code>https://flarehq.xyz</code>
           </pre>
         </div>
       </section>

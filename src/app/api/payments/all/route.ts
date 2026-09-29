@@ -4,7 +4,8 @@ import { prisma } from '@/src/lib/prisma';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { resolveRowCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
 import { conversionView, payTokenView } from '@/src/lib/routing/receiptView';
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getArcNetworkName } from "@/lib/config/network";
+import { filterRowsForNetwork, productionChainFallback } from "@/src/lib/payments/chainFilter";
 
 export const dynamic = 'force-dynamic';
 
@@ -18,13 +19,20 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const paymentLogs = await prisma.paymentLog.findMany({
-      where: { merchantId: merchant.id },
-      orderBy: {
-        timestamp: 'desc',
-      },
-    });
+    const paymentLogs = filterRowsForNetwork(
+      await prisma.paymentLog.findMany({
+        where: { merchantId: merchant.id },
+        orderBy: {
+          timestamp: 'desc',
+        },
+      }),
+      getArcNetworkName()
+    );
 
+    // Production views (mainnet server) exclude historical testnet-chain
+    // rows from BOTH the list and the aggregates below — no testnet record
+    // may appear as current mainnet activity/balances. Rows are preserved in
+    // the database (never deleted); testnet servers still see everything.
     const successfulLogs = paymentLogs.filter((log) => log.status === 'SUCCESS');
 
     // Explicit per-currency buckets — USDC and EURC are never summed as
@@ -94,7 +102,7 @@ export async function GET(req: NextRequest) {
         reference: log.reference,
         amount: log.amount || 0,
         currency: log.currency || 'USDC',
-        chain: log.chain || 'Arc Testnet',
+        chain: log.chain || productionChainFallback(),
         status: displayStatus,
         rawStatus: log.status,
         displayStatus,

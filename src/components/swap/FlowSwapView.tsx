@@ -55,8 +55,10 @@ import {
   useSwitchChain,
 } from 'wagmi';
 import type { Address } from 'viem';
-import { getNetworkConfig } from '@/lib/config/network';
-import { useExplorer, useArcLabel } from '@/src/components/NetworkContext';
+import { useExplorer, useArcLabel, useActiveArcChain } from '@/src/components/NetworkContext';
+// (getNetworkConfig intentionally NOT imported: module-scope reads would use
+// client build-time env with its testnet fallback. Server truth arrives via
+// useActiveArcChain() below.)
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
 import {
@@ -85,7 +87,11 @@ import {
   type SwapSymbol,
 } from './swapCopy';
 
-const ARC_CHAIN_ID = getNetworkConfig().chainId;
+// Server-driven Arc chain id for ALL wallet mechanics below (production-safe
+// mainnet default via useActiveArcChain — never a build-time chain object,
+// which would fall back to testnet when the bundle was built without
+// NEXT_PUBLIC_ARC_NETWORK). The module-level constant is intentionally gone:
+// getNetworkConfig() at import time reads client env in the browser.
 
 type FlowPhase = 'form' | 'executing' | 'mined' | 'verifying' | 'verified' | 'failed';
 
@@ -172,6 +178,8 @@ export function FlowSwapView({
   // Server-resolved network label (production-safe "Arc" default until
   // /api/network resolves) — never client-side env (testnet fallback).
   const arcName = useArcLabel();
+  // Server-driven wallet target (production-safe mainnet default).
+  const { chainId: ARC_CHAIN_ID, chain: activeChain } = useActiveArcChain();
   const publicClient = usePublicClient({ chainId: ARC_CHAIN_ID });
   const { sendTransactionAsync, isPending: isSending } = useSendTransaction();
 
@@ -368,7 +376,7 @@ export function FlowSwapView({
             return null;
           }
         };
-        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter });
+        const net = await ensureArcNetwork({ chainId, switchChainAsync, getProvider: providerGetter, chain: activeChain });
         if (!net.ok) throw new Error(net.message);
         markStep('network', { status: 'done' });
       }
@@ -942,6 +950,7 @@ export function FlowSwapView({
                   ensureArcNetwork({
                     chainId,
                     switchChainAsync,
+                    chain: activeChain,
                     getProvider: async () => {
                       try {
                         return await (activeConnector as unknown as { getProvider?: () => Promise<unknown> })?.getProvider?.();

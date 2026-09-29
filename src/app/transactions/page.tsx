@@ -234,7 +234,7 @@ export default function TransactionsPage() {
                       <div>
                         <span className="text-slate-400 block text-[10px] uppercase">Chain</span>
                         <span className="inline-block bg-cyan-50 text-cyan-700 px-1.5 py-0.5 rounded border border-cyan-100 text-[10px]">
-                          {payment.chain.length > 20 ? 'Arc-L1' : payment.chain}
+                          {payment.chain.length > 20 ? 'Arc' : displayChain(payment.chain)}
                         </span>
                       </div>
                     </div>

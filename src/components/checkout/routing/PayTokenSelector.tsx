@@ -1,9 +1,14 @@
 // src/components/checkout/routing/PayTokenSelector.tsx
 //
-// "Pay with USDC / EURC" selector for the hosted + embed checkout.
+// "Pay with" selector for the hosted + embed checkout.
 // Purely presentational (no wagmi, no fetching) so it renders anywhere —
-// including server-side in UI tests. Only the two supported symbols are
-// ever offered; arbitrary ERC-20 addresses are not expressible here.
+// including server-side in UI tests.
+//
+// PRODUCTION MERCHANT PRODUCT: USDC direct settlement only. The only offered
+// pay token is USDC — EURC is NOT a selectable checkout payment option (the
+// production checkout presents USDC as the settlement path and never claims
+// a conversion). The routed approve→route executor is untouched; this
+// component simply offers no cross-token selection.
 //
 // Mobile: two full-height (48px) touch targets that share the row and wrap
 // instead of clipping.
@@ -18,7 +23,7 @@ interface PayTokenSelectorProps {
   disabled?: boolean;
 }
 
-const OPTIONS: readonly SupportedCurrency[] = ['USDC', 'EURC'];
+const OPTIONS: readonly SupportedCurrency[] = ['USDC'];
 
 export function PayTokenSelector({ settlementSymbol, selected, onSelect, disabled = false }: PayTokenSelectorProps) {
   return (

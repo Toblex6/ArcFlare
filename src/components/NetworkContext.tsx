@@ -29,6 +29,8 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { explorerAddressUrl, explorerTxUrl } from '@/lib/config/network';
+import { arcMainnet, resolveActiveArcChainId } from '@/lib/wallet/arcChains';
+import { arcTestnet } from '@/lib/wagmi';
 
 export interface NetworkState {
   /** "testnet" | "mainnet" — server-resolved. Defaults to "mainnet" (production-safe). */
@@ -104,6 +106,39 @@ export function useNetwork(): NetworkState {
 /** Server-resolved user-visible network label ("Arc" / "Arc Testnet"). */
 export function useArcLabel(): string {
   return useContext(NetworkContext).label;
+}
+
+/**
+ * Server-driven wallet target for chain COMPARISONS and SWITCHING.
+ *
+ * The browser bundle cannot see the server's ARC_NETWORK, so every
+ * wallet call site must use THIS hook (backed by GET /api/network) instead
+ * of a build-time chain object. Unresolved/unknown state defaults to Arc
+ * Mainnet (chain 5042) — production-safe, never silently testnet. A testnet
+ * server resolves 5042002 and development keeps working unchanged.
+ *
+ * Display copy must still use useNetwork()/useArcLabel(); this hook is for
+ * chain mechanics only (comparisons, ensureArcNetwork target, RPC/explorer
+ * fallbacks).
+ */
+export function useActiveArcChain(): {
+  /** Active Arc chain id: server-resolved, production-safe 5042 default. */
+  chainId: number;
+  /** Wagmi chain object matching chainId (mainnet static or env testnet). */
+  chain: typeof arcMainnet;
+  /** Raw server-resolved chain id (null while /api/network is unresolved). */
+  serverChainId: number | null;
+  /** True once /api/network has resolved. */
+  loaded: boolean;
+} {
+  const { chainId: serverChainId, loaded } = useContext(NetworkContext);
+  const chainId = resolveActiveArcChainId(serverChainId);
+  return {
+    chainId,
+    chain: (chainId === arcMainnet.id ? arcMainnet : arcTestnet) as typeof arcMainnet,
+    serverChainId,
+    loaded,
+  };
 }
 
 /**

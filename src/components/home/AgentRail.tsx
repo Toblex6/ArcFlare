@@ -48,12 +48,6 @@ export default function AgentRail() {
               <span className="mt-5 inline-flex text-sm font-bold text-cyan-600 dark:text-cyan-300">Open →</span>
             </Link>
           ))}
-          <div className="w-[78vw] sm:w-[380px] shrink-0 rounded-3xl p-8 bg-gradient-to-br from-cyan-500 to-sky-600 text-white flex flex-col justify-center shadow-xl">
-            <p className="text-3xl mb-3">🚀</p>
-            <h3 className="text-2xl font-extrabold mb-2">Deploy your agent today</h3>
-            <p className="text-white/85 text-sm leading-relaxed">ERC-8004 wallet, treasury, reputation — live in minutes.</p>
-            <Link href="/start" className="mt-5 inline-flex w-fit bg-white text-slate-900 font-bold text-sm px-5 py-3 rounded-xl">Get started →</Link>
-          </div>
         </motion.div>
       </div>
     </section>
