@@ -21,9 +21,20 @@
 // the same chain (kept so server code that still keys off it — cctp-v2.ts —
 // derives from here instead of duplicating the table).
 //
-// TESTNET ONLY. There is no mainnet entry and no mainnet override input:
-// the external bridge refuses closed outside testnet (see the intent route).
+// TESTNET table below is unchanged. MAINNET entries live in
+// MAINNET_SOURCES, derived field-by-field from the INSTALLED
+// @circle-fin/bridge-kit chain definitions (no CCTP protocol address is
+// stored here — those resolve from the kit at verify/execute time).
 // This module is client-safe (pure data + pure functions, no secrets).
+
+import {
+  Arbitrum as KitArbitrum,
+  Avalanche as KitAvalanche,
+  Base as KitBase,
+  Ethereum as KitEthereum,
+  Optimism as KitOptimism,
+  Polygon as KitPolygon,
+} from '@circle-fin/bridge-kit/chains';
 
 export interface BridgeSourceChain {
   /** BridgeKit BridgeChain enum string — passed to kit.bridge()/kit.retry(). */
@@ -83,32 +94,94 @@ const SOURCES: BridgeSourceChain[] = [
   },
 ];
 
+/**
+ * Mainnet source set, derived from the installed BridgeKit chain
+ * definitions (chainId / USDC / explorer template read off the kit
+ * objects — a kit upgrade that changes a deployment moves this table
+ * with it). `circleBlockchain` values are Circle's documented
+ * Developer-Controlled Wallets identifiers for these mainnet chains.
+ */
+function kitSource(
+  id: string,
+  label: string,
+  def: {
+    chainId: number;
+    usdcAddress: string | null;
+    explorerUrl: string;
+  },
+  circleBlockchain: string
+): BridgeSourceChain {
+  if (typeof def.usdcAddress !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(def.usdcAddress)) {
+    throw new Error(`[bridge] installed bridge-kit has no USDC address for ${id} — refusing to list it.`);
+  }
+  const explorer = def.explorerUrl.includes('{hash}')
+    ? def.explorerUrl
+    : `${def.explorerUrl.replace(/\/+$/, '')}/{hash}`;
+  return {
+    id,
+    label,
+    chainId: def.chainId,
+    usdcAddress: def.usdcAddress as `0x${string}`,
+    explorerTxTemplate: explorer,
+    circleBlockchain,
+  };
+}
+
+const MAINNET_SOURCES: BridgeSourceChain[] = [
+  kitSource('Ethereum', 'Ethereum', KitEthereum, 'ETH'),
+  kitSource('Base', 'Base', KitBase, 'BASE'),
+  kitSource('Arbitrum', 'Arbitrum', KitArbitrum, 'ARB'),
+  kitSource('Optimism', 'Optimism', KitOptimism, 'OP'),
+  kitSource('Polygon', 'Polygon', KitPolygon, 'MATIC'),
+  kitSource('Avalanche', 'Avalanche', KitAvalanche, 'AVAX'),
+];
+
+export type BridgeNetwork = 'testnet' | 'mainnet';
+
+function tableFor(network: BridgeNetwork): BridgeSourceChain[] {
+  return network === 'mainnet' ? MAINNET_SOURCES : SOURCES;
+}
+
 /** Canonical supported source set (fresh copies — callers must not mutate). */
-export function getBridgeSourceChains(): BridgeSourceChain[] {
-  return SOURCES.map((s) => ({ ...s }));
+export function getBridgeSourceChains(network: BridgeNetwork = 'testnet'): BridgeSourceChain[] {
+  return tableFor(network).map((s) => ({ ...s }));
 }
 
 /** Back-compat constant: the canonical supported source set. */
 export const BRIDGE_SOURCE_CHAINS: readonly BridgeSourceChain[] = SOURCES.map((s) => ({ ...s }));
 
-export function getBridgeSourceChain(id: string): BridgeSourceChain | null {
-  const found = SOURCES.find((s) => s.id === id);
+export function getBridgeSourceChain(id: string, network: BridgeNetwork = 'testnet'): BridgeSourceChain | null {
+  const found = tableFor(network).find((s) => s.id === id);
   return found ? { ...found } : null;
 }
 
-export function getBridgeSourceChainByChainId(chainId: number): BridgeSourceChain | null {
-  const found = SOURCES.find((s) => s.chainId === chainId);
+export function getBridgeSourceChainByChainId(chainId: number, network: BridgeNetwork = 'testnet'): BridgeSourceChain | null {
+  const found = tableFor(network).find((s) => s.chainId === chainId);
   return found ? { ...found } : null;
 }
 
-export function isSupportedBridgeSource(id: unknown): boolean {
-  return typeof id === 'string' && SOURCES.some((s) => s.id === id);
+export function isSupportedBridgeSource(id: unknown, network: BridgeNetwork = 'testnet'): boolean {
+  return typeof id === 'string' && tableFor(network).some((s) => s.id === id);
 }
 
-export function sourceExplorerTxUrl(sourceId: string, txHash: string): string | null {
-  const s = getBridgeSourceChain(sourceId);
+export function sourceExplorerTxUrl(sourceId: string, txHash: string, network: BridgeNetwork = 'testnet'): string | null {
+  const s = getBridgeSourceChain(sourceId, network);
   if (!s) return null;
   return s.explorerTxTemplate.replace('{hash}', txHash);
+}
+
+/**
+ * Stored-intent lookup across both tables (ids are globally unique —
+ * Sepolia-suffixed vs bare mainnet names — so this is deterministic, not
+ * a fallback). Used by verify/complete for intents recorded under
+ * whichever network was active at creation.
+ */
+export function findBridgeSourceChain(id: string): { network: BridgeNetwork; chain: BridgeSourceChain } | null {
+  for (const network of ['testnet', 'mainnet'] as const) {
+    const chain = getBridgeSourceChain(id, network);
+    if (chain) return { network, chain };
+  }
+  return null;
 }
 
 // ─── Amount rules (USDC, canonical 6-decimal base units) ─────────────────────

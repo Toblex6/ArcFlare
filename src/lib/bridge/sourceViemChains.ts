@@ -13,6 +13,12 @@ import {
   optimismSepolia,
   sepolia,
   polygonAmoy,
+  mainnet,
+  base,
+  arbitrum,
+  optimism,
+  polygon,
+  avalanche,
   type Chain,
 } from 'viem/chains';
 
@@ -22,6 +28,14 @@ const BY_CHAIN_ID: Record<number, Chain> = {
   [optimismSepolia.id]: optimismSepolia,
   [sepolia.id]: sepolia,
   [polygonAmoy.id]: polygonAmoy,
+  // Mainnet external-bridge sources (Step D) — same canonical table owner
+  // (sourceChains.ts) via chainId; testnet entries above are unchanged.
+  [mainnet.id]: mainnet,
+  [base.id]: base,
+  [arbitrum.id]: arbitrum,
+  [optimism.id]: optimism,
+  [polygon.id]: polygon,
+  [avalanche.id]: avalanche,
 };
 
 export function sourceViemChainFor(chainId: number): Chain | null {

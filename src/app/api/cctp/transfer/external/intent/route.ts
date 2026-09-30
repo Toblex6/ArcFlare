@@ -6,7 +6,10 @@
 // records a PENDING FlowBridgeIntent the verify/complete endpoints advance.
 // The server never signs or broadcasts here (no Circle wallet SDK, no keys).
 //
-// TESTNET ONLY — mainnet refuses closed.
+// Networks: testnet sources (Sepolia-family) and mainnet sources
+// (Ethereum/Base/Arbitrum/Optimism/Polygon/Avalanche → Arc Mainnet) resolve
+// from the network-scoped table in sourceChains.ts. Testnet behavior is
+// unchanged.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
@@ -45,16 +48,10 @@ export async function POST(req: NextRequest) {
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse!;
 
-    if (getArcNetworkName() === 'mainnet') {
-      return NextResponse.json(
-        {
-          success: false,
-          code: 'BRIDGE_DISABLED_ON_MAINNET',
-          error: 'External bridging is testnet-only in this release.',
-        },
-        { status: 403 }
-      );
-    }
+    // Network-scoped source table (Step D): testnet keeps the Sepolia
+    // family; mainnet offers Ethereum/Base/Arbitrum/Optimism/Polygon/
+    // Avalanche → Arc Mainnet via BridgeKit.
+    const network = getArcNetworkName() === 'mainnet' ? 'mainnet' : 'testnet';
 
     const sessionAddress = await resolveConsumerSession(req);
     if (!sessionAddress) {
@@ -95,13 +92,16 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { sourceChain, amount } = body ?? {};
 
-    const source = typeof sourceChain === 'string' ? getBridgeSourceChain(sourceChain) : null;
+    const source = typeof sourceChain === 'string' ? getBridgeSourceChain(sourceChain, network) : null;
     if (!source) {
       return NextResponse.json(
         {
           success: false,
           code: 'UNSUPPORTED_SOURCE',
-          error: 'This source chain is not currently supported.',
+          error:
+            network === 'mainnet'
+              ? 'This source chain is not currently supported for Arc Mainnet (Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche).'
+              : 'This source chain is not currently supported.',
         },
         { status: 400 }
       );

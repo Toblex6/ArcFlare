@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "1.4.3",
+    "@circle-fin/adapter-viem-v2": "^1.18.0",
     "@circle-fin/bridge-kit": "^1.15.1",
     "@circle-fin/developer-controlled-wallets": "^10.8.0",
     "@circle-fin/w3s-pw-web-sdk": "^1.1.11",

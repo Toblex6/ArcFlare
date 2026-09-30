@@ -12,7 +12,7 @@ import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { prisma } from '@/src/lib/prisma';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { getBridgeSourceChain, sourceExplorerTxUrl } from '@/lib/bridge/sourceChains';
+import { findBridgeSourceChain, sourceExplorerTxUrl } from '@/lib/bridge/sourceChains';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
 import { verifyExternalBurn, type BurnVerifyFailure } from '@/lib/bridge/externalVerify';
 import { EMPTY_MESSAGE_NONCE } from '@/lib/bridge/irisNonce';
@@ -96,7 +96,9 @@ export async function POST(req: NextRequest) {
       // Idempotent re-submit of the same hash; a DIFFERENT hash is never
       // accepted once a burn is bound (prevents double-record).
       if ((intent.burnTxHash ?? '').toLowerCase() === burnTxHash.toLowerCase()) {
-        const source = getBridgeSourceChain(intent.sourceChain);
+        const found = findBridgeSourceChain(intent.sourceChain);
+    const source = found?.chain ?? null;
+    const sourceNet = found?.network ?? 'testnet';
         // Backfill the Circle-attested CCTP message nonce for burns verified
         // before attested-nonce binding existed (or while Iris was still
         // pending): re-prove the already-bound hash and record the nonce so
@@ -133,7 +135,7 @@ export async function POST(req: NextRequest) {
           state: 'burn-confirmed',
           reference: intent.id,
           destinationBound: intent.destinationBound,
-          sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, intent.burnTxHash) : null,
+          sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, intent.burnTxHash, sourceNet) : null,
         });
       }
       return NextResponse.json(
@@ -142,7 +144,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const source = getBridgeSourceChain(intent.sourceChain);
+    const found = findBridgeSourceChain(intent.sourceChain);
+    const source = found?.chain ?? null;
+    const sourceNet = found?.network ?? 'testnet';
     const sourceLabel = source?.label ?? intent.sourceChain;
 
     // Expiry is evaluated AFTER on-chain verification, not before: a burn
@@ -254,7 +258,7 @@ export async function POST(req: NextRequest) {
               state: 'burn-confirmed',
               reference: reread.id,
               destinationBound: reread.destinationBound,
-              sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, reread.burnTxHash) : null,
+              sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, reread.burnTxHash, sourceNet) : null,
             });
           }
           return NextResponse.json(
@@ -294,7 +298,7 @@ export async function POST(req: NextRequest) {
       state: 'burn-confirmed',
       reference: updated.id,
       destinationBound: updated.destinationBound,
-      sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, proof.burnTxHash) : null,
+      sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, proof.burnTxHash, sourceNet) : null,
     });
   } catch (error: any) {
     console.error('[cctp/transfer/external/verify] ERROR', { reference: dbgReference, burnTxHash: dbgBurnTxHash }, error);

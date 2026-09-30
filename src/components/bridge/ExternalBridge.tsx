@@ -216,8 +216,22 @@ export default function ExternalBridge({
   onContinueWithEmail,
   destinationRefreshKey = 0,
 }: ExternalBridgeProps) {
-  const sources = useMemo(() => getBridgeSourceChains(), []);
+  // Server-resolved network (production-safe mainnet default until
+  // /api/network resolves). Sources follow the network: Sepolia/Amoy
+  // test chains on testnet, Ethereum/Base/Arbitrum/Optimism/Polygon/
+  // Avalanche → Arc Mainnet on mainnet (Step D).
+  const { name: networkName } = useNetwork();
+  const bridgeNetwork = networkName === 'mainnet' ? 'mainnet' : 'testnet';
+  const bridgeAvailable = true;
+  const sources = useMemo(() => getBridgeSourceChains(bridgeNetwork), [bridgeNetwork]);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? 'Arbitrum_Sepolia');
+  // Clamp a stale testnet/mainnet selection when the network resolves.
+  useEffect(() => {
+    if (!sources.some((s) => s.id === sourceId)) {
+      setSourceId(sources[0]?.id ?? 'Arbitrum_Sepolia');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridgeNetwork]);
   const source = useMemo(
     () => sources.find((s) => s.id === sourceId) ?? sources[0]!,
     [sources, sourceId]
@@ -226,12 +240,6 @@ export default function ExternalBridge({
   const { address: connectedAddress, isConnected, connector: activeConnector } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync } = useSwitchChain();
-  // External bridging is a testnet-only flow (the intent route refuses on
-  // mainnet). The source picker names Sepolia/Amoy test chains, so on the
-  // production site the whole form is replaced by a neutral unavailable
-  // note — server-resolved via NetworkProvider, defaulting to unavailable
-  // (production-safe) until /api/network proves testnet.
-  const { isTestnet: bridgeAvailable } = useNetwork();
 
   const [amount, setAmount] = useState('');
   const [balanceUnits, setBalanceUnits] = useState<bigint | null>(null);
@@ -244,6 +252,17 @@ export default function ExternalBridge({
 
   const [phase, setPhase] = useState<Phase>('form');
   const [stages, setStages] = useState<StageState[]>([]);
+  // Step D: kit.estimate fee preview (best-effort, never blocks).
+  const [estimate, setEstimate] = useState<{ received: string | null; cost: string | null } | null>(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
+
+  // Display-only native gas labels per source chain (client copy only).
+  const NATIVE_GAS_LABELS: Record<number, string> = {
+    1: 'ETH', 10: 'ETH', 137: 'MATIC', 8453: 'ETH', 42161: 'ETH', 43114: 'AVAX',
+    11155111: 'Sepolia ETH', 421614: 'ETH', 84532: 'ETH', 11155420: 'ETH', 80002: 'Amoy MATIC',
+  };
+
+
   const [stageNote, setStageNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorStage, setErrorStage] = useState<{ stage: string; txHash: string | null; label: string } | null>(null);
@@ -333,6 +352,65 @@ export default function ExternalBridge({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionLower]);
   const walletsMatch = isConnected && !!connectedAddress && connectedLower === sessionLower;
+
+  // Debounced fee estimate (BridgeKit quote — the estimate result is the
+  // quote, never the typed input). Runs only with a connected matching
+  // wallet, a valid amount, and a resolved destination; any failure hides
+  // the panel without blocking the form.
+  useEffect(() => {
+    if (phase !== 'form' || !walletsMatch || !destination) {
+      setEstimate(null);
+      setEstimateLoading(false);
+      return;
+    }
+    const parsed = validateBridgeAmount(amount, null);
+    if (!parsed.ok) {
+      setEstimate(null);
+      setEstimateLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setEstimateLoading(true);
+    const timer = setTimeout(() => {
+      (async () => {
+        try {
+          const [{ BridgeKit }, { createViemAdapterFromProvider }] = await Promise.all([
+            import('@circle-fin/bridge-kit'),
+            import('@circle-fin/adapter-viem-v2'),
+          ]);
+          const provider = await getProvider();
+          if (!provider?.request) throw new Error('no provider');
+          const adapter = await createViemAdapterFromProvider({ provider });
+          const kit: any = new (BridgeKit as any)();
+          const res: any = await (kit as any).estimate({
+            from: { adapter, chain: source.id },
+            to: {
+              chain: bridgeNetwork === 'mainnet' ? 'Arc' : 'Arc_Testnet',
+              recipientAddress: destination,
+              useForwarder: true,
+            },
+            amount: amount.trim(),
+            token: 'USDC',
+          });
+          if (cancelled) return;
+          const received = res && typeof res.amountReceived !== 'undefined' && res.amountReceived !== null
+            ? String(res.amountReceived) : null;
+          const cost = res && typeof res.totalCost !== 'undefined' && res.totalCost !== null
+            ? String(res.totalCost) : null;
+          setEstimate(received || cost ? { received, cost } : null);
+        } catch {
+          if (!cancelled) setEstimate(null);
+        } finally {
+          if (!cancelled) setEstimateLoading(false);
+        }
+      })();
+    }, 800);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, walletsMatch, destination, amount, sourceId, bridgeNetwork]);
 
   const setStage = useCallback((key: StageKey, status: StageState['status']) => {
     setStages((prev) => prev.map((s) => (s.key === key ? { ...s, status } : s)));
@@ -633,7 +711,7 @@ export default function ExternalBridge({
         chain: source.id,
       };
       const bridgeToCtx: Record<string, unknown> = {
-        chain: 'Arc_Testnet',
+        chain: bridgeNetwork === 'mainnet' ? 'Arc' : 'Arc_Testnet',
         recipientAddress: destination as `0x${string}`,
         useForwarder: true,
       };
@@ -1309,6 +1387,30 @@ export default function ExternalBridge({
                       ? 'Reconnect your wallet to continue'
                       : 'Bridge USDC'}
                 </button>
+              )}
+              {phase === 'form' && (
+                <p style={{ color: 'var(--flow-text-faint)', fontSize: 12, margin: '8px 0 0', lineHeight: 1.5 }}>
+                  You need {NATIVE_GAS_LABELS[source.chainId] ?? 'native gas'} on {source.label} for
+                  gas (approve + burn). The Arc mint is relayed — no Arc gas needed.
+                </p>
+              )}
+              {phase === 'form' && (estimateLoading || estimate) && (
+                <div style={styles.stepsCard}>
+                  <p style={{ ...styles.stepRow, fontWeight: 700 }}>Bridge estimate</p>
+                  {estimateLoading && !estimate ? (
+                    <p style={styles.stepRow}>Estimating…</p>
+                  ) : estimate ? (
+                    <>
+                      {estimate.received ? (
+                        <p style={styles.stepRow}>Est. receive on Arc ≈ {estimate.received} USDC</p>
+                      ) : null}
+                      {estimate.cost ? (
+                        <p style={styles.stepRow}>Est. cost: {estimate.cost}</p>
+                      ) : null}
+                      <p style={{ ...styles.stepRow, opacity: 0.7 }}>Quoted by BridgeKit — the final mint decides.</p>
+                    </>
+                  ) : null}
+                </div>
               )}
             </>
           )}

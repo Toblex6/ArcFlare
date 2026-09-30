@@ -71,7 +71,7 @@
 import { createPublicClient, http, decodeEventLog, pad, type Hex } from 'viem';
 import { getNetworkConfig, getRpcUrls } from '@/lib/config/network';
 import {
-  getBridgeSourceChain,
+  findBridgeSourceChain,
   type BridgeSourceChain,
 } from '@/lib/bridge/sourceChains';
 import { sourceViemChainFor } from '@/lib/bridge/sourceViemChains';
@@ -80,10 +80,17 @@ import { fetchIrisBridgeMessage, EMPTY_MESSAGE_NONCE } from '@/lib/bridge/irisNo
 // package the browser flow bridges through), not invented constants.
 import {
   ArbitrumSepolia,
+  Arc,
   ArcTestnet,
+  Arbitrum,
+  Avalanche,
+  Base,
   BaseSepolia,
   OptimismSepolia,
+  Optimism,
+  Ethereum,
   EthereumSepolia,
+  Polygon,
   PolygonAmoy,
 } from '@circle-fin/bridge-kit/chains';
 
@@ -191,6 +198,13 @@ export function sourceCctpV2(sourceId: string): SourceCctpV2 | null {
     Optimism_Sepolia: OptimismSepolia,
     Ethereum_Sepolia: EthereumSepolia,
     Polygon_Amoy_Testnet: PolygonAmoy,
+    // Step D mainnet sources (installed kit defs — never hardcoded).
+    Ethereum,
+    Base,
+    Arbitrum,
+    Optimism,
+    Polygon,
+    Avalanche,
   };
   const def = defs[sourceId];
   const tm = def?.cctp?.contracts?.v2?.tokenMessenger;
@@ -223,6 +237,13 @@ export function sourceBridgeContract(sourceId: string): string | null {
     Optimism_Sepolia: OptimismSepolia,
     Ethereum_Sepolia: EthereumSepolia,
     Polygon_Amoy_Testnet: PolygonAmoy,
+    // Step D mainnet sources (installed kit defs — never hardcoded).
+    Ethereum,
+    Base,
+    Arbitrum,
+    Optimism,
+    Polygon,
+    Avalanche,
   };
   const def = defs[sourceId];
   const bridge = def?.kitContracts?.bridge;
@@ -237,8 +258,10 @@ function arcCctpV2(): SourceCctpV2 {
   // network topology (single authority: getNetworkConfig), while the Arc
   // TokenMessenger is BridgeKit's own deployment fact (same package the
   // browser flow bridges through — same precedent as sourceCctpV2 above).
+  // The kit def follows the network: Arc on mainnet, ArcTestnet otherwise.
   const net = getNetworkConfig();
-  const tm = (ArcTestnet as any)?.cctp?.contracts?.v2?.tokenMessenger;
+  const def = net.name === "mainnet" ? Arc : ArcTestnet;
+  const tm = (def as any)?.cctp?.contracts?.v2?.tokenMessenger;
   if (typeof tm !== 'string' || !tm) throw new Error('Arc TokenMessengerV2 unavailable in installed bridge-kit.');
   return { tokenMessenger: tm, messageTransmitter: net.cctpMessageTransmitter, domain: net.cctpDomain };
 }
@@ -652,7 +675,9 @@ export async function verifyExternalBurn(params: {
   burnTxHash: string;
 }): Promise<BurnVerifyOk | { ok: false; reason: BurnVerifyFailure; detail?: string }> {
   const { sourceId, sourceAddress, amountBaseUnits, destination, burnTxHash } = params;
-  const source = getBridgeSourceChain(sourceId);
+  // Stored-intent lookup across both tables (ids are globally unique) so
+  // mainnet intents verify against mainnet definitions.
+  const source = findBridgeSourceChain(sourceId)?.chain ?? null;
   if (!source) return { ok: false, reason: 'BINDING_MISMATCH', detail: 'Unknown source chain.' };
   if (!/^0x[0-9a-fA-F]{64}$/.test(burnTxHash)) {
     return { ok: false, reason: 'NOT_FOUND', detail: 'Not a transaction hash.' };

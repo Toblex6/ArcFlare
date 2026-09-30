@@ -14,7 +14,7 @@ import { prisma } from '@/src/lib/prisma';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
-import { getBridgeSourceChain, sourceExplorerTxUrl, formatBridgeBaseUnits } from '@/lib/bridge/sourceChains';
+import { findBridgeSourceChain, sourceExplorerTxUrl, formatBridgeBaseUnits } from '@/lib/bridge/sourceChains';
 import { verifyArcMint, sourceCctpV2, type MintVerifyFailure } from '@/lib/bridge/externalVerify';
 import { fetchIrisBridgeMessage } from '@/lib/bridge/irisNonce';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
@@ -244,7 +244,9 @@ export async function POST(req: NextRequest) {
       }
       throw e;
     }
-    const source = getBridgeSourceChain(updated.sourceChain);
+    const found = findBridgeSourceChain(updated.sourceChain);
+    const source = found?.chain ?? null;
+    const sourceNet = found?.network ?? 'testnet';
 
     await logBridgeStage(intent.id, {
       stage: 'MINT_CONFIRMED',
@@ -268,7 +270,7 @@ export async function POST(req: NextRequest) {
       sourceChain: updated.sourceChain,
       sourceLabel: source?.label ?? updated.sourceChain,
       destination: updated.destination,
-      sourceExplorerUrl: updated.burnTxHash && source ? sourceExplorerTxUrl(source.id, updated.burnTxHash) : null,
+      sourceExplorerUrl: updated.burnTxHash && source ? sourceExplorerTxUrl(source.id, updated.burnTxHash, sourceNet) : null,
       destinationExplorerUrl: explorerTxUrl(proof.mintTxHash),
     });
   } catch (error: any) {
