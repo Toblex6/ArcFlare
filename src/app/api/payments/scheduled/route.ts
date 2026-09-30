@@ -10,6 +10,7 @@ import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
 import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
+import { resolveCurrentMerchantAddress } from '@/src/lib/merchant/walletMigration';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import { resolvePlatformPayerWalletId } from '@/lib/config/platformDefaults';
 
@@ -222,7 +223,9 @@ async function createScheduledHandler(request: Request) {
         reference,
         payerSCA,
         payerWalletId: resolvedPayerWalletId,
-        receiverSCA,
+        // Step E: new schedules record the CURRENT wallet (unknown
+        // addresses pass through unchanged).
+        receiverSCA: await resolveCurrentMerchantAddress(receiverSCA),
         amount: parseFloat(schedAmountStr),
         currency: token.symbol,
         tokenAddress: token.address,

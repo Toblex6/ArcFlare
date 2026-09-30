@@ -15,6 +15,7 @@ import {
   NANO_BATCH_THRESHOLD_USDC,
 } from '@/src/lib/nanopayment';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
+import { resolveCurrentMerchantAddress } from '@/src/lib/merchant/walletMigration';
 import { resolvePlatformPayerSca } from '@/lib/config/platformDefaults';
 import { enforceSpendLimit } from '@/lib/agents/spendWindow';
 import { parseUnits } from 'viem';
@@ -57,6 +58,11 @@ async function nanoHandler(request: Request) {
         { status: 400 }
       );
     }
+
+    // Step E: resolve the merchant's CURRENT wallet at payment time — a
+    // caller holding a pre-upgrade address settles to the live one.
+    // Unknown addresses pass through unchanged (never redirected).
+    const liveMerchantSCA = await resolveCurrentMerchantAddress(merchantSCA);
     const nanoAmountStr = String(amount).trim();
     if (!/^\d+(\.\d{1,6})?$/.test(nanoAmountStr) || !Number.isFinite(parseFloat(nanoAmountStr)) || parseFloat(nanoAmountStr) <= 0 || parseFloat(nanoAmountStr) > 10_000_000) {
       return NextResponse.json(
@@ -125,7 +131,7 @@ async function nanoHandler(request: Request) {
 
     const nano = await recordNanoPayment({
       agentSCA,
-      merchantSCA,
+      merchantSCA: liveMerchantSCA,
       amount: parseFloat(nanoAmountStr),
       description,
       currency: token.symbol,
@@ -134,7 +140,7 @@ async function nanoHandler(request: Request) {
 
     // Check current unsettled balance — scoped to THIS token so a USDC
     // charge never nudges an EURC batch over threshold (or vice versa).
-    const { total, count } = await getUnsettledBalance(agentSCA, merchantSCA, {
+    const { total, count } = await getUnsettledBalance(agentSCA, liveMerchantSCA, {
       currency: token.symbol,
       tokenAddress: token.address,
     });
@@ -180,9 +186,13 @@ async function getNanoHandler(request: Request) {
       );
     }
 
+    // Step E: read against the CURRENT wallet (consistent with where new
+    // charges record and where settlement pays).
+    const liveMerchantSCA = await resolveCurrentMerchantAddress(merchantSCA);
+
     const summary = await getBatchSummary(
       agentSCA,
-      merchantSCA,
+      liveMerchantSCA,
       currency || tokenAddress ? { currency, tokenAddress } : null
     );
 

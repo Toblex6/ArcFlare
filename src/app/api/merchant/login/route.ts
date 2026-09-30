@@ -5,6 +5,10 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import bcrypt from 'bcryptjs';
 import { SignJWT } from 'jose';
 import { requireJwtSecret } from '@/src/lib/auth/secrets';
+import {
+  ensureMerchantMainnetWallet,
+} from '@/src/lib/merchant/walletMigration';
+import { WALLET_UPGRADED_MESSAGE } from '@/src/lib/wallets/upgradeGuards';
 
 const JWT_SECRET = requireJwtSecret('MERCHANT_JWT_SECRET');
 
@@ -48,6 +52,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Returning CIRCLE row: mainnet wallet upgrade check (Step E). Own
+    // login only — never bulk, never agents. A clean 404 provisions one
+    // fresh ARC wallet (locked + idempotent); transient Circle failures
+    // never block login (money paths guide a re-login with a friendly
+    // error instead). Healthy, id-less, and non-CIRCLE merchants pass
+    // through untouched.
+    let merchantRow = merchant;
+    if (merchant.walletProvider === 'CIRCLE' && merchant.circleWalletId) {
+      try {
+        const mig = await ensureMerchantMainnetWallet(merchant.id);
+        if (mig.migrated) {
+          merchantRow = await (prisma as any).merchant
+            .findUnique({ where: { id: merchant.id } })
+            .catch(() => merchant);
+        }
+      } catch (e: any) {
+        console.error('[merchant/login] wallet upgrade check failed:', e?.message ?? e);
+      }
+    }
+
+    // One-time upgrade message: shown once, then cleared (a failed clear
+    // only repeats the message next login, never blocks it).
+    let walletUpgraded = false;
+    if (merchantRow?.migrationNoticePending) {
+      walletUpgraded = true;
+      await (prisma as any).merchant
+        .update({ where: { id: merchantRow.id }, data: { migrationNoticePending: false } })
+        .catch(() => {});
+    }
+
     // Issue JWT — 7 day expiry. Carries the account's sessionVersion so the
     // middleware can reject sessions issued before a password reset (M18).
     const token = await new SignJWT({
@@ -63,10 +97,12 @@ export async function POST(req: NextRequest) {
 
     const response = NextResponse.json({
       success: true,
+      ...(walletUpgraded ? { walletUpgraded: true, walletUpgradedMessage: WALLET_UPGRADED_MESSAGE } : {}),
       merchant: {
-        id: merchant.id,
-        email: merchant.email,
-        businessName: merchant.businessName,
+        id: merchantRow.id,
+        email: merchantRow.email,
+        businessName: merchantRow.businessName,
+        walletAddress: merchantRow.walletAddress ?? null,
       },
     });
 

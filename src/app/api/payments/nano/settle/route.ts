@@ -25,6 +25,7 @@ import {
 } from '@/src/lib/nanopayment';
 import { resolveCurrency } from '@/lib/tokens/resolveCurrency';
 import type { CurrencyRef } from '@/lib/tokens/resolveCurrency';
+import { resolveCurrentMerchantAddress } from '@/src/lib/merchant/walletMigration';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import {
   resolvePlatformPayerSca,
@@ -356,12 +357,16 @@ async function settleOnchain(
   const amountScaled = Math.floor(total * 10 ** token.decimals).toString();
   let transferTx;
 
+  // Step E: destination is the merchant's CURRENT wallet at payment time
+  // (batch accounting above stays keyed as recorded — history untouched).
+  const liveMerchantSCA = await resolveCurrentMerchantAddress(merchantSCA);
+
   try {
     transferTx = await circleClient.createTransaction({
       walletId: payerWalletId,
       blockchain: getNetworkConfig().circleBlockchain,
       tokenAddress: token.address,
-      destinationAddress: merchantSCA,
+      destinationAddress: liveMerchantSCA,
       amounts: [amountStr],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     } as any);
@@ -371,7 +376,7 @@ async function settleOnchain(
       blockchain: getNetworkConfig().circleBlockchain,
       contractAddress: token.address,
       abiFunctionSignature: 'transfer(address,uint256)',
-      abiParameters: [merchantSCA, amountScaled],
+      abiParameters: [liveMerchantSCA, amountScaled],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
     } as any);
   }

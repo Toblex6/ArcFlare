@@ -111,7 +111,7 @@ async function main() {
   ok("record keeps currency + tokenAddress", nanoLib.includes("currency: token.symbol") && nanoLib.includes("tokenAddress: token.address"));
   ok("create route resolves currency/tokenAddress via resolver", nanoCreate.includes("resolveCurrency({ currency, tokenAddress })"));
   ok("create route rejects bad token pairs with 400", nanoCreate.includes("status: 400"));
-  ok("create route scopes balance/threshold per token", nanoCreate.includes("getUnsettledBalance(agentSCA, merchantSCA, {"));
+  ok("create route scopes balance/threshold per token", nanoCreate.includes("getUnsettledBalance(agentSCA,") && nanoCreate.includes("currency: token.symbol"));
   ok("settle reads token identity without touching validation.ts", nanoSettle.includes("rawBody") && nanoSettle.includes("resolveCurrency({ currency: rawBody.currency"));
   ok("settle locks only rows resolving to the settlement token", nanoSettle.includes("candidates.filter((n) => logMatchesToken(n as any, token))"));
   ok("settle rejects alien (wrong-token) rows before any transfer", nanoSettle.includes("are not ${token.symbol}"));

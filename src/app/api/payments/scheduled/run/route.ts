@@ -13,6 +13,7 @@ import {
   prismaTrackedTransferStore,
   TransferInProgressError,
 } from '@/src/lib/payments/trackedTransfer';
+import { resolveCurrentMerchantAddress } from '@/src/lib/merchant/walletMigration';
 import {
   computeScheduleAdvance,
   scheduledPeriodKey,
@@ -95,6 +96,10 @@ async function executeScheduledPeriod(
   const { token, amountStr, walletId } = prep;
   const store = prismaTrackedTransferStore((prisma as any).paymentLog);
 
+  // Step E: money destinations follow the CURRENT wallet at payment time.
+  // Batch/claim labels keep the recorded address (audit trail untouched).
+  const liveReceiverSCA = await resolveCurrentMerchantAddress(scheduled.receiverSCA);
+
   const exec = await executeTrackedTransfer({
     store,
     circle: circleClient as any,
@@ -139,7 +144,9 @@ async function executeScheduledPeriod(
         walletId,
         blockchain: getNetworkConfig().circleBlockchain as any,
         tokenAddress: token.address,
-        destinationAddress: scheduled.receiverSCA,
+        // Step E: destination is the CURRENT wallet at payment time (the
+        // claim label above keeps the recorded address as audit trail).
+        destinationAddress: liveReceiverSCA,
         amounts: [amountStr],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       } as any),
@@ -150,7 +157,7 @@ async function executeScheduledPeriod(
         blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: token.address,
         abiFunctionSignature: 'transfer(address,uint256)',
-        abiParameters: [scheduled.receiverSCA, amountWei.toString()],
+        abiParameters: [liveReceiverSCA, amountWei.toString()],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
     },

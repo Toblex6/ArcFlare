@@ -250,6 +250,14 @@ model Merchant {
   // Changing this never mutates existing PaymentLog rows (frozen at creation).
   // Additive only.
   settlementTokenAddress String?
+  // Mainnet wallet upgrade (Step E, mirrors ConsumerAccount): clean-404
+  // circleWalletId at the merchant's own login provisions one fresh ARC
+  // wallet. previousWallets is append-only ({ walletId, walletAddress,
+  // migratedAt, reason }) — nothing deleted; migrationNoticePending drives
+  // the one-time upgrade message.
+  previousWallets        Json?
+  walletMigratedAt       DateTime?
+  migrationNoticePending Boolean   @default(false)
 }
 
 model WalletSignatureRequest {

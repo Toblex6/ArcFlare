@@ -9,6 +9,10 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { isAddress, parseUnits } from 'viem';
 import { createContractTransaction, getWalletBalance } from '@/src/lib/circle/client';
+import {
+  MerchantWalletError,
+  assertMerchantCircleWalletLive,
+} from '@/src/lib/merchant/walletMigration';
 import { erc20TransferAbi, USDC_CONTRACT, USDC_DECIMALS } from '@/src/lib/wallet/erc20';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
@@ -61,6 +65,17 @@ export async function POST(req: NextRequest) {
                 { success: false, error: 'Withdrawals are only available for Circle-managed payout wallets.' },
                 { status: 400 }
             );
+        }
+
+        // Stale-wallet signal (Step E): clean-404 fails with re-login
+        // guidance (login re-provisions) instead of the raw Circle error.
+        try {
+            await assertMerchantCircleWalletLive(merchant);
+        } catch (e: any) {
+            if (e instanceof MerchantWalletError) {
+                return NextResponse.json({ success: false, code: e.code, error: e.message }, { status: e.status });
+            }
+            throw e;
         }
 
         const body = await req.json().catch(() => ({}));

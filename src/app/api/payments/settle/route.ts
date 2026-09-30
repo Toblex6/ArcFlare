@@ -16,6 +16,7 @@ import {
   resolveConsumerWallet,
 } from '@/src/lib/auth/consumerWallet';
 import { assertConsumerCircleWalletLive } from '@/src/lib/consumer/walletMigration';
+import { resolveCurrentMerchantAddress } from '@/src/lib/merchant/walletMigration';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
@@ -561,6 +562,12 @@ async function mergedSettleHandler(request: NextRequest) {
         );
       }
       merchantSCA = merchantRecord.walletAddress;
+    } else if (payment.merchantSCA) {
+      // Step E: link/row without a merchant binding still pays the CURRENT
+      // wallet when the recorded address is a known pre-upgrade merchant
+      // address (history-mapped). Unknown addresses pass through unchanged;
+      // the frozen row itself is never rewritten.
+      merchantSCA = await resolveCurrentMerchantAddress(payment.merchantSCA);
     }
     const circleClient = getCircleClient();
 
