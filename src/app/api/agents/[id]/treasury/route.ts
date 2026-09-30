@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 // M5: id-only on this caller-control endpoint (documented id-only policy).
 import { resolveAgentRouteRefIdOnly as resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
+import { isLegacyBlocked, legacyAgentResponse } from "@/src/lib/agents/legacyGate";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getAgentWalletAddress, getOrCreateAgentWallet } from "@/lib/x402-wallet";
@@ -52,6 +53,9 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
   if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
   const agentId = agent.id;
+  // Step F: legacy (test-network) agents cannot move money on mainnet.
+  // (GET view above stays readable — hiding happens at list level.)
+  if (isLegacyBlocked(agent)) return legacyAgentResponse();
   const wallet = await getOrCreateAgentWallet(agentId);
   const actor = await verifyCallerControlsAddress(req, agent.scaAddress ?? wallet.address);
   if (!actor) return NextResponse.json({ error: "You do not control this agent." }, { status: 403 });

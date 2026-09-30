@@ -35,6 +35,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveAgentRouteRefIdOnly as resolveAgentRouteRef } from '@/lib/agents/resolveAgentRef';
+import { isLegacyBlocked, legacyAgentResponse } from '@/src/lib/agents/legacyGate';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { getCircleClient } from '@/lib/circle/client';
 import { recordLedgerEntry, usdcLedgerIdentity } from '@/lib/ledger/ledgerService';
@@ -72,6 +73,8 @@ async function postHandler(req: NextRequest, ctx: { params: Promise<{ id: string
   if (refMalformed) {
     return NextResponse.json({ error: 'invalid agent id' }, { status: 400 });
   }
+  // Step F: legacy (test-network) agents cannot move money on mainnet.
+  if (isLegacyBlocked(refAgent)) return legacyAgentResponse();
 
   // P1-3: mandatory server idempotency key (merchant/withdraw pattern — the
   // key is required before any transfer can be initiated).

@@ -3,7 +3,7 @@
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
-import { useArcLabel } from '@/src/components/NetworkContext';
+import { useArcLabel, useNetwork } from '@/src/components/NetworkContext';
 
 import { useRouter } from 'next/navigation';
 
@@ -47,6 +47,8 @@ interface Agent {
   createdAt: string;
   totalPaid?: number;
   paymentCount?: number;
+  /** Step F: test-network origin (mainnet hides legacy by default). */
+  isLegacy?: boolean | null;
 }
 
 interface ReputationResult {
@@ -206,15 +208,20 @@ export default function AgentsPage() {
   // Load agents — the full registry list for this merchant. The old load
   // path (/api/agent/status?name=Agent) silently hid any agent whose name
   // didn't contain "Agent".
+  // Step F: on mainnet, legacy (test-network) agents hide by default with
+  // a "show legacy" toggle; off-mainnet the flag is inert.
+  const { isTestnet } = useNetwork();
+  const [showLegacy, setShowLegacy] = useState(false);
   useEffect(() => {
-    fetch('/api/agent/list')
+    setLoading(true);
+    fetch(`/api/agent/list${showLegacy ? '?includeLegacy=1' : ''}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.success) setAgents(d.agents || []);
       })
       .catch(() => { })
       .finally(() => setLoading(false));
-  }, []);
+  }, [showLegacy]);
 
   useEffect(() => {
     let cancelled = false;
@@ -585,6 +592,12 @@ export default function AgentsPage() {
             <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', margin: '0 0 16px' }}>
               Registered Agents
             </h3>
+            {!isTestnet && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={showLegacy} onChange={(e) => setShowLegacy(e.target.checked)} />
+                Show legacy (test-network) agents
+              </label>
+            )}
             {loading ? (
               <p style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 12 }}>
                 Loading agents...
@@ -638,6 +651,11 @@ export default function AgentsPage() {
                         <div>
                           <p style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13, margin: 0 }}>
                             {agent.name}
+                            {agent.isLegacy ? (
+                              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 400, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 6, padding: '1px 6px' }}>
+                                legacy · test network
+                              </span>
+                            ) : null}
                           </p>
                           <p
                             style={{

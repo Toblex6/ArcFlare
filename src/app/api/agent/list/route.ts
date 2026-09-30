@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getNetworkConfig } from '@/lib/config/network';
 import { resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 
 export async function GET(req: NextRequest) {
@@ -25,7 +26,15 @@ export async function GET(req: NextRequest) {
     }
 
     const agents = await (prisma as any).agentRegistry.findMany({
-      where: { merchantId: merchant.id },
+      where: {
+        merchantId: merchant.id,
+        // Step F: on mainnet, test-network agents hide by default
+        // (?includeLegacy=1 opts back in); off-mainnet lists everything.
+        ...(getNetworkConfig().name === "mainnet" &&
+        new URL(req.url).searchParams.get("includeLegacy") !== "1"
+          ? { isLegacy: false }
+          : {}),
+      },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -45,6 +54,7 @@ export async function GET(req: NextRequest) {
         metadataURI: true,
         createdAt: true,
         lastActiveAt: true,
+        isLegacy: true,
       },
     });
 

@@ -69,6 +69,12 @@ model AgentRegistry {
   skills         Json?
   pricing        Json?
   reputation     Int                  @default(50)
+  // Step F: test-network origin flag. Rows whose Circle wallet id the
+  // production key cannot find (test-era wallets) are marked legacy. On
+  // mainnet, legacy agents hide by default and spend/deploy/payments refuse
+  // with LEGACY_AGENT. Fresh rows default false (new agents get mainnet
+  // wallets at creation). Wallet ids are never changed by this flag.
+  isLegacy       Boolean              @default(false)
   lastActiveAt   DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @default(now()) @updatedAt

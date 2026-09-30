@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getNetworkConfig } from "@/lib/config/network";
 import { resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 
 export async function GET(request: NextRequest) {
@@ -33,6 +34,13 @@ export async function GET(request: NextRequest) {
     const where: any = {
       status: "ACTIVE_AGENT_PROVISIONED", // only discoverable agents
     };
+
+    // Step F: legacy visibility. On mainnet, test-network agents hide by
+    // default (?includeLegacy=1 opts back in); off-mainnet the flag is
+    // inert and everything lists as before.
+    if (getNetworkConfig().name === "mainnet" && searchParams.get("includeLegacy") !== "1") {
+      where.isLegacy = false;
+    }
 
     // Merchant-scoped listing (?mine=1): only agents the authenticated
     // merchant owns. No other tenant's agents are ever returned — the scope
@@ -102,6 +110,7 @@ export async function GET(request: NextRequest) {
         lastActiveAt: true,
         createdAt: true,
         merchantId: true,
+        isLegacy: true,
       },
     });
 

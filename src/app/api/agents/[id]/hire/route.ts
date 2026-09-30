@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
+import { isLegacyBlocked, legacyAgentResponse } from "@/src/lib/agents/legacyGate";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (malformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
     if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
     const agentId = agent.id;
+    // Step F: no deploying work onto test-network agents on mainnet.
+    if (isLegacyBlocked(agent)) return legacyAgentResponse();
     const body = await innerReq.json().catch(() => ({}));
     const { clientWalletId, description, criteria, budget, evaluatorAddress, validation } = body;
     if (!clientWalletId || !description || !criteria || budget === undefined) return NextResponse.json({ error: "clientWalletId, description, criteria, budget are required" }, { status: 400 });

@@ -46,6 +46,7 @@ import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { checkSpendAllowed, getSpendLimitContract } from "@/lib/agents/spendLimitEnforcer";
+import { isLegacyBlocked, legacyAgentResponse } from "@/src/lib/agents/legacyGate";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 import { enqueueForReview } from "@/lib/jobs/settlementRecovery";
 import { getUsdcAddress } from "@/lib/tokens/supportedTokens";
@@ -86,6 +87,8 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   if (!agent) {
     return NextResponse.json({ error: `agent ${agentId} not found` }, { status: 404 });
   }
+  // Step F: legacy (test-network) payers cannot pay on mainnet.
+  if (isLegacyBlocked(agent)) return legacyAgentResponse();
 
   const to = typeof body?.to === "string" ? body.to.trim() : "";
   if (!/^0x[a-fA-F0-9]{40}$/.test(to)) {
@@ -226,6 +229,11 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   }
 
   // 5. native value-send (fee-free, credits the recipient exactly).
+  // Step F: a legacy (test-network) recipient cannot be paid on mainnet.
+  const recipientAgent = await (prisma as any).agentRegistry
+    .findFirst({ where: { scaAddress: { equals: to, mode: "insensitive" } }, select: { isLegacy: true } })
+    .catch(() => null);
+  if (isLegacyBlocked(recipientAgent)) return legacyAgentResponse();
   const agentWallet = new Wallet(wallet.privateKey, provider);
   const beforeRecipient = await usdc.balanceOf(to);
   let receipt: any = null;

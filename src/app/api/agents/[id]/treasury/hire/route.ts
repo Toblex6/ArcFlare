@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { resolveAgentRouteRef } from "@/lib/agents/resolveAgentRef";
+import { isLegacyBlocked, legacyAgentResponse } from "@/src/lib/agents/legacyGate";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getOrCreateAgentWallet } from "@/lib/x402-wallet";
@@ -36,6 +37,8 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
   if (hirerMalformed) return NextResponse.json({ error: "invalid agent id" }, { status: 400 });
   if (!hirerRef) return NextResponse.json({ error: "hirer agent not found" }, { status: 404 });
   const hirerId = hirerRef.id;
+  // Step F: legacy (test-network) hirers cannot spend on mainnet.
+  if (isLegacyBlocked(hirerRef)) return legacyAgentResponse();
   const body = await req.json().catch(() => ({}));
   const { providerAgentId, description, criteria, budget, evaluatorAddress, validation } = body;
   if (!providerAgentId || !description || !criteria || budget === undefined) {
@@ -58,6 +61,8 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "providerAgentId, description, criteria, budget are required" }, { status: 400 });
   }
   if (!providerRef) return NextResponse.json({ error: "provider agent not found" }, { status: 404 });
+  // Step F: legacy providers cannot be hired on mainnet either.
+  if (isLegacyBlocked(providerRef)) return legacyAgentResponse();
   const provider = providerRef;
   const providerId = provider.id;
   if (provider.status !== "ACTIVE_AGENT_PROVISIONED") return NextResponse.json({ error: "provider not available" }, { status: 400 });

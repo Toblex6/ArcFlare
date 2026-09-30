@@ -29,6 +29,7 @@ import {
   extractIdentityMintFromLogs,
   matchDeployIntentToMint,
 } from "@/src/lib/agents/agentRegisterRecovery";
+import { isLegacyBlocked, legacyAgentResponse } from "@/src/lib/agents/legacyGate";
 
 const prisma = new PrismaClient();
 
@@ -152,6 +153,9 @@ async function recoverAgentHandler(request: Request, merchant: AuthedMerchant) {
           { status: 409 }
         );
       }
+      // Step F: a legacy (test-network) row is never resurrected into a
+      // mainnet deployment — create a new agent instead.
+      if (isLegacyBlocked(existing)) return legacyAgentResponse();
       await markIntent(intent.id, { status: "COMPLETED" });
       return NextResponse.json({
         success: true,
