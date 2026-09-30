@@ -24,6 +24,22 @@ export type SwapSymbol = 'USDC' | 'EURC' | 'CIRBTC';
 
 export const SWAP_SYMBOLS: readonly SwapSymbol[] = ['USDC', 'EURC', 'CIRBTC'] as const;
 
+/**
+ * Allowed swap outputs per input, by network (display mirror of the server
+ * pair gate `assertFlowPairAllowed` in src/lib/swap/service.ts — the server
+ * re-enforces on every quote, so this can never widen access).
+ * Testnet: every other symbol. Mainnet: USDC↔EURC only (2026-09-30 quoter
+ * survey: cirBTC tiers 2–90% off market — withheld until pools re-price).
+ */
+export function flowOutputsFor(networkName: string, input: SwapSymbol): readonly SwapSymbol[] {
+  if (networkName === 'mainnet') {
+    if (input === 'USDC') return ['EURC'] as const;
+    if (input === 'EURC') return ['USDC'] as const;
+    return [];
+  }
+  return SWAP_SYMBOLS.filter((s) => s !== input);
+}
+
 /** On-chain display label: cirBTC keeps its canonical camelCase brand. */
 export function displaySymbol(symbol: SwapSymbol): string {
   return symbol === 'CIRBTC' ? 'cirBTC' : symbol;
@@ -239,6 +255,9 @@ export function friendlySwapError(raw: string | null | undefined): {
   }
   if (lower.includes('unsupported swap token') || lower.includes('and eurc only') || lower.includes('eurc, and')) {
     return { headline: 'Flow Swap supports USDC, EURC, and cirBTC.', raw: msg };
+  }
+  if (lower.includes('not currently offered')) {
+    return { headline: 'This pair is not currently available on this network. Try USDC↔EURC.', raw: msg };
   }
   if (lower.includes('same-token') || lower.includes('must differ')) {
     return { headline: 'Pick two different tokens to swap between.', raw: msg };

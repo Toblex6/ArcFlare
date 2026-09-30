@@ -55,7 +55,7 @@ import {
   useSwitchChain,
 } from 'wagmi';
 import type { Address } from 'viem';
-import { useExplorer, useArcLabel, useActiveArcChain } from '@/src/components/NetworkContext';
+import { useExplorer, useArcLabel, useActiveArcChain, useNetwork } from '@/src/components/NetworkContext';
 // (getNetworkConfig intentionally NOT imported: module-scope reads would use
 // client build-time env with its testnet fallback. Server truth arrives via
 // useActiveArcChain() below.)
@@ -71,6 +71,7 @@ import { useSwapQuote, type SwapQuoteView } from './useSwapQuote';
 import {
   canonicalDecimals,
   displaySymbol,
+  flowOutputsFor,
   formatCanonicalFor,
   formatCountdown,
   friendlySwapError,
@@ -149,6 +150,34 @@ export function FlowSwapView({
   const [inputSymbol, setInputSymbol] = useState<SwapSymbol>('USDC');
   const [outputSymbol, setOutputSymbol] = useState<SwapSymbol>('EURC');
   const [amount, setAmount] = useState('');
+
+  // Network-gated pair universe (display mirror of the server pair gate
+  // `assertFlowPairAllowed` — the backend re-enforces on every quote, so
+  // this can never widen access). Mainnet offers USDC↔EURC only (2026-09-30
+  // quoter survey: cirBTC tiers 2–90% off market); testnet offers every
+  // distinct pair. `name` is server-resolved via /api/network with a
+  // production-safe mainnet default while loading.
+  const { name: networkName } = useNetwork();
+  const allowedInputs = useMemo(
+    () => SWAP_SYMBOLS.filter((s) => flowOutputsFor(networkName, s).length > 0),
+    [networkName]
+  );
+  const allowedOutputsFor = (s: SwapSymbol): readonly SwapSymbol[] => flowOutputsFor(networkName, s);
+
+  // Clamp the selected pair when the network resolves (e.g. a testnet
+  // cirBTC pair selected before /api/network answered on a mainnet server).
+  useEffect(() => {
+    if (!allowedInputs.includes(inputSymbol)) {
+      setInputSymbol('USDC');
+      setOutputSymbol('EURC');
+      return;
+    }
+    const outs = flowOutputsFor(networkName, inputSymbol);
+    if (!outs.includes(outputSymbol)) {
+      setOutputSymbol(outs[0] ?? 'EURC');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [networkName]);
 
   const [flow, setFlow] = useState<FlowPhase>('form');
   const [steps, setSteps] = useState<ExecStepState[]>([]);
@@ -248,16 +277,32 @@ export function FlowSwapView({
   const insufficientBalance =
     inputBaseUnits !== null && inputBalanceBase !== null && inputBaseUnits > inputBalanceBase;
 
-  /** First listed symbol that is not `next` — keeps the two sides distinct. */
+  // Price-loss guard (mainnet only — testnet renders no warning and never
+  // blocks): loss of the live quote vs the pool mid, in bps, from the
+  // backend. Warn above 1%, block above 5% (the server refuses >5% at quote
+  // and at CIRCLE execution independently).
+  const isMainnet = networkName === 'mainnet';
+  const priceLossBps = quote.quote?.priceLossBps ?? 0;
+  const priceWarn = isMainnet && quote.status === 'quoted' && priceLossBps > 100;
+  const priceBlocked = isMainnet && priceLossBps > 500;
+  const priceLossPct = (priceLossBps / 100).toFixed(2);
+
+  /** First allowed output for `next` — keeps the two sides distinct and listed. */
   const fallbackSymbol = (next: SwapSymbol): SwapSymbol =>
-    SWAP_SYMBOLS.find((s) => s !== next) ?? 'USDC';
+    allowedOutputsFor(next)[0] ?? 'USDC';
 
   const pickSymbol = (side: 'in' | 'out', next: SwapSymbol) => {
     if (flow !== 'form') return;
     if (side === 'in') {
+      // Inputs with no listed pair on this network are not selectable.
+      if (!allowedInputs.includes(next)) return;
       setInputSymbol(next);
-      if (next === outputSymbol) setOutputSymbol(fallbackSymbol(next));
+      if (next === outputSymbol || !allowedOutputsFor(next).includes(outputSymbol)) {
+        setOutputSymbol(fallbackSymbol(next));
+      }
     } else {
+      // Outputs outside this network's listed pairs are not selectable.
+      if (!allowedOutputsFor(inputSymbol).includes(next)) return;
       setOutputSymbol(next);
       if (next === inputSymbol) setInputSymbol(fallbackSymbol(next));
     }
@@ -265,6 +310,8 @@ export function FlowSwapView({
 
   const toggleDirection = () => {
     if (flow !== 'form') return;
+    // Reverse must itself be a listed pair (USDC↔EURC is symmetric).
+    if (!allowedOutputsFor(outputSymbol).includes(inputSymbol)) return;
     setInputSymbol(outputSymbol);
     setOutputSymbol(inputSymbol);
   };
@@ -325,6 +372,14 @@ export function FlowSwapView({
     if (insufficientBalance) {
       setFlowError(
         `Insufficient ${displaySymbol(inputSymbol)} balance for this swap. Lower the amount and try again.`
+      );
+      setFlowRawError(null);
+      setFlow('failed');
+      return;
+    }
+    if (priceBlocked) {
+      setFlowError(
+        `Blocked: this quote sits more than 5% below the pool price (−${priceLossPct}%). No funds moved — try a smaller amount.`
       );
       setFlowRawError(null);
       setFlow('failed');
@@ -707,6 +762,14 @@ export function FlowSwapView({
       setFlow('failed');
       return;
     }
+    if (priceBlocked) {
+      setFlowError(
+        `Blocked: this quote sits more than 5% below the pool price (−${priceLossPct}%). No funds moved — try a smaller amount.`
+      );
+      setFlowRawError(null);
+      setFlow('failed');
+      return;
+    }
     setFlowError(null);
     setFlowRawError(null);
     setVerified(null);
@@ -797,16 +860,19 @@ export function FlowSwapView({
     quote.secondsLeft <= 0 ||
     inputBaseUnits === null ||
     insufficientBalance ||
+    priceBlocked ||
     circleBusy;
 
   const circleConfirmHint =
-    insufficientBalance
-      ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
-      : quote.status === 'error' || quote.status === 'expired'
-        ? 'Get a fresh quote to continue.'
-        : quote.status !== 'quoted'
-          ? 'Enter an amount to get a quote.'
-          : null;
+    priceBlocked
+      ? `Blocked: this quote sits more than 5% below the pool price (−${priceLossPct}%). Try a smaller amount.`
+      : insufficientBalance
+        ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
+        : quote.status === 'error' || quote.status === 'expired'
+          ? 'Get a fresh quote to continue.'
+          : quote.status !== 'quoted'
+            ? 'Enter an amount to get a quote.'
+            : null;
 
   // Guarded by useGuardedConnect's synchronous ref lock: a second tap
   // before re-render no-ops inside guardedConnectAsync instead of opening
@@ -832,6 +898,7 @@ export function FlowSwapView({
     quote.secondsLeft <= 0 ||
     inputBaseUnits === null ||
     insufficientBalance ||
+    priceBlocked ||
     !walletsMatch ||
     isSending;
 
@@ -844,21 +911,27 @@ export function FlowSwapView({
     ? 'Connect the matching wallet to continue.'
     : wrongNetwork
       ? `Switch to ${arcName} to continue — confirming switches your wallet automatically.`
-      : insufficientBalance
-        ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
-        : quote.status === 'error' || quote.status === 'expired'
-          ? 'Get a fresh quote to continue.'
-          : quote.status !== 'quoted'
-            ? 'Enter an amount to get a quote.'
-            : null;
+      : priceBlocked
+        ? `Blocked: this quote sits more than 5% below the pool price (−${priceLossPct}%). Try a smaller amount.`
+        : insufficientBalance
+          ? `Amount exceeds your available ${displaySymbol(inputSymbol)} balance.`
+          : quote.status === 'error' || quote.status === 'expired'
+            ? 'Get a fresh quote to continue.'
+            : quote.status !== 'quoted'
+              ? 'Enter an amount to get a quote.'
+              : null;
 
   return (
     <section style={styles.card}>
       <h2 style={styles.title}>Swap</h2>
       <p style={styles.sub}>
-        {sessionIsCircle
-          ? 'Swap USDC, EURC, and cirBTC inside your FlareHQ wallet.'
-          : 'Swap USDC, EURC, and cirBTC directly on Arc. Approve each step in your connected wallet.'}
+        {networkName === 'mainnet'
+          ? sessionIsCircle
+            ? 'Swap USDC and EURC inside your FlareHQ wallet.'
+            : 'Swap USDC and EURC directly on Arc. Approve each step in your connected wallet.'
+          : sessionIsCircle
+            ? 'Swap USDC, EURC, and cirBTC inside your FlareHQ wallet.'
+            : 'Swap USDC, EURC, and cirBTC directly on Arc. Approve each step in your connected wallet.'}
       </p>
       <div style={styles.line}>
         <span style={styles.dot} />
@@ -971,11 +1044,12 @@ export function FlowSwapView({
           </>
           )}
 
-          {/* ── Balances (all supported tokens, parallel) ── */}
+          {/* ── Balances (per-token isolated: one failure marks only its chip) ── */}
           <div style={styles.balanceRow}>
             {SWAP_SYMBOLS.map((s) => {
               const v = balances.balances[s];
-              const failed = !balances.loading && v === null && balances.error !== null;
+              const tokenErr = balances.errors[s];
+              const failed = !balances.loading && v === null;
               return (
                 <div key={s} style={styles.balanceChip}>
                   <span style={styles.balanceSym}>{displaySymbol(s)}</span>
@@ -985,7 +1059,7 @@ export function FlowSwapView({
                       balances.loading
                         ? 'Loading balance…'
                         : failed
-                          ? 'Balance failed to load — retry below.'
+                          ? (tokenErr ?? 'Balance failed to load — retry below.')
                           : v === null
                             ? 'Balance not loaded yet.'
                             : `${v} ${s}`
@@ -1036,9 +1110,9 @@ export function FlowSwapView({
                       style={styles.tokenSelect}
                       disabled={flow !== 'form'}
                     >
-                      <option value="USDC">USDC</option>
-                      <option value="EURC">EURC</option>
-                      <option value="CIRBTC">cirBTC</option>
+                      {allowedInputs.map((s) => (
+                        <option key={s} value={s}>{displaySymbol(s)}</option>
+                      ))}
                     </select>
                   </div>
                   <div style={styles.underRow}>
@@ -1079,9 +1153,9 @@ export function FlowSwapView({
                       style={styles.tokenSelect}
                       disabled={flow !== 'form'}
                     >
-                      <option value="USDC">USDC</option>
-                      <option value="EURC">EURC</option>
-                      <option value="CIRBTC">cirBTC</option>
+                      {allowedOutputsFor(inputSymbol).map((s) => (
+                        <option key={s} value={s}>{displaySymbol(s)}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -1100,6 +1174,26 @@ export function FlowSwapView({
                       {quote.quote.minOutDisplay} {displaySymbol(outputSymbol)}
                     </span>
                   </div>
+                  {isMainnet && (
+                    <div style={styles.quoteRow}>
+                      <span style={styles.quoteLabel}>Price impact</span>
+                      <span style={styles.quoteVal}>
+                        −{priceLossPct}% vs pool price
+                      </span>
+                    </div>
+                  )}
+                  {priceWarn && !priceBlocked && (
+                    <p style={styles.routeNote}>
+                      ⚠️ This quote sits more than 1% below the pool price (−{priceLossPct}%).
+                      Consider a smaller amount.
+                    </p>
+                  )}
+                  {priceBlocked && (
+                    <p style={styles.inlineError}>
+                      Blocked: this quote sits more than 5% below the pool price (−{priceLossPct}%).
+                      No funds moved — try a smaller amount.
+                    </p>
+                  )}
                   <div style={styles.quoteRow}>
                     <span style={styles.quoteLabel}>Route</span>
                     <span style={styles.quoteVal}>

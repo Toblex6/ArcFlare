@@ -33,6 +33,7 @@ import { encodeAbiParameters, encodeFunctionData, encodePacked } from 'viem';
 import {
   assertDistinctPair,
   assertExecutionIdentityMatch,
+  assertFlowPairAllowed,
   assertSwapSymbol,
   canonicalFromSwapUnits,
   checkWrapLinkage,
@@ -42,6 +43,7 @@ import {
   findExecutionConsumer,
   flowNeedsUnwrap,
   getSwapRegistry,
+  isFlowPairAllowed,
   parseCanonicalAmount,
   requestCheckoutUnitFlowQuote,
   resolveCheckoutVenueId,
@@ -61,6 +63,8 @@ import {
   buildWusdcWithdrawTx,
   computeUnitFlowExecutionIdentity,
   decodeWusdcWithdraw,
+  pickBestTier,
+  priceLossBps,
   toSwapUnits,
   unitFlowSwapLeg,
   verifyUnitFlowExecution,
@@ -546,6 +550,78 @@ async function sectionA() {
   }
   ok('no escrow route touched', !changed.split('\n').some((s) => s.trim().startsWith('src/app/api/escrow/')));
   ok('canonical routing impl untouched', !/src\/lib\/routing\/(canonical|quoter|quoteMath|verifier)\.ts/.test(changed));
+
+  console.log('── A11: mainnet swap hardening — best tier, pair gate, exact approval (pure + static) ──');
+  // (c) best-tier-by-quote: max quoted output wins, never preferred-first.
+  const cands = [
+    { fee: 100, pool: '0xpool100', quoted: 878442n },
+    { fee: 500, pool: '0xpool500', quoted: 862872n },
+    { fee: 10000, pool: '0xpool10k', quoted: 496550n },
+  ];
+  ok('best quote wins over preferred tier', pickBestTier(cands, 500).fee === 100);
+  ok(
+    'exact tie breaks toward preferred, then lowest fee',
+    pickBestTier([{ fee: 500, pool: '0xp5', quoted: 100n }, { fee: 100, pool: '0xp1', quoted: 100n }], 500).fee === 500 &&
+    pickBestTier([{ fee: 500, pool: '0xp5', quoted: 100n }, { fee: 3000, pool: '0xp3', quoted: 100n }], 100).fee === 500
+  );
+  expectThrow('empty candidates fail closed', () => pickBestTier([], 100), 'no tier candidates', 503);
+  const tierSrc = read('src/lib/routing/providers/unitflowV3.ts');
+  ok('tier selection quotes every tier (no preferred-first short-circuit)', /for \(const fee of UNITFLOW_V3_ALLOWED_FEES\)/.test(tierSrc) && tierSrc.includes('pickBestTier(candidates, preferredFee)'));
+  // (b) real min-output + deadline, never zero (explicit fail-closed gates).
+  ok('zero minOut refused at build', tierSrc.includes('slippage floor is zero'));
+  ok('zero deadline refused at build', tierSrc.includes('execution deadline is zero'));
+  // (d) exact-amount approval only: v3-direct approves the router for the
+  // exact swap input — no unlimited allowance anywhere in the swap path.
+  ok('v3-direct approval is exact amountInSwap to the router', /args: \[executorAddress as `0x\$\{string\}`, amountInSwap\]/.test(tierSrc));
+  ok('no unlimited approval in swap providers', !/MaxUint256|type\(uint256\)\.max/i.test(tierSrc) && !/MaxUint256|type\(uint256\)\.max/i.test(svc));
+  // (a) mainnet pair gate: USDC↔EURC only; testnet unchanged (all pairs).
+  const MM_ENV: Record<string, string> = {
+    ARC_NETWORK: 'mainnet',
+    ARC_MAINNET_CHAIN_ID: '5042',
+    ARC_MAINNET_CIRCLE_BLOCKCHAIN: 'ARC',
+    ARC_MAINNET_RPC_URL: 'https://rpc.mainnet.arc.example',
+    ARC_MAINNET_EXPLORER_URL: 'https://explorer.arc.example',
+    ARC_MAINNET_GATEWAY_URL: 'https://gateway-api.circle.example',
+    ARC_MAINNET_CCTP_IRIS_URL: 'https://iris-api.circle.example/v2',
+    ARC_MAINNET_CCTP_DOMAIN: '26',
+    ARC_MAINNET_CCTP_MESSAGE_TRANSMITTER: `0x${'1'.repeat(40)}`,
+    ARC_MAINNET_USDC_ADDRESS: `0x${'2'.repeat(40)}`,
+    ARC_MAINNET_EURC_ADDRESS: `0x${'3'.repeat(40)}`,
+    ARC_MAINNET_X402_VERIFIER: `0x${'5'.repeat(40)}`,
+  };
+  ok('testnet allows every distinct pair', isFlowPairAllowed('USDC', 'CIRBTC', {}) && isFlowPairAllowed('CIRBTC', 'EURC', {}));
+  ok('mainnet allows USDC↔EURC', isFlowPairAllowed('USDC', 'EURC', MM_ENV) && isFlowPairAllowed('EURC', 'USDC', MM_ENV));
+  ok('mainnet withholds cirBTC pairs', !isFlowPairAllowed('USDC', 'CIRBTC', MM_ENV) && !isFlowPairAllowed('CIRBTC', 'USDC', MM_ENV) && !isFlowPairAllowed('EURC', 'CIRBTC', MM_ENV));
+  expectThrow('mainnet cirBTC quote refused cleanly (400)', () => assertFlowPairAllowed('USDC', 'CIRBTC', MM_ENV), 'not currently offered', 400);
+  const { flowOutputsFor } = await import('@/src/components/swap/swapCopy');
+  ok('client mirror: testnet offers every other symbol', flowOutputsFor('testnet', 'USDC').join(',') === 'EURC,CIRBTC');
+  ok('client mirror: mainnet USDC→EURC only, CIRBTC→none', flowOutputsFor('mainnet', 'USDC').join(',') === 'EURC' && flowOutputsFor('mainnet', 'CIRBTC').length === 0);
+  // Balance isolation: route maps not-supported to clean 4xx (never 500).
+  const balRoute = read('src/app/api/consumer/balance/route.ts');
+  ok('balance route maps not-supported to clean 4xx', balRoute.includes('TOKEN_NOT_SUPPORTED_ON_NETWORK') && balRoute.includes('isTokenNotSupportedOnNetwork'));
+  const hook = read('src/components/swap/useSwapBalances.ts');
+  ok('balances settle per-token (one failure never clears the others)', hook.includes('failures.length === settled.length') && hook.includes('errors'));
+
+  console.log('── A12: price-loss guard vs pool mid (pure + static) ────────────');
+  const Q96 = 2n ** 96n;
+  const T0 = `0x${'a'.repeat(40)}`;
+  const T1 = `0x${'b'.repeat(40)}`;
+  ok('parity pool, full quote → 0bps', priceLossBps({ sqrtPriceX96: Q96, tokenInSwap: T0, token0: T0, amountInSwap: 1_000_000n, quotedOutputSwap: 1_000_000n }) === 0);
+  ok('1% under mid → 100bps', priceLossBps({ sqrtPriceX96: Q96, tokenInSwap: T0, token0: T0, amountInSwap: 1_000_000n, quotedOutputSwap: 990_000n }) === 100);
+  ok('reverse direction symmetric', priceLossBps({ sqrtPriceX96: Q96, tokenInSwap: T1, token0: T0, amountInSwap: 1_000_000n, quotedOutputSwap: 990_000n }) === 100);
+  ok('quote above mid clamps to 0', priceLossBps({ sqrtPriceX96: Q96, tokenInSwap: T0, token0: T0, amountInSwap: 1_000_000n, quotedOutputSwap: 1_010_000n }) === 0);
+  // Off-parity pool (tick-implied 0.87913 token1 per token0): 0.878442 → ~7bps, 0.817377 → ~702bps.
+  const SQ = 74285856316195834521429475328n; // floor(sqrt(0.87913)·2^96), 29 digits
+  const loss1 = priceLossBps({ sqrtPriceX96: SQ, tokenInSwap: T0, token0: T0, amountInSwap: 1_000_000n, quotedOutputSwap: 878442n });
+  const loss100 = priceLossBps({ sqrtPriceX96: SQ, tokenInSwap: T0, token0: T0, amountInSwap: 100_000_000n, quotedOutputSwap: 81737721n });
+  ok('live-shape $1 quote under warn threshold', loss1 <= 100, `loss=${loss1}bps`);
+  ok('live-shape $100 quote over block threshold', loss100 > 500, `loss=${loss100}bps`);
+  expectThrow('zero sqrtPrice fails closed', () => priceLossBps({ sqrtPriceX96: 0n, tokenInSwap: T0, token0: T0, amountInSwap: 1_000_000n, quotedOutputSwap: 990_000n }), 'mid unreadable', 503);
+  ok('envelope binds the guard', tierSrc.includes('priceLossBps: guardLossBps'));
+  ok('server refuses >500bps at quote on mainnet only', svc.includes('envelope.priceLossBps > 500') && svc.includes("getNetworkConfig(env).name === 'mainnet'"));
+  ok('CIRCLE execute re-checks the guard on mainnet', read('src/lib/swap/serverExecute.ts').includes('envelope.priceLossBps > 500'));
+  const view = read('src/components/swap/FlowSwapView.tsx');
+  ok('UI warns >1% and blocks >5% on mainnet only', view.includes('priceWarn') && view.includes('priceBlocked') && (view.match(/priceBlocked/g) ?? []).length >= 4);
 }
 
 async function sectionB() {

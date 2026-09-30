@@ -28,7 +28,7 @@ import {
   __resetNetworkConfigCacheForTests,
   getNetworkConfig,
 } from '@/src/lib/config/network';
-import { getTokenByAddress, getTokenBySymbol } from '@/src/lib/tokens/supportedTokens';
+import { getTokenByAddress, getTokenBySymbol, MAINNET_CIRBTC_PIN } from '@/src/lib/tokens/supportedTokens';
 import { normalizeProviderQuote } from '@/src/lib/routing/providers/normalize';
 import {
   getTowerConfig,
@@ -298,8 +298,16 @@ async function mainnetTokenTests() {
     });
     ok('mainnet Tower-shape quote normalizes on mainnet identity',
       q.inputToken.address === MM_USDC && q.outputToken.address === MM_EURC);
-    expectThrow('cirBTC still refuses on mainnet (testnet-only)',
-      () => getTokenBySymbol('CIRBTC'), 'not configured for mainnet');
+    ok('testnet cirBTC pin stays unresolvable on mainnet (network isolation)',
+      getTokenByAddress('0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF') === undefined);
+    // Mainnet cirBTC EXISTS (docs.arc.io pin, live pools on the mainnet
+    // factory — the old testnet-only refusal was the Swap-page 500).
+    // Default is the docs pin; the TESTNET cirBTC pin stays unresolvable.
+    const mmCir = getTokenBySymbol('CIRBTC');
+    ok('mainnet cirBTC resolves to the docs pin (never the testnet pin)',
+      mmCir.address === MAINNET_CIRBTC_PIN && mmCir.address.toLowerCase() !== '0xf0c4a4ce82a5746abaad9425360ab04fbba432bf' && mmCir.decimals === 8);
+    ok('mainnet cirBTC pin resolves back to CIRBTC',
+      getTokenByAddress(MAINNET_CIRBTC_PIN)?.symbol === 'CIRBTC');
     ok('mainnet testnet-EURC pin is not the selected EURC',
       getTokenByAddress('0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a')?.address !== MM_EURC);
   });

@@ -89,6 +89,21 @@ const POOL_ABI = [
   { name: 'liquidity', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint128' }] },
   { name: 'token0', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { name: 'token1', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  {
+    name: 'slot0',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'tick', type: 'int24' },
+      { name: 'observationIndex', type: 'uint16' },
+      { name: 'observationCardinality', type: 'uint16' },
+      { name: 'observationCardinalityNext', type: 'uint16' },
+      { name: 'feeProtocol', type: 'uint8' },
+      { name: 'unlocked', type: 'bool' },
+    ],
+  },
 ] as const;
 
 /** Proven live: quoteExactInputSingle(tokenIn, tokenOut, fee, amountIn, sqrtPriceLimitX96). */
@@ -385,7 +400,92 @@ export function decodeV3DirectExactInputSingle(data: unknown): DecodedV3DirectEx
   }
 }
 
+/**
+ * Price-loss guard math (pure): how far the quoted execution price sits
+ * below the pool's CURRENT mid, in basis points (0 = at/above mid).
+ *
+ * Reference choice: the selected pool's live slot0 mid — the on-chain
+ * market for THIS pair on THIS network. No oracle, no new dependency, no
+ * client input. Mid and effective rate are compared in output-per-input
+ * units at 1e18 fixed precision with exact bigint math (sqrtP² fits in
+ * ~2^320 — bigint-safe).
+ *
+ * Warn/block thresholds live with the callers (UI warn >100bps, block
+ * >500bps on mainnet; server refuses >500bps at quote on mainnet).
+ */
+export function priceLossBps(args: {
+  sqrtPriceX96: bigint;
+  tokenInSwap: string;
+  token0: string;
+  amountInSwap: bigint;
+  quotedOutputSwap: bigint;
+}): number {
+  const { sqrtPriceX96, amountInSwap, quotedOutputSwap } = args;
+  if (typeof sqrtPriceX96 !== 'bigint' || sqrtPriceX96 <= 0n) {
+    throw routingError(503, '[unitflow-v3] pool mid unreadable — refusing to price-guard.');
+  }
+  if (typeof amountInSwap !== 'bigint' || amountInSwap <= 0n) {
+    throw routingError(400, '[unitflow-v3] input amount must be positive.');
+  }
+  if (typeof quotedOutputSwap !== 'bigint' || quotedOutputSwap <= 0n) {
+    throw routingError(400, '[unitflow-v3] quoted output must be positive.');
+  }
+  const TWO_POW_192 = 2n ** 192n;
+  const SCALE = 1_000_000_000_000_000_000n;
+  // Mid as token1-raw per token0-raw (or its reciprocal when selling
+  // token1). Compared against the quote in the SAME raw-per-raw units, so
+  // token decimals cancel exactly — no precision input needed.
+  let num: bigint;
+  let den: bigint;
+  if (eqAddr(args.tokenInSwap, args.token0)) {
+    num = sqrtPriceX96 * sqrtPriceX96;
+    den = TWO_POW_192;
+  } else {
+    num = TWO_POW_192;
+    den = sqrtPriceX96 * sqrtPriceX96;
+  }
+  const midScaled = (num * SCALE) / den;
+  if (midScaled <= 0n) {
+    throw routingError(503, '[unitflow-v3] pool mid computed to zero — refusing to price-guard.');
+  }
+  const effScaled = (quotedOutputSwap * SCALE) / amountInSwap;
+  if (effScaled >= midScaled) return 0;
+  return Number(((midScaled - effScaled) * 10_000n) / midScaled);
+}
+
 // ─── buildExecution() ────────────────────────────────────────────────────────
+/** One live-validated fee-tier candidate (pool + quoter output for this size). */
+export interface UnitFlowTierCandidate {
+  fee: number;
+  pool: string;
+  quoted: bigint;
+}
+
+/**
+ * Pick the best validated tier: max quoted output wins (best-tier-by-quote —
+ * never hardcoded, never preferred-first). Exact ties break toward the
+ * requested preferred fee, then the lowest fee. Pure — unit-testable.
+ */
+export function pickBestTier(
+  candidates: readonly UnitFlowTierCandidate[],
+  preferredFee: number
+): UnitFlowTierCandidate {
+  if (candidates.length === 0) {
+    throw routingError(503, '[unitflow-v3] no tier candidates to choose from.');
+  }
+  let best = candidates[0]!;
+  for (const c of candidates) {
+    if (c.quoted > best.quoted) {
+      best = c;
+      continue;
+    }
+    if (c.quoted === best.quoted && c.fee !== best.fee) {
+      if (c.fee === preferredFee && best.fee !== preferredFee) best = c;
+      else if (best.fee !== preferredFee && c.fee !== preferredFee && c.fee < best.fee) best = c;
+    }
+  }
+  return best;
+}
 export interface UnitFlowV3BuildInput {
   inputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
   outputSymbol: 'USDC' | 'EURC' | 'CIRBTC';
@@ -399,7 +499,9 @@ export interface UnitFlowV3BuildInput {
   slippageBps?: number;
   /** Quote expiry unix seconds (default: now + canonical quote TTL). */
   expiresAtSec?: number;
-  /** Preferred fee tier hint (default 100; others only via live validation). */
+  /** Tie-break hint for best-tier-by-quote (default 100): every allowed tier
+   * is quoted live and the best output wins — this only breaks exact ties
+   * (then lowest fee). Others are never excluded up front. */
   feeTier?: number;
   /** RPC override (test seam; same network only). */
   rpcUrl?: string;
@@ -451,6 +553,13 @@ export interface UnitFlowV3ExecutionEnvelope extends UnsignedExecution {
   readonly amountInSwap: bigint;
   readonly quotedOutputSwap: bigint;
   readonly minOutSwap: bigint;
+  /**
+   * Quoted execution loss vs the chosen pool's live mid, in bps (0 =
+   * at/above mid). Bound at build time from slot0; the UI warns (>100) and
+   * blocks (>500) on mainnet, and the server refuses to quote >500 on
+   * mainnet. Informational on testnet.
+   */
+  readonly priceLossBps: number;
   readonly slippageBps: number;
   readonly merchantSCA: string;
   readonly expectedPayer?: string;
@@ -505,9 +614,14 @@ async function resolveFeeTier(
   outputSwapDecimals: number,
   slippageBps: number
 ): Promise<{ fee: number; pool: string; quoted: bigint }> {
-  const ordered = [preferredFee, ...UNITFLOW_V3_ALLOWED_FEES.filter((f) => f !== preferredFee)];
+  // Best-tier-by-quote (never hardcoded): EVERY allowed tier is validated
+  // live (pool exists + liquidity + pair match + Quoter output + computable
+  // slippage floor) and the tier with the best quoted output wins. The
+  // preferred fee only breaks exact ties (then lowest fee). A tier that
+  // cannot cover the slippage floor is not a candidate for this size.
+  const candidates: UnitFlowTierCandidate[] = [];
   let lastErr: unknown = null;
-  for (const fee of ordered) {
+  for (const fee of UNITFLOW_V3_ALLOWED_FEES) {
     try {
       const pool = (await readWithRetry(`unitflow getPool fee=${fee}`, () =>
         client.readContract({
@@ -541,23 +655,27 @@ async function resolveFeeTier(
       if (quoted <= 0n) continue;
       // A tier whose quote cannot cover the slippage floor is not a valid
       // tier for this size (dust-liquidity pools quote positive-but-dust and
-      // would bind an unexecutable minOut) — try the next tier instead.
+      // would bind an unexecutable minOut) — skip it, keep quoting the rest.
       try {
         unitFlowMinOut(quoted, slippageBps, outputSymbol, outputSwapDecimals);
       } catch (e) {
         lastErr = e;
         continue;
       }
-      return { fee, pool, quoted };
+      candidates.push({ fee, pool, quoted });
     } catch (e) {
       lastErr = e;
       continue;
     }
   }
-  throw routingError(
-    503,
-    `[unitflow-v3] no live V3 pool with liquidity/quote for this pair (tried ${ordered.join(',')}). Last: ${(lastErr as Error)?.message ?? lastErr}`
-  );
+  if (candidates.length === 0) {
+    throw routingError(
+      503,
+      `[unitflow-v3] no live V3 pool with liquidity/quote for this pair (tried ${UNITFLOW_V3_ALLOWED_FEES.join(',')}). Last: ${(lastErr as Error)?.message ?? lastErr}`
+    );
+  }
+  const best = pickBestTier(candidates, preferredFee);
+  return { fee: best.fee, pool: best.pool, quoted: best.quoted };
 }
 
 /**
@@ -643,6 +761,33 @@ export async function buildUnitFlowV3Execution(
   );
   const minOutSwap = unitFlowMinOut(quoted, slippageBps, outputSymbol, outLeg.swapDecimals);
   const deadline = BigInt(expiresAtSec);
+  // Real bounds, never zero: a zero minOut would execute with no price
+  // protection and a zero deadline with no expiry — refuse outright instead
+  // of encoding an unbounded swap (discountForSlippage already rejects
+  // non-positive floors; this is the explicit fail-closed gate).
+  if (minOutSwap <= 0n) {
+    throw routingError(503, '[unitflow-v3] slippage floor is zero — refusing to build execution.');
+  }
+  if (deadline <= 0n) {
+    throw routingError(503, '[unitflow-v3] execution deadline is zero — refusing to build execution.');
+  }
+
+  // Price-loss guard reference: the CHOSEN pool's live mid (slot0) plus its
+  // token order. Read here (not in resolveFeeTier) so the guard always
+  // describes the bound tier, never a rejected candidate.
+  const [slot0, poolToken0] = await readWithRetry('unitflow guard slot0', () =>
+    Promise.all([
+      client.readContract({ address: pool as `0x${string}`, abi: POOL_ABI, functionName: 'slot0' }),
+      client.readContract({ address: pool as `0x${string}`, abi: POOL_ABI, functionName: 'token0' }),
+    ])
+  ) as unknown as [readonly [bigint, number, number, number, number, number, boolean], string];
+  const guardLossBps = priceLossBps({
+    sqrtPriceX96: slot0[0],
+    tokenInSwap: inLeg.swapAddress,
+    token0: poolToken0,
+    amountInSwap,
+    quotedOutputSwap: quoted,
+  });
 
   // ── Executor-specific call encoding ──────────────────────────────────────
   // Universal-router (testnet): execute(0x00, [v3input], deadline) + Permit2
@@ -769,6 +914,7 @@ export async function buildUnitFlowV3Execution(
     amountInSwap,
     quotedOutputSwap: quoted,
     minOutSwap,
+    priceLossBps: guardLossBps,
     slippageBps,
     merchantSCA,
     selfPayer,

@@ -77,6 +77,28 @@ test('mainnet: explicitly configured mainnet tokens still resolve', async () => 
   });
 });
 
+test('mainnet: cirBTC resolves to the docs pin (testnet pin stays dead)', async () => {
+  // docs.arc.io/arc/references/contract-addresses (verified live 2026-09-30):
+  // mainnet cirBTC 0x171A… (8 decimals) with live UnitFlow factory pools.
+  // The old testnet-only refusal was the Swap-page 500.
+  const MAINNET_CIRBTC = '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0';
+  await withEnv(MAINNET_ENV, async () => {
+    const cir = tokens.getTokenBySymbol('CIRBTC');
+    assert.equal(cir.address, MAINNET_CIRBTC);
+    assert.equal(cir.decimals, 8);
+    assert.equal(tokens.getTokenByAddress(MAINNET_CIRBTC)?.symbol, 'CIRBTC');
+    assert.equal(tokens.isSupportedToken(MAINNET_CIRBTC), true);
+    // The testnet cirBTC pin must NOT resolve on mainnet (isolation holds).
+    assert.equal(tokens.getTokenByAddress(TESTNET_CIRBTC), undefined);
+  });
+});
+
+test('mainnet: malformed cirBTC override fails closed (never testnet fallback)', async () => {
+  await withEnv({ ...MAINNET_ENV, ARC_MAINNET_CIRBTC_ADDRESS: 'not-an-address' }, async () => {
+    assert.throws(() => tokens.getTokenBySymbol('CIRBTC'), /ARC_MAINNET_CIRBTC_ADDRESS must be a 0x EVM address/);
+  });
+});
+
 test('mainnet: real-world shape where mainnet USDC equals the testnet address still resolves', async () => {
   // Per .env.example the mainnet USDC interface IS 0x3600… (set explicitly).
   // That row resolves through the environment-selected loop — not the

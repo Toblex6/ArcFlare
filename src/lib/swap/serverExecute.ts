@@ -269,6 +269,14 @@ export async function executeFlowSwapAsServer(req: ServerSwapRequest): Promise<S
       "[swap-execute] live quote terms drifted from the stored intent — request a fresh quote."
     );
   }
+  // Mainnet price-loss block at execution time too: the pool may have moved
+  // since the quote (5-min TTL). Testnet is unaffected.
+  if (getNetworkConfig().name === 'mainnet' && envelope.priceLossBps > 500) {
+    throw routingError(
+      400,
+      `[swap-execute] live price sits more than 5% below the pool price (loss ${envelope.priceLossBps}bps) — refusing to execute. Request a fresh quote.`
+    );
+  }
 
   // Broadcast each envelope step from the consumer's SCA, strictly in order,
   // awaiting finality each time. Step bytes are the envelope's own calldata.

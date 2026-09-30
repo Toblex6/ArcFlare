@@ -118,6 +118,44 @@ export function assertDistinctPair(input: SwapSymbol, output: SwapSymbol): void 
   }
 }
 
+/**
+ * Flow Swap pair universe (server authority — the client mirrors it for
+ * display only and this gate re-enforces on every quote).
+ *
+ * Testnet: every distinct USDC/EURC/CIRBTC pair (unchanged — proven pools).
+ * Mainnet: USDC↔EURC ONLY. Live quoter survey 2026-09-30 against the
+ * mainnet Quoter 0x5AF6…0E34 ($1/$10/$100 both directions, BTC≈$83,400,
+ * EUR/USD≈1.16): USDC/EURC-100 +1.9%/-2.0%, USDC/EURC-500 +0.1%/-4.8%,
+ * USDC/EURC-10000 -42%, USDC/cirBTC tiers -47%..-90%, EURC/cirBTC-500
+ * ≈±2%, EURC/cirBTC-3000 -86%. Only USDC↔EURC clears the 1% bar at
+ * practical sizes (best-tier routing picks the tighter tier per swap);
+ * every cirBTC pair is withheld until pools re-price. Re-run the survey
+ * before widening this set — never add a pair on liquidity alone.
+ */
+const MAINNET_FLOW_PAIRS: ReadonlySet<string> = new Set(['USDC->EURC', 'EURC->USDC']);
+
+export function isFlowPairAllowed(
+  inputSymbol: SwapSymbol,
+  outputSymbol: SwapSymbol,
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  if (getNetworkConfig(env).name !== 'mainnet') return true;
+  return MAINNET_FLOW_PAIRS.has(`${inputSymbol}->${outputSymbol}`);
+}
+
+export function assertFlowPairAllowed(
+  inputSymbol: SwapSymbol,
+  outputSymbol: SwapSymbol,
+  env: Record<string, string | undefined> = process.env
+): void {
+  if (!isFlowPairAllowed(inputSymbol, outputSymbol, env)) {
+    throw routingError(
+      400,
+      `This pair is not currently offered on Arc mainnet — Flow Swap lists USDC↔EURC only (live quoter survey 2026-09-30: cirBTC tiers priced 2–90% off market).`
+    );
+  }
+}
+
 /** Strict decimal string → canonical base units (token-native precision, never float math). */
 export function parseCanonicalAmount(raw: unknown, decimals = 6): bigint {
   if (!Number.isInteger(decimals) || decimals <= 0 || decimals > 18) {
@@ -424,6 +462,8 @@ export interface FlowQuoteView {
   pool: string;
   feeTier: number;
   slippageBps: number;
+  /** Quoted loss vs the pool mid in bps (0 = at/above mid). Blocks >500 on mainnet. */
+  priceLossBps: number;
   quoteExpiresAt: string;
   deadline: string;
   recipient: string;
@@ -450,6 +490,7 @@ export async function requestFlowSwapQuote(
 ): Promise<{ view: FlowQuoteView; tower: TowerCandidate }> {
   const env = req.env ?? process.env;
   assertDistinctPair(req.inputSymbol, req.outputSymbol);
+  assertFlowPairAllowed(req.inputSymbol, req.outputSymbol, env);
   const ownerWallet = assertAddress('ownerWallet', req.ownerWallet);
   if (req.inputAmount <= 0n) throw routingError(400, 'Swap input amount must be positive.');
 
@@ -479,6 +520,15 @@ export async function requestFlowSwapQuote(
   );
   if (envelope.selfPayer !== true) {
     throw routingError(503, '[unitflow-v3] execution scope binding lost — refusing to persist.');
+  }
+  // Mainnet price-loss block: never persist a quote more than 5% below the
+  // pool mid (the UI warns above 1% and blocks above 5%; this is the
+  // server-side enforcement for both wallet modes). Testnet is unaffected.
+  if (getNetworkConfig(env).name === 'mainnet' && envelope.priceLossBps > 500) {
+    throw routingError(
+      400,
+      `[unitflow-v3] quote sits more than 5% below the pool price (loss ${envelope.priceLossBps}bps) — refusing to list this swap. Try a smaller amount.`
+    );
   }
 
   const quoteHash = computeSwapQuoteHash({
@@ -604,6 +654,7 @@ function intentToView(row: any, envelope: UnitFlowV3ExecutionEnvelope): FlowQuot
     pool: row.poolAddress,
     feeTier: row.feeTier,
     slippageBps: row.slippageBps,
+    priceLossBps: typeof envelope.priceLossBps === 'number' ? envelope.priceLossBps : 0,
     quoteExpiresAt: new Date(row.quoteExpiresAt).toISOString(),
     deadline: row.deadline,
     recipient: row.recipient,

@@ -64,6 +64,6 @@ export async function GET() {
   return NextResponse.json({
     success: true,
     status: 'ready',
-    message: 'Flow Swap quoting is active (Arc USDC↔EURC↔cirBTC, UnitFlow execution).',
+    message: 'Flow Swap quoting is active (UnitFlow execution; pairs are network-gated).',
   });
 }

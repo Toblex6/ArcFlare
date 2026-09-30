@@ -37,6 +37,8 @@ export interface SwapQuote {
   expiresAtMs: number;
   unsigned: { approvals: SwapUnsignedTx[]; wrapTx: SwapUnsignedTx | null; swapTx: SwapUnsignedTx };
   slippageBps: number;
+  /** Quoted loss vs the pool mid in bps (0 = at/above mid). Server-enforced block >500 on mainnet. */
+  priceLossBps: number;
 }
 
 export interface SwapQuoteView extends SwapQuote {
@@ -122,6 +124,7 @@ function toViewModel(data: Record<string, unknown>): SwapQuoteView {
       swapTx: unsigned.swapTx,
     },
     slippageBps: typeof data.slippageBps === 'number' ? data.slippageBps : 100,
+    priceLossBps: typeof data.priceLossBps === 'number' && Number.isFinite(data.priceLossBps) ? Math.max(0, Math.floor(data.priceLossBps)) : 0,
     quotedDisplay,
     minOutDisplay,
     rateDisplay,

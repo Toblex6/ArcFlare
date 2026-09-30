@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { getTokenBalance } from "@/src/lib/wallet/tokenBalance";
+import { isTokenNotSupportedOnNetwork } from "@/src/lib/tokens/supportedTokens";
 
 export async function GET(req: NextRequest) {
     try {
@@ -23,7 +24,26 @@ export async function GET(req: NextRequest) {
             );
         }
 
-        const result = await getTokenBalance(walletAddress, requested);
+        let result;
+        try {
+            result = await getTokenBalance(walletAddress, requested);
+        } catch (tokenError: any) {
+            // A token with no configuration on this network is a clean
+            // client-visible answer — never a 500. Genuine RPC/DB failures
+            // fall through to the 500 below.
+            if (isTokenNotSupportedOnNetwork(tokenError)) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: `${requested} is not supported on this network.`,
+                        code: "TOKEN_NOT_SUPPORTED_ON_NETWORK",
+                        currency: requested,
+                    },
+                    { status: 400 }
+                );
+            }
+            throw tokenError;
+        }
 
         return NextResponse.json({
             success: true,

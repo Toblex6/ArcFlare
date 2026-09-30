@@ -48,20 +48,59 @@ export const SUPPORTED_TOKENS: Record<string, SupportedToken> = {
  * Environment-selected address for a supported symbol. Testnet returns the
  * pinned table values above (unchanged); mainnet returns the required
  * ARC_MAINNET_USDC_ADDRESS / ARC_MAINNET_EURC_ADDRESS inputs (fail-closed
- * when absent — never testnet values). cirBTC is Arc Testnet only in this
- * release: mainnet selection refuses fail-closed rather than inheriting the
- * testnet address.
+ * when absent — never testnet values) and the docs-pinned mainnet cirBTC
+ * address below (optional ARC_MAINNET_CIRBTC_ADDRESS override, fail-closed
+ * when malformed — never the testnet cirBTC pin).
  */
+export const MAINNET_CIRBTC_PIN =
+  "0x171A4217b86A807A64eB94757Db6849fb4bDbAA0"; // docs.arc.io/arc/references/contract-addresses (mainnet cirBTC, 8 decimals) — verified live 2026-09-30: name="Circle Wrapped Bitcoin" symbol=cirBTC decimals=8
+
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+
+/**
+ * Clean "not supported on this network" signal (never a 500). Balance and
+ * swap routes map this to a 4xx with code TOKEN_NOT_SUPPORTED_ON_NETWORK;
+ * genuine RPC/DB failures keep their 500.
+ */
+export class TokenNotSupportedOnNetworkError extends Error {
+  readonly code = "TOKEN_NOT_SUPPORTED_ON_NETWORK";
+  readonly status = 400;
+  constructor(symbol: string, network: string) {
+    super(`${symbol} is not supported on ${network} — no token configuration exists for this network.`);
+    this.name = "TokenNotSupportedOnNetworkError";
+  }
+}
+
+/** True for the clean not-supported signal (typed error or legacy message). */
+export function isTokenNotSupportedOnNetwork(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const anyErr = err as { code?: unknown; message?: unknown };
+  if (anyErr.code === "TOKEN_NOT_SUPPORTED_ON_NETWORK") return true;
+  const msg = typeof anyErr.message === "string" ? anyErr.message : "";
+  return /not configured for .*mainnet|not supported on .*network/i.test(msg);
+}
+
 function addressFor(symbol: SupportedSymbol): string {
   const net = getNetworkConfig();
   if (net.name === "mainnet") {
     if (symbol === "CIRBTC") {
-      throw new Error("cirBTC is not configured for mainnet — Arc Testnet only in this release");
+      // Mainnet cirBTC EXISTS (docs.arc.io, live pools on the UnitFlow
+      // mainnet factory) — the old "testnet only" refusal was the Swap-page
+      // 500. Default is the docs pin above (a documented public address, not
+      // testnet inheritance); an explicit override is validated fail-closed.
+      const raw = (process.env.ARC_MAINNET_CIRBTC_ADDRESS ?? "").trim();
+      const addr = raw === "" ? MAINNET_CIRBTC_PIN : raw;
+      if (!ADDRESS_RE.test(addr)) {
+        throw new Error(
+          `ARC_MAINNET_CIRBTC_ADDRESS must be a 0x EVM address (got "${raw}").`
+        );
+      }
+      return addr;
     }
     return symbol === "USDC" ? net.usdcAddress : net.eurcAddress;
   }
   const token = SUPPORTED_TOKENS[symbol];
-  if (!token) throw new Error(`unsupported token: ${symbol}`);
+  if (!token) throw new TokenNotSupportedOnNetworkError(symbol, net.name);
   return token.address;
 }
 
