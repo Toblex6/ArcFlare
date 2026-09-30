@@ -6,6 +6,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardSidebar from "@/src/components/DashboardSidebar";
 import { displayChain } from "@/src/components/NetworkContext";
+import { paymentStatusLabel } from "@/src/lib/payments/statusDisplay";
 import {
   AreaChart,
   Area,
@@ -927,11 +928,11 @@ export default function MerchantDashboard() {
                       <td style={{ padding: "12px 0" }}>
                         <span className={`px-2 py-1 rounded text-[9px] font-bold border ${payment.status === "SUCCESS"
                           ? "bg-green-500/10 text-green-400 border-green-500/20"
-                          : payment.status === "EXPIRED"
+                          : payment.status === "EXPIRED" || payment.status === "FAILED" || payment.status === "SETTLEMENT_ERROR" || payment.status === "ATTESTATION_FAILED"
                             ? "bg-red-500/10 text-red-400 border-red-500/20"
                             : "bg-amber-500/10 text-amber-400 border-amber-500/20"
                           }`}>
-                          {payment.status}
+                          {paymentStatusLabel(payment.status)}
                         </span>
                       </td>
                     </tr>

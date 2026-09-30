@@ -26,6 +26,7 @@ import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
 import ExternalBridge from "@/components/bridge/ExternalBridge";
 import { signingModelForWallet } from "@/lib/wallet/signingModel";
+import { paymentStatusLabel } from "@/src/lib/payments/statusDisplay";
 
 type View = "onboarding" | "home" | "send" | "save" | "request" | "payroll-chat" | "crosschain" | "discover" | "swap";
 
@@ -1909,7 +1910,7 @@ function ConsumerAppInner() {
                           {a.counterparty ? ` ${a.direction === "out" ? "to" : "from"} ${a.counterparty.slice(0, 6)}...${a.counterparty.slice(-4)}` : ""}
                         </p>
                         <p style={{ margin: 0, fontSize: 11, color: a.status === "EXPIRED" ? "#C0563A" : a.status === "SUCCESS" ? "#3F7A57" : "var(--flow-text-faint)" }}>
-                          {new Date(a.timestamp).toLocaleString()} · <span style={{ fontWeight: 700, color: a.status === "EXPIRED" ? "#C0563A" : a.status === "SUCCESS" ? "#3F7A57" : "#8a7560" }}>{a.status}</span>
+                          {new Date(a.timestamp).toLocaleString()} · <span style={{ fontWeight: 700, color: a.status === "EXPIRED" ? "#C0563A" : a.status === "SUCCESS" ? "#3F7A57" : "#8a7560" }}>{paymentStatusLabel(a.status)}</span>
                         </p>
                         {a.explorerUrl ? (
                           <a href={a.explorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>
@@ -1917,7 +1918,7 @@ function ConsumerAppInner() {
                           </a>
                         ) : (
                           <p style={{ margin: 0, fontSize: 11, color: a.status === "EXPIRED" ? "#C0563A" : "var(--flow-text-faint)" }}>
-                            {a.status === "EXPIRED" ? "Expired — link no longer valid" : a.status !== "SUCCESS" ? "Pending — no transaction yet" : null}
+                            {a.status === "SUCCESS" ? null : paymentStatusLabel(a.status)}
                           </p>
                         )}
                       </div>

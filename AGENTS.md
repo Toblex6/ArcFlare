@@ -78,7 +78,7 @@ Dated batch-by-batch audit/build findings live in `docs/AGENTS_ARCHIVE.md` — n
 
 ## Git rules
 
-- **Branch / remote**: `origin` = `https://github.com/Toblex6/ArcFlare.git`. Active work branch for this line is `unitflow-phase2` — confirm branch before committing; never push to another branch by accident.
+- **Branch / remote**: `origin` = `https://github.com/Toblex6/ArcFlare.git`. Active work branch is `main` (confirmed 2026-09-30 — the `unitflow-phase2` line is merged/closed; do not switch branches or ask which branch to use). Never push to another branch by accident.
 - **Message format** (as actually used in this repo): `<type>(<scope>): <subject>` + bullet body. Types: `feat`, `fix`, `refactor`, `test`, `chore`, `docs`. Scopes seen: `unitflow`, `routing`, `config`, `payments`, `agents`, `jobs`, `consumer`, `ui`, `cleanup`, `security`. Bodies explain *what changed + what was proven* (suite counts, tx hashes, explicit non-goals like "No wiring into quote/verify-onchain routes yet").
 - **Pre-commit gate**: `npx tsc --noEmit` clean is mandatory; `next build` for full check; run the suites for the area touched and quote real results in the message — never claim green you didn't run on the current tree.
 - **No commits on request of "show diff first"**: when review is asked for, paste the diff + resulting files and stop. Do not amend, rebase, or rewrite pushed history to "clean up" without explicit instruction.

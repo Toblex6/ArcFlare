@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { prisma } from "@/src/lib/prisma";
 import { resolveRowCurrency, tokenAddressFor } from "@/src/lib/tokens/resolveCurrency";
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getArcNetworkName } from "@/lib/config/network";
+import { filterRowsForNetwork } from "@/src/lib/payments/chainFilter";
 
 export async function GET(req: NextRequest) {
     try {
@@ -23,8 +24,13 @@ export async function GET(req: NextRequest) {
             take: 20,
         });
 
+        // Mainnet parity with the merchant view (/api/payments/all):
+        // historical testnet-chain rows are hidden on mainnet servers.
+        // Rows are never deleted — testnet servers still see everything.
+        const visibleLogs = filterRowsForNetwork(logs, getArcNetworkName());
+
         const now = Date.now();
-        const activity = logs.map((log) => {
+        const activity = visibleLogs.map((log) => {
             const isExpired =
                 log.status === "PENDING" && (log as any).expiresAt != null && now > new Date((log as any).expiresAt).getTime();
             const displayStatus = isExpired ? "EXPIRED" : log.status;
