@@ -44,6 +44,10 @@ import {
   verifyConsumerOtp,
 } from "@/src/lib/auth/consumerOtp";
 import { resolveConsumerWallet } from "@/src/lib/auth/consumerWallet";
+import {
+  WALLET_UPGRADED_MESSAGE,
+  ensureMainnetConsumerWallet,
+} from "@/src/lib/consumer/walletMigration";
 import { createAccountWallet } from "@/src/lib/circle/client";
 import { sendConsumerOtpEmail } from "@/src/lib/email";
 
@@ -193,6 +197,34 @@ export async function PUT(req: NextRequest) {
     }
   }
 
+  // Returning CIRCLE row: mainnet wallet upgrade check (Step C). Runs on
+  // the account's own login only — never bulk, never merchants/agents. A
+  // clean 404 provisions one fresh ARC wallet (locked + idempotent);
+  // transient Circle failures never block login (the Send path guides a
+  // re-login with a friendly error instead).
+  if (account && account.walletType === "CIRCLE" && account.circleWalletId) {
+    try {
+      const mig = await ensureMainnetConsumerWallet(account.id);
+      if (mig.migrated) {
+        account = await (prisma as any).consumerAccount
+          .findUnique({ where: { id: account.id } })
+          .catch(() => account);
+      }
+    } catch (e: any) {
+      console.error("[consumer/email-auth] wallet upgrade check failed:", e?.message ?? e);
+    }
+  }
+
+  // One-time upgrade message: shown once, then cleared (best-effort — a
+  // failed clear only repeats the message next login, never blocks it).
+  let walletUpgraded = false;
+  if (account?.migrationNoticePending) {
+    walletUpgraded = true;
+    await (prisma as any).consumerAccount
+      .update({ where: { id: account.id }, data: { migrationNoticePending: false } })
+      .catch(() => {});
+  }
+
   const wallet = resolveConsumerWallet(account);
   if (!wallet) {
     // Legacy/unknown custody (e.g. a retired USER_CONTROLLED row): the
@@ -214,6 +246,7 @@ export async function PUT(req: NextRequest) {
   const res = NextResponse.json({
     success: true,
     isNew: isNewAccount,
+    ...(walletUpgraded ? { walletUpgraded: true, walletUpgradedMessage: WALLET_UPGRADED_MESSAGE } : {}),
     account: {
       id: account.id,
       walletAddress: account.walletAddress,

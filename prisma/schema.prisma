@@ -302,6 +302,15 @@ model ConsumerAccount {
   sessionVersion   Int      @default(0)
   createdAt        DateTime @default(now())
   lastSeenAt       DateTime @default(now())
+  // Mainnet wallet upgrade (Step C): when the production Circle key returns
+  // a clean 404 for circleWalletId at the account's own login, a fresh
+  // mainnet ARC SCA wallet is provisioned and bound here. previousWallets
+  // is append-only history ({ walletId, walletAddress, migratedAt, reason }
+  // entries) — nothing is ever deleted or rewritten. migrationNoticePending
+  // drives the one-time "wallet upgraded" message, cleared after first shown.
+  previousWallets        Json?
+  walletMigratedAt       DateTime?
+  migrationNoticePending Boolean   @default(false)
 }
 
 // Short-lived single-use email OTPs for consumer recovery flows

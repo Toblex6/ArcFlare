@@ -15,6 +15,7 @@ import {
   ConsumerFeatureError,
   resolveConsumerWallet,
 } from '@/src/lib/auth/consumerWallet';
+import { assertConsumerCircleWalletLive } from '@/src/lib/consumer/walletMigration';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
@@ -523,6 +524,11 @@ async function mergedSettleHandler(request: NextRequest) {
         );
       }
       payerWalletId = wallet.circleWalletId;
+      // Stale-wallet Send signal (Step C): a CIRCLE row whose wallet id the
+      // production key returns clean-404 for fails here with "log in again"
+      // (login re-provisions) instead of the raw Circle signing error.
+      // Merchants/agents are unaffected (separate branches below).
+      await assertConsumerCircleWalletLive(consumerAccount);
     } else {
       const agentRecord = await (prisma as any).agentRegistry.findFirst({
         where: { scaAddress: payerSCA },

@@ -85,6 +85,14 @@ console.log('Deploy-time-only var:');
 const noPrivateKey = validateWalletEnv({ ...BASE, PRIVATE_KEY: undefined });
 ok('absent PRIVATE_KEY does not fail (deploy-time only)', noPrivateKey.ok, noPrivateKey.errors.join('; ').slice(0, 80));
 
+console.log('Production ARC_NETWORK guard (Step C):');
+expectFail('production without ARC_NETWORK refuses testnet default',
+  { ...BASE, NODE_ENV: 'production' }, 'must be set explicitly in production');
+ok('production with ARC_NETWORK set passes the guard',
+  !validateWalletEnv({ ...BASE, NODE_ENV: 'production', ARC_NETWORK: 'mainnet' }).errors.some((e) => e.includes('must be set explicitly in production')));
+ok('non-production without ARC_NETWORK keeps the default',
+  !validateWalletEnv({ ...BASE, NODE_ENV: 'development' }).errors.some((e) => e.includes('must be set explicitly in production')));
+
 console.log('Real merged env (.env + .env.local):');
 try {
   assertWalletEnv();

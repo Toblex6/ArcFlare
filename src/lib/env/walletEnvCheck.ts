@@ -135,6 +135,21 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
   // returned messages are already operator-actionable.
   errors.push(...validateNetworkEnv(env));
 
+  // Production guard (Step C): production must name its network explicitly.
+  // The testnet default exists for dev/test only — a production server that
+  // silently runs testnet config (wrong RPC, wrong wallets) is a fund-risk
+  // misconfiguration, so startup refuses instead. Either variable satisfies
+  // (server reads ARC_NETWORK, the client bundle reads NEXT_PUBLIC_*).
+  if (
+    (env.NODE_ENV ?? "").trim().toLowerCase() === "production" &&
+    !(env.ARC_NETWORK ?? "").trim() &&
+    !(env.NEXT_PUBLIC_ARC_NETWORK ?? "").trim()
+  ) {
+    errors.push(
+      'ARC_NETWORK: must be set explicitly in production ("mainnet" or "testnet") — refusing the testnet default. Dev/test keep the default.'
+    );
+  }
+
   for (const { addressVar, keyVar, description } of SIGNER_PAIRS) {
     const address = env[addressVar];
     const key = env[keyVar];
