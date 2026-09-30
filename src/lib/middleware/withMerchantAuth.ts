@@ -103,12 +103,17 @@ export async function resolveInitializeCaller(req: NextRequest): Promise<Resolve
     return null; // a key was supplied but matched nothing — fail closed
   }
 
-  // Consumer session — Flow's send/request flow, no API key involved
+  // Consumer session — Flow's send/request flow, no API key involved.
+  // DB-bound (sessionVersion parity + aud via resolveConsumerSession), not
+  // a bare signature verify — a logged-out/revoked consumer_token must not
+  // pass here.
   const consumerToken = req.cookies.get('consumer_token')?.value;
   if (consumerToken && CONSUMER_JWT_SECRET) {
     try {
-      const { payload } = await jwtVerify(consumerToken, CONSUMER_JWT_SECRET);
-      return { type: 'consumer', consumerWalletAddress: payload.walletAddress as string };
+      const { resolveConsumerSession } = await import('@/src/lib/middleware/withConsumerAuth');
+      const walletAddress = await resolveConsumerSession(req);
+      if (walletAddress) return { type: 'consumer', consumerWalletAddress: walletAddress };
+      return null;
     } catch {
       return null;
     }

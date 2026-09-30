@@ -110,8 +110,21 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// Logout
+// Logout — server-side invalidation: bump sessionVersion so any outstanding
+// merchant_token (including the one being logged out, and any stolen copy)
+// stops passing resolveMerchant's sessionVersion check. The cookie is always
+// cleared, even when there is no resolvable session.
 export async function DELETE(req: NextRequest) {
+  try {
+    const authed = await resolveMerchant(req);
+    if (authed) {
+      await (prisma as any).merchant
+        .update({ where: { id: authed.id }, data: { sessionVersion: { increment: 1 } } })
+        .catch(() => null);
+    }
+  } catch {
+    // Logout never throws — the cookie is still cleared below.
+  }
   const response = NextResponse.json({ success: true, message: 'Logged out.' });
   response.cookies.delete('merchant_token');
   return response;

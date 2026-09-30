@@ -37,7 +37,7 @@ import { randomBytes } from 'crypto';
 import { createAccountWallet } from '@/src/lib/circle/client';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
 import { requireJwtSecret, tryJwtSecret } from '@/src/lib/auth/secrets';
-import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
+import { issueConsumerSessionToken, CONSUMER_SESSION_AUDIENCE } from '@/src/lib/auth/consumerSession';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 
@@ -147,10 +147,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'No session.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, JWT_SECRET, {
+      audience: CONSUMER_SESSION_AUDIENCE,
+    });
     const acct = await prisma.consumerAccount.findUnique({
       where: { id: payload.consumerId as string },
     });
+    if (!acct) {
+      return NextResponse.json({ success: false, error: 'Invalid or expired session.' }, { status: 401 });
+    }
+    // DB-bound sessionVersion parity (mirrors resolveConsumerSession): a
+    // logged-out / revoked token (bumped version) must not pass this
+    // session-check path.
+    if ((payload as any)?.sessionVersion !== ((acct as any).sessionVersion ?? 0)) {
+      return NextResponse.json({ success: false, error: 'Invalid or expired session.' }, { status: 401 });
+    }
     // Same canonical wallet view as issueSession (recoverable state for
     // unbound CIRCLE rows; nulls for legacy/unknown custody).
     const wallet = resolveConsumerWallet(acct as any);
@@ -359,8 +370,21 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE /api/consumer/session — sign out
-export async function DELETE() {
+// DELETE /api/consumer/session — sign out with server-side invalidation.
+// Bumps ConsumerAccount.sessionVersion so any outstanding consumer_token
+// (including the one being logged out, and any stolen copy) stops passing
+// resolveConsumerSession's sessionVersion parity check. Cookies are always
+// cleared, even when there is no resolvable session.
+export async function DELETE(req: NextRequest) {
+  try {
+    const walletAddress = await resolveConsumerSession(req).catch(() => null);
+    if (walletAddress) {
+      const { bumpConsumerSessionVersion } = await import('@/src/lib/auth/consumerSession');
+      await bumpConsumerSessionVersion(walletAddress).catch(() => null);
+    }
+  } catch {
+    // Logout never throws — the cookies are still cleared below.
+  }
   const response = NextResponse.json({ success: true });
   response.cookies.delete('consumer_token');
   response.cookies.delete(NONCE_COOKIE);
