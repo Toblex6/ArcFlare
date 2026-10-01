@@ -40,6 +40,13 @@ import { requireJwtSecret, tryJwtSecret } from '@/src/lib/auth/secrets';
 import { issueConsumerSessionToken, CONSUMER_SESSION_AUDIENCE } from '@/src/lib/auth/consumerSession';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
+import { getArcNetworkName } from '@/src/lib/config/network';
+import {
+  WALLET_CHECK_FAILED_CODE,
+  WALLET_CHECK_RETRY_MESSAGE,
+  WALLET_NEEDS_UPDATE_MESSAGE,
+  checkCircleWalletLiveness,
+} from '@/src/lib/wallets/liveness';
 
 const NONCE_COOKIE = 'consumer_connect_nonce';
 
@@ -87,6 +94,10 @@ async function issueSession(
       circleWalletId: (account as any).circleWalletId ?? null,
       mode: wallet?.mode ?? null,
       canServerSign: wallet?.canServerSign ?? false,
+      // Login responses never claim verification — the display gate runs in
+      // the session-check GET (and email-auth PUT) via a real getWallet
+      // check. The badge renders only on walletVerified === true.
+      walletVerified: false,
     },
   });
 
@@ -165,6 +176,36 @@ export async function GET(req: NextRequest) {
     // Same canonical wallet view as issueSession (recoverable state for
     // unbound CIRCLE rows; nulls for legacy/unknown custody).
     const wallet = resolveConsumerWallet(acct as any);
+    // Mainnet display gate: a CIRCLE row whose wallet is not ARC+LIVE under
+    // the production key must never have its address shown (Receive page /
+    // deposit copy). Hide it and force the re-login repair path — login
+    // runs the existing login-time migration. Testnet: never gated.
+    let walletVerified = false;
+    if (
+      getArcNetworkName() === 'mainnet' &&
+      String((acct as any)?.walletType ?? '').toUpperCase() === 'CIRCLE' &&
+      (acct as any)?.circleWalletId
+    ) {
+      const live = await checkCircleWalletLiveness(
+        (acct as any).circleWalletId,
+        (acct as any).walletAddress
+      );
+      if (live.checked && !live.live) {
+        // Transient (timeout/5xx/network): retry — never "needs updating",
+        // never a new wallet. Stale (clean 404 / wrong chain): re-login.
+        if (!live.stale) {
+          return NextResponse.json(
+            { success: false, code: WALLET_CHECK_FAILED_CODE, error: WALLET_CHECK_RETRY_MESSAGE },
+            { status: 503 }
+          );
+        }
+        return NextResponse.json(
+          { success: false, code: 'WALLET_NEEDS_UPDATE', error: WALLET_NEEDS_UPDATE_MESSAGE },
+          { status: 409 }
+        );
+      }
+      walletVerified = live.checked && live.live;
+    }
     return NextResponse.json({
       success: true,
       account: {
@@ -174,6 +215,7 @@ export async function GET(req: NextRequest) {
         circleWalletId: (acct as any)?.circleWalletId ?? null,
         mode: wallet?.mode ?? null,
         canServerSign: wallet?.canServerSign ?? false,
+        walletVerified,
       },
     });
   } catch {

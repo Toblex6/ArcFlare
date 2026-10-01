@@ -23,6 +23,9 @@ type TabKey = 'general' | 'wallet' | 'notifications' | 'api' | 'security';
 interface WalletInfo {
   walletProvider: string;
   walletAddress: string | null;
+  // Server-proved mainnet liveness (ARC+LIVE via getWallet). Badge renders
+  // solely on true — never assumed client-side, never on testnet.
+  walletVerified?: boolean;
 }
 
 interface MerchantInfo {
@@ -184,6 +187,16 @@ function WalletTab() {
       .then((r) => r.json())
       .then((data) => {
         if (data.success) setWallet(data.wallet);
+        else if (data?.code === 'WALLET_NEEDS_UPDATE') {
+          // Display gate: the payout address is not ARC+LIVE — hide it and
+          // force the re-login repair path (login runs the migration).
+          setWallet(null);
+          setError(String(data?.error || 'Your wallet needs updating, please log in again.'));
+        } else if (data?.code === 'WALLET_CHECK_FAILED') {
+          // Transient Circle failure: NOT stale — keep any loaded wallet,
+          // surface retry. Never claim it needs updating.
+          setError(String(data?.error || 'Could not verify your wallet right now. Try again.'));
+        }
       })
       .catch(() => {});
   };
@@ -216,6 +229,17 @@ function WalletTab() {
   };
 
   if (loading || !wallet) {
+    // Stale-wallet block (409 WALLET_NEEDS_UPDATE): the payout address is
+    // hidden until re-login repairs it — never render a dead address.
+    if (!loading && !wallet) {
+      return (
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '12px 16px' }}>
+          <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0, wordBreak: 'break-word' }}>
+            ❌ {error || 'Your wallet needs updating, please log in again.'}
+          </p>
+        </div>
+      );
+    }
     return <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Loading wallet settings...</p>;
   }
 
@@ -244,6 +268,12 @@ function WalletTab() {
         {wallet.walletAddress && (
           <p style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--text)', background: 'var(--surface-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', wordBreak: 'break-all', margin: 0 }}>
             {wallet.walletAddress}
+          </p>
+        )}
+        {/* Server-proved mainnet liveness only — never assumed, never on testnet. */}
+        {wallet.walletVerified === true && (
+          <p style={{ fontSize: 11, color: '#0D7C5F', fontWeight: 700, margin: '6px 0 0' }}>
+            Arc Mainnet ✓ verified
           </p>
         )}
       </div>

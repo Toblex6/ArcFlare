@@ -10,6 +10,13 @@ import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { prisma } from '@/src/lib/prisma';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
+import { getArcNetworkName } from '@/src/lib/config/network';
+import {
+  WALLET_CHECK_FAILED_CODE,
+  WALLET_CHECK_RETRY_MESSAGE,
+  WALLET_NEEDS_UPDATE_MESSAGE,
+  checkCircleWalletLiveness,
+} from '@/src/lib/wallets/liveness';
 
 export async function GET(req: NextRequest) {
   try {
@@ -34,7 +41,29 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       );
     }
-    return NextResponse.json({ success: true, destination: dest.destination });
+    // Mainnet display gate: the destination is a deposit target — prove it
+    // is ARC+LIVE under the production key before showing it. A stale link
+    // hides the address and forces the re-login repair path. Testnet:
+    // never gated.
+    let walletVerified = false;
+    if (getArcNetworkName() === 'mainnet') {
+      const live = await checkCircleWalletLiveness(dest.circleWalletId, dest.destination);
+      if (live.checked && !live.live) {
+        // Transient: retry, destination withheld. Stale: re-login.
+        if (!live.stale) {
+          return NextResponse.json(
+            { success: false, code: WALLET_CHECK_FAILED_CODE, error: WALLET_CHECK_RETRY_MESSAGE },
+            { status: 503 }
+          );
+        }
+        return NextResponse.json(
+          { success: false, code: 'WALLET_NEEDS_UPDATE', error: WALLET_NEEDS_UPDATE_MESSAGE },
+          { status: 409 }
+        );
+      }
+      walletVerified = live.checked && live.live;
+    }
+    return NextResponse.json({ success: true, destination: dest.destination, walletVerified });
   } catch (error: any) {
     console.error('[cctp/transfer/external/destination]', error);
     return NextResponse.json({ success: false, error: 'Could not load destination.' }, { status: 500 });

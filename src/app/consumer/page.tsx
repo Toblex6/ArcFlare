@@ -161,6 +161,15 @@ function ConsumerAppInner() {
   // walletType — the single authority for Save/bridge UX branching.
   const [circleWalletId, setCircleWalletId] = useState<string | null>(null);
   const [justCreatedWallet, setJustCreatedWallet] = useState(false);
+  // Mainnet display-gate verdict from the server (session-check GET /
+  // email-auth PUT via a real Circle getWallet ARC+LIVE check, cached
+  // 10 min). True ONLY when the server proved the wallet — the badge below
+  // renders solely on this, and never on testnet.
+  const [walletVerified, setWalletVerified] = useState(false);
+  // Stale-wallet signal: the server refused to serve the address (409
+  // WALLET_NEEDS_UPDATE) because it is not ARC+LIVE under the production
+  // key. The address stays hidden; re-login runs the repair migration.
+  const [walletStaleMessage, setWalletStaleMessage] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
@@ -304,6 +313,9 @@ function ConsumerAppInner() {
     setCircleWalletId(account.circleWalletId ?? null);
     setWalletMode(account.mode ?? null);
     setCanServerSign(!!account.canServerSign);
+    // Server-proved only — absent/false means unverified (never assume).
+    setWalletVerified(account.walletVerified === true);
+    setWalletStaleMessage(null);
     // Hiring/FlareHQ-wallet features key off the bound Circle wallet id.
     if (account.circleWalletId) setConsumerWalletId(account.circleWalletId);
     else setConsumerWalletId(null);
@@ -461,6 +473,16 @@ function ConsumerAppInner() {
         if (data.success && data.account?.walletAddress) {
           applySessionAccount(data.account);
           setView(initialViewRef.current ?? "home");
+        } else if (data?.code === "WALLET_NEEDS_UPDATE") {
+          // Server hid the address: not ARC+LIVE under the production key.
+          // Stay signed out and say so — re-login runs the repair migration.
+          setWalletStaleMessage(String(data?.error || "Your wallet needs updating, please log in again."));
+          setView("onboarding");
+        } else if (data?.code === "WALLET_CHECK_FAILED") {
+          // Transient Circle failure (timeout/5xx): NOT stale — retry, and
+          // never claim the wallet needs updating.
+          setOnboardingError(String(data?.error || "Could not verify your wallet right now. Try again."));
+          setView("onboarding");
         } else {
           setView("onboarding");
         }
@@ -514,6 +536,14 @@ function ConsumerAppInner() {
         body: JSON.stringify({ email, code }),
       });
       const data = await res.json().catch(() => ({}));
+      if (data?.code === "WALLET_NEEDS_UPDATE") {
+        // Server hid the address (stale wallet) — surface the repair path,
+        // never a dead deposit target.
+        setWalletStaleMessage(String(data?.error || "Your wallet needs updating, please log in again."));
+        setLoginCode("");
+        setLoginStep("enter");
+        return;
+      }
       if (!res.ok || !data?.success || !data?.account?.walletAddress) {
         const raw = String(data?.error || "That code did not verify.");
         setLoginMsg(
@@ -1362,7 +1392,7 @@ function ConsumerAppInner() {
               <button
                 style={styles.primaryButton}
                 disabled={creatingWallet || isConnecting}
-                onClick={() => { setConnectPickerOpen(false); resumeConnectRef.current = false; setEmailAuthOpen(true); setOnboardingError(null); setLoginMsg(null); }}
+                onClick={() => { setConnectPickerOpen(false); resumeConnectRef.current = false; setEmailAuthOpen(true); setOnboardingError(null); setLoginMsg(null); setWalletStaleMessage(null); }}
               >
                 Continue with email
               </button>
@@ -1387,6 +1417,9 @@ function ConsumerAppInner() {
               wallet. No Google flow, no Circle SDK ceremony, no duplicate
               wallet-creation panel. */}
           {onboardingError && <p style={styles.onboardingError}>{onboardingError}</p>}
+          {/* Stale-wallet signal from the display gate (409 WALLET_NEEDS_UPDATE):
+              the server hid the address — re-login repairs via migration. */}
+          {walletStaleMessage && <p style={styles.onboardingError}>{walletStaleMessage}</p>}
 
           {/* A4: connector picker — appears only when "Use this wallet" is
               tapped without an active wallet connection. Uses the same wagmi
@@ -1535,6 +1568,15 @@ function ConsumerAppInner() {
             >
               {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
             </button>
+            {/* Server-proved mainnet liveness only — never on testnet. */}
+            {walletVerified && !isTestnet && (
+              <span
+                title="Server-verified Arc Mainnet wallet"
+                style={{ display: 'block', textAlign: 'right', fontSize: 10, color: '#0D7C5F', fontWeight: 700, marginTop: 2 }}
+              >
+                Arc Mainnet ✓ verified
+              </span>
+            )}
             {walletMenuOpen && (
               <>
                 <div
@@ -2250,6 +2292,12 @@ function ConsumerAppInner() {
                     {bridgeAddrCopied ? "✓ Copied" : "📋 Copy"}
                   </button>
                 </div>
+                {/* Server-proved mainnet liveness only — never on testnet. */}
+                {walletVerified && !isTestnet && (
+                  <p style={{ margin: "6px 0 0", fontSize: 11, color: "#0D7C5F", fontWeight: 700 }}>
+                    Arc Mainnet ✓ verified
+                  </p>
+                )}
                 {isTestnet && (
                   <a
                     href="https://faucet.circle.com/"

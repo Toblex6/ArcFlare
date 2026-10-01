@@ -5,6 +5,13 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { resolveMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { isAddress } from 'viem';
 import { createAccountWallet } from '@/src/lib/circle/client';
+import { getArcNetworkName } from '@/src/lib/config/network';
+import {
+  WALLET_CHECK_FAILED_CODE,
+  WALLET_CHECK_RETRY_MESSAGE,
+  WALLET_NEEDS_UPDATE_MESSAGE,
+  checkCircleWalletLiveness,
+} from '@/src/lib/wallets/liveness';
 
 // H5: central merchant auth (active + verified + sessionVersion).
 async function getMerchantFromCookie(req: NextRequest) {
@@ -21,12 +28,40 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
         }
 
+        // Mainnet display gate: a CIRCLE payout address that is not ARC+LIVE
+        // under the production key must never be shown (deposit target).
+        // Hide it and force the re-login repair path — login runs the
+        // existing merchant login-time migration. Testnet: never gated.
+        let walletVerified = false;
+        if (
+            getArcNetworkName() === 'mainnet' &&
+            merchant.walletProvider === 'CIRCLE' &&
+            merchant.circleWalletId
+        ) {
+            const live = await checkCircleWalletLiveness(merchant.circleWalletId, merchant.walletAddress);
+            if (live.checked && !live.live) {
+                // Transient: retry, address withheld. Stale: re-login.
+                if (!live.stale) {
+                    return NextResponse.json(
+                        { success: false, code: WALLET_CHECK_FAILED_CODE, error: WALLET_CHECK_RETRY_MESSAGE },
+                        { status: 503 }
+                    );
+                }
+                return NextResponse.json(
+                    { success: false, code: 'WALLET_NEEDS_UPDATE', error: WALLET_NEEDS_UPDATE_MESSAGE },
+                    { status: 409 }
+                );
+            }
+            walletVerified = live.checked && live.live;
+        }
+
         return NextResponse.json({
             success: true,
             wallet: {
                 walletProvider: merchant.walletProvider,
                 walletAddress: merchant.walletAddress,
                 circleWalletId: merchant.circleWalletId,
+                walletVerified,
             },
         });
     } catch {

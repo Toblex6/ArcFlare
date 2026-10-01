@@ -25,6 +25,12 @@ import {
 } from '@/lib/bridge/sourceChains';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
+import {
+  WALLET_CHECK_FAILED_CODE,
+  WALLET_CHECK_RETRY_MESSAGE,
+  WALLET_NEEDS_UPDATE_MESSAGE,
+  checkCircleWalletLiveness,
+} from '@/src/lib/wallets/liveness';
 
 const INTENT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours to submit the burn
 
@@ -124,6 +130,25 @@ export async function POST(req: NextRequest) {
         { success: false, code: dest.code, reason: dest.reason, error: dest.error },
         { status: 400 }
       );
+    }
+    // Mainnet sink gate (same display/liveness rule as the destination
+    // preview): never record a bridge into a wallet that is not ARC+LIVE
+    // under the production key. Testnet: never gated.
+    if (getArcNetworkName() === 'mainnet') {
+      const live = await checkCircleWalletLiveness(dest.circleWalletId, dest.destination);
+      if (live.checked && !live.live) {
+        // Transient: retry, no intent recorded. Stale: re-login.
+        if (!live.stale) {
+          return NextResponse.json(
+            { success: false, code: WALLET_CHECK_FAILED_CODE, error: WALLET_CHECK_RETRY_MESSAGE },
+            { status: 503 }
+          );
+        }
+        return NextResponse.json(
+          { success: false, code: 'WALLET_NEEDS_UPDATE', error: WALLET_NEEDS_UPDATE_MESSAGE },
+          { status: 409 }
+        );
+      }
     }
 
     const intent = await (prisma as any).flowBridgeIntent.create({

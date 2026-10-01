@@ -15,6 +15,7 @@
 import { prisma } from '@/lib/prisma';
 import { issueConsumerSessionToken } from '@/src/lib/auth/consumerSession';
 import { provisionWalletForTelegramUser } from '@/lib/wallet/circleWalletProvisioning';
+import { ensureMainnetConsumerWallet } from '@/src/lib/consumer/walletMigration';
 
 export interface TelegramAuthResult {
   consumerToken: string;
@@ -36,12 +37,29 @@ export async function authenticateOrCreateTelegramConsumer(
   const existing = await prisma.consumerAccount.findFirst({ where: { telegramUserId } });
 
   if (existing) {
+    // Mainnet wallet upgrade check (Step C, same rule as email-auth login):
+    // a Telegram-login account otherwise skips migration forever and keeps
+    // showing a test-era address. Own login only — clean 404 provisions one
+    // fresh ARC wallet (locked + idempotent); transient failures never block
+    // login (display surfaces guide a re-login instead).
+    let walletAddress = existing.walletAddress!;
+    if (
+      String((existing as any).walletType ?? '').toUpperCase() === 'CIRCLE' &&
+      (existing as any).circleWalletId
+    ) {
+      try {
+        const mig = await ensureMainnetConsumerWallet(existing.id);
+        if (mig.migrated) walletAddress = mig.walletAddress;
+      } catch (e: any) {
+        console.error('[telegramAuth] wallet upgrade check failed:', e?.message ?? e);
+      }
+    }
     // M4: bind the token to the account's current sessionVersion.
-    const consumerToken = await issueConsumerToken(existing.id, existing.walletAddress, (existing as any).sessionVersion ?? 0);
+    const consumerToken = await issueConsumerToken(existing.id, walletAddress, (existing as any).sessionVersion ?? 0);
     return {
       consumerToken,
       consumerId: existing.id,
-      walletAddress: existing.walletAddress!,
+      walletAddress,
       isNewAccount: false,
     };
   }

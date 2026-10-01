@@ -249,6 +249,9 @@ export default function ExternalBridge({
   const [destination, setDestination] = useState<string | null>(null);
   const [destLoading, setDestLoading] = useState(true);
   const [destUnbound, setDestUnbound] = useState<string | null>(null);
+  // Server-proved mainnet liveness for the previewed destination (ARC+LIVE
+  // via getWallet). Badge renders solely on this — never assumed client-side.
+  const [destinationVerified, setDestinationVerified] = useState(false);
 
   const [phase, setPhase] = useState<Phase>('form');
   const [stages, setStages] = useState<StageState[]>([]);
@@ -425,17 +428,36 @@ export default function ExternalBridge({
     let cancelled = false;
     setDestLoading(true);
     setDestUnbound(null);
+    setDestinationVerified(false);
     fetch('/api/cctp/transfer/external/destination')
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
         if (d?.success && d.destination) {
           setDestination(d.destination);
+          // Server-proved only — absent/false means unverified.
+          setDestinationVerified(d.walletVerified === true);
           bridgeDiag('D. FlareHQ CIRCLE destination', d.destination);
         } else if (d?.code === 'CIRCLE_WALLET_UNBOUND') {
           setDestination(null);
           setDestUnbound(d.error ?? 'No FlareHQ wallet is linked yet.');
+        } else if (d?.code === 'WALLET_NEEDS_UPDATE') {
+          // Display gate: the linked wallet is not ARC+LIVE — hide the
+          // address and force the re-login repair path.
+          setDestination(null);
+          setDestUnbound(d.error ?? 'Your wallet needs updating, please log in again.');
+        } else if (d?.code === 'WALLET_CHECK_FAILED') {
+          // Transient Circle failure: NOT stale — retry, never claim the
+          // wallet needs updating. No destination is shown either way.
+          setDestination(null);
+          setDestUnbound(d.error ?? 'Could not verify your wallet right now. Try again.');
         } else {
+          setDestination(null);
+          setDestUnbound(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
           setDestination(null);
           setDestUnbound(null);
         }
@@ -843,6 +865,7 @@ export default function ExternalBridge({
         const d = await fetch('/api/cctp/transfer/external/destination').then((r) => r.json()).catch(() => null);
         if (d?.success && d.destination) {
           setDestination(d.destination);
+          setDestinationVerified(d.walletVerified === true);
         } else {
           busyRef.current = false;
           setPhase('form');
@@ -860,6 +883,15 @@ export default function ExternalBridge({
       if (!intent?.success) {
         if (intent?.code === 'CIRCLE_WALLET_UNBOUND') {
           setDestUnbound(intent.error);
+        }
+        if (intent?.code === 'WALLET_NEEDS_UPDATE') {
+          setDestination(null);
+          setDestinationVerified(false);
+          setDestUnbound(intent.error ?? 'Your wallet needs updating, please log in again.');
+        }
+        if (intent?.code === 'WALLET_CHECK_FAILED') {
+          setDestinationVerified(false);
+          setDestUnbound(intent.error ?? 'Could not verify your wallet right now. Try again.');
         }
         throw new Error(intent?.error ?? 'Could not start the bridge. Please try again.');
       }
@@ -1282,7 +1314,19 @@ export default function ExternalBridge({
             {destLoading ? (
               'Resolving…'
             ) : destination ? (
-              <span style={styles.mono}>{shortAddr(destination)}</span>
+              <>
+                <span style={styles.mono}>{shortAddr(destination)}</span>
+                {/* Server-proved ARC+LIVE only (server returns true on mainnet
+                    checks alone — never assumed client-side). */}
+                {destinationVerified && (
+                  <>
+                    <br />
+                    <span style={{ fontSize: 11, color: '#0D7C5F', fontWeight: 700 }}>
+                      Arc Mainnet ✓ verified
+                    </span>
+                  </>
+                )}
+              </>
             ) : (
               <span style={{ color: '#fbbf24' }}>
                 {destUnbound ?? 'No FlareHQ wallet linked yet.'}

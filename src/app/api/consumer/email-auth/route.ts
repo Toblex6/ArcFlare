@@ -48,6 +48,13 @@ import {
   WALLET_UPGRADED_MESSAGE,
   ensureMainnetConsumerWallet,
 } from "@/src/lib/consumer/walletMigration";
+import { getArcNetworkName } from "@/src/lib/config/network";
+import {
+  WALLET_CHECK_FAILED_CODE,
+  WALLET_CHECK_RETRY_MESSAGE,
+  WALLET_NEEDS_UPDATE_MESSAGE,
+  checkCircleWalletLiveness,
+} from "@/src/lib/wallets/liveness";
 import { createAccountWallet } from "@/src/lib/circle/client";
 import { sendConsumerOtpEmail } from "@/src/lib/email";
 
@@ -243,6 +250,44 @@ export async function PUT(req: NextRequest) {
   // Same session mechanism as every other consumer login — no new session
   // system.
   const { token } = await issueSessionCookie(account);
+  // Mainnet display gate (same rule as the session-check GET): the address
+  // in this response renders immediately (Receive/deposit copy), so verify
+  // ARC+LIVE here too. A stale wallet fails closed to the re-login message
+  // with NO address rather than displaying a dead deposit target. The
+  // login-time migration above already repaired clean-404 rows, so a live
+  // row passes and a fresh row passes by construction (cached 10 min).
+  let walletVerified = false;
+  if (
+    getArcNetworkName() === "mainnet" &&
+    account?.walletType === "CIRCLE" &&
+    account?.circleWalletId
+  ) {
+    const live = await checkCircleWalletLiveness(account.circleWalletId, account.walletAddress);
+    if (live.checked && !live.live) {
+      // Transient (timeout/5xx/network): retry with NO address and NO
+      // session — never "needs updating", never a new wallet. Stale (clean
+      // 404 / wrong chain): re-login repair path.
+      if (!live.stale) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: WALLET_CHECK_FAILED_CODE,
+            error: WALLET_CHECK_RETRY_MESSAGE,
+          },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        {
+          success: false,
+          code: "WALLET_NEEDS_UPDATE",
+          error: WALLET_NEEDS_UPDATE_MESSAGE,
+        },
+        { status: 409 }
+      );
+    }
+    walletVerified = live.checked && live.live;
+  }
   const res = NextResponse.json({
     success: true,
     isNew: isNewAccount,
@@ -254,6 +299,7 @@ export async function PUT(req: NextRequest) {
       circleWalletId: account.circleWalletId ?? null,
       mode: wallet.mode,
       canServerSign: wallet.canServerSign,
+      walletVerified,
     },
   });
   res.cookies.set("consumer_token", token, {
