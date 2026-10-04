@@ -1,6 +1,21 @@
 // src/app/api/webhooks/circle/route.ts
-// Receives Circle V2 webhook events and automatically routes
-// detected USDC transfers to Arc via CCTP V2.
+// Receives Circle V2 webhook events.
+//
+// PRODUCTION STATUS (2026-10-04 hardening review): the auto-settle side
+// effect below (creating a PaymentLog + minting on Arc with
+// ARC_ADMIN_PRIVATE_KEY) is DORMANT — no subscription setup exists in this
+// repository, no CIRCLE_WEBHOOK_SECRET is configured in any environment, and
+// the live Mainnet bridge path (Bridge Kit browser flow + detect/cctp-settle
+// client polling) never touches this route. Signature verification stays
+// fail-closed (401 on mismatch), but signature VALIDATION against Circle's
+// current v2 signed-webhook mechanism is UNPROVEN for the legacy HMAC-hex
+// scheme implemented in verifyCircleWebhookSignature — legitimate v2 traffic
+// most likely 401s here, which is exactly why the mint path must not be
+// armed by default. Auto-settle therefore requires explicit opt-in
+// (CIRCLE_WEBHOOK_AUTOSETTLE_ENABLED=1); without it the route acknowledges
+// (handshake/ping/event receipt) and performs NO ledger write and NO mint.
+// Do not re-arm this without proving end-to-end signature validation against
+// a real Circle v2 notification first.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
@@ -77,7 +92,19 @@ export async function POST(req: NextRequest) {
         isUsdc = false;
       }
 
-      if (messageHash && isUsdc) {
+      // Dormant-path isolation: without explicit opt-in, observe only —
+      // never create ledger rows or mint (see header). This keeps the route
+      // safe while signature-scheme compatibility with Circle v2 is unproven.
+      const autoSettleArmed =
+        (process.env.CIRCLE_WEBHOOK_AUTOSETTLE_ENABLED ?? '').trim().toLowerCase() === '1' ||
+        (process.env.CIRCLE_WEBHOOK_AUTOSETTLE_ENABLED ?? '').trim().toLowerCase() === 'true';
+      if (messageHash && isUsdc && !autoSettleArmed) {
+        console.log(
+          `⏸️ Circle webhook auto-settle is not armed (CIRCLE_WEBHOOK_AUTOSETTLE_ENABLED unset) — acknowledging without ledger write or mint.`
+        );
+      }
+
+      if (messageHash && isUsdc && autoSettleArmed) {
         const reference = `arc_auto_${Date.now().toString(36)}_${Math.random()
           .toString(36)
           .slice(2, 8)}`;
@@ -166,6 +193,15 @@ export async function POST(req: NextRequest) {
 
 // ─── Background: Auto-settle via CCTP V2 ─────────────────────────────────────
 async function autoSettleV2(reference: string, messageHash: string) {
+  // Defense in depth: the caller gates on the flag, and the minter refuses
+  // without it too — no path reaches mintOnArc while disarmed.
+  const armed =
+    (process.env.CIRCLE_WEBHOOK_AUTOSETTLE_ENABLED ?? '').trim().toLowerCase() === '1' ||
+    (process.env.CIRCLE_WEBHOOK_AUTOSETTLE_ENABLED ?? '').trim().toLowerCase() === 'true';
+  if (!armed) {
+    console.log(`⏸️ autoSettleV2 invoked while disarmed — refusing to mint for ${reference}.`);
+    return;
+  }
   try {
     console.log(`⚡ CCTP V2 auto-settling ${reference}...`);
 

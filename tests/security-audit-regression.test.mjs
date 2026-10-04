@@ -41,7 +41,8 @@ const H5_ROUTES = [
   'src/app/api/merchant/payment-link/route.ts',
   'src/app/api/merchant/escrow-link/route.ts',
   'src/app/api/merchant/withdraw/route.ts',
-  'src/app/api/merchant/merchant/withdraw/route.ts',
+  // 2026-10-04 hardening: identical nested duplicate
+  // (merchant/merchant/withdraw) deleted — single withdraw route only.
 ];
 for (const r of H5_ROUTES) {
   test(`H5 ${r} uses resolveMerchant (active+verified+sessionVersion)`, () => {
@@ -52,7 +53,8 @@ for (const r of H5_ROUTES) {
 }
 
 // ── H6: withdraw idempotency ───────────────────────────────────────────────
-for (const r of ['src/app/api/merchant/withdraw/route.ts', 'src/app/api/merchant/merchant/withdraw/route.ts']) {
+// (nested duplicate deleted 2026-10-04 — single route only)
+for (const r of ['src/app/api/merchant/withdraw/route.ts']) {
   test(`H6 ${r} requires Idempotency-Key + unique claim + replay`, () => {
     const s = read(r);
     assert.ok(s.includes('Idempotency-Key'), 'header required');

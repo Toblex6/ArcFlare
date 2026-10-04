@@ -7,7 +7,10 @@ import { prisma } from '@/src/lib/prisma';
 import { createWalletClient, createPublicClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getArcChain } from '@/lib/config/network';
-const arcTestnet = getArcChain();
+// Authoritative chain (env-resolved: testnet 5042002, mainnet 5042).
+// Named for what it is — the stale `arcTestnet` name was a Mainnet
+// misreading hazard on this money path.
+const arcChain = getArcChain();
 import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMerchantAuth';
 import { resolveConsumerSession } from '@/lib/middleware/withConsumerAuth';
 import { requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
@@ -423,11 +426,11 @@ async function mergedSettleHandler(request: NextRequest) {
       const account = privateKeyToAccount(adminKey as `0x${string}`);
       const walletClient = createWalletClient({
         account,
-        chain: arcTestnet,
+        chain: arcChain,
         transport: http(getNetworkConfig().primaryRpc),
       });
       const publicClient = createPublicClient({
-        chain: arcTestnet,
+        chain: arcChain,
         transport: http(getNetworkConfig().primaryRpc),
       });
 

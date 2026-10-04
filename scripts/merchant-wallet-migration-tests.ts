@@ -82,7 +82,9 @@ ok('scheduled create records CURRENT receiver', sched.includes('resolveCurrentMe
 const schedRun = read('src/app/api/payments/scheduled/run/route.ts');
 ok('scheduled/run pays CURRENT receiver', schedRun.includes('liveReceiverSCA'));
 
-for (const f of ['src/app/api/merchant/withdraw/route.ts', 'src/app/api/merchant/merchant/withdraw/route.ts']) {
+// 2026-10-04 hardening: the identical nested duplicate
+// (merchant/merchant/withdraw) was deleted — single withdraw route only.
+for (const f of ['src/app/api/merchant/withdraw/route.ts']) {
   const w = read(f);
   ok(`${f.split('/').slice(-2).join('/')} maps stale id to 409`, w.includes('assertMerchantCircleWalletLive(merchant)'));
 }

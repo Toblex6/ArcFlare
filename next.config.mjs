@@ -8,6 +8,10 @@ import { ethers } from 'ethers';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Consolidated from the removed next.config.ts (which Next never loaded:
+  // CONFIG_FILES order is js > mjs > ts, so this .mjs is authoritative).
+  // Prisma must stay external to the server bundle, not bundled raw.
+  serverExternalPackages: ['@prisma/client'],
   typescript: {
     // tsc --noEmit is now clean repo-wide (was 113 errors when this flag
     // was added) — keep the gate ON so type regressions fail the build.

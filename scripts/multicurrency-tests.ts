@@ -94,6 +94,7 @@ function throws(fn: () => unknown): boolean {
 
 const root = process.cwd();
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
+const exists = (p: string) => fs.existsSync(path.join(root, p));
 
 const USDC = SUPPORTED_TOKENS.USDC.address;
 const EURC = SUPPORTED_TOKENS.EURC.address;
@@ -182,15 +183,18 @@ async function main() {
   console.log("\n[Phase 1] read paths — canonical token identity + legacy defaulting");
   const verify = read("src/app/api/payments/verify/[reference]/route.ts");
   const all = read("src/app/api/payments/all/route.ts");
-  const history = read("src/app/api/payments/history/route.ts");
   const activity = read("src/app/api/consumer/activity/route.ts");
-  for (const [name, src] of [["verify", verify], ["payments/all", all], ["history", history], ["consumer/activity", activity]] as const) {
+  for (const [name, src] of [["verify", verify], ["payments/all", all], ["consumer/activity", activity]] as const) {
     ok(`${name}: resolves row currency via canonical resolver`, src.includes("resolveRowCurrency("));
     ok(`${name}: exposes token identity`, /token,/.test(src) || /token:\s*\{/.test(src));
     ok(`${name}: unsupported legacy data degrades to USDC instead of failing the read`, src.includes("tokenAddressFor('USDC')") || src.includes('tokenAddressFor("USDC")'));
   }
   ok("verify keeps legacy response shape (status/amount/reference intact)", verify.includes("reference:") && verify.includes("amount:") && verify.includes("status:"));
-  ok("history keeps legacy per-row fields intact", history.includes("currency: log.currency") && history.includes("amount: log.amount"));
+  // 2026-10-04 hardening: the unauthenticated global /api/payments/history
+  // feed was deleted (no callers; tenant-scoped merchant history is the real
+  // read path). Assert the deletion rather than the old feed's shape.
+  ok("global payments/history route deleted", !exists("src/app/api/payments/history/route.ts"));
+  ok("merchant history stays tenant-scoped", read("src/app/api/merchant/payment-link/route.ts").includes("resolveMerchant(req)"));
 
   console.log("\n[Phase 1] client-safe token metadata layer");
   const clientTokens = read("src/lib/tokens/clientTokens.ts");
