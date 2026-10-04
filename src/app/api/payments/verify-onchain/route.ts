@@ -6,24 +6,156 @@
 // confirms a real Transfer(customer -> merchant, >= amount) log exists
 // before marking anything SUCCESS. A client claiming success alone is
 // never sufficient.
+//
+// H1 hardening: one direct payment proof (chainId, txHash, logIndex) settles
+// AT MOST ONE invoice. The claim row is created atomically inside the same
+// transaction as the SUCCESS update (see src/lib/payments/directProof.ts) —
+// concurrent verifiers race on the unique constraint and exactly one wins.
+// Platform-fee collection is claim-before-transfer exactly-once (see
+// src/lib/payments/platformFee.ts) and can never roll back a settled payment.
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createPublicClient, http, parseUnits, decodeEventLog, erc20Abi } from 'viem';
+import { createPublicClient, http, parseUnits, erc20Abi } from 'viem';
 import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
-import { arcTestnet } from '@/src/lib/wagmi';
 import { erc20TransferAbi } from '@/src/lib/wallet/erc20';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
-import { transferUsdc } from '@/src/lib/circle/transfers';
 import { getRoutingConfig, readWithRetry } from '@/src/lib/routing/canonical';
 import { checkRoutedExecution, findRoutedEvent } from '@/src/lib/routing/verifier';
-import { getNetworkConfig } from "@/lib/config/network";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 import { claimTxSlot, recheckExecutionConsumerTx, executionConflict } from '@/src/lib/swap/service';
+import {
+    findDirectTransfer,
+    assertTransferNotPredatingInvoice,
+    assertMainnetSettlementAllowed,
+    settleDirectPaymentAtomic,
+} from '@/src/lib/payments/directProof';
+import {
+    settlePlatformFeeOnce,
+    prismaPlatformFeeStore,
+    circleFeePorts,
+    type FeeDecision,
+} from '@/src/lib/payments/platformFee';
 
-const publicClient = createPublicClient({
-    chain: arcTestnet,
-    transport: http(),
-});
+void erc20TransferAbi;
+
+/**
+ * Chain client for verification — built per request from the single
+ * authoritative network config (chain metadata + primary RPC). Never a
+ * stale/testnet-pinned chain object: on ARC_NETWORK=mainnet this resolves to
+ * Arc Mainnet (chain 5042, mainnet RPC), and misconfiguration fails closed
+ * inside getNetworkConfig instead of silently verifying against testnet.
+ */
+function verifierClient() {
+    const cfg = getNetworkConfig();
+    return createPublicClient({ chain: getArcChain(), transport: http(cfg.primaryRpc) });
+}
+
+async function readTokenBalance(
+    owner: string,
+    tokenAddress: string
+): Promise<bigint> {
+    const cfg = getNetworkConfig();
+    const pc = createPublicClient({
+        chain: getArcChain(),
+        transport: http(cfg.primaryRpc),
+    });
+    return (await pc.readContract({
+        address: tokenAddress as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [owner as `0x${string}`],
+    })) as bigint;
+}
+
+interface FeeToken {
+    symbol: 'USDC' | 'EURC';
+    address: string;
+    decimals: number;
+}
+
+/**
+ * Platform-fee collection, best-effort and NEVER load-bearing for the payment
+ * result: any failure (or deferral) is logged, never thrown, so a fee
+ * operational failure cannot falsely report the customer payment as failed
+ * and can never roll back a SUCCESS that already persisted.
+ */
+async function settleFeeBestEffort(payment: any, token: FeeToken): Promise<void> {
+    try {
+        const FEE_BPS = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
+        const unitsPerToken = 10 ** token.decimals;
+        const rawFee = payment.amount * FEE_BPS / 10000;
+        const feeAmount = Math.round(rawFee * unitsPerToken) / unitsPerToken;
+        const feeRounded = Math.round(feeAmount * unitsPerToken) / unitsPerToken;
+        const SELLER_ADDRESS = process.env.SELLER_ADDRESS as string | undefined;
+
+        const merchantRow: any = payment.merchantId
+            ? await (prisma as any).merchant.findUnique({ where: { id: payment.merchantId } })
+            : null;
+        const fallbackMerchantId =
+            (payment as any).merchantId || (merchantRow?.id as string | undefined) || 'unknown';
+
+        let decision: FeeDecision;
+        if (!merchantRow || merchantRow.walletProvider !== 'CIRCLE' || !merchantRow.circleWalletId) {
+            decision = { kind: 'defer', reason: 'non-Circle wallet, cannot auto-debit' };
+        } else if (feeRounded === 0) {
+            decision = { kind: 'defer', reason: 'fee rounds to zero' };
+        } else if (!SELLER_ADDRESS) {
+            decision = { kind: 'defer', reason: 'fee collector address not configured' };
+        } else {
+            let merchantBalance: bigint | null = null;
+            try {
+                merchantBalance = await readTokenBalance(merchantRow.walletAddress as string, token.address);
+            } catch (e: any) {
+                console.error('fee balance read failed:', e.message);
+            }
+            const feeWei = BigInt(Math.round(feeRounded * unitsPerToken));
+            if (merchantBalance !== null && merchantBalance < feeWei) {
+                decision = { kind: 'defer', reason: 'insufficient balance' };
+            } else {
+                const amountStr = feeRounded.toFixed(token.decimals).replace(/\.?0+$/, '');
+                decision = {
+                    kind: 'collect',
+                    walletId: merchantRow.circleWalletId as string,
+                    walletAddress: merchantRow.walletAddress as string,
+                    destinationAddress: SELLER_ADDRESS,
+                    amountStr,
+                    tokenAddress: token.address,
+                    decimals: token.decimals,
+                };
+            }
+        }
+
+        // SELLER delta measurement (informational amountReceived only).
+        let sellerBefore = 0n;
+        if (decision.kind === 'collect' && SELLER_ADDRESS) {
+            try {
+                sellerBefore = await readTokenBalance(SELLER_ADDRESS, token.address);
+            } catch { /* RPC hiccup — fall back to requested amount */ }
+        }
+        const outcome = await settlePlatformFeeOnce({
+            store: prismaPlatformFeeStore(),
+            ports: circleFeePorts(async () => {
+                if (!SELLER_ADDRESS) return null;
+                try {
+                    const sellerAfter = await readTokenBalance(SELLER_ADDRESS, token.address);
+                    const delta = sellerAfter - sellerBefore;
+                    if (delta > 0n) return Number(delta) / unitsPerToken;
+                } catch { /* fall back to requested amount */ }
+                return null;
+            }),
+            paymentLogId: payment.id,
+            merchantId: fallbackMerchantId,
+            amountCharged: feeAmount,
+            decision,
+        });
+        console.log(`platform fee ${outcome.action} for payment ${payment.reference ?? payment.id}`);
+    } catch (e: any) {
+        // Fail closed WITHOUT touching the settled payment: fee state says
+        // FAILED/PENDING (resumable), the customer payment stays SUCCESS.
+        console.error('Platform fee debit error:', e?.message ?? e);
+    }
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -45,6 +177,16 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, error: 'Payment not found.' }, { status: 404 });
         }
         if (payment.status === 'SUCCESS') {
+            // Crash recovery: a fee claim left PENDING by a crashed first
+            // attempt resumes here under the SAME idempotency key — never a
+            // second transfer. The payment result itself is unchanged.
+            try {
+                const settledToken = resolveRowCurrency({
+                    currency: (payment as any).currency ?? null,
+                    tokenAddress: (payment as any).tokenAddress ?? null,
+                });
+                await settleFeeBestEffort(payment, settledToken);
+            } catch { /* fee is best-effort; the payment stays settled */ }
             return NextResponse.json({ success: true, alreadySettled: true });
         }
 
@@ -71,12 +213,27 @@ export async function POST(req: NextRequest) {
             );
         }
 
+        // Mainnet merchant-checkout policy: USDC-only settlement, enforced
+        // server-side (the UI restriction alone is bypassable). Testnet keeps
+        // its intentionally-supported multicurrency behavior.
+        try {
+            assertMainnetSettlementAllowed(token.symbol);
+        } catch (gateErr: any) {
+            return NextResponse.json(
+                { success: false, error: gateErr.message },
+                { status: typeof gateErr?.status === 'number' ? gateErr.status : 400 }
+            );
+        }
+
         if (!payment.merchantSCA) {
             return NextResponse.json(
                 { success: false, error: 'This payment has no recipient wallet on file.' },
                 { status: 400 }
             );
         }
+
+        const cfg = getNetworkConfig();
+        const publicClient = verifierClient();
 
         // Read the receipt directly from the chain — do not trust anything
         // the client says about whether the tx "worked."
@@ -92,6 +249,24 @@ export async function POST(req: NextRequest) {
                 { status: 400 }
             );
         }
+
+        // Chain binding: the receipt was served by the configured network's
+        // RPC (a mainnet RPC cannot serve a testnet receipt), and the mined
+        // transaction's own chainId must additionally equal the configured
+        // chain. A missing tx body degrades to the RPC binding alone.
+        try {
+            const tx = await publicClient.getTransaction({ hash: txHash }).catch(() => null);
+            const txChainId = tx && typeof (tx as any).chainId === 'number' ? (tx as any).chainId : null;
+            if (txChainId !== null && txChainId !== cfg.chainId) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: `Transaction is not on the configured Arc network (tx chain ${txChainId}, expected ${cfg.chainId}).`,
+                    },
+                    { status: 400 }
+                );
+            }
+        } catch { /* RPC hiccup on the tx body — receipt binding stands */ }
 
         // Amount in the RESOLVED token's decimals (both supported tokens are 6
         // decimals today — still resolved, not hardcoded, because the resolver
@@ -114,7 +289,7 @@ export async function POST(req: NextRequest) {
         let routedCheck: { payer: string; actualInput: string; actualOutput: string } | null = null;
         let routedConversion: any = null;
 
-        let matchedTransfer: { from: string; value: bigint } | null = null;
+        let matchedTransfer: { from: string; value: bigint; logIndex?: number } | null = null;
 
         // UnitFlow settlement (if the service already persisted it — the
         // canonical tail below is skipped in that case).
@@ -233,32 +408,16 @@ export async function POST(req: NextRequest) {
         // Direct-transfer matching: only a Transfer log emitted by the
         // resolved token contract can satisfy this invoice: a USDC log never
         // satisfies an EURC invoice and vice versa. Logs from any other
-        // contract are ignored (skipped, never matched).
+        // contract are ignored (skipped, never matched). The matched
+        // logIndex identifies the EXACT proof consumed below — claiming the
+        // txHash alone would let one multi-transfer transaction settle
+        // several invoices.
         const expectedAmount = parseUnits(payment.amount.toString(), token.decimals);
-        const merchantAddr = payment.merchantSCA.toLowerCase();
-
-        for (const log of receipt.logs) {
-            if (log.address.toLowerCase() !== token.address.toLowerCase()) continue;
-            try {
-                const decoded = decodeEventLog({
-                    abi: erc20TransferAbi,
-                    data: log.data,
-                    topics: log.topics,
-                });
-                if (decoded.eventName !== 'Transfer') continue;
-                const { to, from, value } = decoded.args as unknown as {
-                    to: string;
-                    from: string;
-                    value: bigint;
-                };
-                if (to.toLowerCase() === merchantAddr && value >= expectedAmount) {
-                    matchedTransfer = { from, value };
-                    break;
-                }
-            } catch {
-                continue; // not a Transfer log, skip
-            }
-        }
+        matchedTransfer = findDirectTransfer((receipt.logs as any) ?? [], {
+            tokenAddress: token.address,
+            merchantSCA: payment.merchantSCA,
+            expectedAmount,
+        });
         } // end direct-transfer matching
 
         if (!matchedTransfer) {
@@ -270,6 +429,34 @@ export async function POST(req: NextRequest) {
                 },
                 { status: 400 }
             );
+        }
+
+        // H1 temporal binding (direct path only — routed conversions already
+        // bind quote time + expiry): a transfer mined before the invoice
+        // existed is unrelated by construction and cannot settle it. The
+        // block read failing closed here creates no proof row, so a retry
+        // after the RPC recovers is always safe.
+        if (!wantsRoute) {
+            const directBlock = await publicClient
+                .getBlock({ blockHash: receipt.blockHash })
+                .catch(() => null);
+            if (!directBlock) {
+                return NextResponse.json(
+                    { success: false, error: 'Could not read execution block — retry shortly.' },
+                    { status: 503 }
+                );
+            }
+            try {
+                assertTransferNotPredatingInvoice({
+                    blockTimestampSec: Number(directBlock.timestamp),
+                    invoiceCreatedAt: (payment as any).timestamp,
+                });
+            } catch (timeErr: any) {
+                return NextResponse.json(
+                    { success: false, error: timeErr.message },
+                    { status: typeof timeErr?.status === 'number' ? timeErr.status : 400 }
+                );
+            }
         }
 
         // Preserve canonical token identity (currency + tokenAddress) so an
@@ -295,6 +482,8 @@ export async function POST(req: NextRequest) {
         // transaction below: claimTxSlot + in-transaction cross-table recheck
         // serialize concurrent claimants for the same execution tx hash,
         // and same-record idempotent resume is preserved.
+        // Direct transfers are protected the same way via the consumed-proof
+        // claim (chainId, txHash, logIndex) — see directProof.ts.
         let updated: any;
         if (unitFlowSettled) {
             updated = unitFlowSettled.payment;
@@ -323,6 +512,34 @@ export async function POST(req: NextRequest) {
             } catch (e: any) {
                 throw executionConflict(e);
             }
+        } else if (!wantsRoute) {
+            // H1: atomic proof-consumption + SUCCESS. Same proof replayed
+            // against THIS invoice resumes idempotently; against ANY other
+            // invoice it fails 409 — sequentially and concurrently.
+            if (matchedTransfer.logIndex === undefined) {
+                return NextResponse.json(
+                    { success: false, error: 'Transfer proof is missing its log index — refusing.' },
+                    { status: 500 }
+                );
+            }
+            try {
+                ({ payment: updated } = await settleDirectPaymentAtomic({
+                    db: prisma,
+                    reference,
+                    paymentId: payment.id,
+                    chainId: cfg.chainId,
+                    txHash,
+                    logIndex: matchedTransfer.logIndex,
+                    successData,
+                }));
+            } catch (claimErr: any) {
+                const claimStatus = typeof claimErr?.status === 'number' ? claimErr.status : 500;
+                if (claimStatus === 500) console.error('Direct proof claim error:', claimErr);
+                return NextResponse.json(
+                    { success: false, error: claimErr.message || 'Verification failed.' },
+                    { status: claimStatus }
+                );
+            }
         } else {
             updated = await prisma.paymentLog.update({ where: { reference }, data: successData });
         }
@@ -344,201 +561,21 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Platform fee debit (post-SUCCESS, never touches customer->merchant verification) ──
-        // FEE SEMANTICS (Phase 2A): the existing protocol charges FEE_BPS of the
-        // invoice amount in TOKEN UNITS — that math is token-unit based, so it
-        // applies identically in USDC or EURC with no cross-currency assumption
-        // (1 EURC is never treated as 1 USDC; the fee is denominated in the
-        // invoice's own token). Balance reads and the debit transfer therefore
-        // use the resolved token contract, not a hardcoded USDC address.
-        try {
-            const FEE_BPS = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
-            const unitsPerToken = 10 ** token.decimals;
-            const rawFee = payment.amount * FEE_BPS / 10000;
-            const feeAmount = Math.round(rawFee * unitsPerToken) / unitsPerToken;
-            const feeRounded = Math.round(feeAmount * unitsPerToken) / unitsPerToken;
-            const SELLER_ADDRESS = process.env.SELLER_ADDRESS as string | undefined;
-
-            async function readTokenBalance(owner: string): Promise<bigint> {
-                const pc = createPublicClient({
-                    chain: arcTestnet,
-                    transport: http(getNetworkConfig().primaryRpc),
-                });
-                return (await pc.readContract({
-                    address: token.address as `0x${string}`,
-                    abi: erc20Abi,
-                    functionName: 'balanceOf',
-                    args: [owner as `0x${string}`],
-                })) as bigint;
-            }
-
-            const merchantRow: any = payment.merchantId
-                ? await (prisma as any).merchant.findUnique({ where: { id: payment.merchantId } })
-                : null;
-
-            const fallbackMerchantId = (payment as any).merchantId || (merchantRow?.id as string | undefined) || 'unknown';
-
-            // Non-Circle wallet — cannot auto-debit
-            if (!merchantRow || merchantRow.walletProvider !== 'CIRCLE' || !merchantRow.circleWalletId) {
-                console.log('fee skipped — non-Circle wallet, cannot auto-debit');
-                try {
-                    await (prisma as any).platformFee.create({
-                        data: {
-                            paymentLogId: payment.id,
-                            merchantId: fallbackMerchantId,
-                            amountCharged: feeAmount,
-                            status: 'DEFERRED',
-                            deferredReason: 'non-Circle wallet, cannot auto-debit',
-                        },
-                    });
-                } catch (e: any) {
-                    console.error('PlatformFee DEFERRED create failed (non-Circle):', e.message);
-                }
-            } else if (feeRounded === 0) {
-                console.log('fee skipped — fee rounds to zero');
-                try {
-                    await (prisma as any).platformFee.create({
-                        data: {
-                            paymentLogId: payment.id,
-                            merchantId: fallbackMerchantId,
-                            amountCharged: feeAmount,
-                            status: 'DEFERRED',
-                            deferredReason: 'fee rounds to zero',
-                        },
-                    });
-                } catch (e: any) {
-                    console.error('PlatformFee DEFERRED create failed (rounds to zero):', e.message);
-                }
-            } else if (!SELLER_ADDRESS) {
-                console.log('fee skipped — non-Circle wallet, cannot auto-debit');
-                try {
-                    await (prisma as any).platformFee.create({
-                        data: {
-                            paymentLogId: payment.id,
-                            merchantId: fallbackMerchantId,
-                            amountCharged: feeAmount,
-                            status: 'DEFERRED',
-                            deferredReason: 'non-Circle wallet, cannot auto-debit',
-                        },
-                    });
-                } catch (e: any) {
-                    console.error('PlatformFee DEFERRED create failed (no SELLER_ADDRESS):', e.message);
-                }
-            } else {
-                // Check merchant Circle wallet balance before attempting debit
-                let merchantBalance: bigint | null = null;
-                try {
-                    merchantBalance = await readTokenBalance(merchantRow.walletAddress as string);
-                } catch (e: any) {
-                    console.error('fee balance read failed:', e.message);
-                }
-                const feeWei = BigInt(Math.round(feeRounded * unitsPerToken));
-                if (merchantBalance !== null && merchantBalance < feeWei) {
-                    console.log('fee skipped — insufficient balance');
-                    try {
-                        await (prisma as any).platformFee.create({
-                            data: {
-                                paymentLogId: payment.id,
-                                merchantId: fallbackMerchantId,
-                                amountCharged: feeAmount,
-                                status: 'DEFERRED',
-                                deferredReason: 'insufficient balance',
-                            },
-                        });
-                    } catch (e: any) {
-                        console.error('PlatformFee DEFERRED create failed (insufficient balance):', e.message);
-                    }
-                } else {
-                    // Attempt fee debit via Circle SDK in the invoice's token,
-                    // measure SELLER delta
-                    const amountStr = feeRounded.toFixed(token.decimals).replace(/\.?0+$/, '');
-                    let sellerBefore = 0n;
-                    try {
-                        sellerBefore = await readTokenBalance(SELLER_ADDRESS);
-                    } catch {}
-                    let arcTxHashFee: string | undefined;
-                    let feeTransferFailed = false;
-                    try {
-                        const result = await transferUsdc({
-                            walletId: merchantRow.circleWalletId as string,
-                            walletAddress: merchantRow.walletAddress as string,
-                            destinationAddress: SELLER_ADDRESS,
-                            amount: amountStr,
-                            tokenAddress: token.address,
-                            decimals: token.decimals,
-                        });
-                        arcTxHashFee = result.arcTxHash;
-                    } catch (e: any) {
-                        console.error('Platform fee transfer failed:', e.message);
-                        try {
-                            await (prisma as any).platformFee.create({
-                                data: {
-                                    paymentLogId: payment.id,
-                                    merchantId: fallbackMerchantId,
-                                    amountCharged: feeAmount,
-                                    status: 'FAILED',
-                                    deferredReason: e.message?.slice(0, 500),
-                                },
-                            });
-                        } catch (inner: any) {
-                            console.error('PlatformFee FAILED create failed:', inner.message);
-                        }
-                        // Do not rethrow — fee failure must not affect SUCCESS response
-                        feeTransferFailed = true;
-                    }
-                    if (!feeTransferFailed && arcTxHashFee) {
-                        let receivedWei = feeWei;
-                        let amountReceived: number = feeRounded;
-                        try {
-                            const sellerAfter = await readTokenBalance(SELLER_ADDRESS);
-                            const delta = sellerAfter - sellerBefore;
-                            if (delta > 0n) {
-                                receivedWei = delta;
-                                amountReceived = Number(delta) / unitsPerToken;
-                            }
-                        } catch {
-                            // RPC hiccup — fall back to requested amount
-                        }
-                        try {
-                            await (prisma as any).platformFee.create({
-                                data: {
-                                    paymentLogId: payment.id,
-                                    merchantId: fallbackMerchantId,
-                                    amountCharged: feeAmount,
-                                    amountReceived,
-                                    status: 'SUCCESS',
-                                    txHash: arcTxHashFee,
-                                },
-                            });
-                        } catch (e: any) {
-                            console.error('PlatformFee SUCCESS create failed:', e.message);
-                        }
-                    }
-                }
-            }
-        } catch (e: any) {
-            console.error('Platform fee debit error:', e.message);
-            try {
-                const FEE_BPS_FALLBACK = parseInt(process.env.PLATFORM_FEE_BPS ?? '25', 10);
-                const fallbackUnits = 10 ** token.decimals;
-                const feeFallback = Math.round((payment.amount * FEE_BPS_FALLBACK / 10000) * fallbackUnits) / fallbackUnits;
-                await (prisma as any).platformFee.create({
-                    data: {
-                        paymentLogId: payment.id,
-                        merchantId: (payment as any).merchantId || 'unknown',
-                        amountCharged: feeFallback,
-                        status: 'FAILED',
-                        deferredReason: e.message?.slice(0, 500),
-                    },
-                });
-            } catch (inner: any) {
-                console.error('PlatformFee FAILED outer create failed:', inner.message);
-            }
-        }
+        // Claim-before-transfer exactly-once (src/lib/payments/platformFee.ts):
+        // at most one Circle transfer per settled payment across duplicates,
+        // concurrency, and crash-retries. Best-effort: failures are logged,
+        // never thrown — the customer payment above stays SUCCESS.
+        await settleFeeBestEffort(updated, token);
 
         return NextResponse.json({ success: true, payment: updated });
     } catch (error: any) {
         console.error('On-chain verification error:', error);
-        const status = typeof error?.status === 'number' ? error.status : 500;
+        let status = typeof error?.status === 'number' ? error.status : 500;
+        // Pooled-DB burst timeouts never started a transaction (no state
+        // changed) — report retryable 503, never a terminal 500.
+        if (status === 500 && (error?.code === 'P2028' || error?.code === 'P2034')) {
+            status = 503;
+        }
         return NextResponse.json(
             { success: false, error: error.message || 'Verification failed.' },
             { status }

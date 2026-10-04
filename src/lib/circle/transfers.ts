@@ -57,30 +57,64 @@ export interface TransferUsdcParams {
   // only ever a belt-and-suspenders layer on top of.
 }
 
-export async function transferUsdc({
-  walletId,
-  walletAddress,
-  destinationAddress,
-  amount,
-  tokenAddress,
-  decimals = 6,
-}: TransferUsdcParams): Promise<{ arcTxHash: string; circleTxId: string }> {
-  // Resolve lazily from the authoritative network config (testnet value
-  // unchanged; mainnet: required ARC_MAINNET_USDC_ADDRESS, fail-closed).
-  tokenAddress = tokenAddress ?? defaultTokenAddress();
+export interface CircleTransferInit {
+  walletId: string;
+  walletAddress: string;
+  destinationAddress: string;
+  amount: string;
+  tokenAddress?: string;
+  decimals?: number;
+  /**
+   * Stable caller-side idempotency key (fee path: `platform-fee:<paymentLogId>`).
+   * Forwarded to Circle's createTransaction when the endpoint accepts it; when
+   * the endpoint rejects the parameter (verified 2026-08-19 on ARC-TESTNET:
+   * "API parameter invalid") creation is retried ONCE without it. Rejection
+   * happens before any transfer exists, so the retry cannot double-send.
+   */
+  idempotencyKey?: string;
+}
+
+function isIdempotencyRejection(e: any): boolean {
+  const msg = String(e?.message ?? e ?? '');
+  return /idempotency/i.test(msg) && /invalid|unknown|unexpected|not (supported|allowed)/i.test(msg);
+}
+
+/**
+ * Initiate a Circle transfer and return its transaction id WITHOUT waiting
+ * for finality. The caller must persist circleTxId BEFORE polling (crash
+ * anchor) — see src/lib/payments/platformFee.ts. Throws when neither the
+ * native nor the ERC-20 fallback route yields an id.
+ */
+export async function createCircleTransfer(init: CircleTransferInit): Promise<{ circleTxId: string }> {
+  const tokenAddress = init.tokenAddress ?? defaultTokenAddress();
+  const decimals = init.decimals ?? 6;
   const client = getCircleClient();
   let circleTxId: string | undefined;
 
-  try {
-    const transferTx = await client.createTransaction({
-      walletId,
+  const nativeArgs = (withKey: boolean) =>
+    ({
+      walletId: init.walletId,
       blockchain: getNetworkConfig().circleBlockchain as any,
       tokenAddress,
-      destinationAddress,
-      amounts: [amount],
+      destinationAddress: init.destinationAddress,
+      amounts: [init.amount],
       fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-    } as any);
-    circleTxId = transferTx.data?.id;
+      ...(withKey && init.idempotencyKey ? { idempotencyKey: init.idempotencyKey } : {}),
+    }) as any;
+
+  try {
+    try {
+      const transferTx = await client.createTransaction(nativeArgs(true));
+      circleTxId = transferTx.data?.id;
+    } catch (nativeInitError: any) {
+      if (init.idempotencyKey && isIdempotencyRejection(nativeInitError)) {
+        console.warn('Circle rejected idempotencyKey param — retrying creation without it.');
+        const transferTx = await client.createTransaction(nativeArgs(false));
+        circleTxId = transferTx.data?.id;
+      } else {
+        throw nativeInitError;
+      }
+    }
   } catch (nativeInitError: any) {
     console.warn('Native Circle transfer initialization failed, trying fallback:', nativeInitError.message);
   }
@@ -88,11 +122,11 @@ export async function transferUsdc({
   if (!circleTxId) {
     try {
       const contractTx = await client.createContractExecutionTransaction({
-        walletAddress,
+        walletAddress: init.walletAddress,
         blockchain: getNetworkConfig().circleBlockchain,
         contractAddress: tokenAddress,
         abiFunctionSignature: 'transfer(address,uint256)',
-        abiParameters: [destinationAddress, parseUnits(amount, decimals).toString()],
+        abiParameters: [init.destinationAddress, parseUnits(init.amount, decimals).toString()],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
       circleTxId = contractTx.data?.id;
@@ -103,6 +137,32 @@ export async function transferUsdc({
     }
   }
 
-  const arcTxHash = await waitForCircleTx(client, circleTxId!);
+  return { circleTxId: circleTxId! };
+}
+
+/** Poll a created Circle transfer to finality (same 40x2.5s semantics). */
+export async function awaitCircleTx(circleTxId: string): Promise<string> {
+  return waitForCircleTx(getCircleClient(), circleTxId);
+}
+
+export async function transferUsdc({
+  walletId,
+  walletAddress,
+  destinationAddress,
+  amount,
+  tokenAddress,
+  decimals = 6,
+  idempotencyKey,
+}: TransferUsdcParams): Promise<{ arcTxHash: string; circleTxId: string }> {
+  const { circleTxId } = await createCircleTransfer({
+    walletId,
+    walletAddress,
+    destinationAddress,
+    amount,
+    tokenAddress,
+    decimals,
+    idempotencyKey,
+  });
+  const arcTxHash = await awaitCircleTx(circleTxId);
   return { arcTxHash, circleTxId };
 }

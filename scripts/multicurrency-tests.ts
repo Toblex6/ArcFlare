@@ -236,12 +236,19 @@ async function main() {
   const verifyOnchain = read("src/app/api/payments/verify-onchain/route.ts");
   ok("verify resolves via canonical resolver", verifyOnchain.includes("resolveRowCurrency("));
   ok("verify rejects unsupported token identity (400)", verifyOnchain.includes("Unsupported settlement token"));
-  ok("Transfer log filtered by resolved contract address", verifyOnchain.includes("log.address.toLowerCase() !== token.address.toLowerCase()"));
+  // H1 hardening moved direct matching into the single-consumption helper —
+  // same invariant (resolved-contract filter), canonical location.
+  const directProof = read("src/lib/payments/directProof.ts");
+  ok("Transfer log filtered by resolved contract address", directProof.includes("log.address.toLowerCase() !== expected.tokenAddress.toLowerCase()") && verifyOnchain.includes("findDirectTransfer("));
   ok("no hardcoded USDC contract in matching", !verifyOnchain.includes("USDC_CONTRACT") && !verifyOnchain.includes("0x3600000000000000000000000000000000000000"));
   ok("expected amount uses resolved decimals", verifyOnchain.includes("parseUnits(payment.amount.toString(), token.decimals)"));
   ok("mismatch error names the invoice token", verifyOnchain.includes("No matching ${token.symbol} transfer"));
-  ok("fee math is token-unit based (no 1 EURC == 1 USDC assumption)", verifyOnchain.includes("unitsPerToken") && /never treated as 1 USDC/.test(verifyOnchain));
-  ok("fee balance reads + debit use the resolved token contract", verifyOnchain.includes("readTokenBalance(") && verifyOnchain.includes("address: token.address") && verifyOnchain.includes("tokenAddress: token.address") && verifyOnchain.includes("decimals: token.decimals"));
+  // Fee exactly-once hardening moved collection into the claim-before-transfer
+  // helper — same invariants (token-unit math, resolved-contract reads/debit),
+  // canonical locations.
+  const platformFee = read("src/lib/payments/platformFee.ts");
+  ok("fee math is token-unit based (no 1 EURC == 1 USDC assumption)", verifyOnchain.includes("10 ** token.decimals") && verifyOnchain.includes("feeRounded.toFixed(token.decimals)"));
+  ok("fee balance reads + debit use the resolved token contract", verifyOnchain.includes("readTokenBalance(") && verifyOnchain.includes("tokenAddress: token.address") && verifyOnchain.includes("decimals: token.decimals") && platformFee.includes("idempotencyKey"));
   ok("no hardcoded USDC address left in verify", !verifyOnchain.includes("USDC_ARC") && !verifyOnchain.includes("0x3600000000000000000000000000000000000000"));
   ok("SUCCESS preserves canonical currency + tokenAddress", verifyOnchain.includes("currency: token.symbol") && verifyOnchain.includes("tokenAddress: token.address"));
   const transfers = read("src/lib/circle/transfers.ts");

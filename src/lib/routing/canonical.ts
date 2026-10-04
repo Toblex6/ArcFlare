@@ -5,8 +5,7 @@
 // cannot be quoted or verified — client input never supplies addresses.
 
 import { createPublicClient, http } from 'viem';
-import { arcTestnet } from '@/src/lib/wagmi';
-import { getNetworkConfig } from "@/lib/config/network";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 
 // ── Policy constants ─────────────────────────────────────────────────────────
 export const ROUTING_QUOTE_TTL_MS = 5 * 60 * 1000; // short-lived quotes (~5 min)
@@ -100,7 +99,10 @@ export const SWAP_POOL_READ_ABI = [
 ] as const;
 
 export function getRoutingPublicClient(rpcUrl: string) {
-  return createPublicClient({ chain: arcTestnet, transport: http(rpcUrl) });
+  // Chain metadata flows from the single authoritative network config — never
+  // a pinned/testnet-named chain object — so mainnet money paths verify
+  // against Arc Mainnet (chain 5042) whenever ARC_NETWORK=mainnet.
+  return createPublicClient({ chain: getArcChain(), transport: http(rpcUrl) });
 }
 
 // ── RPC with retry (Arc cluster is intermittently flaky — retry, don't fail) ─

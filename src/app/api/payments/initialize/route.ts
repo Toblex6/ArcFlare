@@ -8,6 +8,7 @@ import { resolveMerchantSettlementPreference } from '@/src/lib/routing/preferenc
 import { resolveInitializeCaller } from '@/src/lib/middleware/withMerchantAuth';
 import { requireConsumerStepUp } from '@/lib/auth/consumerStepUp';
 import { getNetworkConfig } from '@/lib/config/network';
+import { assertMainnetSettlementAllowed } from '@/src/lib/payments/directProof';
 import { publicUrl } from '@/lib/publicOrigin';
 
 export async function POST(req: NextRequest) {
@@ -189,6 +190,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { success: false, error: `Unsupported settlement token: ${tokenErr.message}` },
         { status: 400 }
+      );
+    }
+
+    // Mainnet merchant-checkout policy: USDC-only invoice creation, enforced
+    // server-side (the UI restriction alone is bypassable by direct API
+    // calls). Testnet keeps its intentionally-supported multicurrency
+    // behavior; historical EURC rows are untouched.
+    try {
+      assertMainnetSettlementAllowed(token.symbol);
+    } catch (gateErr: any) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            `Merchant checkout on Arc Mainnet settles USDC only — ${token.symbol} invoices cannot be created. Use USDC for this payment.`,
+        },
+        { status: typeof gateErr?.status === 'number' ? gateErr.status : 400 }
       );
     }
 

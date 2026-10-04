@@ -50,8 +50,31 @@ model PaymentLog {
   updatedAt        DateTime?          @updatedAt
   ledgerEntries    AgentLedgerEntry[]
   platformFees     PlatformFee[]
+  directProof      DirectPaymentProof?
 
   @@index([listingId])
+}
+
+// ── Direct-checkout payment-proof consumption (H1 hardening) ────────────────
+// ONE direct (non-routed) on-chain Transfer proof settles AT MOST ONE invoice.
+// The claim is (chainId, txHash, logIndex): the exact Transfer log inside the
+// receipt that satisfied the invoice — created atomically inside the SAME
+// database transaction that flips the PaymentLog to SUCCESS, so concurrent
+// verifiers race on the unique constraint and exactly one wins. Failed
+// verification never creates a row (the claim only happens after every
+// on-chain check passes), so a failed attempt cannot poison the proof.
+model DirectPaymentProof {
+  id           String     @id @default(uuid())
+  chainId      Int
+  txHash       String
+  logIndex     Int
+  paymentLogId String     @unique
+  paymentLog   PaymentLog @relation(fields: [paymentLogId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([txHash])
+  @@map("direct_payment_proofs")
 }
 
 model AgentRegistry {
@@ -947,7 +970,7 @@ model AgentProviderPolicy {
 
 model PlatformFee {
   id             String     @id @default(uuid())
-  paymentLogId   String // FK to PaymentLog.id
+  paymentLogId   String // FK to PaymentLog.id — UNIQUE: one fee lifecycle per payment (claim-before-transfer)
   paymentLog     PaymentLog @relation(fields: [paymentLogId], references: [id])
   merchantId     String
   amountCharged  Float // feeAmount computed = payment.amount * FEE_BPS / 10000
@@ -955,8 +978,15 @@ model PlatformFee {
   status         String // PENDING|SUCCESS|FAILED|DEFERRED
   txHash         String?
   deferredReason String?
+  // Crash-safe resume: the Circle transaction id, persisted BEFORE polling
+  // for finality. A retry finds it and resumes polling instead of creating
+  // a second transfer. Stable Circle idempotency key derived from the
+  // payment (platform-fee:<paymentLogId>) — reused on every retry.
+  circleTxId     String?
+  idempotencyKey String?    @unique
   createdAt      DateTime   @default(now())
 
+  @@unique([paymentLogId])
   @@index([merchantId])
   @@index([status])
   @@map("platform_fees")

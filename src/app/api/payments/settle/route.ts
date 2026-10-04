@@ -20,6 +20,7 @@ import { resolveCurrentMerchantAddress } from '@/src/lib/merchant/walletMigratio
 import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
+import { assertMainnetSettlementAllowed } from '@/src/lib/payments/directProof';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
 import {
@@ -270,6 +271,23 @@ async function mergedSettleHandler(request: NextRequest) {
           error: `Unsupported settlement token for this payment: ${tokenErr.message}`,
         },
         { status: 400 }
+      );
+    }
+
+    // Mainnet merchant-checkout policy: USDC-only settlement, enforced
+    // server-side on BOTH paths (custodial Path B moves funds via Circle, so
+    // the gate sits before the atomic lock — no state changes on refusal).
+    // Testnet keeps its intentionally-supported multicurrency behavior.
+    try {
+      assertMainnetSettlementAllowed(token.symbol);
+    } catch (gateErr: any) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            `Merchant checkout on Arc Mainnet settles USDC only — ${token.symbol} settlement is rejected. Use USDC for this payment.`,
+        },
+        { status: typeof gateErr?.status === 'number' ? gateErr.status : 400 }
       );
     }
 

@@ -116,11 +116,14 @@ async function main() {
   const verify = read("src/app/api/payments/verify-onchain/route.ts");
   ok("verify resolves via canonical resolver", verify.includes("resolveRowCurrency("));
   ok("verify rejects unsupported token identity (400)", verify.includes("Unsupported settlement token"));
-  ok("Transfer log filtered by resolved contract address", verify.includes("log.address.toLowerCase() !== token.address.toLowerCase()"));
+  // H1 hardening moved direct matching into the single-consumption helper —
+  // same invariant (resolved-contract filter), canonical location.
+  const directProofSrc = read("src/lib/payments/directProof.ts");
+  ok("Transfer log filtered by resolved contract address", directProofSrc.includes("log.address.toLowerCase() !== expected.tokenAddress.toLowerCase()") && verify.includes("findDirectTransfer("));
   ok("no hardcoded USDC contract in matching", !verify.includes("USDC_CONTRACT") && !verify.includes("0x3600000000000000000000000000000000000000"));
   ok("expected amount uses resolved decimals", verify.includes("parseUnits(payment.amount.toString(), token.decimals)"));
   ok("mismatch error names the invoice token", verify.includes("No matching ${token.symbol} transfer"));
-  ok("wrong-token logs are skipped, never matched", verify.includes("continue; // not a Transfer log, skip") || verify.includes("continue;"));
+  ok("wrong-token logs are skipped, never matched", directProofSrc.includes("continue; // not a Transfer log, skip"));
 
   console.log("\n[V1] cross-token matrix (simulated matching rule)");
   const usdcFull = parseUnits("1.5", 6);
@@ -136,8 +139,10 @@ async function main() {
   ok("decimal handling uses resolver (parseUnits 6 for both today)", parseUnits("0.01", resolveRowCurrency({ currency: "EURC" }).decimals) === parseUnits("0.01", 6));
 
   console.log("\n[V2] fee leg + PaymentLog identity");
-  ok("fee math is token-unit based (no 1 EURC == 1 USDC assumption)", verify.includes("unitsPerToken") && /never treated as 1 USDC/.test(verify));
-  ok("fee balance reads use resolved token contract", verify.includes("readTokenBalance(") && verify.includes("address: token.address"));
+  // Fee exactly-once hardening moved collection into the claim-before-transfer
+  // helper — same invariants (token-unit math, resolved-contract reads/debit).
+  ok("fee math is token-unit based (no 1 EURC == 1 USDC assumption)", verify.includes("10 ** token.decimals") && verify.includes("feeRounded.toFixed(token.decimals)"));
+  ok("fee balance reads use resolved token contract", verify.includes("readTokenBalance(") && verify.includes("readTokenBalance(merchantRow.walletAddress as string, token.address)"));
   ok("fee debit passes resolved token to Circle transfer", verify.includes("tokenAddress: token.address") && verify.includes("decimals: token.decimals"));
   ok("no hardcoded USDC address left in verify", !verify.includes("USDC_ARC") && !verify.includes("0x3600000000000000000000000000000000000000"));
   ok("SUCCESS preserves canonical currency + tokenAddress", verify.includes("currency: token.symbol") && verify.includes("tokenAddress: token.address"));
