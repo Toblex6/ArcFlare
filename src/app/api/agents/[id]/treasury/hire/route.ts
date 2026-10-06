@@ -182,16 +182,10 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
   const expiredAt = Math.floor(Date.now() / 1000) + (criteria.deadlineUnix ? criteria.deadlineUnix - Math.floor(Date.now()/1000) : 86400);
   const evaluator = evaluatorAddress || clientAddress;
 
-  const createTx = await circleClient.createContractExecutionTransaction({
-    walletAddress: clientAddress,
-    blockchain: getNetworkConfig().circleBlockchain,
-    contractAddress: escrowContract,
-    abiFunctionSignature: "createJob(address,address,uint256,string,address)",
-    abiParameters: [provider.scaAddress, evaluator, expiredAt.toString(), description, "0x0000000000000000000000000000000000000000"],
-    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-  });
-  // H10: claim the idempotency row BEFORE waiting on-chain, so a retry
-  // racing this hire replays instead of double-hiring. P2002 → replay.
+  // H10: claim the idempotency row BEFORE the on-chain write (final-fix
+  // pass — previously claimed AFTER createContractExecutionTransaction,
+  // so two concurrent hires with the same key could both submit before
+  // either claimed). P2002 → replay the winner.
   try {
     await (prisma as any).paymentLog.create({
       data: {
@@ -213,10 +207,24 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     }
     throw e;
   }
-  const txHash = await waitForTransaction(createTx.data?.id!, "create job (treasury hire)");
+  // The external action runs UNDER the claim above: a concurrent duplicate
+  // now hits P2002 on the claim and replays instead of double-hiring.
+  // (Hoisted lets: the SUCCESS bind + response below the try need them.)
+  let txHash: string;
+  let jobId: bigint | null = null;
+  let job: any;
+  try {
+  const createTx = await circleClient.createContractExecutionTransaction({
+    walletAddress: clientAddress,
+    blockchain: getNetworkConfig().circleBlockchain,
+    contractAddress: escrowContract,
+    abiFunctionSignature: "createJob(address,address,uint256,string,address)",
+    abiParameters: [provider.scaAddress, evaluator, expiredAt.toString(), description, "0x0000000000000000000000000000000000000000"],
+    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+  });
+  txHash = await waitForTransaction(createTx.data?.id!, "create job (treasury hire)");
   const publicClient = createPublicClient({ chain: arcTestnet, transport: http() });
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash as `0x${string}` });
-  let jobId: bigint | null = null;
   try {
     const log = receipt.logs.find((l) => l.address.toLowerCase() === escrowContract.toLowerCase());
     const parsed = log ? decodeEventLog({ abi: agenticCommerceAbi as any, data: log.data, topics: log.topics, eventName: "JobCreated" }) : null;
@@ -227,7 +235,7 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     jobId = next - 1n;
   }
 
-  const job = await prisma.erc8183Job.create({
+  job = await prisma.erc8183Job.create({
     data: {
       jobId,
       clientSCA: clientAddress,
@@ -252,6 +260,15 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ id: string }> 
     where: { idempotencyKey: hireIdemKey },
     data: { status: 'SUCCESS', arcTxHash: txHash, gatewayReference: jobId.toString() },
   }).catch(() => {});
+  } catch (hireError: any) {
+    // Release the PROCESSING claim so a retry with the same key can
+    // proceed (createJob moves no funds — a failed hire retried is
+    // wasteful at worst, never a duplicate fund movement; funding is a
+    // separate idempotent /api/jobs/fund call). Failure responses are
+    // otherwise unchanged (unhandled throw → 500, as before).
+    await (prisma as any).paymentLog.delete({ where: { idempotencyKey: hireIdemKey } }).catch(() => {});
+    throw hireError;
+  }
 
   // Ledger: hirer subcontractor spend is not recorded until funded/released (escrow lock at fund, spend at release).
   // We record a pending intent as metadata only if needed; for now the hire itself is not a ledger event.

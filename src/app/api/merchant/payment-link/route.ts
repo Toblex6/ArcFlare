@@ -130,9 +130,14 @@ export async function GET(req: NextRequest) {
 
     // Production views (mainnet server) exclude historical testnet-chain
     // rows — preserved in the database, never shown as current links.
+    //
+    // TENANT SCOPING (final-fix pass): rows are scoped by the
+    // authenticated merchant's authoritative merchantId — NEVER by
+    // businessName, which is not unique (two merchants can share a name)
+    // and must never serve as an authorization boundary.
     const payments = filterRowsForNetwork(
       await prisma.paymentLog.findMany({
-        where: { merchant: merchant.businessName },
+        where: { merchantId: merchant.id },
         orderBy: { timestamp: 'desc' },
         take: 100,
       }),

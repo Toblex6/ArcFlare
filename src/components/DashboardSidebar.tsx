@@ -53,7 +53,7 @@ const BASE_SECTIONS: NavSection[] = [
         group: 'AI & AGENTS',
         items: [
             { label: 'Marketplace', href: '/marketplace' },
-            { label: 'Agent Brain', href: '/agent-brain', disabled: true, disabledReason: 'Temporarily unavailable — check back soon' },
+            { label: 'Agent Brain', href: '/agent-brain' },
             { label: 'Agents', href: '/agents' },
             { label: 'Jobs', href: '/jobs' },
             { label: 'AI Assistant', href: '/merchant/assistant' },

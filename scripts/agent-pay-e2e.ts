@@ -139,10 +139,20 @@ async function main() {
     const recvBefore = Number(await erc20.balanceOf(recipientEoa)) / 1e6;
     const payerBefore = Number(await erc20.balanceOf(agentEoa)) / 1e6;
 
-    const payRes = await fetch(`${BASE}/api/agents/${payerAgentId}/pay`, {
+    // idempotencyKey is MANDATORY (final-fix pass) — every payment carries
+    // one; keyless requests are rejected with 400 (asserted below).
+    const noKeyRes = await fetch(`${BASE}/api/agents/${payerAgentId}/pay`, {
       method: 'POST',
       headers: { cookie, 'Content-Type': 'application/json' },
       body: JSON.stringify({ to: recipientEoa, amount: AMOUNT }),
+    });
+    ok('POST pay without idempotencyKey → 400', noKeyRes.status === 400,
+      `got ${noKeyRes.status}`);
+
+    const payRes = await fetch(`${BASE}/api/agents/${payerAgentId}/pay`, {
+      method: 'POST',
+      headers: { cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: recipientEoa, amount: AMOUNT, idempotencyKey: `e2e_pay_${Date.now()}` }),
     });
     const payBody = await payRes.json();
     ok('POST pay: 200 with tx hash', payRes.status === 200 && /^0x[a-fA-F0-9]{64}$/.test(payBody.txHash ?? ''), `tx ${(payBody.txHash ?? '').slice(0, 12)}…`);
@@ -208,10 +218,13 @@ async function main() {
 
     // ── over-cap rejection: spend-limit enforcement on the route ──────────
     const recvBefore2 = Number(await erc20.balanceOf(recipientEoa)) / 1e6;
+    // The over-cap claim is released (no money moved), so no stranded
+    // PENDING row may remain for this key.
+    const overCapKey = `e2e_overcap_${Date.now()}`;
     const overCapRes = await fetch(`${BASE}/api/agents/${payerAgentId}/pay`, {
       method: 'POST',
       headers: { cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: recipientEoa, amount: '1.90' }),
+      body: JSON.stringify({ to: recipientEoa, amount: '1.90', idempotencyKey: overCapKey }),
     });
     const overCapBody = await overCapRes.json();
     ok('over-cap pay: 403 spend-limit rejection', overCapRes.status === 403 && String(overCapBody.error ?? '').includes('spend limit'),
@@ -224,6 +237,8 @@ async function main() {
     ok('over-cap: no new PaymentLog row with that amount', !(await prisma.paymentLog.findFirst({
       where: { reference: { startsWith: 'agentpay_' }, amount: 1.9 },
     })));
+    ok('over-cap: released claim leaves no stranded row for the key',
+      !(await prisma.paymentLog.findUnique({ where: { idempotencyKey: overCapKey } })));
 
     // ── wallet route is address-only (never leaks a key) ──────────────────
     ok('wallet response has no key material', !('privateKey' in walletBody) && !('encryptedKey' in walletBody));

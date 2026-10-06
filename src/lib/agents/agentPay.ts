@@ -115,7 +115,18 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   // create/squat the idempotency record. A concurrent duplicate hits P2002
   // and replays the winner's row. Non-consumer (merchant/service-key)
   // callers pass the step-up through untouched, so their path is unchanged.
-  const idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim().slice(0, 120) : "";
+  // M9 idempotency is MANDATORY (final-fix pass): without a key a retried
+  // POST executes twice — the on-chain spend cap bounds the total but does
+  // not dedupe — so keyless requests are rejected before any side effect.
+  // Distinct payments use distinct keys; retries reuse the key and replay.
+  const rawIdempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+  if (!rawIdempotencyKey || rawIdempotencyKey.length > 120) {
+    return NextResponse.json(
+      { error: "idempotencyKey (1-120 chars) is required — retry with the same key to replay, a new key to pay again." },
+      { status: 400 }
+    );
+  }
+  const idempotencyKey = rawIdempotencyKey;
   let claimedLogId: string | null = null;
 
   const replay = (row: any): NextResponse => {
@@ -169,7 +180,8 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
 
   // 2c. idempotency claim — only reachable once authentication + step-up
   // passed. Atomicity preserved: unique-claim + P2002 → replay winner.
-  if (idempotencyKey) {
+  // The key is mandatory (rejected above when absent), so this always runs.
+  {
     const existing = await (prisma as any).paymentLog.findUnique({ where: { idempotencyKey } }).catch(() => null);
     if (existing) return replay(existing);
     try {
@@ -197,6 +209,16 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
     }
   }
 
+  // Releases the PENDING claim when no money moved, so a corrected retry
+  // with the SAME key can proceed instead of stranding on "in progress".
+  // Awaited (not fire-and-forget): the retry must observe the release.
+  const releaseClaim = async (): Promise<void> => {
+    if (claimedLogId) {
+      await (prisma as any).paymentLog.delete({ where: { id: claimedLogId } }).catch(() => {});
+      claimedLogId = null;
+    }
+  };
+
   const provider = getProvider();
   const usdc = new Contract(getUsdcAddress(), USDC_ERC20_ABI, provider);
   const amountNative = parseEther(rawAmount); // native sends are 18-dec — same asset
@@ -204,6 +226,7 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   // 3. spend-limit PRE-FLIGHT — before any funds move.
   const spendCheck = await checkSpendAllowed({ agentAddress: agentEoa, amount });
   if (!spendCheck.allowed) {
+    await releaseClaim();
     return NextResponse.json(
       { error: `Agent spend limit rejected: ${spendCheck.reason}. No payment was taken.` },
       { status: 403 }
@@ -219,6 +242,7 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
     await recordTx.wait();
     recordTxHash = recordTx.hash;
   } catch (recordError: any) {
+    await releaseClaim();
     return NextResponse.json(
       {
         error: "Agent spend limit race: on-chain record failed before the transfer.",
@@ -233,7 +257,12 @@ export async function executeAgentToAgentPayment(req: NextRequest, agentId: numb
   const recipientAgent = await (prisma as any).agentRegistry
     .findFirst({ where: { scaAddress: { equals: to, mode: "insensitive" } }, select: { isLegacy: true } })
     .catch(() => null);
-  if (isLegacyBlocked(recipientAgent)) return legacyAgentResponse();
+  if (isLegacyBlocked(recipientAgent)) {
+    // Pre-transfer refusal — release the claim so the caller can retry
+    // with a non-legacy recipient under the same key.
+    await releaseClaim();
+    return legacyAgentResponse();
+  }
   const agentWallet = new Wallet(wallet.privateKey, provider);
   const beforeRecipient = await usdc.balanceOf(to);
   let receipt: any = null;

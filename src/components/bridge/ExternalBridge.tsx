@@ -104,19 +104,20 @@ function bridgeDiag(stage: string, data: unknown): void {
   if (BRIDGE_DIAG_ENABLED) console.debug(`[external-bridge:diag] ${stage}`, data);
 }
 
-// ── Production-visible step trail (diagnosis instrumentation, no behavior change) ──
-// bridgeDiag above is dev-only (gated by NODE_ENV), so production browsers emit
-// NOTHING at each sub-step — a stall before verify leaves zero client evidence.
-// bridgeTrace is ALWAYS ON (console.log, production included) and logs ONLY the
-// step name + intent reference + public tx hashes / step states at the four
-// sub-steps that matter: (a) intent created, (b/c) wallet signing via
-// kit.bridge (approve+burn prompts), (d) verify POST. No keys, no seed phrases,
-// no provider internals — reference + hashes are enough to correlate with the
-// server's [bridge-stage] / [cctp/transfer/external/verify] Render log lines.
+// ── Step trail (diagnosis instrumentation, no behavior change) ──
+// Dev-only like bridgeDiag above (gated by NODE_ENV): production browsers
+// emit NOTHING — the step name + intent reference + public tx hashes / step
+// states at the four sub-steps that matter ((a) intent created, (b/c) wallet
+// signing via kit.bridge, (d) verify POST) stay a local debug trail. No
+// keys, no seed phrases, no provider internals. Server-side
+// [bridge-stage] / [cctp/transfer/external/verify] log lines remain the
+// production correlation source. console.error calls below are untouched —
+// operational error logging stays.
 function bridgeTrace(step: string, data?: unknown): void {
+  if (!BRIDGE_DIAG_ENABLED) return;
   try {
-    if (data === undefined) console.log(`[external-bridge] ${step}`);
-    else console.log(`[external-bridge] ${step}`, data);
+    if (data === undefined) console.debug(`[external-bridge] ${step}`);
+    else console.debug(`[external-bridge] ${step}`, data);
   } catch {
     // logging must never break the flow
   }

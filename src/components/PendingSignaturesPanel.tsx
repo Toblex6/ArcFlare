@@ -159,8 +159,6 @@ export default function PendingSignaturesPanel() {
       setBroadcastId(req.id);
       setError(null);
     }
-    // Full server payload stays out of the UI — developer console only.
-    console.debug('[PendingSignaturesPanel] broadcasting request', req.id, req.payload);
     try {
       const abi = [abiFromSignature(intent.abiFunctionSignature)];
       const txHash = await writeContractAsync({
