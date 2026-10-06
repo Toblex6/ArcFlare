@@ -85,8 +85,19 @@ function main() {
     !/fetch\(`\/api\/jobs\/\$\{(lookupJobId|input\.jobId)\}`/.test(jobsPage + brain));
 
   console.log("\n[4] material enforcement differences hold");
-  ok("flat fund LACKS treasury/spend-limit enforcement (divergence is real)",
-    !flatFund.includes("evaluatePolicyForSpend") && !flatFund.includes("checkSpendAllowed"));
+  // Final-fix convergence: agent-clients on the flat fund route are
+  // DELEGATED to the canonical [jobId]/fund handler (treasury policy +
+  // spend-limit enforced there) — the flat route must no longer fund an
+  // agent client through its own unenforced approve+fund body. The legacy
+  // body remains ONLY for non-agent (merchant/consumer owner-wallet)
+  // clients, which the canonical route 404s and which have no
+  // treasury/spend-limit to bypass.
+  ok("flat fund DELEGATES agent-clients to the canonical fund handler (spend-policy gap closed)",
+    flatFund.includes("@/app/api/jobs/[jobId]/fund/route") && flatFund.includes("canonicalFundPOST"));
+  ok("flat fund ignores caller-supplied clientWalletId on the delegated agent path",
+    flatFund.includes("Caller-supplied clientWalletId is ignored on the delegated path") || flatFund.includes("resolves the payer server-side"));
+  ok("flat fund keeps the legacy owner flow ONLY for non-agent clients",
+    flatFund.includes("non-agent") && flatFund.includes("verifyCallerControlsAddress(req, clientAddress)"));
   ok("canonical fund HAS treasury/spend-limit enforcement",
     canonicalFund.includes("evaluatePolicyForSpend") && canonicalFund.includes("checkAndRecordSpend"));
   ok("flat fund still gates caller control (no weakened auth)",

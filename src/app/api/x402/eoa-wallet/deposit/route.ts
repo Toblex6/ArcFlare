@@ -4,6 +4,7 @@ import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { withApiKeyOrMerchant, resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getOrCreateBuyerWallet } from "@/lib/x402-wallet";
 import { explorerTxUrl } from "@/lib/config/network";
+import { isGatewayAvailable, requireGatewayChain, gatewayUnavailableBody } from "@/lib/x402-gateway";
 
 function sanitizeBigInts(obj: any): any {
   if (typeof obj === "bigint") return obj.toString();
@@ -19,6 +20,11 @@ function sanitizeBigInts(obj: any): any {
 // POST — deposit USDC into Gateway, for the caller's OWN wallet
 async function depositPostHandler(req: NextRequest) {
   try {
+    // Mainnet fail-closed (Option B): Gateway deposits are not available
+    // on Arc Mainnet yet — refuse before any wallet/key handling.
+    if (!isGatewayAvailable()) {
+      return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
+    }
     const { amount } = await req.json();
     if (!amount) {
       return NextResponse.json(
@@ -35,7 +41,7 @@ async function depositPostHandler(req: NextRequest) {
     const wallet = await getOrCreateBuyerWallet(merchant.id);
 
     const client = new GatewayClient({
-      chain: "arcTestnet",
+      chain: requireGatewayChain(),
       privateKey: wallet.privateKey,
     });
 
@@ -61,6 +67,11 @@ async function depositPostHandler(req: NextRequest) {
 // GET — check the CALLER's own Gateway + wallet balance
 async function depositGetHandler(req: NextRequest) {
   try {
+    // Mainnet fail-closed (Option B): Gateway balances are not available
+    // on Arc Mainnet yet.
+    if (!isGatewayAvailable()) {
+      return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
+    }
     const merchant = await resolveMerchant(req);
     if (!merchant) {
       return NextResponse.json({ success: false, error: "Authentication required." }, { status: 401 });
@@ -68,7 +79,7 @@ async function depositGetHandler(req: NextRequest) {
 
     const wallet = await getOrCreateBuyerWallet(merchant.id);
     const client = new GatewayClient({
-      chain: "arcTestnet",
+      chain: requireGatewayChain(),
       privateKey: wallet.privateKey,
     });
 

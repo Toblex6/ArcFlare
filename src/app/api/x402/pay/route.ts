@@ -11,9 +11,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { withApiKeyOrMerchant, resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getOrCreateBuyerWallet } from "@/lib/x402-wallet";
+import { isGatewayAvailable, requireGatewayChain, gatewayUnavailableBody } from "@/lib/x402-gateway";
 
 async function x402PayHandler(req: NextRequest) {
   try {
+    // Mainnet fail-closed (Option B): the x402 Gateway feature is not
+    // Mainnet-ready — refuse BEFORE any wallet resolution or the legacy
+    // BUYER_PRIVATE_KEY fallback below, so a mainnet request can never
+    // execute against Arc Testnet or touch the shared fallback key.
+    if (!isGatewayAvailable()) {
+      return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
+    }
     const { resourceUrl, body } = await req.json();
 
     if (!resourceUrl) {
@@ -57,8 +65,11 @@ async function x402PayHandler(req: NextRequest) {
     console.log(`[x402 pay] Paying: ${resolvedResourceUrl}`);
     console.log(`[x402 pay] Buyer: ${payerAddress}${merchant ? ` (merchant ${merchant.id})` : " (internal service key)"}`);
 
+    // requireGatewayChain() throws on mainnet (defense-in-depth behind
+    // the 503 guard above) — a mainnet request can never silently target
+    // Arc Testnet.
     const client = new GatewayClient({
-      chain: "arcTestnet",
+      chain: requireGatewayChain(),
       privateKey: PRIVATE_KEY,
     });
 

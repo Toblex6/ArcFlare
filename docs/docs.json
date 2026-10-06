@@ -3,11 +3,11 @@
   "name": "FlareHQ",
   "theme": "mint",
   "logo": {
-    "light": "/arcflare-logo.png.png",
-    "dark": "/arcflare-logo.png.png",
+    "light": "/arcflare-logo.png",
+    "dark": "/arcflare-logo.png",
     "href": "https://flarehq.xyz"
   },
-  "favicon": "/arcflare-logo.png.png",
+  "favicon": "/arcflare-logo.png",
   "colors": {
     "primary": "#00ADEF",
     "light": "#38BDF8",

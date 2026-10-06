@@ -50,6 +50,7 @@ import { getTokenBySymbol, isSupportedToken, getUsdcAddress, getTokenByAddress }
 import { parseEventValue } from "@/lib/contracts/receiptParser";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 import { getNetworkConfig } from "@/lib/config/network";
+import { isGatewayAvailable, requireGatewayChain, GatewayMainnetUnavailableError } from "@/lib/x402-gateway";
 
 const PAYROLL_CONTRACT_ADDRESS = process.env.PAYROLL_CONTRACT_ADDRESS ?? "";
 
@@ -166,12 +167,18 @@ export interface PayrollRecipient {
  * race.
  */
 async function sweepSettledToRelayer(price: string): Promise<SweepResult> {
+  // Mainnet fail-closed (Option B): the payroll-x402 Gateway sweep is not
+  // Mainnet-ready — refuse before the SELLER key is touched, so a mainnet
+  // request can never sweep against Arc Testnet.
+  if (!isGatewayAvailable()) {
+    throw new GatewayMainnetUnavailableError();
+  }
   const sellerPrivateKey = process.env.SELLER_PRIVATE_KEY;
   if (!sellerPrivateKey) {
     throw new Error("SELLER_PRIVATE_KEY not configured — cannot sweep settled funds to the relayer");
   }
   const gateway = new GatewayClient({
-    chain: "arcTestnet",
+    chain: requireGatewayChain(),
     privateKey: sellerPrivateKey as `0x${string}`,
   });
   const sellerEoa = new (await import("ethers")).Wallet(sellerPrivateKey).address;
@@ -207,7 +214,7 @@ async function sweepSettledToRelayer(price: string): Promise<SweepResult> {
     }
 
     const result = await gateway.withdraw(price, {
-      chain: "arcTestnet",
+      chain: requireGatewayChain(),
       recipient: (await getRelayerSigner().getAddress()) as `0x${string}`,
     });
 

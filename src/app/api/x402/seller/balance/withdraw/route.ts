@@ -23,6 +23,7 @@ import { withApiKey } from "@/lib/middleware/withApiKey";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { privateKeyToAccount } from "viem/accounts";
 import { explorerTxUrl } from "@/lib/config/network";
+import { isGatewayAvailable, requireGatewayChain, gatewayUnavailableBody } from "@/lib/x402-gateway";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { USDC_AMOUNT_RE, MAX_USDC_AMOUNT } from "@/lib/validation";
 
@@ -39,6 +40,12 @@ const ALLOWED_CHAINS = new Set(["arcTestnet", "base", "base-sepolia"]);
 // stays as the second, destination-side defense.
 async function withdrawHandler(request: NextRequest) {
   try {
+    // Mainnet fail-closed (Option B): Gateway withdrawals are not
+    // Mainnet-ready — refuse before the SELLER key is touched, so a
+    // mainnet request can never withdraw against Arc Testnet.
+    if (!isGatewayAvailable()) {
+      return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
+    }
     const { amount, destinationChain, destinationAddress } = await request.json();
 
     const sellerPrivateKey = process.env.SELLER_PRIVATE_KEY;
@@ -107,13 +114,16 @@ async function withdrawHandler(request: NextRequest) {
       recipient = treasuryAllowlist[0] as `0x${string}`;
     }
 
+    // requireGatewayChain() throws on mainnet (defense-in-depth behind
+    // the 503 guard above) — construction can never target testnet from a
+    // mainnet request.
     const gateway = new GatewayClient({
-      chain: "arcTestnet",
+      chain: requireGatewayChain(),
       privateKey: sellerPrivateKey as `0x${string}`,
     });
 
     const result = await gateway.withdraw(amount.toString(), {
-      chain: destinationChain || "arcTestnet",
+      chain: destinationChain || requireGatewayChain(),
       recipient,
     });
 

@@ -32,8 +32,10 @@
 //   POST /api/jobs/[jobId]/apply + GET .../applicants (Telegram /apply and
 //   the jobs UI both go through /api/procurement/* instead).
 // Material authorization/enforcement differences vs canonical routes:
-// - Flat /api/jobs/fund: NO treasury policy / spend-limit enforcement
-//   (canonical [jobId]/fund has both). Same caller-control gate.
+// - Flat /api/jobs/fund: agent-clients are DELEGATED to the canonical
+//   [jobId]/fund handler (treasury policy + spend-limit enforced there);
+//   the flat approve+fund body runs ONLY for non-agent owner-wallet
+//   clients (no treasury/spend-limit to bypass). Same caller-control gate.
 // - Flat /api/jobs/create: withMerchantAuth only (no API-key session).
 // - GET /api/jobs/list: merchant session inline (resolveMerchant).
 // - GET /api/jobs/[jobId]: NO auth wrapper (public read) — the canonical
