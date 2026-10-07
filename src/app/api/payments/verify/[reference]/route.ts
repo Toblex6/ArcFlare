@@ -33,7 +33,7 @@ export async function GET(
     if (payment.status === 'SUCCESS') {
       return NextResponse.json({
         status: true,
-        message: 'Verification successful (Cached Testnet Ledger)',
+        message: 'Verification successful',
         data: await formatResponse(payment),
       });
     }
