@@ -124,16 +124,23 @@ export async function POST(req: NextRequest) {
       const assistantAccount = await (prisma as any).consumerAccount.findUnique({
         where: { walletAddress },
       });
+      // Own-wallet payment REQUESTS skip step-up (mirrors initialize):
+      // the request branch below forwards no payoutAddress, so the invoice
+      // always pays the caller's own wallet — no fund movement, no
+      // fund-direction change. Inner initialize still gates any future
+      // arbitrary-payout request (defense in depth). Send/save always gate.
       const assistantAction =
         action === 'send' ? 'consumer.send' as const
-        : action === 'request' ? 'consumer.request' as const
+        : action === 'request' ? null // own-wallet request: no step-up
         : action === 'save' ? 'consumer.save' as const
         : null;
-      if (!assistantAction) {
+      if (!assistantAction && action !== 'request') {
         return NextResponse.json({ success: false, error: 'Unknown confirmed action.' }, { status: 400 });
       }
-      const assistantStepUp = await requireConsumerStepUp(req, assistantAccount, assistantAction);
-      if (assistantStepUp) return assistantStepUp;
+      if (assistantAction) {
+        const assistantStepUp = await requireConsumerStepUp(req, assistantAccount, assistantAction);
+        if (assistantStepUp) return assistantStepUp;
+      }
 
       // Forward the step-up credential to the inner routes so their own
       // canonical gates see the same proof (the PIN itself is never logged
