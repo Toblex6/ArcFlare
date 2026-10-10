@@ -61,9 +61,16 @@ async function resolveAuthoritativeValidatorWalletId(validatorSCA: string): Prom
   return null;
 }
 
-// ── ERC-8004 contracts on Arc Testnet ─────────────────────────────────────────
-const REPUTATION_REGISTRY = '0x8004B663056A597Dffe9eCcC1965A193B7388713';
-const VALIDATION_REGISTRY = '0x8004Cb1BF31DAf7788923b405b754f57acEB4272';
+// ── ERC-8004 ReputationRegistry on Arc ──────────────────────────────────────
+// Resolved per-request from the authoritative network config (official
+// testnet pin on testnet, official mainnet pin on mainnet). Never an inline
+// literal: a module-scope testnet pin would silently record reputation on
+// testnet on mainnet.
+function reputationRegistry(): `0x${string}` {
+  // Fail closed on invalid configuration — throws before any wallet or
+  // on-chain side effect, never silently uses the testnet registry.
+  return getNetworkConfig().reputationRegistryAddress as `0x${string}`;
+}
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -209,7 +216,7 @@ async function reputationHandler(request: NextRequest) {
     const reputationTx = await circleClient.createContractExecutionTransaction({
       walletAddress: validatorSCA,
       blockchain: getNetworkConfig().circleBlockchain as any,
-      contractAddress: REPUTATION_REGISTRY,
+      contractAddress: reputationRegistry(),
       abiFunctionSignature:
         'giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)',
       abiParameters: [
@@ -305,7 +312,7 @@ async function getReputationHandler(request: Request) {
         totalPayments: payments.length,
         successfulPayments: successCount,
         totalVolumeUSDC: parseFloat(totalVolume.toFixed(6)),
-        reputationRegistryAddress: REPUTATION_REGISTRY,
+        reputationRegistryAddress: reputationRegistry(),
       },
       recentPayments: payments.slice(0, 10),
       message: `Agent #${agent.tokenId} reputation summary. For onchain reputation, check ArcScan.`,

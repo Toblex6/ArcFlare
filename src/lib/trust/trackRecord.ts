@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { computeTrustScore, TRUST_METHODOLOGY_VERSION } from "./trustScore";
 import { readOnChainReputation } from "./reputationReader";
+import { getNetworkConfig } from "@/lib/config/network";
 
 export interface TrackRecord {
   agent: { id: number; tokenId: string; scaAddress: string; name: string; status: string };
@@ -53,7 +54,13 @@ export async function getTrackRecord(agentRegistryId: number): Promise<TrackReco
   const trust = await computeTrustScore(agentRegistryId);
   let rep: Awaited<ReturnType<typeof readOnChainReputation>>;
   try { rep = await readOnChainReputation(agent.tokenId); } catch (e: any) {
-    rep = { tokenId: String(agent.tokenId), reputationScore: null, reputationCount: null, positiveCount: null, negativeCount: null, recentFeedback: [], registryAddress: process.env.REPUTATION_REGISTRY_ADDRESS || "0x8004B663056A597Dffe9eCcC1965A193B7388713", readOk: false, error: e?.message };
+    // Fallback address comes from the same authoritative network config the
+    // reader uses — never a legacy env var or inline testnet pin. When the
+    // configuration itself is invalid, getNetworkConfig throws here too, so
+    // resolve defensively and let the error field carry the cause.
+    let fallbackRegistry = "";
+    try { fallbackRegistry = getNetworkConfig().reputationRegistryAddress; } catch {}
+    rep = { tokenId: String(agent.tokenId), reputationScore: null, reputationCount: null, positiveCount: null, negativeCount: null, recentFeedback: [], registryAddress: fallbackRegistry, readOk: false, error: e?.message };
   }
 
   const jobs: any[] = await (prisma as any).erc8183Job.findMany({ where: { providerSCA: { equals: agent.scaAddress, mode: "insensitive" } }, orderBy: { updatedAt: "desc" }, take: 20 }).catch(() => []);

@@ -6,9 +6,13 @@
 import { createPublicClient, http } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 
-const REPUTATION_REGISTRY = (process.env.REPUTATION_REGISTRY_ADDRESS || "0x8004B663056A597Dffe9eCcC1965A193B7388713") as `0x${string}`;
+// ERC-8004 ReputationRegistry is resolved per-call from the authoritative
+// network config (getNetworkConfig().reputationRegistryAddress): the official
+// testnet pin on testnet, the official mainnet pin on mainnet. The legacy
+// REPUTATION_REGISTRY_ADDRESS env override is intentionally NOT honored — an
+// unset legacy var silently fell back to the testnet registry on mainnet.
 // Chain + RPC flow from the authoritative network config (was hardcoded
-// id 5042002 + testnet RPC). Registry address stays env-driven (unchanged).
+// id 5042002 + testnet RPC).
 const arcTestnet = getArcChain();
 
 const REPUTATION_ABI = [
@@ -41,6 +45,9 @@ export interface ReputationSummary {
 export async function readOnChainReputation(tokenId: string | bigint): Promise<ReputationSummary> {
   const tid = typeof tokenId === "string" ? BigInt(tokenId) : tokenId;
   const tidStr = tid.toString();
+  // Fail closed on invalid network configuration (e.g. testnet registry on
+  // mainnet) before any chain read — throws, never silently reads testnet.
+  const REPUTATION_REGISTRY = getNetworkConfig().reputationRegistryAddress as `0x${string}`;
   const pc = getPublicClient() as any;
   let reputationScore: number | null = null;
   let reputationCount: number | null = null;

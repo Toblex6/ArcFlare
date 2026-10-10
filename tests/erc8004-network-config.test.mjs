@@ -15,7 +15,7 @@
 // Run: npx tsx --test tests/erc8004-network-config.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -136,38 +136,81 @@ test('explicit testnet registry on mainnet fails closed (never silently used)', 
   });
 });
 
-// ── 4. Routes use the central config (no own fallback addresses) ────────────
-test('deploy/recover/card routes resolve ERC-8004 from getNetworkConfig (no testnet fallback)', () => {
-  const deploy = read('src/app/api/agent/deploy/route.ts');
-  const recover = read('src/app/api/agent/deploy/recover/route.ts');
-  const card = read('src/app/api/agents/[id]/card/route.ts');
-
-  for (const [name, src] of [['deploy', deploy], ['recover', recover], ['card', card]]) {
+// ── 4. Every registry consumer uses the central config (no own fallback) ───
+// Covers the original deploy/recover/card fix plus the follow-up sweep:
+// reputation readers/writers, track-record fallback, job-validation policy +
+// all validation request/respond/status routes and the agent brain.
+test('all ERC-8004 consumers resolve from getNetworkConfig (no testnet fallback)', () => {
+  const IDENTITY_CONSUMERS = [
+    'src/app/api/agent/deploy/route.ts',
+    'src/app/api/agent/deploy/recover/route.ts',
+  ];
+  const REPUTATION_CONSUMERS = [
+    'src/lib/trust/reputationReader.ts',
+    'src/lib/trust/autoReputation.ts',
+    'src/lib/trust/trackRecord.ts',
+    'src/app/api/agent/reputation/route.ts',
+    'src/app/api/agent/brain/route.ts',
+  ];
+  const VALIDATION_CONSUMERS = [
+    'src/lib/jobs/jobValidationPolicy.ts',
+    'src/app/api/agent/validation/route.ts',
+    'src/app/api/jobs/[jobId]/validation/route.ts',
+    'src/app/api/jobs/[jobId]/validation/request/route.ts',
+    'src/app/api/jobs/[jobId]/validation/respond/route.ts',
+    'src/app/api/agents/[id]/card/route.ts',
+  ];
+  const check = (file, field) => {
+    const src = read(file);
     assert.ok(
       !src.includes('process.env.IDENTITY_REGISTRY_ADDRESS') &&
         !src.includes('process.env.REPUTATION_REGISTRY_ADDRESS') &&
-        !src.includes('process.env.VALIDATION_REGISTRY_ADDRESS'),
-      `${name} route must not read legacy ERC-8004 env overrides`
+        !src.includes('process.env.VALIDATION_REGISTRY_ADDRESS') &&
+        !src.includes('process.env.NEXT_PUBLIC_VALIDATION_REGISTRY'),
+      `${file} must not read legacy ERC-8004 env overrides`
     );
-    // No hardcoded testnet registry literal left in the route (case-insensitive).
+    // No hardcoded testnet registry literal left in the consumer (case-insensitive).
     for (const pin of Object.values(TESTNET)) {
       assert.ok(
         !src.toLowerCase().includes(pin.toLowerCase()),
-        `${name} route must not inline the testnet pin ${pin}`
+        `${file} must not inline the testnet pin ${pin}`
       );
     }
+    assert.match(
+      src,
+      new RegExp(`(?:getNetworkConfig\\(\\)\\.${field}|\\bnet\\.${field})`),
+      `${file} must resolve the registry via getNetworkConfig().${field} (directly or via a getNetworkConfig() alias)`
+    );
+    assert.ok(src.includes('getNetworkConfig()'), `${file} must call getNetworkConfig()`);
+  };
+  for (const f of IDENTITY_CONSUMERS) check(f, 'identityRegistryAddress');
+  for (const f of REPUTATION_CONSUMERS) check(f, 'reputationRegistryAddress');
+  for (const f of VALIDATION_CONSUMERS) check(f, 'validationRegistryAddress');
+});
+
+// ── 4b. Pin single-authority: full registry literals live ONLY in network.ts ─
+test('ERC-8004 registry literals live ONLY in src/lib/config/network.ts', () => {
+  const SRC_ROOT = path.join(ROOT, 'src');
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(entry)) files.push(full);
+    }
+  };
+  walk(SRC_ROOT);
+  const pins = [...Object.values(TESTNET), ...Object.values(MAINNET)].map((p) => p.toLowerCase());
+  const offenders = [];
+  for (const f of files) {
+    const rel = path.relative(ROOT, f).split(path.sep).join('/');
+    if (rel === 'src/lib/config/network.ts') continue;
+    const lower = readFileSync(f, 'utf8').toLowerCase();
+    for (const pin of pins) {
+      if (lower.includes(pin)) offenders.push(`${rel} contains ${pin}`);
+    }
   }
-  assert.match(deploy, /getNetworkConfig\(\)\.identityRegistryAddress/);
-  assert.match(recover, /getNetworkConfig\(\)\.identityRegistryAddress/);
-  assert.match(card, /getNetworkConfig\(\)/);
-  assert.ok(
-    card.includes('net.identityRegistryAddress') || card.includes('getNetworkConfig().identityRegistryAddress'),
-    'card route must source the identity registry from the network config'
-  );
-  assert.ok(
-    card.includes('net.validationRegistryAddress') || card.includes('getNetworkConfig().validationRegistryAddress'),
-    'card route must source the validation registry from the network config'
-  );
+  assert.deepEqual(offenders, [], `registry pins must live only in network.ts: ${offenders.join(', ')}`);
 });
 
 // ── 5. Misleading re-deploy hint is gone; recovery path is surfaced ─────────

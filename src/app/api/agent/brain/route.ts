@@ -31,8 +31,15 @@ const INTERNAL_API_KEY = process.env.INTERNAL_SETTLEMENT_API_KEY!;
 const GROQ_API_KEY = process.env.GROQ_API_KEY!;
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
 
-// ERC-8004 registries
-const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
+// ERC-8004 ReputationRegistry — resolved per-call from the authoritative
+// network config (official testnet pin on testnet, official mainnet pin on
+// mainnet). Never an inline literal: a module-scope testnet pin would silently
+// target testnet on mainnet.
+function reputationRegistry(): `0x${string}` {
+  // Fail closed on invalid configuration — throws, never silently uses the
+  // testnet registry.
+  return getNetworkConfig().reputationRegistryAddress as `0x${string}`;
+}
 
 // NOTE: ERC-8183/USDC addresses live in src/lib/contracts/erc8183.ts (the
 // single source of truth). This route performs no direct USDC contract reads,
@@ -561,7 +568,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
       const tx = await circle.createContractExecutionTransaction({
         walletAddress: validatorAddress,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: REPUTATION_REGISTRY,
+        contractAddress: reputationRegistry(),
         abiFunctionSignature:
           "giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)",
         abiParameters: [
@@ -633,7 +640,7 @@ async function executeTool(name: string, input: any, baseUrl: string): Promise<a
       if (input.type === "reputation") {
         try {
           const score = await publicClient.readContract({
-            address: REPUTATION_REGISTRY,
+            address: reputationRegistry(),
             abi: [{ name: "getReputation", type: "function", stateMutability: "view", inputs: [{ name: "tokenId", type: "uint256" }], outputs: [{ name: "", type: "int128" }] }],
             functionName: "getReputation",
             args: [BigInt(input.reference)],
