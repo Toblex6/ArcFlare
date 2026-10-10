@@ -16,6 +16,11 @@ function resolveEscrowContract(): string | null {
 }
 
 function buildAgentCard(agent: any, baseUrl: string) {
+  // ERC-8004 registries resolve from the authoritative network config: the
+  // official testnet pins on testnet, the official mainnet pins on mainnet.
+  // The legacy IDENTITY_/VALIDATION_REGISTRY_ADDRESS env overrides are
+  // intentionally NOT honored (unset legacy var = silent testnet fallback).
+  const net = getNetworkConfig();
   return {
     agentId: agent.tokenId,
     erc8004TokenId: agent.tokenId,
@@ -29,7 +34,7 @@ function buildAgentCard(agent: any, baseUrl: string) {
     wallet: { scaAddress: agent.scaAddress, circleWalletId: agent.circleWalletId, acceptedPaymentMethods: ["x402", "native_usdc", "erc20_usdc"], paymentEoaEndpoint: `/api/agents/${agent.id}/wallet` },
     endpoints: { card: `${baseUrl}/api/agents/${agent.id}/card`, reputation: `/api/agent/reputation?agentId=${agent.tokenId}`, validation: `/api/agent/validation?agentId=${agent.tokenId}`, metadataURI: agent.metadataURI },
     reputation: { score: agent.reputation ?? 50, verifyEndpoint: `/api/agent/reputation?agentId=${agent.tokenId}` },
-    identity: { registryAddress: process.env.IDENTITY_REGISTRY_ADDRESS || "0x8004A818BFB912233c491871b3d84c89A494BD9e", tokenId: agent.tokenId, scaAddress: agent.scaAddress, ownerNode: agent.ownerNode, metadataURI: agent.metadataURI },
+    identity: { registryAddress: net.identityRegistryAddress, tokenId: agent.tokenId, scaAddress: agent.scaAddress, ownerNode: agent.ownerNode, metadataURI: agent.metadataURI },
     status: agent.status,
     lastActiveAt: agent.lastActiveAt,
     createdAt: agent.createdAt,
@@ -37,7 +42,7 @@ function buildAgentCard(agent: any, baseUrl: string) {
     supportedChains: [getNetworkConfig().circleBlockchain],
     supportedTokens: ["USDC", "EURC"],
     hiring: { hireEndpoint: `/api/agents/${agent.id}/hire`, createJobEndpoint: `/api/agents/${agent.id}/hire`, escrowContract: resolveEscrowContract(), jobTypes: ["escrow"] },
-    validation: { registryAddress: process.env.VALIDATION_REGISTRY_ADDRESS || "0x8004Cb1BF31DAf7788923b405b754f57acEB4272", verifyEndpoint: `/api/agent/validation?agentId=${agent.tokenId}` },
+    validation: { registryAddress: net.validationRegistryAddress, verifyEndpoint: `/api/agent/validation?agentId=${agent.tokenId}` },
     generatedAt: new Date().toISOString(),
     schemaVersion: "1.0",
   };
