@@ -1,8 +1,15 @@
 'use client';
 import Link from 'next/link';
+import { useEffect } from 'react';
 
 // Neutral FlareHQ error state — no merchant assumption. Theme tokens only.
-export default function Error({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  // Phase 5: the route-level boundary must make unexpected client failures
+  // visible. Logs the error message + Next digest only (never credentials,
+  // tokens, or request bodies — Error objects must not carry those).
+  useEffect(() => {
+    console.error('[flarehq/error-boundary]', error?.message ?? String(error), error?.digest ? `digest=${error.digest}` : '');
+  }, [error]);
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--background)', color: 'var(--text)', padding: 24, textAlign: 'center' }}>
       <p style={{ fontSize: 40, margin: '0 0 8px' }} aria-hidden>⚠️</p>

@@ -15,7 +15,9 @@
 //     required ARC_MAINNET_* environment input — EXCEPT
 //     ARC_MAINNET_ERC8183_ADDRESS (external protocol dependency with no
 //     verified mainnet address; optional, null when unset, per-feature
-//     fail-closed via requireErc8183Address()). Selecting mainnet with a
+//     fail-closed via requireErc8183Address()) and the ERC-8004 registries
+//     (official mainnet pins from docs.arc.io, optional ARC_MAINNET_*
+//     overrides, testnet values rejected). Selecting mainnet with a
 //     missing REQUIRED value FAILS CLOSED (throws) — it never silently
 //     inherits a testnet value.
 //
@@ -61,6 +63,25 @@ export interface ArcNetworkConfig {
   usdcAddress: string;
   /** EURC (6 decimals) on Arc */
   eurcAddress: string;
+  /**
+   * ERC-8004 IdentityRegistry on Arc — authoritative per-network address.
+   * Testnet: official testnet pin. Mainnet: official mainnet pin (or the
+   * explicit ARC_MAINNET_IDENTITY_REGISTRY override when set). Never the
+   * testnet pin on mainnet — a testnet value on mainnet fails closed.
+   */
+  identityRegistryAddress: string;
+  /**
+   * ERC-8004 ReputationRegistry on Arc — authoritative per-network address.
+   * Same selection/fail-closed semantics as identityRegistryAddress
+   * (override: ARC_MAINNET_REPUTATION_REGISTRY).
+   */
+  reputationRegistryAddress: string;
+  /**
+   * ERC-8004 ValidationRegistry on Arc — authoritative per-network address.
+   * Same selection/fail-closed semantics as identityRegistryAddress
+   * (override: ARC_MAINNET_VALIDATION_REGISTRY).
+   */
+  validationRegistryAddress: string;
   /**
    * ERC-8183 AgenticCommerce contract on Arc — or null when unconfigured.
    * Testnet always carries the pinned reference implementation. Mainnet
@@ -108,6 +129,26 @@ const TESTNET_DEFAULTS = {
   walletConnectChainId: "eip155:5042002",
 } as const;
 
+// ─── ERC-8004 registries: official per-network pins ───────────────────────────
+// Source: https://docs.arc.io/arc/references/contract-addresses ("AI agents /
+// ERC-8004"). These are protocol-level deployments (FlareHQ only calls them,
+// never deploys them), so BOTH networks have official pins — unlike ERC-8183,
+// which has no verified mainnet address and stays optional/null there.
+// Production code MUST resolve these via getNetworkConfig() — never inline a
+// literal, never read IDENTITY_/REPUTATION_/VALIDATION_REGISTRY_ADDRESS env
+// overrides (those legacy vars are intentionally NOT honored: on mainnet an
+// unset legacy var silently fell back to the testnet pin).
+export const TESTNET_ERC8004 = {
+  identity: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  reputation: "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+  validation: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
+} as const;
+export const MAINNET_ERC8004 = {
+  identity: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+  reputation: "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+  validation: "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58",
+} as const;
+
 function readEnv(env: Record<string, string | undefined>, key: string): string | undefined {
   const v = env[key]?.trim();
   return v ? v : undefined;
@@ -149,6 +190,9 @@ function buildTestnetConfig(
     x402VerifierContract: TESTNET_DEFAULTS.x402VerifierContract,
     usdcAddress: TESTNET_DEFAULTS.usdcAddress,
     eurcAddress: TESTNET_DEFAULTS.eurcAddress,
+    identityRegistryAddress: TESTNET_ERC8004.identity,
+    reputationRegistryAddress: TESTNET_ERC8004.reputation,
+    validationRegistryAddress: TESTNET_ERC8004.validation,
     erc8183Address: AGENTIC_COMMERCE_CONTRACT,
     walletConnectChainId: TESTNET_DEFAULTS.walletConnectChainId,
   };
@@ -221,6 +265,40 @@ function buildMainnetConfig(
       `ARC_MAINNET_ERC8183_ADDRESS must be a 0x EVM address (got "${erc8183Raw}") — or leave it unset for per-feature fail-closed.`
     );
   }
+  // ERC-8004 registries: official mainnet pins by default, with explicit
+  // ARC_MAINNET_* overrides allowed. Either way the resolved value must be a
+  // well-formed address AND must not be the testnet registry — silently
+  // registering agents/reputation/validation against testnet on mainnet is
+  // the exact failure this guard exists to prevent. The legacy
+  // IDENTITY_/REPUTATION_/VALIDATION_REGISTRY_ADDRESS vars are NOT honored.
+  const identityRegistryAddress =
+    readEnv(env, "ARC_MAINNET_IDENTITY_REGISTRY") ?? MAINNET_ERC8004.identity;
+  const reputationRegistryAddress =
+    readEnv(env, "ARC_MAINNET_REPUTATION_REGISTRY") ?? MAINNET_ERC8004.reputation;
+  const validationRegistryAddress =
+    readEnv(env, "ARC_MAINNET_VALIDATION_REGISTRY") ?? MAINNET_ERC8004.validation;
+  for (const [label, value] of [
+    ["ARC_MAINNET_IDENTITY_REGISTRY", identityRegistryAddress],
+    ["ARC_MAINNET_REPUTATION_REGISTRY", reputationRegistryAddress],
+    ["ARC_MAINNET_VALIDATION_REGISTRY", validationRegistryAddress],
+  ] as const) {
+    if (!ADDRESS_RE.test(value)) {
+      throw new Error(`${label} must be a 0x EVM address (got "${value}").`);
+    }
+  }
+  for (const [label, value, testnetPin] of [
+    ["identity registry", identityRegistryAddress, TESTNET_ERC8004.identity],
+    ["reputation registry", reputationRegistryAddress, TESTNET_ERC8004.reputation],
+    ["validation registry", validationRegistryAddress, TESTNET_ERC8004.validation],
+  ] as const) {
+    if (value.toLowerCase() === testnetPin.toLowerCase()) {
+      throw new Error(
+        `ARC_NETWORK=mainnet refuses to use the testnet ERC-8004 ${label} (${testnetPin}). ` +
+          `Set the official mainnet address explicitly — testnet registries are never inherited. ` +
+          `See https://docs.arc.io/arc/references/contract-addresses.`
+      );
+    }
+  }
   const primaryRpc = readEnv(env, "ARC_MAINNET_RPC_URL")!;
   const extraFallbacks = splitList(readEnv(env, "ARC_MAINNET_RPC_FALLBACKS"));
   // Derived identifiers default from the configured chain ID (derivation, not
@@ -242,6 +320,9 @@ function buildMainnetConfig(
     x402VerifierContract: readEnv(env, "ARC_MAINNET_X402_VERIFIER")!,
     usdcAddress: readEnv(env, "ARC_MAINNET_USDC_ADDRESS")!,
     eurcAddress: readEnv(env, "ARC_MAINNET_EURC_ADDRESS")!,
+    identityRegistryAddress,
+    reputationRegistryAddress,
+    validationRegistryAddress,
     erc8183Address: erc8183Raw ?? null,
     walletConnectChainId:
       readEnv(env, "ARC_MAINNET_WALLETCONNECT_CHAIN_ID") ?? eip155,

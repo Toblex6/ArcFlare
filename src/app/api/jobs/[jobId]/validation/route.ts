@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getJobValidationStatus } from "@/lib/jobs/jobValidationPolicy";
+import { getNetworkConfig } from "@/lib/config/network";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
@@ -44,7 +45,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ jobI
         lastUpdate: status.onChain.lastUpdate.toString(),
       } : null,
       evidence: status.evidence,
-      validationRegistryAddress: process.env.VALIDATION_REGISTRY_ADDRESS || process.env.NEXT_PUBLIC_VALIDATION_REGISTRY || "0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
+      // ERC-8004 ValidationRegistry from the authoritative network config —
+      // the official testnet pin on testnet, the official mainnet pin on
+      // mainnet. Legacy VALIDATION_/NEXT_PUBLIC_VALIDATION_REGISTRY overrides
+      // are intentionally NOT honored (unset legacy var = testnet fallback).
+      validationRegistryAddress: getNetworkConfig().validationRegistryAddress,
     });
   } catch (e: any) {
     console.error("GET job validation status error:", e);

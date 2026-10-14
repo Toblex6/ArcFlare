@@ -6,10 +6,24 @@ import path from 'path';
 const envPath = path.resolve(process.cwd(), '.env.local');
 dotenv.config({ path: envPath });
 
-// Registry Addresses
+// Registry Addresses — TESTNET pins (docs.arc.io/arc/references/contract-addresses).
+// TESTNET-ONLY script: refuses mainnet execution (see guard below). A mainnet
+// ERC-8004 lifecycle run would submit real-money transactions and must never be
+// triggered by this helper.
+const ARC_NETWORK_SELECTED = (
+  process.env.ARC_NETWORK ??
+  process.env.NEXT_PUBLIC_ARC_NETWORK ??
+  "testnet"
+).toLowerCase();
+if (ARC_NETWORK_SELECTED === "mainnet") {
+  console.error(
+    "Refusing to run scripts/runErc8004Lifecycle.ts with ARC_NETWORK=mainnet: this is a TESTNET-ONLY operator script. Mainnet lifecycle actions are separate, deliberate operations."
+  );
+  process.exit(1);
+}
 const IDENTITY_REGISTRY = '0x8004A818BFB912233c491871b3d84c89A494BD9e';
 const REPUTATION_REGISTRY = '0x8004B663056A597Dffe9eCcC1965A193B7388713';
-const VALIDATION_REGISTRY = '0x28836b53b821f5FE3aBcdeDB7a8A67B0D8D08A9E';
+const VALIDATION_REGISTRY = '0x8004Cb1BF31DAf7788923b405b754f57acEB4272';
 
 async function runErc8004Lifecycle() {
   console.log('🚀 [FlareHQ Core] Booting Machine Identity Lifecycle Engine...');

@@ -43,13 +43,19 @@ export interface StreamOnChainState {
   openedAt: bigint;
 }
 
-const ARC_TESTNET_RPC_URL = getNetworkConfig().primaryRpc;
+// Authoritative network RPC (testnet or mainnet per ARC_NETWORK) —
+// resolved lazily so a mainnet misconfiguration throws at call time in the
+// stream path, not at import time in every route importing this module.
+// (Previously a module-load constant misleadingly named ARC_TESTNET_RPC_URL.)
+function getArcRpcUrl(): string {
+  return getNetworkConfig().primaryRpc;
+}
 
 let cachedProvider: JsonRpcProvider | null = null;
 
 export function getStreamProvider(): JsonRpcProvider {
   if (!cachedProvider) {
-    cachedProvider = new JsonRpcProvider(ARC_TESTNET_RPC_URL);
+    cachedProvider = new JsonRpcProvider(getArcRpcUrl());
   }
   return cachedProvider;
 }

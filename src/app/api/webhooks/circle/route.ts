@@ -168,7 +168,15 @@ export async function POST(req: NextRequest) {
                 settlementType: 'CCTP_V2_AUTO_ROUTED',
                 explorerUrl: `${explorerTxUrl(arcTxHash)}`,
               }),
-            }).catch(() => {});
+            }).catch((cbErr: any) => {
+              // Merchant delivery failure must stay ACK-200 (webhook must not
+              // retry-storm), but the loss has to be visible: without this log
+              // a dead merchant endpoint fails silently forever.
+              console.warn(
+                `[webhooks/circle] merchant callback delivery failed for ${reference}:`,
+                cbErr?.message ?? cbErr
+              );
+            });
           }
         } catch (err: any) {
           console.warn('Mint record update failed:', err.message);
@@ -252,15 +260,28 @@ async function autoSettleV2(reference: string, messageHash: string) {
           settlementType: 'CCTP_V2_AUTO_ROUTED',
           explorerUrl: `${explorerTxUrl(arcTxHash)}`,
         }),
-      }).catch(() => {});
+      }).catch((cbErr: any) => {
+        console.warn(
+          `[webhooks/circle] auto-settle callback delivery failed for ${reference}:`,
+          cbErr?.message ?? cbErr
+        );
+      });
     }
   } catch (err: any) {
     console.error(`❌ CCTP V2 auto-settle failed for ${reference}:`, err.message);
+    // The ATTESTATION_FAILED mark is reconciliation state: if THIS write
+    // fails too, the row keeps a stale status with no trace — log loudly.
+    // The outer webhook ACK-200 is unchanged (this runs in background).
     await prisma.paymentLog
       .update({
         where: { reference },
         data: { status: 'ATTESTATION_FAILED' },
       })
-      .catch(() => {});
+      .catch((markErr: any) => {
+        console.error(
+          `[webhooks/circle] ATTESTATION_FAILED mark failed for ${reference}:`,
+          markErr?.message ?? markErr
+        );
+      });
   }
 }

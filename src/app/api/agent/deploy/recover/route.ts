@@ -21,7 +21,7 @@
 import { NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { createPublicClient, http } from "viem";
-import { getArcChain } from "@/lib/config/network";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 const arcTestnet = getArcChain();
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { withMerchantAuth, AuthedMerchant } from "@/src/lib/middleware/withMerchantAuth";
@@ -33,9 +33,10 @@ import { isLegacyBlocked, legacyAgentResponse } from "@/src/lib/agents/legacyGat
 
 const prisma = new PrismaClient();
 
-// Same authoritative registry the deploy route registers against.
-const IDENTITY_REGISTRY =
-  process.env.IDENTITY_REGISTRY_ADDRESS || "0x8004A818BFB912233c491871b3d84c89A494BD9e";
+// ERC-8004 IdentityRegistry is resolved per-request from the authoritative
+// network config (getNetworkConfig().identityRegistryAddress) — the same
+// registry the deploy route registers against. The legacy
+// IDENTITY_REGISTRY_ADDRESS env override is intentionally NOT honored.
 
 const TX_HASH_RE = /^0x[a-fA-F0-9]{64}$/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -49,6 +50,8 @@ const markIntent = (id: string, patch: Record<string, unknown>) =>
     .catch(() => {});
 
 async function recoverAgentHandler(request: Request, merchant: AuthedMerchant) {
+  // Fail closed on invalid network configuration before any chain reads.
+  const IDENTITY_REGISTRY = getNetworkConfig().identityRegistryAddress;
   try {
     const body = await request.json().catch(() => ({}));
     const txHash = String(body?.txHash ?? "").trim();
@@ -89,7 +92,14 @@ async function recoverAgentHandler(request: Request, merchant: AuthedMerchant) {
     for (let attempt = 1; attempt <= 3 && !receipt; attempt++) {
       try {
         receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
-      } catch {
+      } catch (e: any) {
+        // Transient RPC flakes (out-of-sync nodes) — retried with backoff.
+        // Warn per attempt so a persistently unreachable chain is visible
+        // instead of surfacing only as a bare 404 "receipt not found".
+        console.warn(
+          `[agent/deploy/recover] receipt fetch attempt ${attempt}/3 failed for ${txHash}:`,
+          e?.message ?? e
+        );
         if (attempt < 3) await sleep(1500 * attempt);
       }
     }
@@ -188,7 +198,11 @@ async function recoverAgentHandler(request: Request, merchant: AuthedMerchant) {
         holderInWalletSet = (data?.wallets ?? []).some(
           (w: any) => w?.address && String(w.address).toLowerCase() === mintToLower
         );
-      } catch {
+      } catch (e: any) {
+        console.warn(
+          `[agent/deploy/recover] wallet-set proof attempt ${attempt}/3 failed for ${txHash}:`,
+          e?.message ?? e
+        );
         if (attempt < 3) await sleep(1500 * attempt);
       }
     }

@@ -11,7 +11,16 @@ import { prisma } from "@/lib/prisma";
 import { createPublicClient, http } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 
-const VALIDATION_REGISTRY = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272" as `0x${string}`; // job validation uses the same registry as agent validation (validationRequest), not NEXT_PUBLIC_VALIDATION_REGISTRY (requestValidation)
+// ERC-8004 ValidationRegistry — resolved per-read from the authoritative
+// network config (official testnet pin on testnet, official mainnet pin on
+// mainnet). Never an inline literal, never a legacy env override: job
+// validation uses the same registry as agent validation (validationRequest),
+// not NEXT_PUBLIC_VALIDATION_REGISTRY (requestValidation).
+function validationRegistry(): `0x${string}` {
+  // Fail closed on invalid configuration (e.g. testnet registry on mainnet)
+  // — throws, never silently reads the testnet registry.
+  return getNetworkConfig().validationRegistryAddress as `0x${string}`;
+}
 
 // Chain + RPC flow from the authoritative network config (was hardcoded
 // id 5042002 + testnet RPC). Registry address + ABI unchanged.
@@ -236,7 +245,7 @@ export async function getOnChainValidationStatus(requestHash: string): Promise<{
   lastUpdate: bigint;
 }> {
   const result = (await publicClient.readContract({
-    address: VALIDATION_REGISTRY,
+    address: validationRegistry(),
     abi: VALIDATION_ABI,
     functionName: "getValidationStatus",
     args: [requestHash as `0x${string}`],

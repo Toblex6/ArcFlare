@@ -126,17 +126,29 @@ export async function POST(req: NextRequest) {
       preferenceMerchant = merchantRecord;
     } else if (caller.type === 'consumer' && caller.consumerWalletAddress) {
       // Consumer step-up (Stage 2): initiating a payment needs the step-up
-      // credential once a payment PIN is enrolled. A session alone is not
-      // sufficient — the helper enforces this in front of the session check.
-      const initAccount = await (prisma as any).consumerAccount.findUnique({
-        where: { walletAddress: caller.consumerWalletAddress },
-      });
-      const initStepUp = await requireConsumerStepUp(
-        req,
-        initAccount,
-        direction === 'request' ? 'consumer.request' : 'consumer.send'
-      );
-      if (initStepUp) return initStepUp as NextResponse;
+      // credential once a payment PIN is enrolled — EXCEPT an own-wallet
+      // payment REQUEST. Creating a request only inserts a PENDING invoice
+      // row (no on-chain transfer, no Circle call); when no payoutAddress is
+      // given (or it equals the caller's own wallet) the invoice pays the
+      // caller themselves, so there is no fund movement and no fund-direction
+      // change to protect. "Send" always stays gated (the caller IS the payer
+      // and settle will debit them), and a request naming an ARBITRARY
+      // payoutAddress stays gated (it changes where future funds go).
+      const ownWallet = caller.consumerWalletAddress.toLowerCase();
+      const isOwnWalletRequest =
+        direction === 'request' &&
+        (!payoutAddress || payoutAddress.toLowerCase() === ownWallet);
+      if (!isOwnWalletRequest) {
+        const initAccount = await (prisma as any).consumerAccount.findUnique({
+          where: { walletAddress: caller.consumerWalletAddress },
+        });
+        const initStepUp = await requireConsumerStepUp(
+          req,
+          initAccount,
+          direction === 'request' ? 'consumer.request' : 'consumer.send'
+        );
+        if (initStepUp) return initStepUp as NextResponse;
+      }
       // Flow's "Send"/"Request" — the requesting/sending party is whichever
       // consumer is logged in, not whatever the client claims.
       //

@@ -17,7 +17,15 @@ import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
-const VALIDATION_REGISTRY = '0x8004Cb1BF31DAf7788923b405b754f57acEB4272';
+// ERC-8004 ValidationRegistry — resolved per-request from the authoritative
+// network config (official testnet pin on testnet, official mainnet pin on
+// mainnet). Never an inline literal: a module-scope testnet pin would
+// silently validate against testnet on mainnet.
+function validationRegistry(): `0x${string}` {
+  // Fail closed on invalid configuration — throws before any wallet or
+  // on-chain side effect, never silently uses the testnet registry.
+  return getNetworkConfig().validationRegistryAddress as `0x${string}`;
+}
 
 const arcTestnet = {
   id: getNetworkConfig().chainId,
@@ -186,7 +194,7 @@ async function validationHandler(request: NextRequest) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: ownerSCA,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: VALIDATION_REGISTRY,
+        contractAddress: validationRegistry(),
         abiFunctionSignature: 'validationRequest(address,uint256,string,bytes32)',
         abiParameters: [validatorSCA, agentId.toString(), requestURI, requestHash],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -307,7 +315,7 @@ async function validationHandler(request: NextRequest) {
       const tx = await circleClient.createContractExecutionTransaction({
         walletAddress: designated.validatorAddress,
         blockchain: getNetworkConfig().circleBlockchain as any,
-        contractAddress: VALIDATION_REGISTRY,
+        contractAddress: validationRegistry(),
         abiFunctionSignature: 'validationResponse(bytes32,uint8,string,bytes32,string)',
         abiParameters: [requestHash, responseCode.toString(), '', `0x${'0'.repeat(64)}`, tag],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
@@ -386,7 +394,7 @@ async function getValidationHandler(request: Request) {
     }
 
     const result = (await publicClient.readContract({
-      address: VALIDATION_REGISTRY,
+      address: validationRegistry(),
       abi: VALIDATION_ABI,
       functionName: 'getValidationStatus',
       args: [requestHash as `0x${string}`],
@@ -410,8 +418,8 @@ async function getValidationHandler(request: Request) {
         lastUpdate: lastUpdate.toString(),
         lastUpdatedAt: lastUpdate > 0n ? new Date(Number(lastUpdate) * 1000).toISOString() : null,
       },
-      validationRegistryAddress: VALIDATION_REGISTRY,
-      arcScanUrl: `${explorerAddressUrl(VALIDATION_REGISTRY)}`,
+      validationRegistryAddress: validationRegistry(),
+      arcScanUrl: `${explorerAddressUrl(validationRegistry())}`,
       message: pending
         ? 'Validation request pending — validator has not responded yet.'
         : `Validation ${passed ? 'PASSED ✅' : 'FAILED ❌'} — tag: ${tag}`,

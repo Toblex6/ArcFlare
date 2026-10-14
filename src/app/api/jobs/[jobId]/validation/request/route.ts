@@ -9,7 +9,15 @@ import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-
 import { createPublicClient, http, keccak256, toHex } from "viem";
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 
-const VALIDATION_REGISTRY = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272" as `0x${string}`;
+// ERC-8004 ValidationRegistry — resolved per-request from the authoritative
+// network config (official testnet pin on testnet, official mainnet pin on
+// mainnet). Never an inline literal: a module-scope testnet pin would silently
+// request validation on testnet on mainnet.
+function validationRegistry(): `0x${string}` {
+  // Fail closed on invalid configuration — throws before any wallet or
+  // on-chain side effect, never silently uses the testnet registry.
+  return getNetworkConfig().validationRegistryAddress as `0x${string}`;
+}
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({ apiKey: process.env.CIRCLE_API_KEY!, entitySecret: process.env.CIRCLE_ENTITY_SECRET! });
@@ -58,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     const requestURI = `ipfs://arcflare-job-${jobId}-validation-${requestTag}`;
     const requestHash = keccak256(toHex(`flarehq_job_validation_${jobId}_${policy.validatorSCA}_${Date.now()}`)) as `0x${string}`;
     const circleClient = getCircleClient();
-    // Use validationRequest(validator, agentId, requestURI, requestHash) — matches deployed contract at 0x8004Cb1B...
+    // Use validationRequest(validator, agentId, requestURI, requestHash) — matches the network-config ValidationRegistry.
     // For job validation, the provider agent is being validated, so the sender must be the provider's owner (agent.scaAddress)
     // The validator is the designated job validator (policy.validatorSCA)
     const signingWalletForRequest = agent.scaAddress;
@@ -73,7 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
     const tx = await circleClient.createContractExecutionTransaction({
       walletAddress: signingWalletForRequest,
       blockchain: getNetworkConfig().circleBlockchain as any,
-      contractAddress: VALIDATION_REGISTRY,
+      contractAddress: validationRegistry(),
       abiFunctionSignature: "validationRequest(address,uint256,string,bytes32)",
       abiParameters: [policy.validatorSCA, agent.tokenId.toString(), requestURI, requestHash],
       fee: { type: "level", config: { feeLevel: "MEDIUM" } },

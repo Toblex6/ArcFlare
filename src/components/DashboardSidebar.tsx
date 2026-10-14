@@ -8,6 +8,7 @@
 
 import { useNetwork } from "@/src/components/NetworkContext";
 import Image from 'next/image';
+import Link from 'next/link';
 import { useEffect, useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -30,7 +31,8 @@ const BASE_SECTIONS: NavSection[] = [
         items: [
             { label: 'Dashboard', href: '/merchant/dashboard' },
             { label: 'Analytics', href: '/analytics' },
-            { label: 'Homepage', href: '/' },
+            // No separate Homepage item: the FlareHQ logo above links to "/",
+            // so a second home link would be a duplicate nav entry.
         ],
     },
     {
@@ -65,7 +67,6 @@ const BASE_SECTIONS: NavSection[] = [
 const ICONS: Record<string, JSX.Element> = {
     Dashboard: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
     Analytics: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 16l4-6 4 3 5-8" /></svg>,
-    Homepage: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" /><line x1="1" y1="10" x2="23" y2="10" /></svg>,
     Transactions: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>,
     Escrow: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12.01" y2="18" /></svg>,
     Nanopayments: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12h8" /><path d="M12 8v8" /></svg>,
@@ -181,13 +182,13 @@ export default function DashboardSidebar({ active }: { active: string }) {
                     borderRight: '1px solid #2d2015',
                 }}
             >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36, paddingLeft: 6 }}>
+                <Link href="/" title="FlareHQ homepage" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36, paddingLeft: 6, textDecoration: 'none' }}>
                     <Image src="/arcflare-logo.png" alt="FlareHQ" width={36} height={36} style={{ borderRadius: 8, objectFit: 'contain' }} />
                     <div>
                         <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
                         <p style={{ color: '#4b5563', fontSize: 10, margin: '3px 0 0 0' }}>Stablecoin Payment Infrastructure</p>
                     </div>
-                </div>
+                </Link>
 
                 <nav style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
                     {SECTIONS.map((section) => (

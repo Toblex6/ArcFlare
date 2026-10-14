@@ -14,31 +14,49 @@ import { publicUrl } from '@/lib/publicOrigin';
 // H5: central merchant auth (active + verified + sessionVersion).
 
 export async function GET(req: NextRequest) {
+  // Safe timing diagnostic (Phase 4): durations only, no customer data. The
+  // login route logs its own total under [merchant/login]; compare the two
+  // to separate "login API slow" from "dashboard follow-up slow".
+  const t0 = Date.now();
   try {
     // H5: resolveMerchant enforces active + verified + sessionVersion.
+    const tAuth = Date.now();
     const authed = await resolveMerchant(req);
+    const authMs = Date.now() - tAuth;
     if (!authed) {
       return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
     }
 
-    const merchant = await (prisma as any).merchant.findUnique({
-      where: { id: authed.id },
-    });
+    // The profile row and the payment list are independent given authed.id —
+    // run them concurrently instead of sequentially (one fewer DB round trip
+    // on the dashboard's critical post-login path). Auth checks above stay
+    // strictly before both reads.
+    const tData = Date.now();
+    const [merchant, rawPayments] = await Promise.all([
+      (prisma as any).merchant.findUnique({
+        where: { id: authed.id },
+      }),
+      prisma.paymentLog.findMany({
+        where: { merchantId: authed.id },
+        orderBy: { timestamp: 'desc' },
+        take: 50,
+      }),
+    ]);
+    const dataMs = Date.now() - tData;
 
     if (!merchant) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
     }
 
-    // Get their payments (matched by businessName in merchant field).
+    // Tenant isolation: payments are scoped by the authenticated merchant's ID
+    // (merchantId FK), NEVER by businessName — businessName is a non-unique
+    // display string shared by unrelated merchants, so name-scoping leaked
+    // one merchant's payments/volume into another's dashboard.
     // Production views (mainnet server) exclude historical testnet-chain
     // rows — preserved in the database, never shown as current activity.
-    const payments = filterRowsForNetwork(
-      await prisma.paymentLog.findMany({
-        where: { merchant: merchant.businessName },
-        orderBy: { timestamp: 'desc' },
-        take: 50,
-      }),
-      getArcNetworkName()
+    const payments = filterRowsForNetwork(rawPayments, getArcNetworkName());
+    console.log(
+      `[merchant/me] totalMs=${Date.now() - t0} authMs=${authMs} dataMs=${dataMs} payments=${payments.length}`
     );
 
     // Explicit per-currency buckets — USDC and EURC are never summed as
@@ -79,8 +97,12 @@ export async function GET(req: NextRequest) {
         createdAt: merchant.createdAt,
         walletProvider: merchant.walletProvider,
         walletAddress: merchant.walletAddress,
-        // Show masked key — full key was shown only at signup
-        apiKeyHint: `${merchant.apiKey.slice(0, 16)}...`,
+        // Show masked key — full key was shown only at signup. apiKey is NULL
+        // for signed-up-but-unverified merchants (verify mints it), so guard
+        // the slice — a null crash here used to surface as a misleading 401
+        // "Invalid session" that bounced the merchant to the login page.
+        apiKeyHint: merchant.apiKey ? `${String(merchant.apiKey).slice(0, 16)}...` : null,
+        hasApiKey: merchant.apiKey != null,
       },
       settlementPreference: {
         symbol: preference.symbol,

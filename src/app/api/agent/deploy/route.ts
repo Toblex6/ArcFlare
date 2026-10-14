@@ -14,12 +14,17 @@ import {
 
 const prisma = new PrismaClient();
 
-// Use environment variable with a fallback for local testing
-const IDENTITY_REGISTRY =
-  process.env.IDENTITY_REGISTRY_ADDRESS || '0x8004A818BFB912233c491871b3d84c89A494BD9e';
+// ERC-8004 IdentityRegistry is resolved per-request from the authoritative
+// network config (getNetworkConfig().identityRegistryAddress): the official
+// testnet pin on testnet, the official mainnet pin on mainnet. The legacy
+// IDENTITY_REGISTRY_ADDRESS env override is intentionally NOT honored — an
+// unset legacy var silently fell back to the testnet registry on mainnet.
 
 // ─── Internal Route Handler Logic ─────────────────────────────────────────────
 async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
+  // Fail closed on invalid network configuration (e.g. testnet registry on
+  // mainnet) before any wallet or on-chain side effect.
+  const IDENTITY_REGISTRY = getNetworkConfig().identityRegistryAddress;
   try {
     const body = await request.json().catch(() => ({}));
     const metadataUri =
@@ -332,8 +337,15 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
         if (pool.length > 0 && pool[pool.length - 1].args.tokenId != null) {
           tokenId = pool[pool.length - 1].args.tokenId!.toString();
         }
-      } catch {
-        // Transient RPC failure (TLS bad-record-MAC, ECONNRESET, out-of-sync node) — retry below.
+      } catch (e: any) {
+        // Transient RPC failure (TLS bad-record-MAC, ECONNRESET, out-of-sync
+        // node) — retried below. Warn per attempt (not silent): repeated
+        // failures here are the difference between "registration failed" and
+        // "the chain is unreachable", and operators need that distinction.
+        console.warn(
+          `[agent/deploy] tokenId log scan attempt ${attempt}/3 failed for ${txHash}:`,
+          e?.message ?? e
+        );
       }
       if (!tokenId && attempt < 3) await sleep(1500 * attempt);
     }
@@ -364,7 +376,7 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
           },
           registry: IDENTITY_REGISTRY,
           ownerAddress: ownerWallet.address,
-          hint: 'Re-run POST /api/agent/deploy or inspect the tx receipt Transfer logs to recover the real tokenId; no fallback identity was persisted and no wallet was deleted.',
+          hint: 'Recover via POST /api/agent/deploy/recover with this txHash to attach the minted identity; do not re-deploy — a second registration would mint a duplicate identity. No fallback identity was persisted and no wallet was deleted.',
         },
         { status: 502 }
       );

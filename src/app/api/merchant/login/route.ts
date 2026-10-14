@@ -13,8 +13,21 @@ import { WALLET_UPGRADED_MESSAGE } from '@/src/lib/wallets/upgradeGuards';
 const JWT_SECRET = requireJwtSecret('MERCHANT_JWT_SECRET');
 
 export async function POST(req: NextRequest) {
+  // Safe login timing diagnostics (Phase 4): per-step durations only — no
+  // email, password, token, wallet secret, or customer data is ever logged.
+  // Correlate with the dashboard's follow-up requests (/api/merchant/me,
+  // /api/payments/all, /api/merchant/platform-fees log their own totals)
+  // to separate "login API slow" from "dashboard follow-ups slow".
+  const reqId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID().slice(0, 8)
+    : Date.now().toString(36);
+  const t0 = Date.now();
+  const elapsed = () => Date.now() - t0;
+  const steps: Record<string, number> = {};
   try {
+    const tRate = Date.now();
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'default');
+    steps.rateLimitMs = Date.now() - tRate;
     if (!allowed) return limitResponse;
 
     const body = await req.json().catch(() => ({}));
@@ -28,7 +41,9 @@ export async function POST(req: NextRequest) {
     }
 
 
+    const tLookup = Date.now();
     const merchant = await (prisma as any).merchant.findUnique({ where: { email } });
+    steps.lookupMs = Date.now() - tLookup;
     if (!merchant) {
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
@@ -36,7 +51,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const tBcrypt = Date.now();
     const valid = await bcrypt.compare(password, merchant.passwordHash);
+    steps.bcryptMs = Date.now() - tBcrypt;
     if (!valid) {
       return NextResponse.json({ success: false, error: 'Invalid email or password.' }, { status: 401 });
     }
@@ -57,12 +74,17 @@ export async function POST(req: NextRequest) {
     // fresh ARC wallet (locked + idempotent); transient Circle failures
     // never block login (money paths guide a re-login with a friendly
     // error instead). Healthy, id-less, and non-CIRCLE merchants pass
-    // through untouched.
+    // through untouched. INTENTIONALLY synchronous (never backgrounded):
+    // money paths must observe the post-migration wallet, and deferring it
+    // would trade correctness for apparent speed.
     let merchantRow = merchant;
+    let migrated = false;
+    const tWallet = Date.now();
     if (merchant.walletProvider === 'CIRCLE' && merchant.circleWalletId) {
       try {
         const mig = await ensureMerchantMainnetWallet(merchant.id);
         if (mig.migrated) {
+          migrated = true;
           merchantRow = await (prisma as any).merchant
             .findUnique({ where: { id: merchant.id } })
             .catch(() => merchant);
@@ -71,29 +93,48 @@ export async function POST(req: NextRequest) {
         console.error('[merchant/login] wallet upgrade check failed:', e?.message ?? e);
       }
     }
+    steps.walletMs = Date.now() - tWallet;
 
     // One-time upgrade message: shown once, then cleared (a failed clear
     // only repeats the message next login, never blocks it).
     let walletUpgraded = false;
     if (merchantRow?.migrationNoticePending) {
       walletUpgraded = true;
-      await (prisma as any).merchant
-        .update({ where: { id: merchantRow.id }, data: { migrationNoticePending: false } })
-        .catch(() => {});
     }
 
     // Issue JWT — 7 day expiry. Carries the account's sessionVersion so the
     // middleware can reject sessions issued before a password reset (M18).
-    const token = await new SignJWT({
-      merchantId: merchant.id,
-      email: merchant.email,
-      businessName: merchant.businessName,
-      sessionVersion: merchant.sessionVersion ?? 0,
-    })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt()
-      .setExpirationTime('7d')
-      .sign(JWT_SECRET);
+    // The one-time notice-clear UPDATE is independent of the JWT payload
+    // (which comes from the already-loaded row), so both run concurrently —
+    // one fewer sequential DB round trip on the login path.
+    const tSign = Date.now();
+    const [token] = await Promise.all([
+      new SignJWT({
+        merchantId: merchant.id,
+        email: merchant.email,
+        businessName: merchant.businessName,
+        sessionVersion: merchant.sessionVersion ?? 0,
+      })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime('7d')
+        .sign(JWT_SECRET),
+      (merchantRow?.migrationNoticePending
+        ? (prisma as any).merchant
+            .update({ where: { id: merchantRow.id }, data: { migrationNoticePending: false } })
+            .catch(() => null)
+        : Promise.resolve(null)),
+    ]);
+    steps.signMs = Date.now() - tSign;
+    steps.totalMs = elapsed();
+    // Durations + non-sensitive shape only (provider, migrated flag). No
+    // email, password, token, or wallet address.
+    console.log(
+      `[merchant/login] req=${reqId} totalMs=${steps.totalMs} ` +
+        `rateLimitMs=${steps.rateLimitMs} lookupMs=${steps.lookupMs} ` +
+        `bcryptMs=${steps.bcryptMs} walletMs=${steps.walletMs} signMs=${steps.signMs} ` +
+        `provider=${merchant.walletProvider ?? 'none'} migrated=${migrated}`
+    );
 
     const response = NextResponse.json({
       success: true,

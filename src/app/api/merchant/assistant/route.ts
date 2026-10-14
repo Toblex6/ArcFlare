@@ -97,8 +97,11 @@ async function executeTool(name: string, input: any, merchant: any): Promise<any
         case "get_spending_summary": {
             const days = input.days || 30;
             const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+            // Tenant isolation: scope by the authenticated merchant's ID, not
+            // businessName (non-unique display string — name-scoping leaked
+            // other merchants' spend into this summary).
             const payments = await prisma.paymentLog.findMany({
-                where: { merchant: merchant.businessName, timestamp: { gte: since } },
+                where: { merchantId: merchant.id, timestamp: { gte: since } },
             });
             const successful = payments.filter((p) => p.status === "SUCCESS");
             const totalVolume = successful.reduce((sum, p) => sum + p.amount, 0);

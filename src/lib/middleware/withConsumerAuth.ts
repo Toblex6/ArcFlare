@@ -25,9 +25,15 @@ export async function resolveConsumerSession(req: NextRequest): Promise<string |
     const walletAddress = payload.walletAddress as string;
     if (!walletAddress) return null;
     const { prisma } = await import('@/src/lib/prisma');
+    // A DB failure here must stay a silent null to the caller (expected-401
+    // shape is preserved), but it is an UNEXPECTED infrastructure failure —
+    // log it so a database outage doesn't masquerade as mass session expiry.
     const account = await (prisma as any).consumerAccount
       .findUnique({ where: { walletAddress } })
-      .catch(() => null);
+      .catch((e: any) => {
+        console.error('[consumer/session] account lookup failed:', e?.message ?? e);
+        return null;
+      });
     if (!account) return null;
     const expected = (account as any).sessionVersion ?? 0;
     if ((payload as any)?.sessionVersion !== expected) return null;

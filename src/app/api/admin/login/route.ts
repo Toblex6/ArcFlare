@@ -49,6 +49,10 @@ export async function POST(req: NextRequest) {
         });
         return response;
     } catch (error: any) {
+        // Unexpected failure (not a bad-credential 401 — that returns above).
+        // Log the cause server-side; the client still gets a generic message
+        // and no credential material is ever logged.
+        console.error('[admin/login] unexpected failure:', error?.message ?? error);
         return NextResponse.json({ success: false, error: 'Login failed.' }, { status: 500 });
     }
 }

@@ -9,7 +9,10 @@ import { getCircleClient, waitForTransaction } from "@/lib/circle/client";
 import { keccak256, toHex } from "viem";
 import { getNetworkConfig } from "@/lib/config/network";
 
-const REPUTATION_REGISTRY = (process.env.REPUTATION_REGISTRY_ADDRESS || "0x8004B663056A597Dffe9eCcC1965A193B7388713") as `0x${string}`;
+// ERC-8004 ReputationRegistry is resolved per-call from the authoritative
+// network config (getNetworkConfig().reputationRegistryAddress): the official
+// testnet pin on testnet, the official mainnet pin on mainnet. The legacy
+// REPUTATION_REGISTRY_ADDRESS env override is intentionally NOT honored.
 
 // Deterministic dedupe: jobId:validationId:VALIDATED_COMPLETION
 // We also persist a guard row via AgentLedgerEntry with type REPUTATION_SIGNAL so retries are idempotent.
@@ -28,6 +31,11 @@ export async function maybeAutoReputationForValidatedJob(params: {
   if (!jobValidationId || !providerAgentId || !providerTokenId) {
     return { attempted: false, reason: "missing jobValidationId/providerAgentId/providerTokenId" };
   }
+  // Fail closed on invalid network configuration (e.g. testnet registry on
+  // mainnet) before any DB guard row or on-chain write — throws, never
+  // silently writes feedback to the testnet registry. Both callers
+  // (jobs/complete, jobs route) invoke this inside try/catch + log.
+  const REPUTATION_REGISTRY = getNetworkConfig().reputationRegistryAddress as `0x${string}`;
   const validation: any = await (prisma as any).erc8183JobValidation.findUnique({ where: { id: jobValidationId } }).catch(() => null);
   if (!validation) return { attempted: false, reason: "validation not found" };
   if (validation.status !== "PASSED") return { attempted: false, reason: `validation status ${validation.status} != PASSED` };

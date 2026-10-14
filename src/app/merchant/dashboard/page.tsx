@@ -2,7 +2,7 @@
 "use client";
 
 import Image from "next/image";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardSidebar from "@/src/components/DashboardSidebar";
 import { displayChain } from "@/src/components/NetworkContext";
@@ -66,7 +66,9 @@ function formatVolume(m: DashboardMetrics): { value: string; unit: string } {
 interface MerchantInfo {
   businessName: string;
   email: string;
-  apiKeyHint: string;
+  // NULL for signed-up-but-unverified merchants (the key is minted at
+  // verification) — the UI must render a "verify email" note, never crash.
+  apiKeyHint: string | null;
   walletProvider?: string; // 'CIRCLE' | 'METAMASK' | 'WALLETCONNECT' | 'COINBASE' — see /api/merchant/me
   walletAddress?: string | null;
 }
@@ -139,6 +141,12 @@ export default function MerchantDashboard() {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawResult, setWithdrawResult] = useState<any>(null);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  // Idempotency key for the in-progress withdrawal attempt. The key is minted
+  // once per attempt and REUSED on retry (same inputs), so a double-click,
+  // Enter-key repeat, or network-error retry replays the same server-side
+  // claim instead of moving funds twice. Cleared on success or when the
+  // inputs change (a new destination/amount is a new attempt).
+  const withdrawKeyRef = useRef<string | null>(null);
 
   // ── Platform fee state ──
   const [feeSummary, setFeeSummary] = useState<PlatformFeeSummary | null>(null);
@@ -153,6 +161,13 @@ export default function MerchantDashboard() {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  // Mount: authenticate (me) AND load dashboard data (payments + fees) in
+  // parallel. All three endpoints authenticate independently via the
+  // merchant_token cookie and each redirects to /merchant/login on 401, so
+  // waiting for `me` before firing the data fetches only added a full
+  // sequential round trip to the post-login waterfall. Unauthenticated
+  // visitors still end up at login (every fetch redirects there).
+  const dataStartedRef = useRef(false);
   useEffect(() => {
     fetch("/api/merchant/me")
       .then((r) => r.json())
@@ -173,6 +188,16 @@ export default function MerchantDashboard() {
       })
       .catch(() => router.replace("/merchant/login"))
       .finally(() => setCheckingAuth(false));
+    // Fire alongside `me` (not after it) — see the comment above. Guarded by
+    // ref so React 18 StrictMode's double-effect still fetches only once per
+    // mount cycle pair... (StrictMode remounts reset refs, so in dev this
+    // fires twice; in production it fires once. Both data endpoints are
+    // idempotent GETs, so a double fire is harmless.)
+    if (!dataStartedRef.current) {
+      dataStartedRef.current = true;
+      fetchLiveDatabaseState();
+      fetchPlatformFees();
+    }
   }, [router]);
 
   const fetchLiveDatabaseState = async (isSilentUpdate = false) => {
@@ -262,6 +287,9 @@ export default function MerchantDashboard() {
 
   const handleCreateLink = async (e: React.FormEvent) => {
     e.preventDefault();
+    // In-flight guard: React commits setCreating async, so a rapid
+    // double-submit would otherwise create two live payment-link invoices.
+    if (creating) return;
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       setLinkError('Enter a valid amount.');
       return;
@@ -298,15 +326,28 @@ export default function MerchantDashboard() {
 
   const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
+    // In-flight guard: without this, a rapid double-submit fires two fetches
+    // before React re-renders the disabled button — two on-chain spends.
+    if (withdrawing) return;
     setWithdrawing(true);
     setWithdrawError(null);
     setWithdrawResult(null);
+    // Stable per-attempt key: minted once, reused on retry of the same
+    // destination+amount so the server replays instead of double-spending.
+    if (!withdrawKeyRef.current) {
+      withdrawKeyRef.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    }
+    const idempotencyKey = withdrawKeyRef.current;
 
     try {
       const res = await fetch('/api/merchant/withdraw', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({
           destinationAddress: withdrawAddress,
@@ -321,11 +362,26 @@ export default function MerchantDashboard() {
       setWithdrawResult(data);
       setWithdrawAddress('');
       setWithdrawAmount('');
+      // Success ends the attempt — the next withdrawal mints a fresh key.
+      withdrawKeyRef.current = null;
     } catch (err: any) {
+      // Failure keeps the key: retrying the SAME inputs replays the same
+      // server-side claim. Editing the inputs below clears it (new attempt).
       setWithdrawError(err.message || 'Withdrawal failed.');
     } finally {
       setWithdrawing(false);
     }
+  };
+
+  // A new destination or amount is a new withdrawal attempt: the previous
+  // attempt's key must not be reused for different money movement.
+  const onWithdrawAddressChange = (v: string) => {
+    withdrawKeyRef.current = null;
+    setWithdrawAddress(v);
+  };
+  const onWithdrawAmountChange = (v: string) => {
+    withdrawKeyRef.current = null;
+    setWithdrawAmount(v);
   };
 
   const copyLink = (url: string) => {
@@ -364,8 +420,8 @@ export default function MerchantDashboard() {
 
   useEffect(() => {
     if (checkingAuth || !merchant) return;
-    fetchLiveDatabaseState();
-    fetchPlatformFees();
+    // Data fetching starts on mount (see the mount effect below), not here:
+    // this effect now only owns the 5s silent-refresh interval.
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchLiveDatabaseState(true);
     }, 5000);
@@ -709,7 +765,7 @@ export default function MerchantDashboard() {
                 </label>
                 <input
                   type="text" placeholder="0x..."
-                  value={withdrawAddress} onChange={(e) => setWithdrawAddress(e.target.value)} required
+                  value={withdrawAddress} onChange={(e) => onWithdrawAddressChange(e.target.value)} required
                   style={{ width: "100%", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", color: "var(--text)", fontSize: 13, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }}
                 />
               </div>
@@ -719,7 +775,7 @@ export default function MerchantDashboard() {
                 </label>
                 <input
                   type="number" step="0.01" min="0.01" placeholder="e.g. 50.00"
-                  value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} required
+                  value={withdrawAmount} onChange={(e) => onWithdrawAmountChange(e.target.value)} required
                   style={{ width: "100%", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", color: "var(--text)", fontSize: 14, outline: "none", boxSizing: "border-box" }}
                 />
               </div>
@@ -803,7 +859,7 @@ export default function MerchantDashboard() {
             <h3 style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", margin: "0 0 20px 0" }}>Your API Key</h3>
             <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "0 0 4px 0" }}>Key hint (full key shown at signup only)</p>
             <p style={{ fontSize: 13, fontFamily: "monospace", color: "var(--text)", background: "var(--background)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", margin: "0 0 20px 0", wordBreak: "break-all" }}>
-              {merchant.apiKeyHint}
+              {merchant.apiKeyHint ?? "No API key yet — verify your email to receive one."}
             </p>
 
             <div style={{ background: "var(--background)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 14 }}>

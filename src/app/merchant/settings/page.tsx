@@ -31,7 +31,7 @@ interface WalletInfo {
 interface MerchantInfo {
   businessName: string;
   email: string;
-  apiKeyHint: string;
+  apiKeyHint: string | null;
 }
 
 const EXTERNAL_KINDS = new Set(['METAMASK', 'WALLETCONNECT', 'COINBASE']);
@@ -354,7 +354,7 @@ function ApiTab({ merchant }: { merchant: MerchantInfo | null }) {
         <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>Your API Key</h3>
         <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 16px' }}>Key hint shown below — the full key was only shown once, at signup.</p>
         <p style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--text)', background: 'var(--surface-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', margin: 0, wordBreak: 'break-all' }}>
-          {merchant.apiKeyHint}
+          {merchant.apiKeyHint ?? 'No API key yet — verify your email to receive one.'}
         </p>
       </div>
       <div style={cardStyle}>
