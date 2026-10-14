@@ -56,11 +56,21 @@ export async function getTrackRecord(agentRegistryId: number): Promise<TrackReco
   try { rep = await readOnChainReputation(agent.tokenId); } catch (e: any) {
     // Fallback address comes from the same authoritative network config the
     // reader uses — never a legacy env var or inline testnet pin. When the
-    // configuration itself is invalid, getNetworkConfig throws here too, so
-    // resolve defensively and let the error field carry the cause.
-    let fallbackRegistry = "";
-    try { fallbackRegistry = getNetworkConfig().reputationRegistryAddress; } catch {}
-    rep = { tokenId: String(agent.tokenId), reputationScore: null, reputationCount: null, positiveCount: null, negativeCount: null, recentFeedback: [], registryAddress: fallbackRegistry, readOk: false, error: e?.message };
+    // configuration itself is invalid, getNetworkConfig throws here too: the
+    // registry field MUST NOT be an empty string (callers surface
+    // evidenceReferences.reputationRegistry as the source of the reading, and
+    // "" would look like a valid-but-blank address). Use an explicit
+    // "unavailable" sentinel and carry BOTH failure causes in error, so a
+    // failed read is never mistaken for a valid zero-reputation read.
+    // readOk stays false — no consumer may treat this as on-chain evidence.
+    let fallbackRegistry = "unavailable";
+    let configCause: string | undefined;
+    try { fallbackRegistry = getNetworkConfig().reputationRegistryAddress; } catch (cfgErr: any) {
+      configCause = cfgErr?.message ?? String(cfgErr);
+    }
+    const causes = [`read failed: ${e?.message ?? String(e)}`];
+    if (configCause) causes.push(`registry config invalid: ${configCause}`);
+    rep = { tokenId: String(agent.tokenId), reputationScore: null, reputationCount: null, positiveCount: null, negativeCount: null, recentFeedback: [], registryAddress: fallbackRegistry, readOk: false, error: causes.join(" | ") };
   }
 
   const jobs: any[] = await (prisma as any).erc8183Job.findMany({ where: { providerSCA: { equals: agent.scaAddress, mode: "insensitive" } }, orderBy: { updatedAt: "desc" }, take: 20 }).catch(() => []);

@@ -136,7 +136,122 @@ test('explicit testnet registry on mainnet fails closed (never silently used)', 
   });
 });
 
-// ── 4. Every registry consumer uses the central config (no own fallback) ───
+// ── 3b. Legacy env overrides are NOT honored (retired vars) ─────────────────
+// The pre-centralization code read IDENTITY_/REPUTATION_/VALIDATION_
+// REGISTRY_ADDRESS (and NEXT_PUBLIC_VALIDATION_REGISTRY). Those vars are
+// intentionally dead: setting them must not change the resolved registries on
+// either network — otherwise an operator could silently steer mainnet reads or
+// writes at a testnet/attacker registry.
+test('legacy ERC-8004 env overrides are ignored on both networks', async () => {
+  const legacy = {
+    IDENTITY_REGISTRY_ADDRESS: '0x' + 'a'.repeat(40),
+    REPUTATION_REGISTRY_ADDRESS: '0x' + 'b'.repeat(40),
+    VALIDATION_REGISTRY_ADDRESS: '0x' + 'c'.repeat(40),
+    NEXT_PUBLIC_VALIDATION_REGISTRY: '0x' + 'd'.repeat(40),
+  };
+  await withEnv({ ARC_NETWORK: '', ...legacy }, async () => {
+    const cfg = net.getNetworkConfig();
+    assert.equal(cfg.identityRegistryAddress, TESTNET.identity);
+    assert.equal(cfg.reputationRegistryAddress, TESTNET.reputation);
+    assert.equal(cfg.validationRegistryAddress, TESTNET.validation);
+  });
+  await withEnv({ ...MAINNET_ENV, ...legacy }, async () => {
+    const cfg = net.getNetworkConfig();
+    assert.equal(cfg.identityRegistryAddress, MAINNET.identity);
+    assert.equal(cfg.reputationRegistryAddress, MAINNET.reputation);
+    assert.equal(cfg.validationRegistryAddress, MAINNET.validation);
+  });
+});
+
+// ── 3c. Testnet-pin rejection is case-insensitive ────────────────────────────
+// Address comparison must be exact-match-resistant: an all-caps or all-lower
+// testnet pin in an ARC_MAINNET_* override must fail closed exactly like the
+// checksummed form (the config already lowercases both sides — pinned here so
+// a future "simplification" to === cannot silently pass a cased variant).
+test('testnet registry rejection is case-insensitive', async () => {
+  const variants = [
+    ['ARC_MAINNET_IDENTITY_REGISTRY', TESTNET.identity.toUpperCase(), TESTNET.identity],
+    ['ARC_MAINNET_IDENTITY_REGISTRY', TESTNET.identity.toLowerCase(), TESTNET.identity],
+    ['ARC_MAINNET_REPUTATION_REGISTRY', TESTNET.reputation.toUpperCase(), TESTNET.reputation],
+    ['ARC_MAINNET_VALIDATION_REGISTRY', TESTNET.validation.toLowerCase(), TESTNET.validation],
+  ];
+  // Note: the all-caps "0X" PREFIX variant is rejected by the address-format
+  // guard ("must be a 0x EVM address") before it even reaches the testnet-pin
+  // comparison — still fail-closed, just a different message. Assert any throw
+  // for that variant, and the testnet-specific message for the rest.
+  for (const [key, cased, pin] of variants) {
+    assert.notEqual(cased, pin, 'test setup: variant must differ in case');
+    await withEnv({ ...MAINNET_ENV, [key]: cased }, async () => {
+      if (cased.startsWith('0X')) {
+        assert.throws(() => net.getNetworkConfig(), `${key}=${cased} (0X prefix) must fail closed`);
+      } else {
+        assert.throws(
+          () => net.getNetworkConfig(),
+          (e) => e.message.includes('testnet') && e.message.includes('mainnet'),
+          `${key}=${cased} (cased testnet pin) must fail closed`
+        );
+      }
+    });
+  }
+});
+
+// ── 3d. Config resolves BEFORE any side effect (static ordering proof) ───────
+// maybeAutoReputationForValidatedJob must call getNetworkConfig() before its
+// first prisma write (guard-row create); readOnChainReputation must resolve
+// the registry before its first readContract. A reorder that writes first and
+// validates later could persist a guard row or read testnet data on mainnet.
+test('registry config resolves before any DB write / chain read', () => {
+  const auto = read('src/lib/trust/autoReputation.ts');
+  const cfgIdx = auto.indexOf('getNetworkConfig().reputationRegistryAddress');
+  assert.ok(cfgIdx !== -1, 'autoReputation must resolve the registry via getNetworkConfig()');
+  const firstWrite = Math.min(
+    ...['agentLedgerEntry.create', 'erc8183JobValidation.findUnique', 'erc8183Job.findUnique']
+      .map((m) => auto.indexOf(m))
+      .filter((i) => i !== -1)
+  );
+  assert.ok(
+    cfgIdx < firstWrite,
+    'getNetworkConfig() must precede the first DB access in maybeAutoReputationForValidatedJob'
+  );
+  const reader = read('src/lib/trust/reputationReader.ts');
+  const readerCfgIdx = reader.indexOf('getNetworkConfig().reputationRegistryAddress');
+  assert.ok(readerCfgIdx !== -1, 'reputationReader must resolve the registry via getNetworkConfig()');
+  // Match the actual readContract CALL (".readContract("), not the doc comment
+  // on line 3 ("via publicClient.readContract") which precedes everything.
+  assert.ok(
+    readerCfgIdx < reader.indexOf('.readContract('),
+    'getNetworkConfig() must precede the first readContract call in readOnChainReputation'
+  );
+});
+
+// ── 3e. trackRecord fallback never presents an empty/misleading address ─────
+// When the on-chain read fails AND the config itself is invalid, the fallback
+// registry field must be an explicit "unavailable" sentinel — never "" — and
+// the error must carry both causes, with readOk false.
+test('trackRecord failure fallback is never an empty registry address', () => {
+  const src = read('src/lib/trust/trackRecord.ts');
+  assert.ok(!src.includes('let fallbackRegistry = ""'), 'empty-string fallback must be gone');
+  assert.ok(src.includes('"unavailable"'), 'fallback must use an explicit unavailable sentinel');
+  assert.ok(src.includes('readOk: false') || src.includes('readOk:false'), 'failed fallback must keep readOk false');
+  assert.ok(
+    src.includes('registry config invalid') || src.includes('configCause'),
+    'config failure cause must be carried in the error field'
+  );
+});
+
+// ── 3f. Testnet-only operator scripts refuse mainnet execution ───────────────
+// scripts/agent/setup.ts and scripts/runErc8004Lifecycle.ts submit real
+// registration transactions against hardcoded testnet registries. They must
+// exit(1) when ARC_NETWORK=mainnet rather than run against the wrong network.
+test('testnet-only operator scripts reject mainnet execution', () => {
+  for (const f of ['scripts/agent/setup.ts', 'scripts/runErc8004Lifecycle.ts']) {
+    const src = read(f);
+    assert.ok(
+      src.includes("ARC_NETWORK") && src.includes("mainnet") && src.includes("process.exit(1)"),
+      `${f} must refuse to run under ARC_NETWORK=mainnet`
+    );
+  }
+});
 // Covers the original deploy/recover/card fix plus the follow-up sweep:
 // reputation readers/writers, track-record fallback, job-validation policy +
 // all validation request/respond/status routes and the agent brain.

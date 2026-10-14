@@ -19,7 +19,15 @@ import { getNetworkConfig } from "@/lib/config/network";
 
 // ---- Config — fill these in for your actual deployment ----
 
-const ARC_TESTNET_RPC_URL = getNetworkConfig().primaryRpc;
+// NOTE: this is the AUTHORITATIVE network RPC (testnet or mainnet per
+// ARC_NETWORK), not testnet-only — the old ARC_TESTNET_RPC_URL name was a
+// lie on mainnet and has been renamed so a future reader never assumes this
+// signer is pinned to testnet. Resolved lazily inside getProvider() (not at
+// module load) so a mainnet misconfiguration throws at call time in the
+// escrow path — not at import time in every route that imports this module.
+function getArcRpcUrl(): string {
+  return getNetworkConfig().primaryRpc;
+}
 export const JOB_ESCROW_CONTRACT_ADDRESS = process.env.JOB_ESCROW_CONTRACT_ADDRESS ?? ""; // set after deploying ArcFlareJobEscrow.sol
 const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY ?? ""; // the relayer wallet's key — see security note above
 
@@ -46,7 +54,7 @@ let cachedRelayerSigner: Wallet | null = null;
 
 function getProvider(): JsonRpcProvider {
   if (!cachedProvider) {
-    cachedProvider = new JsonRpcProvider(ARC_TESTNET_RPC_URL);
+    cachedProvider = new JsonRpcProvider(getArcRpcUrl());
   }
   return cachedProvider;
 }

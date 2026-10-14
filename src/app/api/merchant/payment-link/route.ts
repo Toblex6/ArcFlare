@@ -51,6 +51,9 @@ export async function POST(req: NextRequest) {
       const usdc = getTokenBySymbol('USDC');
       token = { symbol: 'USDC', address: usdc.address, decimals: usdc.decimals };
     } catch (tokenErr: any) {
+      // Unexpected: the canonical USDC token is network-config derived — a
+      // failure here means broken network/token config, not a bad request.
+      console.error('[merchant/payment-link] USDC token resolve failed:', tokenErr?.message ?? tokenErr);
       return NextResponse.json(
         { success: false, error: 'USDC settlement is unavailable on this network.' },
         { status: 500 }
@@ -118,11 +121,17 @@ export async function POST(req: NextRequest) {
 
 // List merchant's payment links
 export async function GET(req: NextRequest) {
+  // Auth failures stay silent 401s (expected, high-volume). Only genuinely
+  // unexpected failures (DB errors, config errors) are logged + 500 — the
+  // old empty catch masked both as "Invalid session".
+  const authed = await resolveMerchant(req).catch((e: any) => {
+    console.error('[merchant/payment-link] GET auth lookup failed:', e?.message ?? e);
+    return null;
+  });
+  if (!authed) {
+    return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
+  }
   try {
-    const authed = await resolveMerchant(req);
-    if (!authed) {
-      return NextResponse.json({ success: false, error: 'Not authenticated.' }, { status: 401 });
-    }
     const merchant = await (prisma as any).merchant.findUnique({ where: { id: authed.id } });
     if (!merchant) {
       return NextResponse.json({ success: false, error: 'Merchant not found.' }, { status: 404 });
@@ -174,7 +183,8 @@ export async function GET(req: NextRequest) {
         };
       }),
     });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Invalid session.' }, { status: 401 });
+  } catch (e: any) {
+    console.error('[merchant/payment-link] GET failed:', e?.message ?? e);
+    return NextResponse.json({ success: false, error: 'Could not load payment links.' }, { status: 500 });
   }
 }

@@ -143,10 +143,22 @@ export async function POST(req: NextRequest) {
             `Merchant withdrawal — ${merchant.businessName}`
         );
 
+        // CRITICAL visibility (Phase 5): funds have ALREADY moved on-chain at
+        // this point. If this update fails, the claim row stays PROCESSING
+        // and replays misreport the withdrawal — so a failure is logged
+        // loudly with the txHash + idempotency key (both non-sensitive) for
+        // operator reconciliation. The success response below is still
+        // returned: reporting failure here would invite a duplicate
+        // withdrawal for money that already moved.
         await prisma.paymentLog.update({
             where: { idempotencyKey },
             data: { status: 'SUCCESS', arcTxHash: txHash },
-        }).catch(() => {});
+        }).catch((dbErr: any) => {
+            console.error(
+                '[merchant/withdraw] POST-TX LEDGER UPDATE FAILED — funds moved on-chain but row not marked SUCCESS. ' +
+                `txHash=${txHash} idempotencyKey=${idempotencyKey} cause=${dbErr?.message ?? dbErr}`
+            );
+        });
 
         return NextResponse.json({
             success: true,

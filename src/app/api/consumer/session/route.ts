@@ -354,8 +354,10 @@ export async function POST(req: NextRequest) {
               });
           }
         }
-      } catch {
-        // Linking must never block wallet connection.
+      } catch (e: any) {
+        // Linking must never block wallet connection — but a failure here is
+        // still unexpected (bridge bookkeeping lost), so warn visibly.
+        console.warn('[consumer/session] bridge link block failed:', e?.message ?? e);
       }
 
       const response = await issueSession(account);
@@ -391,9 +393,11 @@ export async function POST(req: NextRequest) {
           );
         }
       }
-    } catch {
+    } catch (e: any) {
       // Best-effort only — the invariant check must never throw out of Path B
-      // for callers without a resolvable session.
+      // for callers without a resolvable session. Warn so a broken check
+      // doesn't silently stop enforcing the invariant.
+      console.warn('[consumer/session] Path-B invariant pre-check failed:', e?.message ?? e);
     }
     const wallet = await createAccountWallet(`consumer_${Date.now()}`);
 

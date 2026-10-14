@@ -92,7 +92,14 @@ async function recoverAgentHandler(request: Request, merchant: AuthedMerchant) {
     for (let attempt = 1; attempt <= 3 && !receipt; attempt++) {
       try {
         receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
-      } catch {
+      } catch (e: any) {
+        // Transient RPC flakes (out-of-sync nodes) — retried with backoff.
+        // Warn per attempt so a persistently unreachable chain is visible
+        // instead of surfacing only as a bare 404 "receipt not found".
+        console.warn(
+          `[agent/deploy/recover] receipt fetch attempt ${attempt}/3 failed for ${txHash}:`,
+          e?.message ?? e
+        );
         if (attempt < 3) await sleep(1500 * attempt);
       }
     }
@@ -191,7 +198,11 @@ async function recoverAgentHandler(request: Request, merchant: AuthedMerchant) {
         holderInWalletSet = (data?.wallets ?? []).some(
           (w: any) => w?.address && String(w.address).toLowerCase() === mintToLower
         );
-      } catch {
+      } catch (e: any) {
+        console.warn(
+          `[agent/deploy/recover] wallet-set proof attempt ${attempt}/3 failed for ${txHash}:`,
+          e?.message ?? e
+        );
         if (attempt < 3) await sleep(1500 * attempt);
       }
     }

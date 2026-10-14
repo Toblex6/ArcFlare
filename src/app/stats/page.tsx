@@ -7,19 +7,39 @@
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useArcLabel } from "@/src/components/NetworkContext";
 import { useExplorer } from "@/src/components/NetworkContext";
 
 interface Metrics {
   totalVolume: number;
+  // Per-currency settled volume (USDC/EURC never summed). Absent on stale
+  // cached responses — every render below falls back to USDC-only display.
+  volumeByCurrency?: { USDC: number; EURC: number };
   totalTransactions: number;
   successCount: number;
   successRate: number;
   totalEscrows: number;
   totalLocked: number;
+  lockedByCurrency?: { USDC: number; EURC: number };
   totalReleased: number;
+  releasedByCurrency?: { USDC: number; EURC: number };
   totalAgents: number;
 }
+
+// Pinned Arc TESTNET deployments — rendered ONLY when the resolved network
+// is testnet (see the arcName gate below). Never presented as another
+// network's contracts.
+const TESTNET_CONTRACTS = [
+  {
+    name: 'ArcFlareEscrow.sol',
+    address: '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F',
+  },
+  {
+    name: 'ArcFlareStream.sol',
+    address: '0xd8ca3Bbc212F36666145fAa487D45742eA04A52B',
+  },
+];
 
 export default function PublicStatsPage() {
   // Server-resolved network label (production-safe "Arc" default until
@@ -41,12 +61,15 @@ export default function PublicStatsPage() {
 
       setMetrics({
         totalVolume: data.data.totalVolume,
+        volumeByCurrency: data.data.volumeByCurrency,
         totalTransactions: data.data.totalTransactions,
         successCount: Math.round((data.data.successRate / 100) * data.data.totalTransactions),
         successRate: data.data.successRate,
         totalEscrows: data.data.totalEscrows,
         totalLocked: data.data.totalLocked,
+        lockedByCurrency: data.data.lockedByCurrency,
         totalReleased: data.data.totalReleased,
+        releasedByCurrency: data.data.releasedByCurrency,
         totalAgents: data.data.totalAgents,
       });
 
@@ -110,7 +133,7 @@ export default function PublicStatsPage() {
     <div style={S.page}>
       {/* Header */}
       <header style={S.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Link href="/" title="FlareHQ homepage" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'inherit' }}>
           <Image
             src="/arcflare-logo.png"
             alt="FlareHQ"
@@ -124,7 +147,7 @@ export default function PublicStatsPage() {
               Public Analytics — {arcName}
             </p>
           </div>
-        </div>
+        </Link>
         <div
           style={{
             display: 'flex',
@@ -196,8 +219,16 @@ export default function PublicStatsPage() {
               }}
             >
               <div style={S.statCard}>
-                <p style={S.statValue}>{metrics.totalVolume}</p>
+                {/* Truthful per-currency volume: USDC and EURC are never
+                    summed. Legacy cached responses without buckets fall back
+                    to the USDC-only figure. */}
+                <p style={S.statValue}>{metrics.volumeByCurrency ? metrics.volumeByCurrency.USDC : metrics.totalVolume}</p>
                 <p style={S.statLabel}>USDC Volume Settled</p>
+                {metrics.volumeByCurrency && metrics.volumeByCurrency.EURC > 0 && (
+                  <p style={{ fontSize: 11, color: '#6b5a45', margin: '6px 0 0', fontFamily: 'monospace' }}>
+                    + {metrics.volumeByCurrency.EURC} EURC
+                  </p>
+                )}
               </div>
               <div style={S.statCard}>
                 <p style={S.statValue}>{metrics.totalTransactions}</p>
@@ -243,7 +274,10 @@ export default function PublicStatsPage() {
                       fontFamily: 'monospace',
                     }}
                   >
-                    {metrics.totalLocked} USDC
+                    {metrics.lockedByCurrency ? metrics.lockedByCurrency.USDC : metrics.totalLocked} USDC
+                    {metrics.lockedByCurrency && metrics.lockedByCurrency.EURC > 0 && (
+                      <span style={{ display: 'block', fontSize: 12 }}>+ {metrics.lockedByCurrency.EURC} EURC</span>
+                    )}
                   </p>
                   <p style={{ fontSize: 11, color: '#6b5a45', margin: 0 }}>Currently Locked</p>
                 </div>
@@ -257,28 +291,27 @@ export default function PublicStatsPage() {
                       fontFamily: 'monospace',
                     }}
                   >
-                    {metrics.totalReleased} USDC
+                    {metrics.releasedByCurrency ? metrics.releasedByCurrency.USDC : metrics.totalReleased} USDC
+                    {metrics.releasedByCurrency && metrics.releasedByCurrency.EURC > 0 && (
+                      <span style={{ display: 'block', fontSize: 12 }}>+ {metrics.releasedByCurrency.EURC} EURC</span>
+                    )}
                   </p>
                   <p style={{ fontSize: 11, color: '#6b5a45', margin: 0 }}>Released</p>
                 </div>
               </div>
             </div>
 
-            {/* Contracts */}
+            {/* Contracts — the pinned addresses below are the Arc TESTNET
+                deployments. On mainnet they are NOT shown: presenting
+                testnet addresses as the current network's contracts would be
+                a false claim. Verify live contract addresses on the
+                explorer for the network shown above. */}
             <div style={{ ...S.card, marginBottom: 24 }}>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: '#c8975a', margin: '0 0 16px' }}>
                 📜 Deployed Contracts — {arcName}
               </h3>
-              {[
-                {
-                  name: 'ArcFlareEscrow.sol',
-                  address: '0x24DAB3fB3Fe6A17c2e9c57F3c1D5d15CBcF5800F',
-                },
-                {
-                  name: 'ArcFlareStream.sol',
-                  address: '0xd8ca3Bbc212F36666145fAa487D45742eA04A52B',
-                },
-              ].map((c) => (
+              {arcName === 'Arc Testnet'
+                ? TESTNET_CONTRACTS.map((c) => (
                 <div
                   key={c.address}
                   style={{
@@ -299,10 +332,23 @@ export default function PublicStatsPage() {
                     {c.address.slice(0, 10)}...{c.address.slice(-6)} ↗
                   </a>
                 </div>
-              ))}
+                ))
+                : (
+                <p style={{ fontSize: 12, color: '#6b5a45', margin: 0, lineHeight: 1.6 }}>
+                  Contract addresses on {arcName} are verified per deployment — search the explorer above
+                  for the current Escrow and Stream contracts. Testnet addresses are never shown as
+                  mainnet contracts.
+                </p>
+                )}
             </div>
 
-            {/* Circle integration */}
+            {/* Circle integration — only products with a live, tracked
+                integration are badged "integrated". Webhook DELIVERY
+                outcomes are not tracked anywhere (see /analytics
+                notTracked), and x402 Gateway nanopayments are disabled on
+                mainnet (503 gateway_mainnet_unavailable) — badging either
+                as "Integrated" would be a false claim, so both are listed
+                honestly below instead of being dropped silently. */}
             <div style={S.card}>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: '#c8975a', margin: '0 0 16px' }}>
                 ⚡ Circle Products Integrated
@@ -313,8 +359,6 @@ export default function PublicStatsPage() {
                   'Programmable Wallets',
                   'Smart Contract Accounts',
                   'Iris API V2',
-                  'Webhooks',
-                  'Gateway Nanopayments',
                   'Agent Wallets',
                 ].map((p) => (
                   <span
@@ -333,6 +377,10 @@ export default function PublicStatsPage() {
                   </span>
                 ))}
               </div>
+              <p style={{ fontSize: 11, color: '#6b5a45', margin: '14px 0 0', lineHeight: 1.6 }}>
+                Not badged: webhook delivery outcomes are received best-effort and not tracked
+                (see Analytics), and x402 Gateway nanopayments are unavailable on mainnet.
+              </p>
             </div>
           </>
         )}

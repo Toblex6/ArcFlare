@@ -337,8 +337,15 @@ async function deployAgentHandler(request: Request, merchant: AuthedMerchant) {
         if (pool.length > 0 && pool[pool.length - 1].args.tokenId != null) {
           tokenId = pool[pool.length - 1].args.tokenId!.toString();
         }
-      } catch {
-        // Transient RPC failure (TLS bad-record-MAC, ECONNRESET, out-of-sync node) — retry below.
+      } catch (e: any) {
+        // Transient RPC failure (TLS bad-record-MAC, ECONNRESET, out-of-sync
+        // node) — retried below. Warn per attempt (not silent): repeated
+        // failures here are the difference between "registration failed" and
+        // "the chain is unreachable", and operators need that distinction.
+        console.warn(
+          `[agent/deploy] tokenId log scan attempt ${attempt}/3 failed for ${txHash}:`,
+          e?.message ?? e
+        );
       }
       if (!tokenId && attempt < 3) await sleep(1500 * attempt);
     }

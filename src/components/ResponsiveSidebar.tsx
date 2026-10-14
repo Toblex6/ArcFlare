@@ -68,14 +68,14 @@ export default function ResponsiveSidebar({ navSections, children }: ResponsiveS
           borderRight: "1px solid #2d2015",
         }}
       >
-        {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6 }}>
+        {/* Logo — links to the homepage (the single home entry point) */}
+        <Link href="/" title="FlareHQ homepage" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 36, paddingLeft: 6, textDecoration: "none" }}>
           <Image src="/arcflare-logo.png" alt="FlareHQ" width={36} height={36} style={{ borderRadius: 8, objectFit: "contain" }} />
           <div>
             <p style={{ color: "#fff", fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
             <p style={{ color: "#4b5563", fontSize: 10, margin: "3px 0 0 0" }}>Stablecoin Payment Infrastructure</p>
           </div>
-        </div>
+        </Link>
 
         {/* Navigation */}
         <nav style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>

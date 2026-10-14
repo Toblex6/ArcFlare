@@ -17,6 +17,21 @@ import {
 import { arcTestnet } from "viem/chains";
 
 // ── Confirmed ERC-8004 registry addresses from Arc docs ──────────────────────
+// TESTNET-ONLY script: every value below (chain, RPC, blockchains, explorer)
+// is pinned to Arc Testnet. It must refuse to run when the environment selects
+// mainnet — a mainnet registration is a real-money action and must never be
+// triggered by this helper.
+const ARC_NETWORK = (
+  process.env.ARC_NETWORK ??
+  process.env.NEXT_PUBLIC_ARC_NETWORK ??
+  "testnet"
+).toLowerCase();
+if (ARC_NETWORK === "mainnet") {
+  console.error(
+    "Refusing to run scripts/agent/setup.ts with ARC_NETWORK=mainnet: this is a TESTNET-ONLY operator script (Arc Testnet registries, ARC-TESTNET wallets). Mainnet agent registration is a separate, deliberate action."
+  );
+  process.exit(1);
+}
 const IDENTITY_REGISTRY   = "0x8004A818BFB912233c491871b3d84c89A494BD9e";
 const REPUTATION_REGISTRY = "0x8004B663056A597Dffe9eCcC1965A193B7388713";
 const VALIDATION_REGISTRY = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272";
