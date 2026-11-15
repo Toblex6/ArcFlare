@@ -42,6 +42,7 @@ import { Contract } from "ethers";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { prisma } from "@/lib/prisma";
 import { paymentRequiredResponse, verifyPayment, settlePayment } from "@/lib/x402";
+import { x402UnavailableResponse } from "@/lib/x402/availability";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { checkSpendAllowed, getSpendLimitContract, recordSpend } from "@/lib/agents/spendLimitEnforcer";
@@ -50,7 +51,7 @@ import { getTokenBySymbol, isSupportedToken, getUsdcAddress, getTokenByAddress }
 import { parseEventValue } from "@/lib/contracts/receiptParser";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 import { getNetworkConfig } from "@/lib/config/network";
-import { isGatewayAvailable, requireGatewayChain, GatewayMainnetUnavailableError } from "@/lib/x402-gateway";
+import { isGatewayAvailable, requireGatewayChain, GatewayMainnetUnavailableError, gatewayUnavailableBody } from "@/lib/x402-gateway";
 
 const PAYROLL_CONTRACT_ADDRESS = process.env.PAYROLL_CONTRACT_ADDRESS ?? "";
 
@@ -188,7 +189,7 @@ async function sweepSettledToRelayer(price: string): Promise<SweepResult> {
   // network config (was hardcoded testnet RPC + 0x0077… literal).
   const provider = new (await import("ethers")).JsonRpcProvider(getNetworkConfig().primaryRpc);
   const batching = new (await import("ethers")).Contract(
-    getNetworkConfig().x402VerifierContract,
+    getNetworkConfig().x402VerifierContract!,
     ["function totalBalance(address token, address depositor) view returns (uint256)"],
     provider
   );
@@ -242,6 +243,13 @@ export async function fundPayrollViaX402(
   recipients: PayrollRecipient[],
   token?: string
 ): Promise<NextResponse> {
+  const unavailable = x402UnavailableResponse();
+  if (unavailable) return unavailable;
+  // The sweep is unsupported on mainnet even with a verifier configured.
+  // Refuse BEFORE verify/settle, not after the payer has been charged.
+  if (!isGatewayAvailable()) {
+    return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
+  }
   const tokenAddress = token ?? getUsdcAddress();
   if (recipients.length === 0) {
     return NextResponse.json({ error: "a non-empty recipients array is required" }, { status: 400 });

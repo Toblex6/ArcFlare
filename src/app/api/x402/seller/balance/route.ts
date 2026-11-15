@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { formatUnits } from "viem";
 import { withApiKeyOrMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
+import { isGatewayAvailable, gatewayUnavailableBody } from "@/lib/x402-gateway";
 
 // Gateway API base, CCTP domain, chain, RPC and USDC address flow from the
 // authoritative network config (were hardcoded testnet values).
@@ -40,6 +41,9 @@ async function getWalletUsdcBalance(address: `0x${string}`): Promise<string> {
 }
 
 async function getBalanceHandler(request: Request) {
+  if (!isGatewayAvailable()) {
+    return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
+  }
   const { searchParams } = new URL(request.url);
   const address = searchParams.get("sellerAddress") || process.env.SELLER_ADDRESS;
 

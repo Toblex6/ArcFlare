@@ -7,6 +7,7 @@
 //      the same set.
 //
 // Run: npx tsx scripts/ssrf-guard-tests.ts   (dev server on 127.0.0.1:3000)
+//      npx tsx scripts/ssrf-guard-tests.ts --unit-only (no server/DB writes)
 
 import { assertSafeTargetUrl } from '../src/lib/security/ssrfGuard';
 import { PrismaClient } from '@prisma/client';
@@ -118,12 +119,13 @@ async function liveTests() {
 }
 
 async function main() {
-  if (!(await waitForServer())) {
+  const unitOnly = process.argv.includes('--unit-only');
+  if (!unitOnly && !(await waitForServer())) {
     console.log('FAIL dev server not reachable');
     process.exit(1);
   }
   await unitTests();
-  await liveTests();
+  if (!unitOnly) await liveTests();
   console.log(`\nssrf-guard-tests: ${checks} checks, ${failures} failures`);
   process.exit(failures === 0 ? 0 : 1);
 }

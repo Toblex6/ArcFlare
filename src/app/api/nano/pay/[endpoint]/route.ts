@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withGateway } from "@/lib/x402";
+import { x402UnavailableResponse } from "@/lib/x402/availability";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { getNetworkConfig } from "@/lib/config/network";
 import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
@@ -141,6 +142,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ endpoint: string }> }
 ) {
+  const unavailable = x402UnavailableResponse();
+  if (unavailable) return unavailable;
   const { endpoint } = await params;
   const { allowed, response: limitResponse } = await checkRateLimit(req, "payments");
   if (!allowed) return limitResponse;

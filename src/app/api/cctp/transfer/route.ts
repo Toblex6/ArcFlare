@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAddress } from "viem";
 import { startBridge, getCctpSources, getCctpDestinations } from "@/lib/cctp-v2";
+import { cctpUnavailableResponse } from "@/lib/bridge/cctpAvailability";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { requireConsumerStepUp } from "@/lib/auth/consumerStepUp";
 import { getNetworkConfig } from "@/lib/config/network";
@@ -26,6 +27,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const sources = getCctpSources();
+    const destinations = getCctpDestinations();
     const body = await req.json();
     const { fromChain, toChain, amount, recipient } = body;
 
@@ -36,7 +39,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const source = getCctpSources().find((c) => c.id === fromChain);
+    const source = sources.find((c) => c.id === fromChain);
     if (!source) {
       return NextResponse.json(
         { success: false, error: `Unsupported source chain: ${fromChain}` },
@@ -44,7 +47,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const destExists = getCctpDestinations().some((c) => c.id === toChain);
+    const destExists = destinations.some((c) => c.id === toChain);
     if (!destExists) {
       return NextResponse.json(
         { success: false, error: `Unsupported destination chain: ${toChain}` },
@@ -152,6 +155,8 @@ export async function POST(req: NextRequest) {
       message: "Bridge started — poll /api/cctp/transfer/status?reference=... to check progress.",
     });
   } catch (error: any) {
+    const unavailable = cctpUnavailableResponse(error);
+    if (unavailable) return unavailable;
     console.error("[CCTP Bridge]", error);
     return NextResponse.json(
       { success: false, error: error.message },
@@ -161,9 +166,15 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  return NextResponse.json({
-    success: true,
-    sourceChains: getCctpSources(),
-    destinationChains: getCctpDestinations(),
-  });
+  try {
+    return NextResponse.json({
+      success: true,
+      sourceChains: getCctpSources(),
+      destinationChains: getCctpDestinations(),
+    });
+  } catch (error) {
+    const unavailable = cctpUnavailableResponse(error);
+    if (unavailable) return unavailable;
+    throw error;
+  }
 }

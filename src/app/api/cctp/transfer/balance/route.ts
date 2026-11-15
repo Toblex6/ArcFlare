@@ -4,7 +4,8 @@
 // wallet id; anything else fails closed with the EXTERNAL_WALLET code so
 // the UI can show its "create a wallet" upgrade flow.
 import { NextRequest, NextResponse } from "next/server";
-import { getCctpSources } from "@/lib/cctp-v2";
+import { getCctpSources, getCctpDestinations } from "@/lib/cctp-v2";
+import { cctpUnavailableResponse } from "@/lib/bridge/cctpAvailability";
 import { resolveConsumerSession } from "@/src/lib/middleware/withConsumerAuth";
 import { getWalletBalance } from "@/src/lib/circle/client";
 import { getNetworkConfig } from "@/lib/config/network";
@@ -18,12 +19,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Sign in required." }, { status: 401 });
     }
 
+    const sources = getCctpSources();
+    getCctpDestinations();
     const fromChain = req.nextUrl.searchParams.get("fromChain");
     if (!fromChain) {
       return NextResponse.json({ success: false, error: "Missing fromChain." }, { status: 400 });
     }
 
-    const source = getCctpSources().find((c) => c.id === fromChain);
+    const source = sources.find((c) => c.id === fromChain);
     if (!source) {
       return NextResponse.json(
         { success: false, error: `Unsupported source chain: ${fromChain}` },
@@ -69,6 +72,8 @@ export async function GET(req: NextRequest) {
       chainLabel: source.label,
     });
   } catch (error: any) {
+    const unavailable = cctpUnavailableResponse(error);
+    if (unavailable) return unavailable;
     console.error("[cctp/transfer/balance]", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

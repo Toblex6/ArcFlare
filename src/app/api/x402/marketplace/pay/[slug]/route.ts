@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withGateway } from '@/lib/x402';
+import { x402UnavailableResponse } from '@/lib/x402/availability';
 import { assertSafeTargetUrl } from '@/lib/security/ssrfGuard';
 import { checkRateLimit } from '@/lib/ratelimit';
 
@@ -160,6 +161,8 @@ async function handleRequest(req: NextRequest, slug: string): Promise<NextRespon
 }
 
 async function route(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
+    const unavailable = x402UnavailableResponse();
+    if (unavailable) return unavailable;
     const { slug } = await params;
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse;

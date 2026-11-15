@@ -17,6 +17,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { withGateway } from "@/lib/x402";
+import { x402UnavailableResponse } from "@/lib/x402/availability";
 import { prisma } from "@/lib/prisma";
 import { createPublicClient, http, keccak256, toHex } from "viem";
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
@@ -1172,7 +1173,13 @@ const brainHandler = async (req: NextRequest): Promise<NextResponse> => {
   }
 };
 
-export const POST = withGateway(brainHandler, "$0.002", "/api/agent/brain");
+// Resolve optional x402 configuration at request time, before any challenge or
+// settlement; do not construct withGateway at module evaluation on mainnet.
+export async function POST(req: NextRequest) {
+  const unavailable = x402UnavailableResponse();
+  if (unavailable) return unavailable;
+  return withGateway(brainHandler, "$0.002", "/api/agent/brain")(req);
+}
 
 export async function GET() {
   return NextResponse.json({

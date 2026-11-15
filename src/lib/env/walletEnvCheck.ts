@@ -126,10 +126,12 @@ function isValidKey(key: string | undefined): boolean {
 export interface WalletEnvValidationResult {
   ok: boolean;
   errors: string[];
+  warnings: string[];
 }
 
 export function validateWalletEnv(env: Record<string, string | undefined> = process.env): WalletEnvValidationResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   // Arc network configuration (src/lib/config/network.ts): testnet needs no
   // mainnet-only variables and is always valid here; ARC_NETWORK=mainnet
@@ -216,12 +218,14 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
 
   // Stream contract address — network-gated exactly like escrow. Testnet keeps
   // the existing deployment variable (both spellings live in this repo);
-  // mainnet requires ARC_MAINNET_STREAM_ADDRESS and NEVER reads the testnet
+  // mainnet permits an unset ARC_MAINNET_STREAM_ADDRESS and NEVER reads the testnet
   // variables (a testnet value there is additionally rejected at request time
   // by requireStreamAddress()).
   if (getArcNetworkName(env) === "mainnet") {
-    const mainnetStream = env.ARC_MAINNET_STREAM_ADDRESS;
-    if (!mainnetStream || !ADDRESS_RE.test(mainnetStream)) {
+    const mainnetStream = env.ARC_MAINNET_STREAM_ADDRESS?.trim();
+    if (!mainnetStream) {
+      warnings.push("ARC_MAINNET_STREAM_ADDRESS is not set — streaming is unavailable on mainnet (503); testnet variables are never used.");
+    } else if (!ADDRESS_RE.test(mainnetStream)) {
       errors.push(
         "ARC_MAINNET_STREAM_ADDRESS: missing or invalid address (ArcFlareStream on mainnet — testnet variables are never used)"
       );
@@ -257,7 +261,7 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
     }
   }
 
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 export function assertWalletEnv(env: Record<string, string | undefined> = process.env): void {
@@ -268,6 +272,10 @@ export function assertWalletEnv(env: Record<string, string | undefined> = proces
         "Fix these before running:\n  - " +
         result.errors.join("\n  - ")
     );
+  }
+
+  for (const warning of result.warnings) {
+    console.warn(`[FlareHQ] Configuration warning: ${warning}`);
   }
 
   // Informational: degraded-but-functional public client config. Not an error

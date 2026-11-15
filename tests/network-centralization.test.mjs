@@ -179,7 +179,7 @@ test('C: stale USDC env overrides are gone from balance/verification', () => {
 
 test('C: CCTP destination config derives from network.ts (no inlined testnet CCTP values)', () => {
   const cctpV2 = read('src/lib/cctp-v2.ts');
-  assert.match(cctpV2, /getNetworkConfig\(\)/, 'cctp-v2 must import the network config');
+  assert.match(cctpV2, /getNetworkConfig\(env\)/, 'cctp-v2 must resolve the authoritative network config through its explicit env seam');
   assert.match(cctpV2, /destinationDomain:\s*net\.cctpDomain/, 'cctp-v2 destination domain must come from config');
   assert.match(cctpV2, /messageTransmitter:\s*net\.cctpMessageTransmitter/, 'cctp-v2 MessageTransmitter must come from config');
   assert.match(cctpV2, /irisApiUrl:\s*net\.irisApiUrl/, 'cctp-v2 Iris URL must come from config');

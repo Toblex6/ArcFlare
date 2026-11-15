@@ -340,7 +340,7 @@ test('stream address has a single authority (network config), no env read elsewh
   const envCheck = read('src/lib/env/walletEnvCheck.ts');
   assert.ok(
     envCheck.includes('ARC_MAINNET_STREAM_ADDRESS'),
-    'startup validation must require ARC_MAINNET_STREAM_ADDRESS on mainnet'
+    'startup validation must handle optional ARC_MAINNET_STREAM_ADDRESS on mainnet'
   );
 
   const config = read('src/lib/config/network.ts');

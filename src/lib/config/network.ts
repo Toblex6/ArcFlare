@@ -12,7 +12,8 @@
 //     already live in this repository (verified, unchanged behavior).
 //   - "mainnet": Arc Mainnet (production target). NO mainnet deployment
 //     addresses are known in this repository, so EVERY mainnet value is a
-//     required ARC_MAINNET_* environment input — EXCEPT
+//     required ARC_MAINNET_* environment input for core topology — EXCEPT
+//     optional stream, escrow and x402-verifier feature addresses, plus
 //     ARC_MAINNET_ERC8183_ADDRESS (external protocol dependency with no
 //     verified mainnet address; optional, null when unset, per-feature
 //     fail-closed via requireErc8183Address()) and the ERC-8004 registries
@@ -57,8 +58,8 @@ export interface ArcNetworkConfig {
   cctpMessageTransmitter: string;
   /** x402 payment network identifier (same shape as eip155) */
   x402Network: string;
-  /** x402 GatewayWalletBatched verifying (batching) contract */
-  x402VerifierContract: string;
+  /** x402 verifier; optional on mainnet, paid callers must gate before charging. */
+  x402VerifierContract: string | null;
   /** USDC (6-dec ERC-20 interface) on Arc */
   usdcAddress: string;
   /** EURC (6 decimals) on Arc */
@@ -230,8 +231,9 @@ function buildTestnetConfig(
   };
 }
 
-// Every mainnet value is a required environment input — nothing is inherited
-// from testnet. Missing values fail closed with an actionable error.
+// Core mainnet topology is required — nothing is inherited from testnet.
+// Optional feature addresses (ERC-8183, escrow, stream, x402 verifier) do not
+// block startup; their callers must fail closed before any payment.
 //
 // EXCEPTION: ARC_MAINNET_ERC8183_ADDRESS is deliberately NOT in this list.
 // ERC-8183 is an external protocol dependency with no verified mainnet
@@ -250,7 +252,6 @@ export const MAINNET_REQUIRED_VARS = [
   "ARC_MAINNET_CCTP_MESSAGE_TRANSMITTER",
   "ARC_MAINNET_USDC_ADDRESS",
   "ARC_MAINNET_EURC_ADDRESS",
-  "ARC_MAINNET_X402_VERIFIER",
 ] as const;
 
 function buildMainnetConfig(
@@ -282,12 +283,18 @@ function buildMainnetConfig(
     "ARC_MAINNET_CCTP_MESSAGE_TRANSMITTER",
     "ARC_MAINNET_USDC_ADDRESS",
     "ARC_MAINNET_EURC_ADDRESS",
-    "ARC_MAINNET_X402_VERIFIER",
   ] as const) {
     const v = readEnv(env, k)!;
     if (!ADDRESS_RE.test(v)) {
       throw new Error(`${k} must be a 0x EVM address (got "${v}").`);
     }
+  }
+  const x402Verifier = readEnv(env, "ARC_MAINNET_X402_VERIFIER");
+  if (x402Verifier !== undefined && !ADDRESS_RE.test(x402Verifier)) {
+    throw new Error("ARC_MAINNET_X402_VERIFIER must be a 0x EVM address — or leave it unset for per-feature fail-closed.");
+  }
+  if (x402Verifier?.toLowerCase() === TESTNET_DEFAULTS.x402VerifierContract.toLowerCase()) {
+    throw new Error("ARC_MAINNET_X402_VERIFIER must not be the Arc Testnet verifier — configure a verified mainnet address or leave it unset.");
   }
   // ERC-8183 is optional on mainnet (see MAINNET_REQUIRED_VARS comment):
   // validated when present, null when absent — never testnet-inherited.
@@ -349,7 +356,7 @@ function buildMainnetConfig(
     cctpDomain,
     cctpMessageTransmitter: readEnv(env, "ARC_MAINNET_CCTP_MESSAGE_TRANSMITTER")!,
     x402Network: readEnv(env, "ARC_MAINNET_X402_NETWORK") ?? eip155,
-    x402VerifierContract: readEnv(env, "ARC_MAINNET_X402_VERIFIER")!,
+    x402VerifierContract: x402Verifier ?? null,
     usdcAddress: readEnv(env, "ARC_MAINNET_USDC_ADDRESS")!,
     eurcAddress: readEnv(env, "ARC_MAINNET_EURC_ADDRESS")!,
     identityRegistryAddress,

@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { checkBridgeStatus, findStep } from "@/lib/cctp-v2";
+import { cctpUnavailableResponse } from "@/lib/bridge/cctpAvailability";
 import { explorerTxUrl } from "@/lib/config/network";
 
 export async function GET(req: NextRequest) {
@@ -54,6 +55,8 @@ export async function GET(req: NextRequest) {
             error: result.state === 'error' ? mintStep?.errorMessage || burnStep?.errorMessage : undefined,
         });
     } catch (error: any) {
+        const unavailable = cctpUnavailableResponse(error);
+        if (unavailable) return unavailable;
         console.error("[CCTP Bridge status]", error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }

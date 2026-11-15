@@ -24,10 +24,9 @@
 //     Bridge Kit docs, then supply via CCTP_MAINNET_SOURCES_JSON (array of
 //     { id, label, circleBlockchain }) or extend the table below. Until
 //     then, mainnet bridging refuses closed (see getCctpSources()).
-//   - The Arc destination BridgeChain enum below is 'Arc_Testnet'. The
-//     mainnet enum value (expected 'Arc' — UNCONFIRMED) must be verified
-//     against the installed @circle-fin/bridge-kit BridgeChain enum, then
-//     supplied via CCTP_MAINNET_ARC_CHAIN_ID; no mainnet value is assumed.
+//   - Installed Bridge Kit 1.15.1 includes BridgeChain.Arc = 'Arc' (mainnet).
+//     CCTP_MAINNET_ARC_CHAIN_ID must explicitly be that CHAIN NAME, not the
+//     EVM chain ID 5042 or CCTP domain 26. No destination is defaulted.
 
 import { BridgeKit, BridgeChain } from '@circle-fin/bridge-kit';
 import { createCircleWalletsAdapter } from '@circle-fin/adapter-circle-wallets';
@@ -38,23 +37,19 @@ import { getArcNetworkName, getNetworkConfig } from '@/lib/config/network';
 // its own { id, label, testnet, circleBlockchain } view derived from it —
 // the values are mapped, never re-declared.
 import { getBridgeSourceChains } from '@/lib/bridge/sourceChains';
+import { CctpUnavailableError } from '@/lib/bridge/cctpAvailability';
 
 // ── BridgeKit compatibility guard ────────────────────────────────────────────
 // BridgeChain is the CANONICAL source of bridging-supported chains for the
-// installed @circle-fin/bridge-kit (1.13.0 in this repo: Arc_Testnet only, NO
-// Arc mainnet member — verified 2026-09-13). Mainnet chain ids supplied via
-// env are validated against this enum so a typo or a pre-support value fails
-// fast here instead of inside kit.bridge(). NOTE: until Circle ships a
-// bridge-kit containing an Arc mainnet member, NO value can satisfy the
-// destination check below — mainnet bridging stays fail-closed by
-// construction, which is the correct posture (see .env.example).
+// installed @circle-fin/bridge-kit (1.15.1: Arc and Arc_Testnet supported).
+// These identifiers are chain NAMES, validated before kit.bridge(). Package
+// support alone does not enable our Circle server-signed source-wallet flow.
 function assertBridgeChainMember(value: string, envVar: string): void {
   const members = new Set<string>(Object.values(BridgeChain) as string[]);
   if (!members.has(value)) {
-    throw new Error(
+    throw new CctpUnavailableError(
       `${envVar}="${value}" is not a member of the installed @circle-fin/bridge-kit BridgeChain enum ` +
-        `(no Arc mainnet member exists in the installed version — mainnet bridging is unsupported until Circle ships one). ` +
-        `Verify against the installed package before setting this variable.`
+        `Use a chain name from the installed package, not an EVM chain ID or CCTP domain.`
     );
   }
 }
@@ -103,7 +98,7 @@ export function getCctpSources(
   }
   const raw = (env.CCTP_MAINNET_SOURCES_JSON ?? '').trim();
   if (!raw) {
-    throw new Error(
+    throw new CctpUnavailableError(
       'CCTP_MAINNET_SOURCES_JSON is required on mainnet — the Sepolia/Amoy testnet source list is never offered on mainnet. ' +
         'Set it to a JSON array of { id, label, circleBlockchain } confirmed against Circle Developer-Controlled Wallets + Bridge Kit docs.'
     );
@@ -112,17 +107,17 @@ export function getCctpSources(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error('CCTP_MAINNET_SOURCES_JSON is not valid JSON (expected an array of { id, label, circleBlockchain }).');
+    throw new CctpUnavailableError('CCTP_MAINNET_SOURCES_JSON is not valid JSON (expected an array of { id, label, circleBlockchain }).');
   }
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error('CCTP_MAINNET_SOURCES_JSON must be a non-empty array of { id, label, circleBlockchain }.');
+    throw new CctpUnavailableError('CCTP_MAINNET_SOURCES_JSON must be a non-empty array of { id, label, circleBlockchain }.');
   }
   return parsed.map((entry: any, i: number) => {
     const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
     const label = typeof entry?.label === 'string' ? entry.label.trim() : '';
     const circleBlockchain = typeof entry?.circleBlockchain === 'string' ? entry.circleBlockchain.trim() : '';
     if (!id || !label || !circleBlockchain) {
-      throw new Error(
+      throw new CctpUnavailableError(
         `CCTP_MAINNET_SOURCES_JSON[${i}] must carry non-empty { id, label, circleBlockchain } (got ${JSON.stringify(entry)}).`
       );
     }
@@ -145,27 +140,24 @@ export const CCTP_SOURCE_CHAINS: readonly CctpSourceChain[] = TESTNET_SOURCE_CHA
 // `id` is Circle Bridge Kit's destination-chain ENUM — a product constant
 // Bridge Kit resolves internally, not a network literal, so it is not
 // duplicated from network.ts (there is no network field for it).
-// TESTNET: 'Arc_Testnet' (verified). MAINNET: the enum value is UNCONFIRMED
-// (expected 'Arc' — do NOT assume); supply CCTP_MAINNET_ARC_CHAIN_ID after
-// verifying against the installed BridgeKit BridgeChain enum, else mainnet
-// bridging fails closed here rather than bridging to a wrong chain.
-export function getCctpDestination() {
-  const net = getNetworkConfig();
+// TESTNET: 'Arc_Testnet'. MAINNET: explicitly configured 'Arc', verified in
+// installed Bridge Kit 1.15.1. Configuration is lazy and never defaulted.
+export function getCctpDestination(env: Record<string, string | undefined> = process.env) {
+  const net = getNetworkConfig(env);
   const isTestnet = net.name !== 'mainnet';
   if (!isTestnet) {
-    const arcChainId = (process.env.CCTP_MAINNET_ARC_CHAIN_ID ?? '').trim();
+    const arcChainId = (env.CCTP_MAINNET_ARC_CHAIN_ID ?? '').trim();
     if (!arcChainId) {
-      throw new Error(
-        'CCTP_MAINNET_ARC_CHAIN_ID is required on mainnet — the BridgeKit Arc destination enum is unconfirmed ' +
-          "(expected 'Arc', UNVERIFIED). Verify against the installed @circle-fin/bridge-kit BridgeChain enum, then set CCTP_MAINNET_ARC_CHAIN_ID explicitly."
+      throw new CctpUnavailableError(
+        "CCTP_MAINNET_ARC_CHAIN_ID is required for mainnet bridging — set it explicitly to the Bridge Kit chain NAME 'Arc', not EVM chain ID 5042 or CCTP domain 26."
       );
     }
-    // Must be a real BridgeChain member of the INSTALLED bridge-kit, not an
-    // assumed string. (Installed 1.13.0 has no Arc mainnet member, so this
-    // throws until Circle ships one — fail-closed by construction.)
     assertBridgeChainMember(arcChainId, 'CCTP_MAINNET_ARC_CHAIN_ID');
+    if (arcChainId !== BridgeChain.Arc) {
+      throw new CctpUnavailableError("CCTP_MAINNET_ARC_CHAIN_ID must be the mainnet chain NAME 'Arc'; other destinations and Arc_Testnet are refused.");
+    }
     return {
-      id: arcChainId as 'Arc_Testnet',
+      id: BridgeChain.Arc,
       label: 'Arc Mainnet',
       testnet: false,
       // CCTP V2 destination values owned by network.ts:
@@ -188,11 +180,12 @@ export function getCctpDestination() {
 }
 
 /** Back-compat export: environment-selected destination list (lazy getter). */
-export function getCctpDestinations() {
-  return [getCctpDestination()];
+export function getCctpDestinations(env: Record<string, string | undefined> = process.env) {
+  return [getCctpDestination(env)];
 }
 
-export const CCTP_DEST_CHAINS = [getCctpDestination()];
+// Former eager CCTP_DEST_CHAINS export removed: all consumers use the lazy
+// getCctpDestinations(). Importing this module must not require bridge env.
 
 let cachedAdapter: ReturnType<typeof createCircleWalletsAdapter> | null = null;
 let cachedKit: BridgeKit | null = null;
@@ -209,7 +202,7 @@ function toBridgeAdapter(adapter: ReturnType<typeof createCircleWalletsAdapter>)
 
 function getKitAndAdapter() {
   if (!process.env.CIRCLE_API_KEY || !process.env.CIRCLE_ENTITY_SECRET) {
-    throw new Error(
+    throw new CctpUnavailableError(
       'Missing Circle credentials: CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET must be set in environment'
     );
   }
@@ -251,12 +244,20 @@ function makeReference(): string {
 // with the returned reference to follow progress.
 export function startBridge(params: {
   fromChain: string; // one of CCTP_SOURCE_CHAINS ids
-  toChain: string; // one of CCTP_DEST_CHAINS ids ("Arc_Testnet")
+  toChain: string; // configured Bridge Kit chain NAME ("Arc_Testnet" / "Arc")
   amount: string;
   senderAddress: `0x${string}`; // the consumer's own Circle wallet address
   recipientAddress: `0x${string}`; // where minted USDC should land on the destination
 }): { reference: string } {
   const { fromChain, toChain, amount, senderAddress, recipientAddress } = params;
+  // Validate configuration and initialize credentials synchronously: never
+  // claim "pending" then discover a missing bridge dependency in background.
+  const sources = getCctpSources();
+  const destinations = getCctpDestinations();
+  if (!sources.some((source) => source.id === fromChain) || !destinations.some((dest) => dest.id === toChain)) {
+    throw new CctpUnavailableError('Bridge chains do not match the configured source/destination list.');
+  }
+  const { kit, adapter } = getKitAndAdapter();
   const reference = makeReference();
   pendingTransfers.set(reference, { status: 'submitting' });
 
@@ -268,7 +269,6 @@ export function startBridge(params: {
   // that called startBridge() has already been sent.
   (async () => {
     try {
-      const { kit, adapter } = getKitAndAdapter();
       const result = await kit.bridge({
         from: { adapter, chain: fromChain as BridgeChain, address: senderAddress },
         to: { adapter, chain: toChain as BridgeChain, address: recipientAddress },
