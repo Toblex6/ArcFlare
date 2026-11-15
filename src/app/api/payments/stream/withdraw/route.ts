@@ -17,41 +17,23 @@
 // Per the external-wallet repair spec (§9/§10): "real or explicitly rejected
 // if unsupported." This is an explicit rejection.
 
-import { NextResponse, NextRequest } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { NextResponse } from 'next/server';
 import { withApiKey } from '@/lib/middleware/withApiKey';
 import { streamAddressOr503 } from '@/lib/stream/streamGuard';
 
-const conflictMessage = (address: string) =>
-  `The configured stream contract (${address}) is the criterion-based ArcFlareStream (nanopayments) contract, which has no withdraw(bytes32) function. The per-second streaming model this route implemented was replaced on 2026-08-21. Withdrawing from a per-second stream cannot be executed on-chain against this configuration, so FlareHQ refuses to record a fabricated withdrawal. Use the nanopayment stream flow (/api/jobs/nanopay/*) instead.`;
-
-async function withdrawHandler(request: NextRequest) {
-  // Network gate first: no valid stream deployment for this network → 503.
+async function withdrawHandler() {
+  // No body parsing or stream lookup: this operation cannot be executed.
   const streamGate = streamAddressOr503();
   if ('response' in streamGate) return streamGate.response;
-  const STREAM_CONTRACT = streamGate.address;
-
-  const { reference, receiverSCA } = await request.json().catch(() => ({}));
-
-  if (!reference || !receiverSCA) {
-    return NextResponse.json(
-      { success: false, error: 'reference and receiverSCA are required.' },
-      { status: 400 }
-    );
-  }
-
-  const stream = await prisma.stream.findUnique({ where: { reference } });
-  if (!stream) {
-    return NextResponse.json({ success: false, error: 'Stream not found.' }, { status: 404 });
-  }
 
   return NextResponse.json(
     {
       success: false,
-      error: conflictMessage(STREAM_CONTRACT),
+      error: 'streaming withdraw is not available',
       code: 'STREAM_ABI_CONFIG_CONFLICT',
+      message: 'The deployed stream contract has no receiver withdrawal operation. Only the poster can release job tranches or close the stream. Use /api/jobs/nanopay/* for job tranches. No funds have moved.',
     },
-    { status: 501 }
+    { status: 503 }
   );
 }
 

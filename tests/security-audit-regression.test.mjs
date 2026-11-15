@@ -91,7 +91,6 @@ test('H8 invariant: EXTERNAL rows never yield a signing binding', async () => {
 const H9_ROUTES = [
   ['src/app/api/payroll/run/route.ts', 'runPayrollHandler'],
   ['src/app/api/payments/scheduled/run/route.ts', 'runScheduledHandler'],
-  ['src/app/api/payments/stream/create/route.ts', 'createStreamHandler'],
   ['src/app/api/jobs/[jobId]/fund/route.ts', 'handler'],
   ['src/app/api/agents/[id]/treasury/hire/route.ts', 'handler'],
 ];
@@ -106,6 +105,15 @@ test('H9 ratelimit is fail-closed (memory fallback still enforces)', () => {
   const s = read('src/lib/ratelimit.ts');
   assert.ok(s.includes('fail-closed') || s.includes('fail closed'), 'fail-closed documented');
   assert.ok(s.includes('memoryRateLimit(key, config.limit'), 'fallback enforces same limit');
+});
+
+test('H9/H12 legacy stream creation is unavailable before any spend or validation sink', () => {
+  const s = read('src/app/api/payments/stream/create/route.ts').split('export const POST')[0];
+  assert.ok(s.includes('streamAddressOr503()'), 'network guard retained');
+  assert.ok(s.includes('streaming create is not available') && s.includes('status: 503'), 'explicit unavailable response');
+  for (const sink of ['createContractExecutionTransaction', 'parseUnits(', 'enforceSpendLimit(', 'prisma.stream.create(', 'fetch(']) {
+    assert.ok(!s.includes(sink), `unavailable creation must not reach ${sink}`);
+  }
 });
 
 // ── H10: treasury caps + nano claim ────────────────────────────────────────
@@ -148,7 +156,6 @@ const H12_SINKS = [
   'src/app/api/cctp/transfer/route.ts',
   'src/app/api/gateway/route.ts',
   'src/app/api/x402/seller/balance/withdraw/route.ts',
-  'src/app/api/payments/stream/create/route.ts',
   'src/app/api/escrow/create/route.ts',
 ];
 for (const r of H12_SINKS) {
@@ -160,7 +167,7 @@ for (const r of H12_SINKS) {
 test('H12 destinations/chains are validated', () => {
   assert.ok(read('src/app/api/gateway/route.ts').includes('must be valid 0x addresses'), 'gateway isAddress');
   assert.ok(read('src/app/api/x402/seller/balance/withdraw/route.ts').includes('ALLOWED_CHAINS'), 'chain allowlist');
-  assert.ok(read('src/app/api/payments/stream/create/route.ts').includes('StreamCreateSchema'), 'stream schema (scaAddress both ends)');
+  assert.ok(read('src/app/api/payments/stream/create/route.ts').includes('streaming create is not available'), 'legacy stream has no amount/address sink');
   assert.ok(read('src/app/api/escrow/create/route.ts').includes('depositorSCA must be a valid 0x address'), 'depositor isAddress');
 });
 

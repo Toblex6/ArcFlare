@@ -142,7 +142,7 @@ async function main() {
       h7cookie.status === 403 && /do not control/.test(h7cookieBody.error || ''),
       'got ' + h7cookie.status + ': ' + JSON.stringify(h7cookieBody).slice(0, 160));
 
-    console.log('\n=== Spend-limit: stream/create ceilings ===');
+    console.log('\n=== Spend-limit: legacy stream/create is unavailable ===');
 
     const bigRate = await post('/api/payments/stream/create', {
       senderSCA: attackerWallet,
@@ -152,8 +152,8 @@ async function main() {
       reference: 'audit-rate-abuse',
     }, { 'x-api-key': attackerKey });
     const bigRateBody = await j(bigRate);
-    ok('stream/create: ratePerSecond over ceiling -> 400',
-      bigRate.status === 400 && /ratePerSecond/.test(bigRateBody.error || ''),
+    ok('stream/create: abusive rate refused without approval/deposit -> 503',
+      bigRate.status === 503 && /streaming create is not available/.test(bigRateBody.error || ''),
       'got ' + bigRate.status + ': ' + JSON.stringify(bigRateBody).slice(0, 160));
 
     const bigDeposit = await post('/api/payments/stream/create', {
@@ -164,8 +164,8 @@ async function main() {
       reference: 'audit-deposit-abuse',
     }, { 'x-api-key': attackerKey });
     const bigDepositBody = await j(bigDeposit);
-    ok('stream/create: totalDeposited over ceiling -> 400',
-      bigDeposit.status === 400 && /totalDeposited/.test(bigDepositBody.error || ''),
+    ok('stream/create: abusive deposit refused without approval/deposit -> 503',
+      bigDeposit.status === 503 && /streaming create is not available/.test(bigDepositBody.error || ''),
       'got ' + bigDeposit.status + ': ' + JSON.stringify(bigDepositBody).slice(0, 160));
 
     console.log('\nNOTE: window atomicity (serializable + FOR UPDATE proof) runs via:');
