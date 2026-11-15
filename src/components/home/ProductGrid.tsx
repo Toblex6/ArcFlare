@@ -20,8 +20,8 @@ const PRODUCTS: {
   },
   {
     icon: '🌊',
-    title: 'Per-second streaming',
-    desc: 'USDC streaming via API — create, stop, and withdraw streams on Arc. Integrate through the docs; there is no hosted streaming dashboard yet.',
+    title: 'Streaming payments',
+    desc: 'USDC streaming via API — criterion-based tranches you release as work completes. Integrate through the docs; there is no hosted streaming dashboard yet.',
     href: '/docs/api',
     tag: 'API',
   },
@@ -49,7 +49,7 @@ const PRODUCTS: {
   {
     icon: '🌉',
     title: 'CCTP bridge',
-    desc: 'Move USDC from supported chains into your Arc wallet, inside the Flow app.',
+    desc: 'Move USDC from supported testnet chains into your Arc testnet wallet inside the Flow app — development/testnet today; not yet live on Arc Mainnet.',
     href: '/consumer?view=crosschain',
     tag: 'Bridge',
   },
