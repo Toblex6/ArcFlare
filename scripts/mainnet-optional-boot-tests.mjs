@@ -18,7 +18,7 @@ for (const key of Object.keys(env)) {
   if (/^CCTP_MAINNET_/.test(key)) env[key] = '';
 }
 for (const key of ['ARC_MAINNET_STREAM_ADDRESS', 'ARC_MAINNET_X402_VERIFIER', 'ARC_MAINNET_ESCROW_ADDRESS',
-  'ARCFLARE_STREAM_CONTRACT_ADDRESS', 'ARC_FLARE_STREAM_CONTRACT_ADDRESS',
+  'ARCFLARE_STREAM_CONTRACT_ADDRESS', 'ARC_FLARE_STREAM_CONTRACT_ADDRESS', 'ESCROW_ADMIN_PRIVATE_KEY',
   'CCTP_MAINNET_SOURCES_JSON', 'CCTP_MAINNET_ARC_CHAIN_ID', 'SELLER_WALLET_ADDRESS',
   'SENTRY_DSN', 'NEXT_PUBLIC_SENTRY_DSN']) env[key] = '';
 const server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1', '--port', String(port)], {
@@ -62,7 +62,7 @@ try {
     assert.equal(body.code, path.includes('/cctp/') ? 'cctp_unavailable' : 'x402_unavailable');
     checks++;
   }
-  console.log(`mainnet-optional-boot: ${checks}/${checks} passed (CCTP_MAINNET_* absent; ARC_MAINNET_CCTP_* topology retained; no funds moved)`);
+  console.log(`mainnet-optional-boot: ${checks}/${checks} passed (stream/verifier/CCTP_MAINNET_* and escrow-admin key absent; ARC_MAINNET_CCTP_* topology retained; no funds moved)`);
 } finally {
   server.kill();
   await stopped;

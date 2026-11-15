@@ -27,7 +27,7 @@
 // Placeholder detection: "YOUR_…" prefixes, "changeme", and near-zero keys.
 
 import { Wallet } from "ethers";
-import { getArcNetworkName, validateNetworkEnv } from "@/lib/config/network";
+import { getArcNetworkName, getNetworkConfig, validateNetworkEnv } from "@/lib/config/network";
 
 export interface SignerPair {
   addressVar: string;
@@ -44,6 +44,8 @@ export const KEY_ONLY: { keyVar: string; description: string }[] = [
   { keyVar: "EOA_PRIVATE_KEY", description: "relayer EOA (job escrow tests + gas sponsorship)" },
   { keyVar: "RELAYER_PRIVATE_KEY", description: "relayer EOA (payroll/escrow/x402 settlement)" },
   { keyVar: "ARC_ADMIN_PRIVATE_KEY", description: "admin signer (settlement, CCTP, agent pay)" },
+  // Required on testnet and whenever mainnet escrow is configured. With no
+  // mainnet escrow it may be absent; any supplied key is still validated.
   { keyVar: "ESCROW_ADMIN_PRIVATE_KEY", description: "escrow admin signer (dispute resolution)" },
   // NOTE: PRIVATE_KEY is deliberately NOT required here — it is a deploy-time
   // variable consumed only by hardhat.config.js and scripts/deploy-*.mjs, which
@@ -137,7 +139,12 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
   // mainnet-only variables and is always valid here; ARC_NETWORK=mainnet
   // fails closed if any ARC_MAINNET_* input is missing/malformed. The
   // returned messages are already operator-actionable.
-  errors.push(...validateNetworkEnv(env));
+  const networkErrors = validateNetworkEnv(env);
+  errors.push(...networkErrors);
+  const escrowAdminOptional =
+    getArcNetworkName(env) === "mainnet" &&
+    networkErrors.length === 0 &&
+    getNetworkConfig(env).escrowAddress === null;
 
   // Production guard (Step C): production must name its network explicitly.
   // The testnet default exists for dev/test only — a production server that
@@ -182,8 +189,19 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
   }
 
   for (const { keyVar, description } of KEY_ONLY) {
+    if (keyVar === "ESCROW_ADMIN_PRIVATE_KEY" && escrowAdminOptional && !env[keyVar]?.trim()) {
+      warnings.push("ESCROW_ADMIN_PRIVATE_KEY is not set — no mainnet escrow is configured; escrow routes remain fail-closed (503).");
+      continue;
+    }
     if (!isValidKey(env[keyVar])) {
       errors.push(`${keyVar}: missing, invalid, or placeholder (${description})`);
+    } else if (keyVar === "ESCROW_ADMIN_PRIVATE_KEY") {
+      // Format-valid hex may still be outside the secp256k1 scalar range.
+      try {
+        new Wallet(env[keyVar]!);
+      } catch {
+        errors.push(`${keyVar}: not a valid private key (${description})`);
+      }
     }
   }
 
