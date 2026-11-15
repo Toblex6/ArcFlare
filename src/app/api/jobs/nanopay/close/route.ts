@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createContractTransaction } from "@/lib/circle/client";
-import { ARC_FLARE_STREAM_CONTRACT_ADDRESS } from "@/lib/contracts/streamContract";
+import { streamAddressOr503 } from "@/lib/stream/streamGuard";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
@@ -9,6 +9,11 @@ import { recordNanopaymentStreamClosed } from "@/lib/jobs/nanopaymentSplit";
 
 async function closeHandler(req: NextRequest) {
   try {
+    // Network gate FIRST — see src/lib/stream/streamGuard.ts.
+    const stream = streamAddressOr503();
+    if ("response" in stream) return stream.response;
+    const STREAM_CONTRACT = stream.address;
+
     const body = await req.json();
     const { jobId } = body as { jobId?: string };
 
@@ -43,7 +48,7 @@ async function closeHandler(req: NextRequest) {
     // Execute close on-chain (always signed by the poster's wallet)
     const txHash = await createContractTransaction(
       job.clientSCA,
-      ARC_FLARE_STREAM_CONTRACT_ADDRESS,
+      STREAM_CONTRACT,
       "closeStream(uint256)",
       [streamRecord.streamId],
       "close nanopayment stream"

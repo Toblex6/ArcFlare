@@ -25,14 +25,18 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
-import { ARCFLARE_STREAM_CONTRACT_ADDRESS } from '@/lib/wallet/flarehqContracts';
+import { streamAddressOr503 } from '@/lib/stream/streamGuard';
 
-const STREAM_CONTRACT =
-  process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
-
-const CONFLICT_MESSAGE = `The configured stream contract (${STREAM_CONTRACT || 'unset'}) is the criterion-based ArcFlareStream (nanopayments) contract, which has no stopStream(bytes32) function. The per-second streaming model this route implemented was replaced on 2026-08-21. Stopping a per-second stream cannot be executed on-chain against this configuration, so FlareHQ refuses to record a fabricated stop. Use the nanopayment stream flow (/api/jobs/nanopay/*) instead.`;
+const conflictMessage = (address: string) =>
+  `The configured stream contract (${address}) is the criterion-based ArcFlareStream (nanopayments) contract, which has no stopStream(bytes32) function. The per-second streaming model this route implemented was replaced on 2026-08-21. Stopping a per-second stream cannot be executed on-chain against this configuration, so FlareHQ refuses to record a fabricated stop. Use the nanopayment stream flow (/api/jobs/nanopay/*) instead.`;
 
 async function stopStreamHandler(request: NextRequest) {
+  // Network gate first: no valid stream deployment for this network → 503 and
+  // nothing else runs (mainnet never inherits the testnet stream contract).
+  const streamGate = streamAddressOr503();
+  if ('response' in streamGate) return streamGate.response;
+  const STREAM_CONTRACT = streamGate.address;
+
   const { reference, callerSCA } = await request.json().catch(() => ({}));
 
   if (!reference || !callerSCA) {
@@ -50,7 +54,7 @@ async function stopStreamHandler(request: NextRequest) {
   return NextResponse.json(
     {
       success: false,
-      error: CONFLICT_MESSAGE,
+      error: conflictMessage(STREAM_CONTRACT),
       code: 'STREAM_ABI_CONFIG_CONFLICT',
     },
     { status: 501 }

@@ -27,7 +27,7 @@
 // Placeholder detection: "YOUR_…" prefixes, "changeme", and near-zero keys.
 
 import { Wallet } from "ethers";
-import { validateNetworkEnv } from "@/lib/config/network";
+import { getArcNetworkName, validateNetworkEnv } from "@/lib/config/network";
 
 export interface SignerPair {
   addressVar: string;
@@ -97,7 +97,9 @@ export const REQUIRED_CONTRACT_ADDRESSES: { addressVar: string; description: str
   { addressVar: "SPEND_LIMIT_CONTRACT_ADDRESS", description: "ArcFlareSpendLimit" },
   { addressVar: "SWAP_POOL_CONTRACT_ADDRESS", description: "ArcFlareSwapPool" },
   { addressVar: "JOB_ESCROW_CONTRACT_ADDRESS", description: "job escrow" },
-  { addressVar: "ARC_FLARE_STREAM_CONTRACT_ADDRESS", description: "ArcFlareStream (nanopayments)" },
+  // NOTE: the stream address is network-gated (src/lib/config/network.ts) and
+  // validated separately below — testnet: ARCFLARE_STREAM_CONTRACT_ADDRESS,
+  // mainnet: ARC_MAINNET_STREAM_ADDRESS only.
 ];
 
 export const OPTIONAL_ADDRESS_LISTS: { listVar: string; description: string }[] = [
@@ -209,6 +211,28 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
     const value = env[addressVar];
     if (!value || !ADDRESS_RE.test(value)) {
       errors.push(`${addressVar}: missing or invalid address (${description})`);
+    }
+  }
+
+  // Stream contract address — network-gated exactly like escrow. Testnet keeps
+  // the existing deployment variable (both spellings live in this repo);
+  // mainnet requires ARC_MAINNET_STREAM_ADDRESS and NEVER reads the testnet
+  // variables (a testnet value there is additionally rejected at request time
+  // by requireStreamAddress()).
+  if (getArcNetworkName(env) === "mainnet") {
+    const mainnetStream = env.ARC_MAINNET_STREAM_ADDRESS;
+    if (!mainnetStream || !ADDRESS_RE.test(mainnetStream)) {
+      errors.push(
+        "ARC_MAINNET_STREAM_ADDRESS: missing or invalid address (ArcFlareStream on mainnet — testnet variables are never used)"
+      );
+    }
+  } else {
+    const testnetStream =
+      env.ARCFLARE_STREAM_CONTRACT_ADDRESS ?? env.ARC_FLARE_STREAM_CONTRACT_ADDRESS;
+    if (!testnetStream || !ADDRESS_RE.test(testnetStream)) {
+      errors.push(
+        "ARCFLARE_STREAM_CONTRACT_ADDRESS (or the legacy ARC_FLARE_STREAM_CONTRACT_ADDRESS): missing or invalid address (ArcFlareStream)"
+      );
     }
   }
 

@@ -48,8 +48,12 @@ import { getNetworkConfig } from "@/lib/config/network";
 // This export exists for non-throwing display/diagnostic consumers only.
 export const ARCFLARE_ESCROW_CONTRACT_ADDRESS: string =
   getNetworkConfig().escrowAddress ?? "";
-export const ARCFLARE_STREAM_CONTRACT_ADDRESS =
-  process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
+// Stream resolves through the same network authority: testnet →
+// ARCFLARE_STREAM_CONTRACT_ADDRESS (ARCFLARE_/ARC_FLARE_ spellings), mainnet →
+// ARC_MAINNET_STREAM_ADDRESS only. Display/diagnostic consumers only — stream
+// routes gate on streamAddressOr503() so a missing/wrong value is 503, not "".
+export const ARCFLARE_STREAM_CONTRACT_ADDRESS: string =
+  getNetworkConfig().streamAddress ?? "";
 
 // USDC + chain ID now flow from the authoritative network config (testnet:
 // the exact values below; mainnet: required ARC_MAINNET_* env inputs).

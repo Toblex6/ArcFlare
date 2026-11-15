@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createContractTransaction } from "@/lib/circle/client";
-import { ARC_FLARE_STREAM_CONTRACT_ADDRESS, ARC_FLARE_STREAM_ABI, computeTrancheAmounts } from "@/lib/contracts/streamContract";
+import { ARC_FLARE_STREAM_ABI, computeTrancheAmounts } from "@/lib/contracts/streamContract";
+import { streamAddressOr503 } from "@/lib/stream/streamGuard";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
@@ -19,6 +20,13 @@ const streamIface = new Interface(ARC_FLARE_STREAM_ABI as unknown as string[]);
 
 async function openHandler(req: NextRequest) {
   try {
+    // Network gate FIRST: on mainnet without ARC_MAINNET_STREAM_ADDRESS (or with
+    // the testnet deployment) this answers 503 before any auth, DB, RPC or
+    // Circle transaction — no funds can move against the wrong contract.
+    const stream = streamAddressOr503();
+    if ("response" in stream) return stream.response;
+    const STREAM_CONTRACT = stream.address;
+
     const body = await req.json();
     const { jobId, criteria } = body as { jobId?: string; criteria?: AcceptanceCriteria };
 
@@ -68,14 +76,14 @@ async function openHandler(req: NextRequest) {
       job.clientSCA,
       USDC_ADDRESS,
       "approve(address,uint256)",
-      [ARC_FLARE_STREAM_CONTRACT_ADDRESS, totalBudget],
+      [STREAM_CONTRACT, totalBudget],
       "approve USDC for nanopayment stream"
     );
 
     // 2) Open the stream on-chain
     const openTx = await createContractTransaction(
       job.clientSCA,
-      ARC_FLARE_STREAM_CONTRACT_ADDRESS,
+      STREAM_CONTRACT,
       "openStream(address,address,uint256,uint256)",
       [job.providerSCA, USDC_ADDRESS, totalBudget, trancheCount.toString()],
       "open nanopayment stream"
@@ -84,7 +92,7 @@ async function openHandler(req: NextRequest) {
     // 3) Parse streamId from the StreamOpened event
     const receipt = await publicClient.waitForTransactionReceipt({ hash: openTx as `0x${string}` });
     const streamOpenedLog = receipt.logs.find(
-      (log) => log.address.toLowerCase() === ARC_FLARE_STREAM_CONTRACT_ADDRESS.toLowerCase()
+      (log) => log.address.toLowerCase() === STREAM_CONTRACT.toLowerCase()
     );
     if (!streamOpenedLog) {
       throw new Error("StreamOpened event not found in receipt");

@@ -100,6 +100,18 @@ export interface ArcNetworkConfig {
    * malformed value) fails closed (503) instead of moving funds.
    */
   escrowAddress: string | null;
+  /**
+   * ArcFlareStream address on Arc — or null when this network has no stream
+   * deployment configured. Testnet:
+   * ARCFLARE_STREAM_CONTRACT_ADDRESS (the deployed ArcFlareStream, with the
+   * legacy ARC_FLARE_STREAM_CONTRACT_ADDRESS spelling also honored as a
+   * fallback). Mainnet: ARC_MAINNET_STREAM_ADDRESS ONLY — the testnet
+   * deployment and both testnet stream variables are never consulted on
+   * mainnet. Consumers MUST resolve through requireStreamAddress() /
+   * streamAddressOr503() so a null (or a testnet / malformed value) fails
+   * closed (503) instead of moving funds.
+   */
+  streamAddress: string | null;
   /** WalletConnect chain identifier, e.g. "eip155:5042002" */
   walletConnectChainId: string;
 }
@@ -207,6 +219,13 @@ function buildTestnetConfig(
     // Testnet escrow comes from the existing deployment variable — unchanged
     // behavior. Unset means "no escrow configured here" (null), never a guess.
     escrowAddress: readEnv(env, "ARCFLARE_ESCROW_CONTRACT_ADDRESS") ?? null,
+    // Testnet stream: the existing deployment variable — both spellings that
+    // exist in this repository are honored (ARCFLARE_/ARC_FLARE_ prefix).
+    // Unset means "no stream configured" (null), never a guess.
+    streamAddress:
+      readEnv(env, "ARCFLARE_STREAM_CONTRACT_ADDRESS") ??
+      readEnv(env, "ARC_FLARE_STREAM_CONTRACT_ADDRESS") ??
+      null,
     walletConnectChainId: TESTNET_DEFAULTS.walletConnectChainId,
   };
 }
@@ -344,6 +363,11 @@ function buildMainnetConfig(
     // mainnet. Only an explicit ARC_MAINNET_ESCROW_ADDRESS can configure it,
     // and requireEscrowAddress() additionally rejects the testnet pin.
     escrowAddress: readEnv(env, "ARC_MAINNET_ESCROW_ADDRESS") ?? null,
+    // Stream is optional on mainnet on the same terms: ARC_MAINNET_STREAM_ADDRESS
+    // only. Neither testnet stream variable (ARCFLARE_STREAM_CONTRACT_ADDRESS /
+    // ARC_FLARE_STREAM_CONTRACT_ADDRESS) is read here, and
+    // requireStreamAddress() additionally rejects the testnet deployment.
+    streamAddress: readEnv(env, "ARC_MAINNET_STREAM_ADDRESS") ?? null,
     walletConnectChainId:
       readEnv(env, "ARC_MAINNET_WALLETCONNECT_CHAIN_ID") ?? eip155,
   };
@@ -523,6 +547,92 @@ export function isEscrowAvailable(
 ): boolean {
   try {
     requireEscrowAddress(env);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Stream per-network fail-closed ──────────────────────────────────────────
+// ArcFlareStream is deployed and production-used on Arc TESTNET only
+// (0xd8ca3Bbc…A52B — criterion-based tranche model, openStream/releaseTranche/
+// closeStream). Stream therefore resolves per network exactly like escrow:
+//
+//   testnet → ARCFLARE_STREAM_CONTRACT_ADDRESS (existing behavior, unchanged;
+//             the legacy ARC_FLARE_STREAM_CONTRACT_ADDRESS spelling is honored
+//             as a fallback because both names exist in this repository)
+//   mainnet → ARC_MAINNET_STREAM_ADDRESS only (explicit, verified)
+//
+// Missing (or the testnet deployment, or a malformed value) => every stream
+// route answers HTTP 503 and moves no funds. This is the single authority for
+// the stream address: routes must call requireStreamAddress() through
+// streamAddressOr503() (src/lib/stream/streamGuard.ts) rather than reading
+// process.env directly.
+
+/** The Arc TESTNET ArcFlareStream deployment — never valid on mainnet. */
+export const TESTNET_STREAM_CONTRACT_ADDRESS =
+  "0xd8ca3Bbc212F36666145fAa487D45742eA04A52B";
+
+/** Thrown when the selected network has no stream deployment configured. */
+export class StreamUnavailableError extends Error {
+  readonly code = "stream_unavailable";
+  constructor(networkName: ArcNetworkName = getArcNetworkName()) {
+    super(
+      networkName === "mainnet"
+        ? "Streaming is not available on mainnet — ARC_MAINNET_STREAM_ADDRESS is not set. " +
+          "Stream routes are fail-closed: no funds can move. The Arc Testnet stream contract is never used on mainnet."
+        : "Streaming is not available — ARCFLARE_STREAM_CONTRACT_ADDRESS is not set for Arc Testnet, so no stream contract is configured. " +
+          "No funds can move until it is set to the deployed ArcFlareStream address."
+    );
+    this.name = "StreamUnavailableError";
+  }
+}
+
+/** Thrown when a stream address is configured but is not valid for this network. */
+export class StreamMisconfiguredError extends Error {
+  readonly code = "stream_misconfigured";
+  constructor(message: string) {
+    super(message);
+    this.name = "StreamMisconfiguredError";
+  }
+}
+
+/**
+ * The ArcFlareStream address for the selected network — or throws.
+ *
+ * - throws StreamUnavailableError when nothing is configured (mainnet with no
+ *   ARC_MAINNET_STREAM_ADDRESS is a legitimate production state);
+ * - throws StreamMisconfiguredError when the value is not a 0x address, or when
+ *   mainnet is pointed at the Arc Testnet deployment.
+ */
+export function requireStreamAddress(
+  env: Record<string, string | undefined> = process.env
+): string {
+  const cfg = getNetworkConfig(env);
+  const raw = (cfg.streamAddress ?? "").trim();
+  if (!raw) throw new StreamUnavailableError(cfg.name);
+  if (!EVM_ADDRESS_RE.test(raw)) {
+    throw new StreamMisconfiguredError(
+      `The stream address configured for ${cfg.name} is not a valid 0x EVM address ("${raw}"). ` +
+        (cfg.name === "mainnet" ? "Set ARC_MAINNET_STREAM_ADDRESS." : "Set ARCFLARE_STREAM_CONTRACT_ADDRESS.")
+    );
+  }
+  if (cfg.name === "mainnet" && raw.toLowerCase() === TESTNET_STREAM_CONTRACT_ADDRESS.toLowerCase()) {
+    throw new StreamMisconfiguredError(
+      `ARC_NETWORK=mainnet refuses to use the Arc Testnet ArcFlareStream (${TESTNET_STREAM_CONTRACT_ADDRESS}). ` +
+        "The testnet deployment is never valid on mainnet — set ARC_MAINNET_STREAM_ADDRESS to the verified mainnet deployment, " +
+        "or leave it unset so streaming stays fail-closed (503)."
+    );
+  }
+  return raw;
+}
+
+/** True when the selected network has a valid stream address configured. */
+export function isStreamAvailable(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  try {
+    requireStreamAddress(env);
     return true;
   } catch {
     return false;

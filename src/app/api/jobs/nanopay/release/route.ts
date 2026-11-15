@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createContractTransaction } from "@/lib/circle/client";
-import { ARC_FLARE_STREAM_CONTRACT_ADDRESS } from "@/lib/contracts/streamContract";
+import { streamAddressOr503 } from "@/lib/stream/streamGuard";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
@@ -9,6 +9,12 @@ import { recordNanopaymentTrancheReleased } from "@/lib/jobs/nanopaymentSplit";
 
 async function releaseHandler(req: NextRequest) {
   try {
+    // Network gate FIRST — no body parsing / DB / Circle call on a network with
+    // no valid stream deployment (503 stream_unavailable / stream_misconfigured).
+    const stream = streamAddressOr503();
+    if ("response" in stream) return stream.response;
+    const STREAM_CONTRACT = stream.address;
+
     const body = await req.json();
     const { jobId, requirementIndex } = body as { jobId?: string; requirementIndex?: number };
 
@@ -62,7 +68,7 @@ async function releaseHandler(req: NextRequest) {
     // Execute release on-chain (always signed by the poster's wallet)
     const txHash = await createContractTransaction(
       job.clientSCA,
-      ARC_FLARE_STREAM_CONTRACT_ADDRESS,
+      STREAM_CONTRACT,
       "releaseTranche(uint256,uint256)",
       [streamRecord.streamId, requirementIndex.toString()],
       `release nanopayment tranche ${requirementIndex}`

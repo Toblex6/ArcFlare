@@ -22,8 +22,8 @@ import { parseUnits } from 'viem';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { enforceSpendLimit } from '@/lib/agents/spendWindow';
+import { streamAddressOr503 } from '@/lib/stream/streamGuard';
 
-const STREAM_CONTRACT = process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || '';
 const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
 // ── Per-merchant stream ceilings (audit: spend-limit gap) ────────────────────
@@ -66,6 +66,13 @@ async function waitForCircleTx(
 
 async function createStreamHandler(request: NextRequest) {
   try {
+    // Network gate FIRST: the stream address resolves per network (mainnet →
+    // ARC_MAINNET_STREAM_ADDRESS only). Missing/invalid/testnet-on-mainnet
+    // answers 503 before any rate limit, auth, Circle or chain call.
+    const streamGate = streamAddressOr503();
+    if ('response' in streamGate) return streamGate.response;
+    const STREAM_CONTRACT = streamGate.address;
+
     // H9: payments-tier rate limit on this fund-moving POST.
     const { allowed, response: limitResponse } = await checkRateLimit(request, 'payments');
     if (!allowed) return limitResponse!;
@@ -90,13 +97,6 @@ async function createStreamHandler(request: NextRequest) {
       totalDeposited,
       webhookUrl,
     } = data;
-
-    if (!STREAM_CONTRACT) {
-      return NextResponse.json(
-        { success: false, error: 'ARCFLARE_STREAM_CONTRACT_ADDRESS not set in environment.' },
-        { status: 500 }
-      );
-    }
 
     // ── Ownership check — proves the caller actually controls senderSCA ────
     const actor = await verifyCallerControlsAddress(request, senderSCA);

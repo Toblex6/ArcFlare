@@ -1,9 +1,9 @@
 // src/lib/contracts/streamContract.ts
 //
-// Single source of truth for the ArcFlareStream contract on Arc Testnet:
-// address + ABI + ethers read helpers. The ABI below is generated from
-// contracts/ArcFlareStream.sol (the canonical implementation, compiled with
-// solc 0.8.24 / OpenZeppelin 5.0.2). Deployed 2026-08-20:
+// Single source of truth for the ArcFlareStream ABI + ethers read helpers.
+// The ADDRESS is resolved per network by src/lib/config/network.ts
+// (requireStreamAddress) — testnet: ARCFLARE_STREAM_CONTRACT_ADDRESS, mainnet:
+// ARC_MAINNET_STREAM_ADDRESS only. Testnet deployment (2026-08-20):
 //   0xd8ca3Bbc212F36666145fAa487D45742eA04A52B
 //   tx 0x13a3879bcd6dd9ad9f97230f1cd25af949116a468b7e4bc67b7749909cad3009
 // Bytecode verified live against the local artifact (keccak match).
@@ -13,11 +13,15 @@
 // exposes READ helpers over ethers, plus the ABI used for event parsing.
 
 import { Contract, JsonRpcProvider, id as keccakId } from "ethers";
-import { getNetworkConfig } from "@/lib/config/network";
+import { getNetworkConfig, requireStreamAddress } from "@/lib/config/network";
 
-export const ARC_FLARE_STREAM_CONTRACT_ADDRESS =
-  process.env.ARC_FLARE_STREAM_CONTRACT_ADDRESS ?? "";
-
+// The stream address is NOT read from process.env here. It resolves per network
+// through the single authority (src/lib/config/network.ts):
+//   testnet → ARCFLARE_STREAM_CONTRACT_ADDRESS (ARCFLARE_/ARC_FLARE_ spellings)
+//   mainnet → ARC_MAINNET_STREAM_ADDRESS only, never the testnet deployment.
+// requireAddress() throws when the selected network has no valid deployment, so
+// this module can never broadcast/read against the wrong chain's contract.
+// Route handlers must gate even earlier via streamAddressOr503().
 export const ARC_FLARE_STREAM_ABI = [
   "function openStream(address worker, address token, uint256 totalBudget, uint256 trancheCount) external returns (uint256 streamId)",
   "function releaseTranche(uint256 streamId, uint256 requirementIndex) external",
@@ -61,12 +65,13 @@ export function getStreamProvider(): JsonRpcProvider {
 }
 
 function requireAddress(): string {
-  if (!ARC_FLARE_STREAM_CONTRACT_ADDRESS) {
+  try {
+    return requireStreamAddress();
+  } catch (e: any) {
     throw new Error(
-      "ARC_FLARE_STREAM_CONTRACT_ADDRESS is not configured — deploy ArcFlareStream.sol first"
+      `ArcFlareStream is not usable on this network — ${e?.message ?? String(e)}`
     );
   }
-  return ARC_FLARE_STREAM_CONTRACT_ADDRESS;
 }
 
 /**
