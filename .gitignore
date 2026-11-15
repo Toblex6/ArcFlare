@@ -38,6 +38,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 *.tsbuildinfo
+*.log
+dev-err.txt
+dev-out.txt
+debug_output.txt
+npm-install.log
 
 # Misc
 .DS_Store
