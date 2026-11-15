@@ -16,13 +16,13 @@ const PILLARS = [
     icon: '🤖',
     title: 'Agents',
     desc: 'Identity, wallets, spend policies, reputation, jobs, Brain.',
-    items: ['ERC-8004 wallets', 'Reputation + validation', 'ERC-8183 jobs', 'Agent Brain operator'],
+    items: ['ERC-8004 wallets', 'Reputation + validation', 'ERC-8183 jobs (testnet)', 'Agent Brain operator'],
   },
   {
     icon: '🧱',
     title: 'Infrastructure',
     desc: 'x402 micro-billing, APIs, webhooks, CCTP bridging on one ledger.',
-    items: ['$0.002 x402 calls', 'APIs + docs', 'Settlement webhooks', 'CCTP bridge'],
+    items: ['$0.002 x402 calls', 'APIs + docs', 'Settlement webhooks', 'CCTP bridge (testnet)'],
   },
 ];
 

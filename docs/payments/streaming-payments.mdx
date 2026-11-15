@@ -96,6 +96,13 @@ For a budget of 30,000 base units (0.03 USDC) and 3 criteria:
 Deployment tx: `0x13a3879bcd6dd9ad9f97230f1cd25af949116a468b7e4bc67b7749909cad3009`  
 Bytecode verified (keccak match).
 
+**ArcFlareStream** on Arc Mainnet (`5042`): `0x79230A415dF3B22cD8c7DDB9b7Cd1f860e95375e`  
+Deployment tx: `0x5b601cdf312fc623886c9579a1af0aa4525d3f3f6f23d1dbbf5000fe0d7f8349`  
+Bytecode verified against the repo artifact. **Status: deployed but unused** — no
+stream has been created on Arc Mainnet yet (on-chain `nextStreamId()` is `0`).
+Arc Testnet is the proven path (streams created and tranches released there);
+streams on Mainnet are not yet customer-proven.
+
 Features:
 - ReentrancyGuard + SafeERC20
 - Poster-funded, poster-releases, no refund path
