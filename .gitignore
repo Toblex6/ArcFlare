@@ -48,6 +48,9 @@ npm-install.log
 .DS_Store
 *.pem
 
+# Presentation decks (large binary artifacts, not part of the app)
+*.pptx
+
 # Generated Prisma Client
 /src/generated/client
 # Hardhat build artifacts

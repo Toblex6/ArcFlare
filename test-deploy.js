@@ -1,13 +1,36 @@
 // test-deploy.js
 // Run this file using: node test-deploy.js
-const { execSync } = require('child_process');
-
-// Config settings — swap out localhost for your production Render URL when ready!
-const TARGET_API_URL = 'http://localhost:3000/api/agent/deploy';
-const TEST_API_KEY = 'your_generated_dev_api_key_here';
+//
+// Smoke-test for POST /api/agent/deploy (agent provisioning).
+//
+// Configuration is read from the environment — no keys or URLs live in this
+// file:
+//   TEST_API_KEY     (required) API key with deploy permission
+//   TARGET_API_URL   (optional) defaults to http://localhost:3000/api/agent/deploy
+//
+// Example:
+//   TARGET_API_URL=https://your-app.onrender.com/api/agent/deploy \
+//   TEST_API_KEY=... node test-deploy.js
+const TARGET_API_URL =
+  process.env.TARGET_API_URL || 'http://localhost:3000/api/agent/deploy';
+const TEST_API_KEY = process.env.TEST_API_KEY;
 
 async function runVerificationTest() {
+  if (!TEST_API_KEY) {
+    console.error(
+      '❌ TEST_API_KEY is not set.\n' +
+        '   Export an API key before running this script, e.g.:\n' +
+        '     TEST_API_KEY=<your key> node test-deploy.js\n' +
+        '   Optionally set TARGET_API_URL (default: ' +
+        TARGET_API_URL +
+        ').'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   console.log('🚀 Initiating FlareHQ Agent Deployment Security verification sequence...');
+  console.log(`📡 Target: ${TARGET_API_URL}`);
 
   const payload = JSON.stringify({
     agentName: 'Siggy Alpha Agent-01',
