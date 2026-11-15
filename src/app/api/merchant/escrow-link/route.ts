@@ -17,6 +17,7 @@ import { checkRateLimit } from '@/src/lib/ratelimit';
 import { keccak256, toBytes, isAddress } from 'viem';
 import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
 import { publicUrl } from '@/lib/publicOrigin';
+import { escrowAddressOr503 } from '@/lib/escrow/escrowGuard';
 
 // H5: central merchant auth (active + verified + sessionVersion).
 
@@ -28,6 +29,12 @@ const UNFUNDED_DEPOSITOR = '0x0000000000000000000000000000000000000000';
 
 export async function POST(req: NextRequest) {
   try {
+    // Network gate FIRST: no escrow-request links can be minted for a network
+    // that has no escrow deployment (mainnet today) — 503, no row written.
+    const escrowGuard = escrowAddressOr503();
+    if ("response" in escrowGuard) return escrowGuard.response;
+    const ESCROW_CONTRACT = escrowGuard.address;
+
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse;
 
@@ -83,7 +90,7 @@ export async function POST(req: NextRequest) {
         currency: 'USDC',
         depositorSCA: UNFUNDED_DEPOSITOR, // replaced when the outsider funds
         beneficiarySCA,
-        contractAddress: process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '',
+        contractAddress: ESCROW_CONTRACT,
         status: 'PENDING_FUNDING',
         condition: condition || null,
         deadline: deadlineDate,

@@ -19,13 +19,12 @@ import { resolveWalletProvider } from '@/lib/wallet/resolve';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
-import { ARCFLARE_ESCROW_CONTRACT_ADDRESS, ARC_TESTNET_CHAIN_ID, escrowAbi } from '@/lib/wallet/flarehqContracts';
+import { ARC_TESTNET_CHAIN_ID, escrowAbi } from '@/lib/wallet/flarehqContracts';
 import { readContractReliable } from '@/lib/wallet/chainClient';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import type { Hash } from 'viem';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
-
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+import { escrowAddressOr503 } from '@/lib/escrow/escrowGuard';
 
 function getCircleClient() {
   return initiateDeveloperControlledWalletsClient({
@@ -60,6 +59,12 @@ async function waitForCircleTx(
 
 async function releaseHandler(request: NextRequest) {
   try {
+    // Network gate FIRST — 503 (no funds move, no wallet/RPC call) when the
+    // selected network has no escrow deployment.
+    const escrowGuard = escrowAddressOr503();
+    if ("response" in escrowGuard) return escrowGuard.response;
+    const ESCROW_CONTRACT = escrowGuard.address;
+
     const { reference, callerSCA } = await request.json();
 
     if (!reference || !callerSCA) {

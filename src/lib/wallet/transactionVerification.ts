@@ -31,13 +31,17 @@ import {
   readContractReliable,
 } from "@/lib/wallet/chainClient";
 import {
-  ARCFLARE_ESCROW_CONTRACT_ADDRESS,
   ARCFLARE_USDC_DECIMALS,
   escrowAbi,
   escrowEventTopics,
   usdcTransferAbi,
   type EscrowOnChain,
 } from "@/lib/wallet/flarehqContracts";
+import {
+  EscrowMisconfiguredError,
+  EscrowUnavailableError,
+  requireEscrowAddress,
+} from "@/lib/config/network";
 import { resolveCurrency } from "@/lib/tokens/resolveCurrency";
 
 const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -59,11 +63,27 @@ export interface VerifiedExternalTransaction {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * The escrow contract for the selected network. Fail-closed: mainnet with no
+ * ARC_MAINNET_ESCROW_ADDRESS (the only valid state today — no mainnet escrow
+ * deployment exists) is a VerificationError, never a silent "no escrow".
+ */
+function escrowContractOrThrow(): string {
+  try {
+    return requireEscrowAddress();
+  } catch (e) {
+    if (e instanceof EscrowUnavailableError || e instanceof EscrowMisconfiguredError) {
+      throw new VerificationError(e.message);
+    }
+    throw e;
+  }
+}
+
 async function readEscrowOnChain(escrowId: string): Promise<EscrowOnChain | null> {
-  if (!ARCFLARE_ESCROW_CONTRACT_ADDRESS) return null;
+  const escrowContract = escrowContractOrThrow();
   try {
     const result = await readContractReliable({
-      address: ARCFLARE_ESCROW_CONTRACT_ADDRESS,
+      address: escrowContract,
       abi: escrowAbi,
       functionName: "getEscrow",
       args: [escrowId as Hash],
@@ -179,7 +199,7 @@ async function verifyEscrowDispute(payload: any, receipt: any): Promise<void> {
   // escrowId (topics[1]).
   let found = false;
   for (const log of receipt.logs || []) {
-    if (!eq(log.address, ARCFLARE_ESCROW_CONTRACT_ADDRESS)) continue;
+    if (!eq(log.address, escrowContractOrThrow())) continue;
     if (log.topics?.[0]?.toLowerCase() !== escrowEventTopics.EscrowDisputed) continue;
     const logId = log.topics?.[1]?.toLowerCase();
     if (logId && logId !== escrowId) {

@@ -31,22 +31,25 @@ import { prisma } from '@/lib/prisma';
 import { checkRateLimit } from '@/lib/ratelimit';
 import { isAddress, keccak256, toBytes, decodeAbiParameters, type Hash } from 'viem';
 import {
-  ARCFLARE_ESCROW_CONTRACT_ADDRESS,
   escrowAbi,
   escrowSelectors,
 } from '@/lib/wallet/flarehqContracts';
 import { getReceiptReliable, getTransactionReliable, extractSelector, readContractReliable } from '@/lib/wallet/chainClient';
 import { notify } from '@/lib/notifications';
 import { explorerTxUrl } from "@/lib/config/network";
-
-const ESCROW_CONTRACT =
-  process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+import { escrowAddressOr503 } from '@/lib/escrow/escrowGuard';
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ reference: string }> }
 ) {
   try {
+    // Network gate FIRST — 503 when escrow is not available on this network.
+    // Nothing below (rate limit, tx/receipt reads, state mirror) runs.
+    const escrowGuard = escrowAddressOr503();
+    if ("response" in escrowGuard) return escrowGuard.response;
+    const ESCROW_CONTRACT = escrowGuard.address;
+
     const { allowed, response: limitResponse } = await checkRateLimit(req, 'payments');
     if (!allowed) return limitResponse;
 
@@ -59,9 +62,6 @@ export async function POST(
     }
     if (!txHash || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
       return NextResponse.json({ success: false, error: 'Valid txHash is required.' }, { status: 400 });
-    }
-    if (!ESCROW_CONTRACT) {
-      return NextResponse.json({ success: false, error: 'Escrow contract address is not configured.' }, { status: 500 });
     }
 
     const escrow = await prisma.escrow.findUnique({ where: { reference } });

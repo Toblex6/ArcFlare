@@ -20,8 +20,8 @@ import { createWalletClient, createPublicClient, http, parseAbiItem } from 'viem
 import { privateKeyToAccount } from 'viem/accounts';
 import { arcTestnet } from '@/src/lib/wagmi';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { escrowAddressOr503 } from '@/lib/escrow/escrowGuard';
 
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 const RPC_URL = getNetworkConfig().primaryRpc;
 
 const RESOLVE_DISPUTE_ABI = parseAbiItem(
@@ -32,6 +32,12 @@ export async function POST(
     req: NextRequest,
     { params }: { params: Promise<{ reference: string }> }
 ) {
+    // Network gate FIRST — 503 before auth/signing when the selected network
+    // has no escrow deployment (mainnet today). No transaction is attempted.
+    const escrowGuard = escrowAddressOr503();
+    if ("response" in escrowGuard) return escrowGuard.response;
+    const ESCROW_CONTRACT = escrowGuard.address;
+
     const isAdmin = await resolveAdminSession(req);
     if (!isAdmin) {
         return NextResponse.json({ success: false, error: 'Unauthorized.' }, { status: 401 });

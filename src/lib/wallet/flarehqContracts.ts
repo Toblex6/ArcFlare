@@ -40,8 +40,14 @@
 import { parseAbi } from "viem";
 import { getNetworkConfig } from "@/lib/config/network";
 
-export const ARCFLARE_ESCROW_CONTRACT_ADDRESS =
-  process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || "";
+// Escrow + stream addresses resolve per network through the authoritative
+// network config. FlareHQEscrow is TESTNET-ONLY today: on mainnet this is ""
+// unless ARC_MAINNET_ESCROW_ADDRESS is explicitly configured, and it is NEVER
+// the testnet deployment. Escrow routes must not rely on this constant for
+// fund-moving logic — they gate on escrowAddressOr503() (503 when unavailable).
+// This export exists for non-throwing display/diagnostic consumers only.
+export const ARCFLARE_ESCROW_CONTRACT_ADDRESS: string =
+  getNetworkConfig().escrowAddress ?? "";
 export const ARCFLARE_STREAM_CONTRACT_ADDRESS =
   process.env.ARCFLARE_STREAM_CONTRACT_ADDRESS || "";
 

@@ -12,8 +12,8 @@ import { parseUnits, keccak256, toBytes, isAddress } from 'viem';
 import { resolveBeneficiary, beneficiaryConfirmUrl } from '@/lib/escrow/resolveBeneficiary';
 import { notifyBeneficiary } from '@/lib/escrow/notifyBeneficiary';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { escrowAddressOr503 } from "@/lib/escrow/escrowGuard";
 
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
 const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
 function getCircleClient() {
@@ -48,6 +48,13 @@ async function waitForCircleTx(
 
 async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
   try {
+    // Network gate FIRST: on mainnet without a configured mainnet escrow
+    // deployment this answers 503 and nothing below (approve/createEscrow)
+    // is ever attempted.
+    const escrowGuard = escrowAddressOr503();
+    if ("response" in escrowGuard) return escrowGuard.response;
+    const ESCROW_CONTRACT = escrowGuard.address;
+
     const {
       depositorSCA, // Depositor Circle SCA wallet address
       depositorWalletId, // Circle wallet ID of depositor (for signing)
@@ -312,4 +319,12 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
   }
 }
 
-export const POST = withMerchantAuth(createEscrowHandler as any);
+const authedCreateEscrow = withMerchantAuth(createEscrowHandler as any);
+
+// Network gate runs BEFORE authentication: an escrow that does not exist on
+// the selected network must answer 503 deterministically, never 401/500.
+export const POST = (request: any) => {
+  const escrow = escrowAddressOr503();
+  if ("response" in escrow) return escrow.response;
+  return authedCreateEscrow(request);
+};

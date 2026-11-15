@@ -90,6 +90,16 @@ export interface ArcNetworkConfig {
    * of crashing the app, and NEVER fall back to the testnet address.
    */
   erc8183Address: string | null;
+  /**
+   * FlareHQEscrow address on Arc — or null when this network has no escrow
+   * deployment configured. Testnet: ARCFLARE_ESCROW_CONTRACT_ADDRESS (the
+   * deployed FlareHQEscrow). Mainnet: ARC_MAINNET_ESCROW_ADDRESS ONLY — the
+   * testnet deployment and the legacy (testnet) ARCFLARE_ESCROW_CONTRACT_ADDRESS
+   * variable are never consulted on mainnet. Consumers MUST resolve through
+   * requireEscrowAddress()/escrowAddressOr503() so a null (or a testnet /
+   * malformed value) fails closed (503) instead of moving funds.
+   */
+  escrowAddress: string | null;
   /** WalletConnect chain identifier, e.g. "eip155:5042002" */
   walletConnectChainId: string;
 }
@@ -194,6 +204,9 @@ function buildTestnetConfig(
     reputationRegistryAddress: TESTNET_ERC8004.reputation,
     validationRegistryAddress: TESTNET_ERC8004.validation,
     erc8183Address: AGENTIC_COMMERCE_CONTRACT,
+    // Testnet escrow comes from the existing deployment variable — unchanged
+    // behavior. Unset means "no escrow configured here" (null), never a guess.
+    escrowAddress: readEnv(env, "ARCFLARE_ESCROW_CONTRACT_ADDRESS") ?? null,
     walletConnectChainId: TESTNET_DEFAULTS.walletConnectChainId,
   };
 }
@@ -324,6 +337,13 @@ function buildMainnetConfig(
     reputationRegistryAddress,
     validationRegistryAddress,
     erc8183Address: erc8183Raw ?? null,
+    // Escrow is optional on mainnet exactly like ERC-8183 (no verified Arc
+    // Mainnet escrow deployment exists). The legacy
+    // ARCFLARE_ESCROW_CONTRACT_ADDRESS variable is deliberately NOT read here:
+    // that is precisely how the Arc TESTNET deployment would leak onto
+    // mainnet. Only an explicit ARC_MAINNET_ESCROW_ADDRESS can configure it,
+    // and requireEscrowAddress() additionally rejects the testnet pin.
+    escrowAddress: readEnv(env, "ARC_MAINNET_ESCROW_ADDRESS") ?? null,
     walletConnectChainId:
       readEnv(env, "ARC_MAINNET_WALLETCONNECT_CHAIN_ID") ?? eip155,
   };
@@ -422,6 +442,91 @@ export function requireErc8183Address(
   const cfg = getNetworkConfig(env);
   if (!cfg.erc8183Address) throw new Erc8183UnavailableError(cfg.name);
   return cfg.erc8183Address;
+}
+
+// ─── Escrow per-network fail-closed ──────────────────────────────────────────
+// FlareHQEscrow is deployed and production-used on Arc TESTNET only
+// (0xEb810... — 31 escrow rows on chain 5042002). There is NO Arc Mainnet
+// escrow deployment. Escrow therefore resolves per network:
+//
+//   testnet → ARCFLARE_ESCROW_CONTRACT_ADDRESS (existing behavior, unchanged)
+//   mainnet → ARC_MAINNET_ESCROW_ADDRESS only (explicit, verified)
+//
+// Missing (or the testnet deployment, or a malformed value) => every escrow
+// route answers HTTP 503 and moves no funds. This is the single authority for
+// the escrow address: routes must call requireEscrowAddress() through
+// escrowAddressOr503() (src/lib/escrow/escrowGuard.ts) rather than reading
+// process.env directly.
+
+/** The Arc TESTNET FlareHQEscrow deployment — never valid on mainnet. */
+export const TESTNET_ESCROW_ADDRESS = "0xEb810aeD24D2314dB7471E44bf6DE89f017631E0";
+
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/** Thrown when the selected network has no escrow deployment configured. */
+export class EscrowUnavailableError extends Error {
+  readonly code = "escrow_unavailable";
+  constructor(networkName: ArcNetworkName = getArcNetworkName()) {
+    super(
+      networkName === "mainnet"
+        ? "Escrow is not available on mainnet — no FlareHQEscrow deployment exists on Arc Mainnet and ARC_MAINNET_ESCROW_ADDRESS is not set. " +
+          "Escrow routes are fail-closed: no funds can move. The Arc Testnet escrow contract is never used on mainnet."
+        : "Escrow is not available — ARCFLARE_ESCROW_CONTRACT_ADDRESS is not set for Arc Testnet, so no escrow contract is configured. " +
+          "No funds can move until it is set to the deployed FlareHQEscrow address."
+    );
+    this.name = "EscrowUnavailableError";
+  }
+}
+
+/** Thrown when an escrow address is configured but is not valid for this network. */
+export class EscrowMisconfiguredError extends Error {
+  readonly code = "escrow_misconfigured";
+  constructor(message: string) {
+    super(message);
+    this.name = "EscrowMisconfiguredError";
+  }
+}
+
+/**
+ * The FlareHQEscrow address for the selected network — or throws.
+ *
+ * - throws EscrowUnavailableError when nothing is configured (mainnet with no
+ *   ARC_MAINNET_ESCROW_ADDRESS is the expected production state today);
+ * - throws EscrowMisconfiguredError when the value is not a 0x address, or when
+ *   mainnet is pointed at the Arc Testnet deployment.
+ */
+export function requireEscrowAddress(
+  env: Record<string, string | undefined> = process.env
+): string {
+  const cfg = getNetworkConfig(env);
+  const raw = (cfg.escrowAddress ?? "").trim();
+  if (!raw) throw new EscrowUnavailableError(cfg.name);
+  if (!EVM_ADDRESS_RE.test(raw)) {
+    throw new EscrowMisconfiguredError(
+      `The escrow address configured for ${cfg.name} is not a valid 0x EVM address ("${raw}"). ` +
+        (cfg.name === "mainnet" ? "Set ARC_MAINNET_ESCROW_ADDRESS." : "Set ARCFLARE_ESCROW_CONTRACT_ADDRESS.")
+    );
+  }
+  if (cfg.name === "mainnet" && raw.toLowerCase() === TESTNET_ESCROW_ADDRESS.toLowerCase()) {
+    throw new EscrowMisconfiguredError(
+      `ARC_NETWORK=mainnet refuses to use the Arc Testnet FlareHQEscrow (${TESTNET_ESCROW_ADDRESS}). ` +
+        "The testnet deployment is never valid on mainnet — set ARC_MAINNET_ESCROW_ADDRESS to a verified mainnet deployment, " +
+        "or leave it unset so escrow stays fail-closed (503)."
+    );
+  }
+  return raw;
+}
+
+/** True when the selected network has a valid escrow address configured. */
+export function isEscrowAvailable(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  try {
+    requireEscrowAddress(env);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Convenience readers (all flow from getNetworkConfig) ───────────────────

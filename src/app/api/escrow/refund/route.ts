@@ -11,8 +11,7 @@ import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerch
 import { verifyCallerControlsAddress } from '@/src/lib/wallet/verifyCallerControlsAddress';
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
-
-const ESCROW_CONTRACT = process.env.ARCFLARE_ESCROW_CONTRACT_ADDRESS || '';
+import { escrowAddressOr503 } from "@/lib/escrow/escrowGuard";
 
 function getCircleClient() {
     return initiateDeveloperControlledWalletsClient({
@@ -38,6 +37,12 @@ async function waitForCircleTx(client: ReturnType<typeof getCircleClient>, txId:
 
 async function refundHandler(request: Request, merchant: AuthedMerchant) {
     try {
+        // Network gate FIRST — 503 (no funds move, no wallet/RPC call) when the
+        // selected network has no escrow deployment.
+        const escrowGuard = escrowAddressOr503();
+        if ("response" in escrowGuard) return escrowGuard.response;
+        const ESCROW_CONTRACT = escrowGuard.address;
+
         const { reference, callerSCA } = await request.json();
 
         if (!reference || !callerSCA) {
@@ -140,4 +145,12 @@ async function refundHandler(request: Request, merchant: AuthedMerchant) {
     }
 }
 
-export const POST = withMerchantAuth(refundHandler as any);
+const authedRefund = withMerchantAuth(refundHandler as any);
+
+export const POST = (request: any) => {
+    // Network gate BEFORE authentication: escrow that does not exist on the
+    // selected network answers 503 deterministically.
+    const escrow = escrowAddressOr503();
+    if ("response" in escrow) return escrow.response;
+    return authedRefund(request);
+};
