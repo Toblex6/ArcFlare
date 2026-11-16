@@ -26,7 +26,7 @@ async function createStreamHandler() {
   );
 }
 
-export const POST = withApiKey(createStreamHandler);
+export const POST = createStreamHandler;
 
 // ─── GET: List all streams or filter by sender/receiver ───────────────────────
 export const dynamic = 'force-dynamic';

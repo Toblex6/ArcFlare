@@ -23,7 +23,6 @@
 // if unsupported." This is an explicit rejection.
 
 import { NextResponse } from 'next/server';
-import { withApiKey } from '@/lib/middleware/withApiKey';
 import { streamAddressOr503 } from '@/lib/stream/streamGuard';
 
 async function stopStreamHandler() {
@@ -42,4 +41,4 @@ async function stopStreamHandler() {
   );
 }
 
-export const POST = withApiKey(stopStreamHandler);
+export const POST = stopStreamHandler;
