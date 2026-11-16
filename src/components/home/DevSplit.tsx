@@ -4,15 +4,14 @@ import Reveal from './Reveal';
 import SectionHeading from './SectionHeading';
 import { useArcLabel } from '@/src/components/NetworkContext';
 
-const CODE = `// Pay-per-call with x402 — <5 min
-const res = await fetch(api + "/expensive", {
-  headers: { Authorization: "Bearer fhq_sec_..." }
-});
-// 402 → pay $0.002 from gateway → retry → 200
+const CODE = `// Use the reference returned by an authenticated
+// POST /api/payments/initialize request.
+<iframe src={checkoutEmbedUrl} />
+// Customer pays directly to the merchant wallet.
+// Re-verify the reference before fulfilling an order.
 
-// Embed checkout anywhere
-<iframe src="https://flarehq.xyz/checkout/embed/abc123" />
-// Webhook: payment.settled → ship it`;
+// Mainnet: x402 disabled; escrow and ERC-8183
+// job streams unavailable. Check the docs first.`;
 
 export default function DevSplit() {
   // Server-resolved network label (production-safe "Arc" default until
@@ -22,8 +21,8 @@ export default function DevSplit() {
     <section id="developers" className="max-w-7xl mx-auto px-4 sm:px-6 py-16 md:py-24 scroll-mt-24">
       <SectionHeading
         eyebrow="Developers"
-        title="Integrate in an afternoon"
-        sub="API keys, webhooks, embeds and docs. Quickstart under five minutes."
+        title="Integrate with clear availability checks"
+        sub="Checkout embeds, authentication and settlement verification. Mainnet x402 remains disabled."
       />
       <div className="grid lg:grid-cols-2 gap-4 md:gap-6 items-stretch">
         <Reveal>
@@ -40,16 +39,16 @@ export default function DevSplit() {
         <div className="flex flex-col gap-4">
           <Reveal delay={0.08}>
             <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 md:p-7 shadow-sm">
-              <p className="text-xs font-extrabold uppercase tracking-widest text-[var(--text-secondary)] mb-3">Sample receipt</p>
+              <p className="text-xs font-extrabold uppercase tracking-widest text-[var(--text-secondary)] mb-3">Illustrative receipt — not a verified transaction</p>
               <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-extrabold text-sm">Payment settled · $18.40 USDC</p>
-                  <p className="text-xs text-[var(--text-secondary)] font-mono mt-0.5">{arcName.toLowerCase()} · 0x7f…3a91 → merchant</p>
+                  <p className="text-xs text-[var(--text-secondary)] font-mono mt-0.5">{arcName} · customer → merchant wallet</p>
                 </div>
                 <span className="text-2xl">✅</span>
               </div>
               <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)] p-4 text-xs font-mono text-[var(--text-secondary)]">
-                webhook: payment.settled → order #1042 → shipped
+                payment.settled notification → server-side verification → fulfill once
               </div>
             </div>
           </Reveal>

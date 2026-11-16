@@ -2,7 +2,8 @@ export default function MerchantDocsPage() {
   const sections = [
     {
       title: 'Payment Initialization',
-      description: 'Create a hosted USDC checkout link for a marketplace or merchant flow.',
+      description: 'Create a hosted USDC checkout link with merchant authentication. The merchant label is not a payout address; the server resolves the merchant wallet. Customers pay it directly; FlareHQ never holds checkout funds.',
+      status: 'Owner verification pending',
       code: `POST /api/payments/initialize
 
 {
@@ -13,17 +14,20 @@ export default function MerchantDocsPage() {
     },
     {
       title: 'Escrow',
-      description: 'Create trustless USDC escrows on ArcFlareEscrow.sol.',
+      description: 'Unavailable on mainnet pending contract deployment and verification. Disabled operations return 503 escrow_unavailable.',
+      status: 'Mainnet unavailable',
       code: 'POST /api/escrow/create',
     },
     {
-      title: 'Streaming Payments',
-      description: 'Create continuous USDC payment streams.',
-      code: 'POST /api/payments/stream/create',
+      title: 'Criterion-based job streams',
+      description: 'Opening requires a FUNDED ERC-8183 job and a configured stream contract. Mainnet ERC-8183 is unavailable. Closing pays the remaining budget to the worker. Legacy per-second stream operations are retired.',
+      status: 'Mainnet unavailable',
+      code: 'POST /api/jobs/nanopay/open',
     },
     {
       title: 'Nanopayments',
-      description: 'Record micro-payments and batch settle automatically.',
+      description: 'Ledger batching is separate from x402. Its mainnet settlement was not verified in this readiness run; x402-paid API execution remains disabled on mainnet.',
+      status: 'Owner verification pending',
       code: 'POST /api/payments/nano',
     },
   ];
@@ -36,8 +40,8 @@ export default function MerchantDocsPage() {
         </div>
         <h1 className="text-4xl font-bold leading-tight md:text-6xl">Merchant Documentation</h1>
         <p className="mt-6 max-w-3xl text-lg leading-relaxed text-gray-400">
-          Initialize checkout, escrow funds, and settle recurring or tiny USDC payments with
-          FlareHQ's hosted APIs.
+          Checkout and payment-link integration, with explicit mainnet limitations for
+          escrow, job streams and x402. Availability snapshot: November 16, 2026.
         </p>
       </header>
 
@@ -50,7 +54,7 @@ export default function MerchantDocsPage() {
                 <p className="mt-3 max-w-2xl text-gray-400">{section.description}</p>
               </div>
               <span className="w-fit rounded-full bg-cyan-400/20 px-4 py-2 text-sm font-mono text-cyan-300">
-                Live
+                {section.status}
               </span>
             </div>
             <pre className="mt-6 overflow-x-auto rounded-2xl border border-[#3a2a22] bg-[#241913] p-4 text-sm text-gray-300">

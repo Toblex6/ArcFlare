@@ -5,19 +5,18 @@ import { motion, useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 import { useArcLabel } from '@/src/components/NetworkContext';
 
-// The actual money path through FlareHQ — the hero visual.
-// USDC payment → checkout → escrow → agent → validation → settlement.
+// Illustrative non-custodial checkout path, not a live receipt or job lifecycle.
 export default function Hero() {
   // Server-resolved network label (production-safe "Arc" default until
   // /api/network resolves) — never client-side env (testnet fallback).
   const arcName = useArcLabel();
   const FLOW = [
-    { label: 'USDC payment', detail: `$12.00 · ${arcName}`, icon: '💵' },
-    { label: 'Checkout', detail: 'link + embed · settled to merchant', icon: '🧾' },
-    { label: 'Escrow', detail: '#4821 · held $250 · milestone 1/3', icon: '🔐' },
-    { label: 'Agent hired', detail: 'agent-07 · ERC-8004 · rep 92', icon: '🤖' },
-    { label: 'Validation', detail: 'validator approved work', icon: '✅' },
-    { label: 'Settlement', detail: 'provider paid · ledger updated', icon: '🏦' },
+    { label: 'Invoice', detail: `USDC amount and merchant wallet · ${arcName}`, icon: '🧾' },
+    { label: 'Checkout', detail: 'open the invoice link or embed', icon: '🔗' },
+    { label: 'Review', detail: 'check amount, recipient and network', icon: '🔎' },
+    { label: 'Payment', detail: 'customer authorizes payment to merchant', icon: '💵' },
+    { label: 'Verification', detail: 'inspect receipt and recipient credit', icon: '✅' },
+    { label: 'Settlement', detail: 'FlareHQ never holds checkout funds', icon: '🏦' },
   ];
   const reduce = useReducedMotion();
   const [active, setActive] = useState(0);
@@ -48,7 +47,7 @@ export default function Hero() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
             </span>
-            <span className="text-[var(--text)]">Live on {arcName}</span>
+            <span className="text-[var(--text)]">Network: {arcName}</span>
             <span className="text-[var(--text-secondary)]">· USDC · checkout is non-custodial</span>
           </motion.div>
 
@@ -71,8 +70,8 @@ export default function Hero() {
             transition={{ duration: 0.7, delay: 0.16 }}
             className="mt-5 text-base sm:text-lg md:text-xl text-[var(--text-secondary)] leading-relaxed max-w-xl"
           >
-            FlareHQ gives businesses and AI agents the money layer they need to transact, hire,
-            pay, and settle autonomously on Arc. Customers pay in USDC — you receive it on Arc.
+            FlareHQ provides payment links and checkout on Arc. Customers pay directly to the
+            merchant wallet; FlareHQ never holds checkout funds. See current feature availability below.
           </motion.p>
 
           <motion.div
@@ -98,7 +97,7 @@ export default function Hero() {
           </motion.div>
         </div>
 
-        {/* live system card — animates the real money path, step by step */}
+        {/* Illustrative checkout steps; no fabricated receipt or reputation. */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
@@ -107,7 +106,7 @@ export default function Hero() {
         >
           <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
             <div>
-              <p className="text-xs uppercase tracking-widest font-bold text-[var(--text-secondary)]">Money in motion</p>
+              <p className="text-xs uppercase tracking-widest font-bold text-[var(--text-secondary)]">Checkout overview</p>
               <h2 className="home-h2 text-2xl font-extrabold mt-1">Payment → settlement</h2>
             </div>
             <span className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 px-4 py-2 rounded-full text-xs font-mono font-bold">

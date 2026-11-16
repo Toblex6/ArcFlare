@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { arcLabel } from '@/lib/arcLabel';
+import { connection } from 'next/server';
 
 const docsLinks = [
   { href: '/docs', label: 'Overview' },
@@ -9,7 +10,9 @@ const docsLinks = [
   { href: '/docs/agents', label: 'Agent Guide' },
 ];
 
-export default function DocsLayout({ children }: { children: React.ReactNode }) {
+export default async function DocsLayout({ children }: { children: React.ReactNode }) {
+  // The shared network label must not be frozen from the build environment.
+  await connection();
   return (
     <div className="min-h-screen bg-[#120b08] text-white">
       <div className="border-b border-[#2a1d16] bg-[#120b08]/95">

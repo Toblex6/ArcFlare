@@ -9,20 +9,20 @@ const PILLARS = [
   {
     icon: '💰',
     title: 'Money',
-    desc: 'Payments, checkout, payroll, escrow, treasury — the business money stack on Arc.',
-    items: ['Checkout + payment links', 'Batch + chat payroll', 'Escrow milestones', 'Scheduled + auto-save'],
+    desc: 'Checkout pays the merchant directly. Other money tools have separate availability and verification requirements.',
+    items: ['Checkout + payment links', 'Payroll: owner verification pending', 'Escrow: mainnet unavailable', 'Savings: owner verification pending'],
   },
   {
     icon: '🤖',
     title: 'Agents',
-    desc: 'Identity, wallets, spend policies, reputation, jobs, Brain.',
-    items: ['ERC-8004 wallets', 'Reputation + validation', 'ERC-8183 jobs (testnet)', 'Agent Brain operator'],
+    desc: 'Identity, wallets and reputation are distinct from job-contract and paid-tool availability.',
+    items: ['ERC-8004 identity + SCA wallet', 'Backend-supplied reputation', 'ERC-8183: mainnet unavailable', 'Brain: mainnet x402 disabled'],
   },
   {
     icon: '🧱',
     title: 'Infrastructure',
-    desc: 'x402 micro-billing, APIs, webhooks, CCTP bridging on one ledger.',
-    items: ['$0.002 x402 calls', 'APIs + docs', 'Settlement webhooks', 'CCTP bridge (testnet)'],
+    desc: 'APIs and settlement notifications, with separate gates for x402 and cross-chain execution.',
+    items: ['x402: mainnet disabled', 'APIs + docs', 'Settlement webhooks', 'CCTP: owner verification pending'],
   },
 ];
 
@@ -51,7 +51,7 @@ export default function SystemFlow() {
       <SectionHeading
         eyebrow="One financial layer"
         title="Money, agents, infrastructure — one ledger"
-        sub="Not a payments page with agent features. One set of canonical primitives: supported tokens, agent registry, jobs, escrow, ledger."
+        sub="Architecture overview, not a claim that every feature is enabled or verified on mainnet."
       />
 
       <div className="grid md:grid-cols-3 gap-4 md:gap-6 mb-10 md:mb-14">
@@ -77,9 +77,9 @@ export default function SystemFlow() {
       <Reveal>
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 md:p-10 shadow-sm">
           <p className="text-xs font-extrabold uppercase tracking-widest text-[var(--text-secondary)] mb-1">
-            Live economic flow
+            Testnet job lifecycle — mainnet ERC-8183 unavailable
           </p>
-          <h3 className="home-h3 text-xl md:text-2xl font-extrabold mb-6">Every job moves the same way</h3>
+          <h3 className="home-h3 text-xl md:text-2xl font-extrabold mb-6">Illustrative on-chain job lifecycle</h3>
           <ol className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
             {LIFECYCLE.map((s, i) => {
               const done = reduce ? true : i < active;

@@ -21,35 +21,35 @@ const PRODUCTS: {
   {
     icon: '🌊',
     title: 'Streaming payments',
-    desc: 'USDC streaming via API — criterion-based tranches you release as work completes. Integrate through the docs; there is no hosted streaming dashboard yet.',
+    desc: 'Criterion-based job tranches require ERC-8183, currently unavailable on mainnet. Legacy per-second streams are disabled.',
     href: '/docs/api',
     tag: 'API',
   },
   {
     icon: '🔐',
     title: 'Escrow milestones',
-    desc: 'Milestone holds with ACTIVE / RELEASED / DISPUTED states and first-class beneficiaries.',
+    desc: 'Unavailable on mainnet pending contract deployment and verification. Escrow endpoints return 503.',
     href: '/escrow',
     tag: 'Trust',
   },
   {
     icon: '💸',
     title: 'Batch + chat payroll',
-    desc: 'Pay N people in one tx, or type “pay Alice 100 monthly” and let the assistant run it.',
+    desc: 'Batch and assistant payroll tools. Mainnet execution has not been verified in the current readiness run.',
     href: '/payroll',
     tag: 'Payroll',
   },
   {
     icon: '🔁',
     title: 'Scheduled + auto-save',
-    desc: 'Recurring payments and recurring self-transfer savings that run themselves.',
+    desc: 'Recurring payment and savings tools. Mainnet execution has not been verified in the current readiness run.',
     href: '/scheduled',
     tag: 'Recurring',
   },
   {
     icon: '🌉',
     title: 'CCTP bridge',
-    desc: 'Move USDC from supported testnet chains into your Arc testnet wallet inside the Flow app — development/testnet today; not yet live on Arc Mainnet.',
+    desc: 'CCTP bridge tools require a supported source and wallet authorization. Mainnet transfer completion awaits an owner-run test.',
     href: '/consumer?view=crosschain',
     tag: 'Bridge',
   },
@@ -60,8 +60,8 @@ export default function ProductGrid() {
     <section id="products" className="max-w-7xl mx-auto px-4 sm:px-6 py-16 md:py-24 scroll-mt-24">
       <SectionHeading
         eyebrow="Core products"
-        title="Six things that are strong today"
-        sub="Only real, live surfaces — no yield, lending, cards, or DEX promises. Every card opens the live surface it describes."
+        title="Product availability"
+        sub="Mainnet readiness as of November 16, 2026. A page or API being present is not proof of successful payment execution."
       />
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         {PRODUCTS.map((p, i) => (
@@ -76,7 +76,7 @@ export default function ProductGrid() {
               <h3 className="home-h3 text-lg md:text-xl font-extrabold mb-2">{p.title}</h3>
               <p className="text-sm md:text-[15px] text-[var(--text-secondary)] leading-relaxed flex-1">{p.desc}</p>
               <Link href={p.href} className="mt-5 text-sm font-bold text-cyan-600 dark:text-cyan-300 inline-flex items-center gap-2 hover:gap-3 transition-all">
-                Open live →
+                View →
               </Link>
             </div>
           </Reveal>

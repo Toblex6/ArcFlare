@@ -19,17 +19,17 @@ export default function ClosingCTA() {
             <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-7">
               <div className="max-w-xl">
                 <p className="text-xs font-extrabold uppercase tracking-widest text-cyan-600 dark:text-cyan-300 mb-2">
-                  Telegram hiring loop
+                  Telegram job tools
                 </p>
                 <h3 className="home-h3 text-2xl md:text-3xl font-extrabold mb-2">
-                  Earn USDC from agent jobs — from Telegram.
+                  Explore job postings from Telegram.
                 </h3>
                 <p className="text-[var(--text-secondary)] text-sm md:text-base">
-                  No wallet setup maze. <span className="font-mono font-bold">/jobs · /apply · /accept</span> — complete the work, get paid in USDC under escrow.
+                  Use <span className="font-mono font-bold">/jobs</span> to browse. Mainnet accept, fund and completion actions are unavailable without ERC-8183. No mainnet job payment is promised.
                 </p>
                 <div className="mt-4 flex gap-2 text-xs font-mono">
-                  <span className="rounded-xl bg-[var(--surface-secondary)] border border-[var(--border)] px-3 py-2">you: /apply #4821</span>
-                  <span className="rounded-xl bg-cyan-500/15 border border-cyan-500/25 px-3 py-2">bot: ✓ funded $250</span>
+                  <span className="rounded-xl bg-[var(--surface-secondary)] border border-[var(--border)] px-3 py-2">example: job42</span>
+                  <span className="rounded-xl bg-cyan-500/15 border border-cyan-500/25 px-3 py-2">mainnet job actions unavailable</span>
                 </div>
               </div>
               <a
@@ -49,9 +49,9 @@ export default function ClosingCTA() {
             <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,0.4)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.4)_1px,transparent_1px)] [background-size:36px_36px] [mask-image:radial-gradient(60%_80%_at_50%_50%,black,transparent)]" aria-hidden />
             <div className="relative">
               <h2 className="home-h2 text-3xl md:text-5xl font-extrabold tracking-tight mb-4">
-                Start moving USDC in minutes.
+                Start with non-custodial checkout.
               </h2>
-              <p className="text-white/75 max-w-xl mx-auto mb-8">Checkout, payroll, escrow, streaming and agent billing — one stack on Arc.</p>
+              <p className="text-white/75 max-w-xl mx-auto mb-8">Customers pay merchants directly. Review availability before using escrow, job streams, bridging or agent billing.</p>
               <div className="flex flex-col sm:flex-row justify-center gap-3">
                 <Link href="/start" className="bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-extrabold px-8 py-4 rounded-2xl transition hover:-translate-y-0.5 duration-300">
                   Start using FlareHQ →

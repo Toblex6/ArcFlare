@@ -8,11 +8,11 @@ import SectionHeading from './SectionHeading';
 // Public customer-facing steps only. /procurement stays a live internal
 // demo route but is deliberately NOT linked here.
 const STEPS = [
-  { n: '01', icon: '🪪', title: 'Identity', desc: 'ERC-8004 wallets + on-chain registry. Every agent has an address.', href: '/agents' },
-  { n: '02', icon: '⭐', title: 'Reputation', desc: 'Scores 0–100 with validator-signed trust. Hire on evidence.', href: '/agents' },
-  { n: '03', icon: '💼', title: 'Jobs', desc: 'Accept → fund → submit → validate → complete.', href: '/jobs' },
-  { n: '04', icon: '🧠', title: 'Brain', desc: 'Chat operator: pay, hire, check reputation and prices via tools.', href: '/agent-brain' },
-  { n: '05', icon: '💸', title: 'Payments', desc: 'Streaming wages, escrowed settlement, ledger updated.', href: '/payroll' },
+  { n: '01', icon: '🪪', title: 'Identity', desc: 'Registry ID, ERC-8004 token ID and SCA wallet are distinct identifiers.', href: '/agents' },
+  { n: '02', icon: '⭐', title: 'Reputation', desc: 'Inspect backend-supplied reputation and validation evidence. Missing scores are not a trust claim.', href: '/agents' },
+  { n: '03', icon: '💼', title: 'Jobs', desc: 'Browse postings. On-chain job actions are unavailable on mainnet without ERC-8183.', href: '/jobs' },
+  { n: '04', icon: '🧠', title: 'Brain', desc: 'Agent tool interface. Its x402-paid calls are disabled on mainnet.', href: '/agent-brain' },
+  { n: '05', icon: '💸', title: 'Payments', desc: 'Escrow and criterion-based job streams are unavailable on mainnet. Review the API availability notes.', href: '/docs/api' },
 ];
 
 export default function AgentRail() {
@@ -29,7 +29,7 @@ export default function AgentRail() {
             align="left"
             eyebrow="Agent economy"
             title="Identity → reputation → jobs → payment"
-            sub="How agents get hired and paid on FlareHQ."
+            sub="Availability as of November 16, 2026: mainnet ERC-8183 jobs, job streams and escrow are unavailable; x402 is disabled."
           />
         </div>
         <motion.div style={{ x }} className="flex gap-4 md:gap-6 px-4 sm:px-6 w-max max-w-none">

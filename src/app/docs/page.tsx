@@ -1,6 +1,9 @@
 import { getNetworkConfig } from "@/lib/config/network";
+import { connection } from "next/server";
 
-export default function DocsPage() {
+export default async function DocsPage() {
+  // The build environment need not match the deployed server network.
+  await connection();
   const network = getNetworkConfig();
   return (
     <main className="max-w-4xl mx-auto px-6 py-16 prose prose-invert prose-blue">
@@ -20,24 +23,24 @@ export default function DocsPage() {
           blockchain.
         </p>
         <p>
-          It enables merchants, developers, and autonomous AI agents to send, receive, escrow,
-          settle, and automate USDC payments through a unified API layer powered by Circle
-          infrastructure and Arc's deterministic finality.
+          Checkout is non-custodial: the customer pays directly to the merchant wallet;
+          FlareHQ never holds checkout funds. A listed page or endpoint is not proof that
+          its mainnet execution is enabled or verified.
         </p>
       </section>
 
       <section className="mb-12">
         <h2 className="text-2xl font-bold border-l-4 border-blue-500 pl-4">
-          Core Value Proposition
+          Mainnet availability — November 16, 2026
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 not-prose">
           {[
-            'Generate shareable USDC checkout links with a single API call',
-            'Deploy ERC-8004 agents with Circle SCA wallets',
-            'Route USDC across chains using Circle CCTP V2',
-            'Create trustless escrows',
-            'Stream payments in real time',
-            'Enable high-frequency nanopayments',
+            'Checkout links and embeds: authenticated production payment test pending',
+            'ERC-8004 identity and SCA wallets: distinct from ERC-8183 job availability',
+            'CCTP bridge: mainnet completion requires an owner-run funded test',
+            'Escrow: unavailable on mainnet pending deployment and verification',
+            'Job streams: unavailable without a FUNDED ERC-8183 job and stream contract; legacy per-second streams are retired',
+            'x402: disabled on mainnet pending end-to-end integration review',
           ].map((feature, i) => (
             <div
               key={i}
@@ -109,10 +112,10 @@ export default function DocsPage() {
       <section>
         <h2 className="text-2xl font-bold border-l-4 border-blue-500 pl-4">Why Arc</h2>
         <ul className="mt-6 space-y-2">
-          <li>Sub-second deterministic finality</li>
-          <li>Efficient streaming payments</li>
-          <li>Near-instant agent settlements</li>
-          <li>Fast cross-chain USDC transfers via CCTP V2</li>
+          <li>USDC-native EVM network</li>
+          <li>Receipt and recipient-credit verification for settlement</li>
+          <li>Separate mainnet and testnet configuration; never send test funds to mainnet</li>
+          <li>CCTP source and destination configuration must be verified before bridging</li>
         </ul>
       </section>
     </main>

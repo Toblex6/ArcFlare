@@ -52,11 +52,27 @@ try {
   assert.equal(descriptor.chainId, 5042);
   assert.equal(descriptor.erc8183Address, null);
   checks++;
-  for (const path of ['/', '/docs', '/merchant/login', '/consumer']) {
+  for (const path of ['/', '/docs', '/docs/api', '/docs/merchant', '/docs/agents', '/merchant/login', '/consumer']) {
     const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(30_000) });
     assert.equal(response.status, 200, `GET ${path}`);
     const html = await response.text();
     assert.ok(!html.includes('Application error:'), `no error boundary on ${path}`);
+    const text = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (path === '/') {
+      assert.match(text, /Mainnet accept, fund and completion actions are unavailable without ERC-8183/);
+      assert.match(text, /Illustrative receipt/);
+      assert.doesNotMatch(text, /funded \$250|rep 92|Live on/);
+    }
+    if (path.startsWith('/docs')) {
+      assert.match(text, /Built on Arc\s/);
+      assert.doesNotMatch(text, /Built on Arc Testnet/);
+      assert.match(text, /mainnet|Mainnet/);
+    }
+    if (path === '/docs') {
+      assert.match(text, /Arc Mainnet/);
+      assert.match(text, /5042/);
+      assert.doesNotMatch(text, /5042002/);
+    }
     checks++;
   }
   const load = await Promise.all(Array.from({ length: 12 }, async () => {
