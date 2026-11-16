@@ -2,7 +2,7 @@
 //
 // CANONICAL EXTERNAL BRIDGE source-chain table — the single authority for
 // which chains an EXTERNAL (browser-controlled) wallet can bridge USDC from
-// into Arc Testnet. Both the browser Bridge UI and the server intent/verify
+// into the selected Arc network. Both the browser Bridge UI and server intent/verify
 // routes resolve through this module — never through provider docs, wagmi
 // chain lists, or a second inline table.
 //
@@ -15,13 +15,14 @@
 //
 // Address values below are the source-chain USDC contracts from the
 // INSTALLED @circle-fin/bridge-kit chain definitions (verified against
-// node_modules/@circle-fin/bridge-kit/chains.cjs, bridge-kit 1.13.0).
+// node_modules/@circle-fin/bridge-kit chain definitions).
 // Explorer templates come from the same definitions ({hash} placeholder).
 // `circleBlockchain` is Circle's Developer-Controlled Wallets identifier for
 // the same chain (kept so server code that still keys off it — cctp-v2.ts —
 // derives from here instead of duplicating the table).
 //
-// TESTNET table below is unchanged. MAINNET entries live in
+// Helpers default to TESTNET for compatibility; mainnet callers must pass
+// 'mainnet' explicitly. The TESTNET table is unchanged. MAINNET entries live in
 // MAINNET_SOURCES, derived field-by-field from the INSTALLED
 // @circle-fin/bridge-kit chain definitions (no CCTP protocol address is
 // stored here — those resolve from the kit at verify/execute time).
