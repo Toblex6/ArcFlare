@@ -18,8 +18,7 @@ import { prisma } from '@/src/lib/prisma';
 import { resolveAdminSession } from '@/src/lib/middleware/withAdminAuth';
 import { createWalletClient, createPublicClient, http, parseAbiItem } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { arcTestnet } from '@/src/lib/wagmi';
-import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { explorerTxUrl, getArcChain, getNetworkConfig } from "@/lib/config/network";
 import { escrowAddressOr503 } from '@/lib/escrow/escrowGuard';
 
 const RPC_URL = getNetworkConfig().primaryRpc;
@@ -67,8 +66,8 @@ export async function POST(
 
         const account = privateKeyToAccount(process.env.ESCROW_ADMIN_PRIVATE_KEY as `0x${string}`);
 
-        const publicClient = createPublicClient({ chain: arcTestnet, transport: http(RPC_URL) });
-        const walletClient = createWalletClient({ account, chain: arcTestnet, transport: http(RPC_URL) });
+        const publicClient = createPublicClient({ chain: getArcChain(), transport: http(RPC_URL) });
+        const walletClient = createWalletClient({ account, chain: getArcChain(), transport: http(RPC_URL) });
 
         console.log(`⚖️ Resolving dispute for ${reference} — releaseToBeneficiary=${releaseToBeneficiary}, admin=${account.address}`);
 
