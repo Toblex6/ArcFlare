@@ -50,7 +50,7 @@ ok(!fundRoute.includes('initiateDeveloperControlledWalletsClient') && !fundRoute
   'fund route never moves funds via Circle');
 
 const linkRoute = readFileSync(join(here, '..', 'src', 'app', 'api', 'merchant', 'escrow-link', 'route.ts'), 'utf8');
-ok(linkRoute.includes("cookies.get('merchant_token')"), 'escrow-link creation requires merchant JWT auth');
+ok(linkRoute.includes('resolveMerchant') && linkRoute.includes('if (!merchant)'), 'escrow-link creation requires resolved merchant auth');
 ok(linkRoute.includes("status: 'PENDING_FUNDING'"), 'escrow-link rows start PENDING_FUNDING (no depositor yet)');
 
 const checkout = readFileSync(join(here, '..', 'src', 'app', 'api', 'escrow', 'create', 'route.ts'), 'utf8');

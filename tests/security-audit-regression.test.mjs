@@ -256,8 +256,8 @@ test('M9 cancelPayrollBatch quarantined (never submits a doomed tx)', () => {
 });
 test('M9 stale escrow source quarantined out of the served tree', () => {
   assert.ok(!existsSync(path.join(ROOT, 'src/app/api/contracts/ArcFlareEscrow.sol')), 'removed from app tree');
-  assert.ok(existsSync(path.join(ROOT, 'contracts/stale/ArcFlareEscrow.stale.sol')), 'quarantined copy exists');
-  const q = read('contracts/stale/ArcFlareEscrow.stale.sol');
+  assert.ok(existsSync(path.join(ROOT, 'contracts/stale/ArcFlareEscrow.stale.sol.quarantined')), 'quarantined copy exists');
+  const q = read('contracts/stale/ArcFlareEscrow.stale.sol.quarantined');
   assert.ok(q.includes('QUARANTINED'), 'quarantine header');
 });
 test('M9 no admin address log line in next.config', () => {
