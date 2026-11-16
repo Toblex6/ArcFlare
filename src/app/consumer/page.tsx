@@ -1205,7 +1205,14 @@ function ConsumerAppInner() {
     setLoading(true);
     setResult(null);
     try {
-      const data = await protectedFetch(`/api/payments/initialize`, { method: "POST" }, { amount, currency: requestCurrency, merchant: "Payment request", direction: "request" });
+      // This form always requests payment to the session wallet; no funds move.
+      const res = await fetch('/api/payments/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, currency: requestCurrency, merchant: 'Payment request', direction: 'request' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Could not create request.');
       setResult({ success: true, message: `Your ${amount} ${requestCurrency} payment link is ready to share.`, reference: data.checkoutUrl });
     } catch (e: any) {
       setResult({ success: false, error: e.message });

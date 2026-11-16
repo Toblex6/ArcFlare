@@ -10,6 +10,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSecurePinDialog } from '@/components/SecurePinDialog';
+import { requestNeedsStepUp } from '@/lib/payments/requestStepUp';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -69,6 +70,7 @@ export default function FlareHQAssistantPage() {
   const [copiedLinkIndex, setCopiedLinkIndex] = useState<number | null>(null);
   // Stage 2 step-up: whether a payment PIN is enrolled (booleans only).
   const [hasPin, setHasPin] = useState(false);
+  const [ownWallet, setOwnWallet] = useState<string | null>(null);
   // Masked, in-memory PIN dialog that replaced the browser prompt for step-up.
   const { requestPin, dialog: pinDialog } = useSecurePinDialog({ accent: '#0d7c5f', accentText: '#ffffff' });
 
@@ -94,6 +96,7 @@ export default function FlareHQAssistantPage() {
       .then((r) => r.json())
       .then((data) => {
         if (!data.success) router.replace('/consumer');
+        else setOwnWallet(data.account?.walletAddress ?? null);
       })
       .catch(() => router.replace('/consumer'));
     // Step-up enrollment (Stage 2): prompt for the payment PIN only when one
@@ -217,7 +220,7 @@ export default function FlareHQAssistantPage() {
       // when one is enrolled. The server's canonical gate enforces it; the
       // client only forwards what the user typed (never stored).
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (hasPin && (action?.action === 'send' || action?.action === 'request' || action?.action === 'save')) {
+      if (hasPin && requestNeedsStepUp(action?.action, action?.recipientAddress, ownWallet)) {
         const entered = await requestPin({
           title: 'Authorize this action',
           description: 'Enter your payment PIN to continue.',

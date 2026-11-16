@@ -124,13 +124,14 @@ export async function POST(req: NextRequest) {
       const assistantAccount = await (prisma as any).consumerAccount.findUnique({
         where: { walletAddress },
       });
-      // Own-wallet payment REQUESTS skip step-up (mirrors initialize):
-      // the request branch below forwards no payoutAddress, so the invoice
-      // always pays the caller's own wallet — no fund movement, no
-      // fund-direction change. Inner initialize still gates any future
-      // arbitrary-payout request (defense in depth). Send/save always gate.
+      // Own-wallet requests skip step-up; explicit foreign payouts and all
+      // sends/savings keep the canonical gate here and in the inner route.
+      if (recipientAddress != null && (typeof recipientAddress !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(recipientAddress))) {
+        return NextResponse.json({ success: false, error: 'Invalid recipient address.' }, { status: 400 });
+      }
       const assistantAction =
         action === 'send' ? 'consumer.send' as const
+        : action === 'request' && recipientAddress && recipientAddress.toLowerCase() !== walletAddress.toLowerCase() ? 'consumer.request' as const
         : action === 'request' ? null // own-wallet request: no step-up
         : action === 'save' ? 'consumer.save' as const
         : null;
@@ -189,7 +190,7 @@ export async function POST(req: NextRequest) {
         const res = await fetch(internalUrl('/api/payments/initialize'), {
           method: 'POST',
           headers: forwardHeaders,
-          body: JSON.stringify({ amount, currency: currency || 'USDC', merchant: 'Payment request', direction: 'request' }),
+          body: JSON.stringify({ amount, currency: currency || 'USDC', merchant: 'Payment request', direction: 'request', ...(recipientAddress ? { payoutAddress: recipientAddress } : {}) }),
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'Could not create request.');
