@@ -1,6 +1,6 @@
 // Run after next build: node scripts/mainnet-optional-boot-tests.mjs
 // Starts the real production server with optional features disabled. Only
-// network-descriptor and fail-closed paid/bridge requests; no DB or funds.
+// public-page loads and fail-closed requests; no DB, signing, or funds.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -17,10 +17,12 @@ const env = { ...process.env, ...MAINNET_ENV };
 for (const key of Object.keys(env)) {
   if (/^CCTP_MAINNET_/.test(key)) env[key] = '';
 }
-for (const key of ['ARC_MAINNET_STREAM_ADDRESS', 'ARC_MAINNET_X402_VERIFIER', 'ARC_MAINNET_ESCROW_ADDRESS',
+for (const key of ['ARC_MAINNET_STREAM_ADDRESS', 'ARC_MAINNET_X402_VERIFIER', 'ARC_MAINNET_ESCROW_ADDRESS', 'ARC_MAINNET_ERC8183_ADDRESS',
   'ARCFLARE_STREAM_CONTRACT_ADDRESS', 'ARC_FLARE_STREAM_CONTRACT_ADDRESS', 'ESCROW_ADMIN_PRIVATE_KEY',
   'CCTP_MAINNET_SOURCES_JSON', 'CCTP_MAINNET_ARC_CHAIN_ID', 'SELLER_WALLET_ADDRESS',
   'SENTRY_DSN', 'NEXT_PUBLIC_SENTRY_DSN']) env[key] = '';
+// Never let an unexpected page read reach the production database.
+env.DATABASE_URL = 'postgresql://offline:offline@127.0.0.1:1/offline';
 const server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1', '--port', String(port)], {
   env, stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -45,8 +47,24 @@ try {
   const base = `http://127.0.0.1:${port}`;
   const network = await fetch(`${base}/api/network`, { signal: AbortSignal.timeout(30_000) });
   assert.equal(network.status, 200);
-  assert.equal((await network.json()).name, 'mainnet');
+  const descriptor = await network.json();
+  assert.equal(descriptor.name, 'mainnet');
+  assert.equal(descriptor.chainId, 5042);
+  assert.equal(descriptor.erc8183Address, null);
   checks++;
+  for (const path of ['/', '/docs', '/merchant/login', '/consumer']) {
+    const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(30_000) });
+    assert.equal(response.status, 200, `GET ${path}`);
+    const html = await response.text();
+    assert.ok(!html.includes('Application error:'), `no error boundary on ${path}`);
+    checks++;
+  }
+  const load = await Promise.all(Array.from({ length: 12 }, async () => {
+    const response = await fetch(`${base}/api/network`, { signal: AbortSignal.timeout(30_000) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).chainId, 5042);
+  }));
+  checks += load.length;
   for (const [path, methods] of [
     ['/api/agent/brain', ['POST']], ['/api/nano/pay/agent-lookup', ['POST']],
     ['/api/x402/marketplace/pay/test-disabled', ['GET', 'POST', 'PUT', 'DELETE']],
@@ -62,7 +80,26 @@ try {
     assert.equal(body.code, path.includes('/cctp/') ? 'cctp_unavailable' : 'x402_unavailable');
     checks++;
   }
-  console.log(`mainnet-optional-boot: ${checks}/${checks} passed (stream/verifier/CCTP_MAINNET_* and escrow-admin key absent; ARC_MAINNET_CCTP_* topology retained; no funds moved)`);
+  for (const action of ['create', 'stop', 'withdraw']) {
+    const response = await fetch(`${base}/api/payments/stream/${action}`, {
+      method: 'POST', body: '{', signal: AbortSignal.timeout(30_000),
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error, 'stream_unavailable');
+    checks++;
+  }
+  for (const action of ['open', 'release', 'close']) {
+    const response = await fetch(`${base}/api/jobs/nanopay/${action}`, {
+      method: 'POST', body: '{', signal: AbortSignal.timeout(30_000),
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error, 'stream_unavailable');
+    checks++;
+  }
+  const listing = await fetch(`${base}/api/payments/stream/create`, { signal: AbortSignal.timeout(30_000) });
+  assert.equal(listing.status, 401, 'legacy GET still requires authentication');
+  checks++;
+  console.log(`mainnet-optional-boot: ${checks}/${checks} passed (built server, public pages, 12 concurrent descriptor reads, unavailable POSTs, authenticated GET boundary; no live DB or funds)`);
 } finally {
   server.kill();
   await stopped;

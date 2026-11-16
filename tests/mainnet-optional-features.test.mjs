@@ -79,9 +79,10 @@ test('configured verifier is retained; malformed stream still fails startup', ()
   assert.equal(validateWalletEnv({ ...MAINNET_ENV, ARC_MAINNET_STREAM_ADDRESS: verifier }).warnings.length, 0);
 });
 
-for (const payment of [false, true]) test(`paid routes refuse before challenge/settlement, signature=${payment}`, async (t) => {
+for (const verifier of [undefined, '0x' + '8'.repeat(40)]) {
+for (const payment of [false, true]) test(`paid routes refuse before challenge/settlement, verifier=${verifier ? 'configured' : 'absent'}, signature=${payment}`, async (t) => {
   const calls = blockEffects(t);
-  await withEnv(MAINNET_ENV, async () => {
+  await withEnv({ ...MAINNET_ENV, ARC_MAINNET_X402_VERIFIER: verifier }, async () => {
     const headers = payment ? { 'payment-signature': Buffer.from('{}').toString('base64') } : {};
     const req = new NextRequest('https://app.example/api/agent/brain', { method: 'POST', headers, body: '{' });
     t.mock.method(req, 'json', () => { throw new Error('Unavailable paid route must not parse body'); });
@@ -98,6 +99,7 @@ for (const payment of [false, true]) test(`paid routes refuse before challenge/s
     assert.deepEqual(calls, []);
   });
 });
+}
 
 test('mainnet Gateway payroll refusal persists with a verifier, before settlement', async (t) => {
   const calls = blockEffects(t);
@@ -105,7 +107,7 @@ test('mainnet Gateway payroll refusal persists with a verifier, before settlemen
     const payroll = await import('../src/lib/payroll/payrollExecution.ts');
     await expect503(await payroll.fundPayrollViaX402(new NextRequest('https://app.example', {
       method: 'POST', headers: { 'payment-signature': Buffer.from('{}').toString('base64') },
-    }), [{ address: MAINNET_ENV.BUYER_ADDRESS, amount: 1n }]), 'gateway_mainnet_unavailable');
+    }), [{ address: MAINNET_ENV.BUYER_ADDRESS, amount: 1n }]), 'x402_unavailable');
     assert.deepEqual(calls, []);
   });
 });

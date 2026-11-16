@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createContractTransaction } from "@/lib/circle/client";
 import { streamAddressOr503 } from "@/lib/stream/streamGuard";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
@@ -74,4 +75,12 @@ async function closeHandler(req: NextRequest) {
   }
 }
 
-export const POST = withApiKeyOrAnySession(closeHandler);
+const authenticatedClose = withApiKeyOrAnySession(closeHandler);
+
+export async function POST(req: NextRequest) {
+  const stream = streamAddressOr503();
+  if ("response" in stream) return stream.response;
+  const erc8183 = erc8183AddressOr503();
+  if ("response" in erc8183) return erc8183.response;
+  return authenticatedClose(req);
+}

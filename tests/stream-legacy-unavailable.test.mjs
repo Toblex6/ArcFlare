@@ -69,11 +69,13 @@ function replaceMethod(t, target, method, implementation) {
 
 function blockSideEffects(t, listing = false) {
   const calls = [];
-  replaceMethod(t, prisma.apiKey, 'findUnique', async () => ({ id: 1, key: 'test-key', active: true }));
   const forbidden = (name) => () => {
     calls.push(name);
     throw new Error(`Forbidden side effect: ${name}`);
   };
+  replaceMethod(t, prisma.apiKey, 'findUnique', listing
+    ? async () => ({ id: 1, key: 'test-key', active: true })
+    : forbidden('apiKey.findUnique'));
   for (const method of ['findUnique', 'findMany', 'count', 'create', 'update', 'updateMany']) {
     if (listing && method === 'findMany') continue;
     replaceMethod(t, prisma.stream, method, forbidden(`stream.${method}`));
@@ -137,9 +139,24 @@ test('legacy create GET remains an authenticated read-only listing', async (t) =
   assert.deepEqual(calls, []);
 });
 
-test('legacy endpoints retain their existing API-key boundary', async () => {
-  for (const [action, route] of Object.entries(ROUTES)) {
-    const response = await route.POST(new NextRequest(`https://app.example/api/payments/stream/${action}`, { method: 'POST' }));
-    assert.equal(response.status, 401);
-  }
+for (const [environment, env] of ENVIRONMENTS) test(`unauthenticated legacy POSTs return unavailable before auth: ${environment}`, async (t) => {
+  const calls = blockSideEffects(t);
+  await withEnv(env, async () => {
+    for (const [action, route] of Object.entries(ROUTES)) {
+      const req = new NextRequest(`https://app.example/api/payments/stream/${action}`, { method: 'POST', body: '{' });
+      t.mock.method(req, 'json', () => { throw new Error('Unavailable route must not parse body'); });
+      const response = await route.POST(req);
+      assert.equal(response.status, 503);
+      const result = await response.json();
+      assert.equal(result.success, false);
+      assert.equal(result.error, environment === 'mainnet without streaming' ? 'stream_unavailable' : `streaming ${action} is not available`);
+    }
+    assert.deepEqual(calls, []);
+  });
+});
+
+test('legacy GET retains its API-key boundary', async (t) => {
+  const calls = blockSideEffects(t);
+  assert.equal((await create.GET(new NextRequest('https://app.example/api/payments/stream/create'))).status, 401);
+  assert.deepEqual(calls, []);
 });

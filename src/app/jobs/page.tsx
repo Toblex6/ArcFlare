@@ -89,7 +89,11 @@ export default function JobsPage() {
   // Server-resolved network state (production-safe defaults until
   // /api/network resolves): the protocol address display + explorer link
   // must reflect the server's network, never client-side env.
-  const { erc8183Address: resolvedErc8183 } = useNetwork();
+  const { erc8183Address: resolvedErc8183, loaded: networkLoaded } = useNetwork();
+  const jobActionsUnavailable = !resolvedErc8183;
+  const jobUnavailableReason = networkLoaded
+    ? 'ERC-8183 is unavailable on this network: the external protocol address is not configured.'
+    : 'Checking ERC-8183 availability on this network…';
   const { addressUrl: explorerAddress } = useExplorer();
   // Server-resolved network label (production-safe "Arc" default until
   // /api/network resolves) — never client-side env (testnet fallback).
@@ -247,6 +251,7 @@ export default function JobsPage() {
   const fundInputRef = React.useRef<HTMLInputElement>(null);
 
   const callJobsAPI = async (body: any) => {
+    if (jobActionsUnavailable) throw new Error(jobUnavailableReason);
     const res = await fetch('/api/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -296,6 +301,10 @@ export default function JobsPage() {
 
   const runManageAction = async () => {
     if (!manageAction) return;
+    if (jobActionsUnavailable) {
+      setManageError(jobUnavailableReason);
+      return;
+    }
     setManageLoading(true);
     setManageError(null);
     setManageResult(null);
@@ -458,6 +467,10 @@ export default function JobsPage() {
   };
 
   const selectAndHire = async (postingId: string, providerAddress: string) => {
+    if (jobActionsUnavailable) {
+      setPostError(jobUnavailableReason);
+      return;
+    }
     setSelecting(postingId);
     setPostError(null);
     try {
@@ -511,6 +524,10 @@ export default function JobsPage() {
 
   const openFundTreasury = () => {
     if (!postAgentId) return;
+    if (jobActionsUnavailable) {
+      setPostError(jobUnavailableReason);
+      return;
+    }
     setFundAmount('5');
     setFundAmountError(null);
     setFundDialogOpen(true);
@@ -518,6 +535,10 @@ export default function JobsPage() {
 
   const submitFundTreasury = async () => {
     if (!postAgentId) return;
+    if (jobActionsUnavailable) {
+      setFundAmountError(jobUnavailableReason);
+      return;
+    }
     const n = Number(fundAmount);
     if (!Number.isFinite(n) || n <= 0) {
       setFundAmountError('Enter a positive USDC amount.');
@@ -697,9 +718,19 @@ export default function JobsPage() {
             ERC-8183 Job Board
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0 }}>
-            Arc's native agentic commerce standard — create, fund, and complete jobs onchain
+            Create, fund, and complete on-chain jobs when the ERC-8183 protocol is available
           </p>
         </div>
+
+        {jobActionsUnavailable && (
+          <div role="status" style={{ ...S.card, borderColor: 'var(--warning)' }}>
+            <p style={{ fontWeight: 700, fontSize: 13, margin: '0 0 6px' }}>{jobUnavailableReason}</p>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>
+              Hiring, job funding, delivery, completion, and criterion-based job streams are unavailable.
+              Pre-chain postings and read-only lists remain accessible. No funds move from disabled actions.
+            </p>
+          </div>
+        )}
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' as const }}>
@@ -725,9 +756,9 @@ export default function JobsPage() {
               About ERC-8183
             </h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, margin: '0 0 20px' }}>
-              ERC-8183 is Arc's native agentic commerce standard. It defines how AI agents create
-              jobs, fund escrow with USDC, submit deliverables, and complete payments — all onchain
-              with no middleman.
+              ERC-8183 is an external agentic commerce protocol. When configured on the selected
+              network, it defines how agents create jobs, fund USDC escrow, submit deliverables,
+              and complete payments on-chain.
             </p>
             <div
               style={{
@@ -745,13 +776,13 @@ export default function JobsPage() {
                 },
                 {
                   icon: '🔒',
-                  title: 'Trustless Escrow',
+                  title: 'Protocol Escrow',
                   desc: 'USDC locked in ERC-8183 contract until job is done',
                 },
                 {
                   icon: '⚡',
-                  title: 'Arc Native',
-                  desc: "Built on Arc's native agentic commerce standard",
+                  title: 'Network-dependent',
+                  desc: 'Requires a verified ERC-8183 deployment on the selected network',
                 },
               ].map((f, i) => (
                 <div
@@ -1139,8 +1170,9 @@ export default function JobsPage() {
                       )}
 
                       <button
-                        style={{ ...S.btn(stepLoading), marginTop: 8 }}
-                        disabled={stepLoading}
+                        style={{ ...S.btn(stepLoading || jobActionsUnavailable), marginTop: 8 }}
+                        disabled={stepLoading || jobActionsUnavailable}
+                        title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                         onClick={() => {
                           if (s.num === 1)
                             runStep('create', {
@@ -1290,7 +1322,8 @@ export default function JobsPage() {
                       )}
                       <button
                         style={{ ...S.btnSm(false), marginTop: 6, color: 'var(--primary)', fontWeight: 700 }}
-                        disabled={funding}
+                        disabled={funding || jobActionsUnavailable}
+                        title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                         onClick={openFundTreasury}
                       >
                         {funding ? 'Funding...' : 'Fund agent treasury (USDC)'}
@@ -1453,7 +1486,8 @@ export default function JobsPage() {
                   {p.status === 'SELECTED' && (
                     <button
                       style={{ ...S.btnSm(false), marginTop: 12, color: 'var(--primary)', fontWeight: 700 }}
-                      disabled={selecting === p.id}
+                      disabled={selecting === p.id || jobActionsUnavailable}
+                      title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                       onClick={() => selectAndHire(p.id, p.selectedProviderSCA)}
                     >
                       {selecting === p.id ? 'Hiring...' : 'Hire Selected Worker'}
@@ -1502,7 +1536,8 @@ export default function JobsPage() {
                             </div>
                             <button
                               style={{ ...S.btnSm(false), whiteSpace: 'nowrap' as const, color: 'var(--primary)', fontWeight: 700 }}
-                              disabled={selecting === p.id}
+                              disabled={selecting === p.id || jobActionsUnavailable}
+                              title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                               onClick={() => selectAndHire(p.id, a.applicantAddress)}
                             >
                               {selecting === p.id ? 'Working...' : 'Select & Hire'}
@@ -1907,6 +1942,8 @@ export default function JobsPage() {
                       {lookupResult.status === 'Open' && (
                         <button
                           style={S.btnSm(manageAction === 'approve')}
+                          disabled={jobActionsUnavailable}
+                          title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                           onClick={() => setManageAction('approve')}
                         >
                           Approve USDC
@@ -1915,6 +1952,8 @@ export default function JobsPage() {
                       {lookupResult.status === 'Open' && (
                         <button
                           style={S.btnSm(manageAction === 'fund')}
+                          disabled={jobActionsUnavailable}
+                          title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                           onClick={() => setManageAction('fund')}
                         >
                           Fund Escrow
@@ -1925,6 +1964,8 @@ export default function JobsPage() {
                         lookupResult.isProvider && (
                           <button
                             style={S.btnSm(manageAction === 'accept')}
+                            disabled={jobActionsUnavailable}
+                            title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                             onClick={() => setManageAction('accept')}
                           >
                             Accept / Set Budget
@@ -1933,6 +1974,8 @@ export default function JobsPage() {
                       {lookupResult.status === 'Funded' && (
                         <button
                           style={S.btnSm(manageAction === 'submit')}
+                          disabled={jobActionsUnavailable}
+                          title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                           onClick={() => setManageAction('submit')}
                         >
                           Submit Deliverable
@@ -1941,6 +1984,8 @@ export default function JobsPage() {
                       {lookupResult.status === 'Submitted' && (
                         <button
                           style={S.btnSm(manageAction === 'complete')}
+                          disabled={jobActionsUnavailable}
+                          title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                           onClick={() => setManageAction('complete')}
                         >
                           Complete & Pay
@@ -2096,8 +2141,9 @@ export default function JobsPage() {
                           </p>
                         )}
                         <button
-                          style={{ ...S.btn(manageLoading) }}
-                          disabled={manageLoading}
+                          style={{ ...S.btn(manageLoading || jobActionsUnavailable) }}
+                          disabled={manageLoading || jobActionsUnavailable}
+                          title={jobActionsUnavailable ? jobUnavailableReason : undefined}
                           onClick={runManageAction}
                         >
                           {manageLoading ? 'Sending to Arc...' : `Execute: ${manageAction === 'accept' ? 'Accept / Set Budget' : manageAction}`}
@@ -2195,7 +2241,7 @@ export default function JobsPage() {
             >
               Cancel
             </button>
-            <button type="submit" disabled={funding} style={{ ...S.btn(funding), flex: 1 }}>
+            <button type="submit" disabled={funding || jobActionsUnavailable} title={jobActionsUnavailable ? jobUnavailableReason : undefined} style={{ ...S.btn(funding || jobActionsUnavailable), flex: 1 }}>
               {funding ? 'Funding...' : 'Fund treasury'}
             </button>
           </div>

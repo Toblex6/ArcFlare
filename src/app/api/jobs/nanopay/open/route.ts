@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createContractTransaction } from "@/lib/circle/client";
 import { ARC_FLARE_STREAM_ABI, computeTrancheAmounts } from "@/lib/contracts/streamContract";
 import { streamAddressOr503 } from "@/lib/stream/streamGuard";
+import { erc8183AddressOr503 } from "@/lib/jobs/erc8183Guard";
 import { prisma } from "@/lib/prisma";
 import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
@@ -20,9 +21,8 @@ const streamIface = new Interface(ARC_FLARE_STREAM_ABI as unknown as string[]);
 
 async function openHandler(req: NextRequest) {
   try {
-    // Network gate FIRST: on mainnet without ARC_MAINNET_STREAM_ADDRESS (or with
-    // the testnet deployment) this answers 503 before any auth, DB, RPC or
-    // Circle transaction — no funds can move against the wrong contract.
+    // Recheck the stream address after authentication; POST gates both protocol
+    // dependencies before authentication, body parsing, or external effects.
     const stream = streamAddressOr503();
     if ("response" in stream) return stream.response;
     const STREAM_CONTRACT = stream.address;
@@ -130,4 +130,13 @@ async function openHandler(req: NextRequest) {
   }
 }
 
-export const POST = withApiKeyOrAnySession(openHandler);
+const authenticatedOpen = withApiKeyOrAnySession(openHandler);
+
+export async function POST(req: NextRequest) {
+  const stream = streamAddressOr503();
+  if ("response" in stream) return stream.response;
+  // A stream deployment alone cannot enable a workflow requiring a FUNDED job.
+  const erc8183 = erc8183AddressOr503();
+  if ("response" in erc8183) return erc8183.response;
+  return authenticatedOpen(req);
+}
