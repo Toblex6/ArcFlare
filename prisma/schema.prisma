@@ -866,7 +866,7 @@ model FlowBridgeIntent {
   cctpNonce      String?  @unique // Circle-attested CCTP V2 bytes32 message nonce (0x + 64 hex), Iris-resolved by burn hash — never the MessageSent zero placeholder; the mint must reproduce it
   status          String   @default("PENDING") // PENDING | BURN_CONFIRMED | COMPLETED | FAILED
   error           String? // terminal failure detail (FAILED only)
-  expiresAt       DateTime // intents expire uncompleted; expired intents are never completable
+  expiresAt       DateTime // source-signing submission TTL; verified burns remain recoverable/completable after it
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

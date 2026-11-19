@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withApiKeyOrAnySession } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { keccak256, toHex } from 'viem';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 

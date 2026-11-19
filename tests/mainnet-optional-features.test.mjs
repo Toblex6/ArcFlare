@@ -142,7 +142,7 @@ for (const [label, config] of invalidBridge) test(`bridge configuration ${label}
   });
 });
 
-test('Arc is the installed mainnet BridgeChain NAME; configured discovery works without starting a bridge', async (t) => {
+test('installed Circle adapter lacks Arc mainnet execution support and refuses configured server signing', async (t) => {
   const calls = blockEffects(t);
   await withEnv({ ...MAINNET_ENV, CCTP_MAINNET_SOURCES_JSON: sources, CCTP_MAINNET_ARC_CHAIN_ID: 'Arc' }, async () => {
     const cctp = await import('../src/lib/cctp-v2.ts');
@@ -152,8 +152,20 @@ test('Arc is the installed mainnet BridgeChain NAME; configured discovery works 
     assert.equal(destination.destinationChainId, 5042);
     assert.equal(destination.destinationDomain, 26);
     const route = await import('../src/app/api/cctp/transfer/route.ts');
-    assert.equal((await route.GET()).status, 200);
+    await expect503(await route.GET(), 'cctp_unavailable');
+    const nestedAdapter = readFileSync(new URL('../node_modules/@circle-fin/adapter-circle-wallets/node_modules/@circle-fin/adapter-viem-v2/index.mjs', import.meta.url), 'utf8');
+    const mapping = nestedAdapter.slice(nestedAdapter.indexOf('const getViemChainByEnum'), nestedAdapter.indexOf('const ViemAdapterOptionsSchema'));
+    assert.ok(mapping.includes('case Blockchain.Arc_Testnet:'));
+    assert.ok(!mapping.includes('case Blockchain.Arc:'));
     assert.deepEqual(calls, []);
+  });
+});
+
+test('valid mainnet source metadata is parsed but cannot bypass the installed adapter gate', async () => {
+  await withEnv({ ...MAINNET_ENV, CCTP_MAINNET_SOURCES_JSON: sources, CCTP_MAINNET_ARC_CHAIN_ID: 'Arc' }, async () => {
+    const cctp = await import('../src/lib/cctp-v2.ts');
+    assert.deepEqual(cctp.parseConfiguredMainnetCctpSources(), [{ id: BridgeChain.Ethereum, label: 'Ethereum', testnet: false, circleBlockchain: 'ETH' }]);
+    assert.throws(() => cctp.getCctpSources(), /cannot initialize Arc Mainnet/);
   });
 });
 
@@ -171,7 +183,7 @@ test('testnet config and bridge discovery remain available; external bridge has 
   }
 });
 
-test('startBridge refuses missing credentials synchronously, never returns a fabricated pending reference', async (t) => {
+test('startBridge refuses unsupported mainnet adapter before credentials or a fabricated pending reference', async (t) => {
   const calls = blockEffects(t);
   await withEnv({ ...MAINNET_ENV, CCTP_MAINNET_SOURCES_JSON: sources, CCTP_MAINNET_ARC_CHAIN_ID: 'Arc', CIRCLE_API_KEY: undefined }, async () => {
     const cctp = await import('../src/lib/cctp-v2.ts');
@@ -179,7 +191,7 @@ test('startBridge refuses missing credentials synchronously, never returns a fab
     assert.throws(() => cctp.startBridge({
       fromChain: BridgeChain.Ethereum, toChain: 'Arc', amount: '0.000001',
       senderAddress: MAINNET_ENV.BUYER_ADDRESS, recipientAddress: MAINNET_ENV.SELLER_ADDRESS,
-    }), (error) => error instanceof CctpUnavailableError && error.message.includes('credentials'));
+    }), (error) => error instanceof CctpUnavailableError && error.message.includes('cannot initialize Arc Mainnet'));
     assert.deepEqual(calls, []);
   });
 });

@@ -23,7 +23,7 @@ import { PrismaClient } from "@prisma/client";
 import { createPublicClient, http } from "viem";
 import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 const arcTestnet = getArcChain();
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from "@/lib/circle/client";
 import { withMerchantAuth, AuthedMerchant } from "@/src/lib/middleware/withMerchantAuth";
 import {
   extractIdentityMintFromLogs,

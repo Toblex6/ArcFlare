@@ -1,8 +1,14 @@
 import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
 import { getNetworkConfig } from '@/lib/config/network';
+import { assertCircleBlockchain, assertCircleSigningNetwork, withCircleNetworkGuard } from './networkGuard';
 
 // Singleton Circle client instance
 let circleClientInstance: ReturnType<typeof initiateDeveloperControlledWalletsClient> | null = null;
+
+/** All SDK factories share the network guard; read APIs remain unchanged. */
+export function createCircleClient(...args: Parameters<typeof initiateDeveloperControlledWalletsClient>) {
+  return withCircleNetworkGuard(initiateDeveloperControlledWalletsClient(...args));
+}
 
 export function getCircleClient() {
   if (!circleClientInstance) {
@@ -12,7 +18,7 @@ export function getCircleClient() {
       );
     }
 
-    circleClientInstance = initiateDeveloperControlledWalletsClient({
+    circleClientInstance = createCircleClient({
       apiKey: process.env.CIRCLE_API_KEY,
       entitySecret: process.env.CIRCLE_ENTITY_SECRET,
     });
@@ -169,6 +175,7 @@ export async function ensureWalletOnChain(
   walletSetId: string,
   circleBlockchainId: string
 ): Promise<{ id: string; address: string }> {
+  assertCircleBlockchain(circleBlockchainId);
   const circleClient = getCircleClient();
 
   const existing = await circleClient.listWallets({
@@ -177,6 +184,7 @@ export async function ensureWalletOnChain(
   });
   const found = existing.data?.wallets?.[0];
   if (found?.id && found.address) {
+    await assertCircleSigningNetwork(circleClient, { walletId: found.id, walletAddress: found.address, blockchain: circleBlockchainId });
     return { id: found.id, address: found.address };
   }
 

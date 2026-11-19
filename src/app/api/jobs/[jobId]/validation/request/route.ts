@@ -5,7 +5,7 @@ import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAd
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getJobValidationPolicy, recordValidationRequest } from "@/lib/jobs/jobValidationPolicy";
 import { notifyValidator } from "@/lib/notifyValidator";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from "@/lib/circle/client";
 import { createPublicClient, http, keccak256, toHex } from "viem";
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 

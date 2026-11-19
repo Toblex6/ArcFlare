@@ -24,7 +24,10 @@ import { checkRateLimit } from '@/lib/ratelimit';
 import { parseBody, SettleSchema } from '@/lib/validation';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { assertMainnetSettlementAllowed } from '@/src/lib/payments/directProof';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { requireLegacyCctpMint, LegacyCctpMintUnavailableError, legacyCctpMintUnavailableBody } from '@/lib/bridge/legacyMint';
+import { cctpPollingStatus } from '@/lib/cctp';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
+import { assertCircleSigningNetwork, CircleNetworkError } from '@/lib/circle/networkGuard';
 import { explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
 import {
   resolvePlatformPayerWalletId as resolveDefaultPayerWalletId,
@@ -132,6 +135,8 @@ async function mergedSettleHandler(request: NextRequest) {
     if (validationError) return validationError;
 
     const { reference, messageHash } = data;
+    // Refuse the legacy mint before claiming/locking or changing a payment.
+    if (messageHash) requireLegacyCctpMint();
     fallbackReference = reference;
 
     // ── 3. Load the row and authorize the caller BEFORE taking the lock ──────
@@ -318,6 +323,7 @@ async function mergedSettleHandler(request: NextRequest) {
                 'REDEEMED_AND_MINTED',
                 'PROCESSING_ONCHAIN',
                 'POLLING_CIRCLE_TESTNET_IRIS_API',
+                'POLLING_CIRCLE_MAINNET_IRIS_API',
                 'REDEEMING_ON_ARC',
               ],
             },
@@ -325,7 +331,7 @@ async function mergedSettleHandler(request: NextRequest) {
           {
             // Recover locks abandoned by crashed workers in ANY transient state
             status: {
-              in: ['PROCESSING_ONCHAIN', 'POLLING_CIRCLE_TESTNET_IRIS_API', 'REDEEMING_ON_ARC'],
+              in: ['PROCESSING_ONCHAIN', 'POLLING_CIRCLE_TESTNET_IRIS_API', 'POLLING_CIRCLE_MAINNET_IRIS_API', 'REDEEMING_ON_ARC'],
             },
             updatedAt: { lt: fiveMinutesAgo },
           },
@@ -357,6 +363,7 @@ async function mergedSettleHandler(request: NextRequest) {
     // this repository, so a non-USDC invoice must never be routed through this
     // branch — it settles via the same-chain token-native Path B instead.
     if (messageHash) {
+      requireLegacyCctpMint();
       if (token.symbol !== 'USDC') {
         return NextResponse.json(
           {
@@ -369,7 +376,7 @@ async function mergedSettleHandler(request: NextRequest) {
       console.log(`🌉 Initiating CCTP Bridge Settlement for ${reference}`);
       await prisma.paymentLog.update({
         where: { reference },
-        data: { status: 'POLLING_CIRCLE_TESTNET_IRIS_API' },
+        data: { status: cctpPollingStatus() },
       });
 
       const { message, attestation } = await pollForAttestation(messageHash);
@@ -619,6 +626,13 @@ async function mergedSettleHandler(request: NextRequest) {
     // because the resolver is the canonical abstraction).
     if (!circleTxId) {
       // STEP 1: Attempt native Circle transfer initialization
+      // Outside both fallback catches: a rejected wallet ID cannot fall back
+      // to an address-based debit on a different network.
+      await assertCircleSigningNetwork(circleClient, {
+        walletId: payerWalletId,
+        walletAddress: payerSCA,
+        blockchain: getNetworkConfig().circleBlockchain,
+      });
       try {
         const transferTx = await circleClient.createTransaction({
           walletId: payerWalletId,
@@ -630,6 +644,7 @@ async function mergedSettleHandler(request: NextRequest) {
         } as any);
         circleTxId = transferTx.data?.id;
       } catch (nativeInitError: any) {
+        if (nativeInitError instanceof CircleNetworkError) throw nativeInitError;
         console.warn(
           'Native Circle transfer initialization failed, trying fallback:',
           nativeInitError.message
@@ -652,6 +667,7 @@ async function mergedSettleHandler(request: NextRequest) {
           if (!circleTxId)
             throw new Error('Fallback ERC-20 transfer failed to generate a Transaction ID.');
         } catch (fallbackError: any) {
+          if (fallbackError instanceof CircleNetworkError) throw fallbackError;
           throw new Error(
             `Both native and fallback initialization failed. Error: ${fallbackError.message}`
           );
@@ -718,6 +734,9 @@ async function mergedSettleHandler(request: NextRequest) {
       circleTxId,
     });
   } catch (error: any) {
+    if (error instanceof LegacyCctpMintUnavailableError) {
+      return NextResponse.json(legacyCctpMintUnavailableBody(), { status: 503 });
+    }
     console.error('Settlement Error:', error.message);
     if (fallbackReference) {
       // Preserve the transaction ID if it was generated before the error occurred

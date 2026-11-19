@@ -5,6 +5,8 @@ import { prisma } from '@/src/lib/prisma';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+import { cctpPollingStatus } from '@/lib/cctp';
+import { requireLegacyCctpMint, LegacyCctpMintUnavailableError, legacyCctpMintUnavailableBody } from '@/lib/bridge/legacyMint';
 
 // Circle Iris API + Arc chain flow from the authoritative network config
 // (were hardcoded sandbox URL + testnet chain literal). Mainnet without
@@ -45,6 +47,7 @@ async function isInternalServiceCall(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    requireLegacyCctpMint();
     const { allowed, response: limitResponse } = await checkRateLimit(request as any, 'payments');
     if (!allowed) return limitResponse;
 
@@ -104,7 +107,7 @@ export async function POST(request: Request) {
     // 2. Transition database row state using your exact lowercase 'paymentLog' model
     await prisma.paymentLog.update({
       where: { reference },
-      data: { status: 'POLLING_CIRCLE_TESTNET_IRIS_API' },
+      data: { status: cctpPollingStatus() },
     });
 
     let attestationBytes = '';
@@ -221,6 +224,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, transaction: completedTx });
   } catch (error: any) {
+    if (error instanceof LegacyCctpMintUnavailableError) {
+      return NextResponse.json(legacyCctpMintUnavailableBody(), { status: 503 });
+    }
     console.error('Cross-chain routing core exception:', error);
 
     return NextResponse.json(

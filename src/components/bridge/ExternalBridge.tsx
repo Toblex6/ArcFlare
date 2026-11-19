@@ -13,9 +13,9 @@
 // burn and mint from on-chain receipts before anything is recorded.
 //
 // Double-submit protection: a synchronous busy ref + phase gating means two
-// rapid taps produce exactly one kit.bridge() call, and a soft/partial
-// BridgeKit result is resumed with kit.retry(...) — never a fresh
-// kit.bridge() (which could duplicate spending).
+// rapid taps produce exactly one kit.bridge() call. Confirmed burns resume
+// settlement only. Approval/burn retries require an explicit wallet-activity
+// check and reuse the SAME intent, never an automatic fresh spend.
 //
 // Client component (dynamic SDK imports keep SSR safe).
 
@@ -28,6 +28,7 @@ import {
   getBridgeSourceChains,
   validateBridgeAmount,
   formatBridgeBaseUnits,
+  sourceExplorerTxUrl,
   type BridgeAmountError,
 } from '@/lib/bridge/sourceChains';
 import { sourceViemChainFor } from '@/lib/bridge/sourceViemChains';
@@ -44,6 +45,8 @@ import {
 import { ensureEvmNetwork } from '@/lib/wallet/ensureEvmNetwork';
 import { friendlyBridgeError } from '@/lib/wallet/walletErrors';
 import { useNetwork } from '@/src/components/NetworkContext';
+import { bridgeEventHash, bridgeHasRecoveryEvidence, bridgeNeedsBurnReview, bridgeResultFailure, canRetryBridgeBeforeBurn, selectBridgeRecoveryHash } from '@/lib/bridge/resultState';
+import { pollBridgeSettlementStatus } from '@/lib/bridge/settlementPolling';
 
 const USDC_ABI = parseAbi([
   'function balanceOf(address owner) view returns (uint256)',
@@ -166,7 +169,7 @@ const STAGE_LABELS: Record<string, string> = {
   MINT_PENDING: 'Minting on Arc',
   MINT_CONFIRMED: 'Mint confirmed on Arc',
   VERIFIED: 'Bridge verified',
-  FAILED: 'Bridge failed',
+  FAILED: 'Bridge step needs attention',
 };
 
 /**
@@ -223,7 +226,23 @@ export default function ExternalBridge({
   // Avalanche → Arc Mainnet on mainnet (Step D).
   const { name: networkName } = useNetwork();
   const bridgeNetwork = networkName === 'mainnet' ? 'mainnet' : 'testnet';
-  const bridgeAvailable = true;
+  const [availability, setAvailability] = useState<{
+    available: boolean; network: string | null; message: string | null;
+  } | null>(null);
+  const bridgeAvailable = availability?.available === true && availability.network === bridgeNetwork;
+  useEffect(() => {
+    let cancelled = false;
+    setAvailability(null);
+    fetch('/api/cctp/transfer/external/availability', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!cancelled) setAvailability({ available: data?.available === true, network: data?.network ?? null, message: data?.message ?? null });
+      })
+      .catch(() => {
+        if (!cancelled) setAvailability({ available: false, network: null, message: 'Could not check bridge availability. No signing request has been opened.' });
+      });
+    return () => { cancelled = true; };
+  }, [bridgeNetwork, destinationRefreshKey]);
   const sources = useMemo(() => getBridgeSourceChains(bridgeNetwork), [bridgeNetwork]);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? 'Arbitrum_Sepolia');
   // Clamp a stale testnet/mainnet selection when the network resolves.
@@ -260,14 +279,10 @@ export default function ExternalBridge({
   const [estimate, setEstimate] = useState<{ received: string | null; cost: string | null } | null>(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
 
-  // Display-only native gas labels per source chain (client copy only).
-  const NATIVE_GAS_LABELS: Record<number, string> = {
-    1: 'ETH', 10: 'ETH', 137: 'MATIC', 8453: 'ETH', 42161: 'ETH', 43114: 'AVAX',
-    11155111: 'Sepolia ETH', 421614: 'ETH', 84532: 'ETH', 11155420: 'ETH', 80002: 'Amoy MATIC',
-  };
-
-
   const [stageNote, setStageNote] = useState<string | null>(null);
+  const [burnReviewConfirmed, setBurnReviewConfirmed] = useState(false);
+  const [recoveryBurnHash, setRecoveryBurnHash] = useState('');
+  const [recoveryMintHash, setRecoveryMintHash] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [errorStage, setErrorStage] = useState<{ stage: string; txHash: string | null; label: string } | null>(null);
   const [receipt, setReceipt] = useState<{
@@ -285,8 +300,8 @@ export default function ExternalBridge({
   // taps before re-render disables the button. Reset on every terminal path.
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
-  // Soft/partial BridgeKit result kept for kit.retry resume (never a fresh
-  // kit.bridge after funds may have moved). The PERSISTED resume facts
+  // Soft/partial BridgeKit result kept only for explicit pre-burn retries.
+  // No SDK signing is used after funds may have moved. The PERSISTED facts
   // (intentReference + sourceChainId + burnTxHash, see
   // src/lib/bridge/resumeStore.ts) survive a browser close/reload: mounts
   // rehydrate from localStorage and resume server-side (status → verify →
@@ -296,7 +311,11 @@ export default function ExternalBridge({
     result: any;
     intentReference: string;
     burnTxHash?: string | null;
+    mintTxHash?: string | null;
     sourceChainId?: string;
+    signingStarted?: boolean;
+    amount?: string;
+    destination?: string | null;
   } | null>(null);
   useEffect(() => {
     mountedRef.current = true;
@@ -312,16 +331,21 @@ export default function ExternalBridge({
   // the reload-surviving copy; resumeRef stays the same-session authority
   // (it additionally holds the live BridgeKit result for kit.retry).
   const persistResume = useCallback(
-    (intentReference: string, result: any, sourceChainId: string) => {
-      const burnTxHash = extractBurnTxHash(result) ?? resumeRef.current?.burnTxHash ?? null;
-      resumeRef.current = { result, intentReference, burnTxHash, sourceChainId };
+    (intentReference: string, result: any, sourceChainId: string, signingStarted = resumeRef.current?.signingStarted) => {
+      const burnTxHash = resumeRef.current?.burnTxHash ?? extractBurnTxHash(result) ?? null;
+      const mintTxHash = resumeRef.current?.mintTxHash ?? stepOf(result, 'Mint')?.txHash ?? null;
+      const savedAmount = resumeRef.current?.amount ?? amount.trim();
+      const savedDestination = resumeRef.current?.destination ?? destination;
+      resumeRef.current = { result, intentReference, burnTxHash, mintTxHash, sourceChainId, signingStarted, amount: savedAmount, destination: savedDestination };
       saveBridgeResume({
         intentReference,
         sourceChainId,
         sourceWallet: sessionLower,
         burnTxHash,
-        amount: amount.trim() || undefined,
-        destination,
+        mintTxHash,
+        signingStarted,
+        amount: savedAmount || undefined,
+        destination: savedDestination,
       });
     },
     [amount, destination, sessionLower]
@@ -340,14 +364,21 @@ export default function ExternalBridge({
       result: null,
       intentReference: saved.intentReference,
       burnTxHash: saved.burnTxHash,
+      mintTxHash: saved.mintTxHash,
       sourceChainId: saved.sourceChainId,
+      signingStarted: saved.signingStarted,
+      amount: saved.amount,
+      destination: saved.destination,
     };
     if (saved.sourceChainId && saved.sourceChainId !== sourceId) {
       setSourceId(saved.sourceChainId);
     }
+    if (saved.amount) setAmount(saved.amount);
     setPhase('awaiting-resume');
     setError(
-      'Bridge interrupted (the page was reloaded or closed). Your funds are safe — resume below to finish (no new transaction will be created).'
+      saved.burnTxHash
+        ? 'A source burn hash was saved. Resume verification and settlement of this same bridge; do not burn again.'
+        : 'Bridge interrupted before a burn hash was saved. Check wallet activity: approval alone is not a bridge. Recover an existing burn, or confirm no burn was submitted before retrying this same intent.'
     );
     fetchBridgeStage(saved.intentReference).then(({ stage, txHash }) => {
       if (!mountedRef.current || !stage) return;
@@ -362,7 +393,7 @@ export default function ExternalBridge({
   // wallet, a valid amount, and a resolved destination; any failure hides
   // the panel without blocking the form.
   useEffect(() => {
-    if (phase !== 'form' || !walletsMatch || !destination) {
+    if (phase !== 'form' || !bridgeAvailable || !walletsMatch || !destination) {
       setEstimate(null);
       setEstimateLoading(false);
       return;
@@ -414,7 +445,7 @@ export default function ExternalBridge({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, walletsMatch, destination, amount, sourceId, bridgeNetwork]);
+  }, [phase, bridgeAvailable, walletsMatch, destination, amount, sourceId, bridgeNetwork]);
 
   const setStage = useCallback((key: StageKey, status: StageState['status']) => {
     setStages((prev) => prev.map((s) => (s.key === key ? { ...s, status } : s)));
@@ -526,6 +557,7 @@ export default function ExternalBridge({
   const validationMsg = !validation.ok ? amountCopy(validation.error, source.label) : '';
 
   const formBlocked =
+    !bridgeAvailable ||
     phase !== 'form' ||
     !walletsMatch ||
     !validation.ok ||
@@ -533,15 +565,18 @@ export default function ExternalBridge({
     destLoading ||
     // No linked destination: the wallet-creation path is email onboarding
     // (the unbound card), never a spend that the server would reject.
-    (!!destUnbound && !destination);
+    !destination;
 
   async function getProvider(): Promise<any> {
     try {
-      return await (
+      if (activeConnector) return await (
         activeConnector as unknown as { getProvider?: () => Promise<unknown> }
-      )?.getProvider?.();
-    } catch {
+      ).getProvider?.();
       return (window as any)?.ethereum ?? null;
+    } catch {
+      // A failed WalletConnect connector must not sign through a different
+      // injected wallet.
+      return null;
     }
   }
 
@@ -602,33 +637,20 @@ export default function ExternalBridge({
     }
   }
 
-  /** Bounded attestation/mint wait via kit.retry (resumes, never restarts). */
-  async function waitForSettlement(
-    kit: any,
-    adapter: any,
-    result: any,
-    intentReference: string
-  ): Promise<any> {
-    let current = result;
-    for (let i = 0; i < RETRY_ROUNDS; i++) {
-      if (!mountedRef.current) throw new Error('Bridge interrupted.');
-      if (current?.state === 'success' || current?.state === 'error') return current;
-      setStageNote(
-        current?.state === 'pending'
-          ? 'Waiting for Circle attestation… Minting on Arc…'
-          : 'Checking bridge status…'
-      );
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        current = await kit.retry(current, { from: adapter, to: undefined });
-        persistResume(intentReference, current, source.id);
-        markStepsFromResult(current);
-      } catch (e) {
-        console.error('[external-bridge] retry poll failed (will retry):', e);
-      }
+  function recordKitEvent(event: any): void {
+    const saved = resumeRef.current;
+    if (!saved) return;
+    const burn = bridgeEventHash(event, 'burn');
+    const mint = bridgeEventHash(event, 'mint');
+    if (burn) saved.burnTxHash = burn;
+    if (mint) saved.mintTxHash = mint;
+    if (burn || mint) persistResume(saved.intentReference, saved.result, saved.sourceChainId ?? source.id, true);
+    if (!mountedRef.current) return;
+    if (String(event?.method).toLowerCase() === 'approve') {
+      setStageNote('Approval returned. The source burn is a separate wallet confirmation; approval alone does not move USDC.');
+      setStage('burn', 'active');
     }
-    return current;
+    if (burn) setStageNote('Source burn hash saved. Checking confirmation and Arc settlement…');
   }
 
   async function verifyAndComplete(
@@ -638,7 +660,7 @@ export default function ExternalBridge({
   ): Promise<void> {
     if (!burnTxHash) {
       throw new Error(
-        'Bridge transaction was not completed. No USDC left your wallet unless a transaction was confirmed.'
+        'No source burn hash was recorded. Check wallet activity before retrying; a confirmed approval is not a completed bridge.'
       );
     }
     setStageNote('Verifying the source transaction…');
@@ -657,14 +679,14 @@ export default function ExternalBridge({
     });
     bridgeDiag('I. verify response (server burn proof)', { ok: v?.success, code: v?.code, reason: v?.reason, error: v?.error });
     if (!v?.success) {
-      throw new Error(v?.error ?? 'Bridge could not be completed.');
+      throw Object.assign(new Error(v?.error ?? 'The source burn could not be verified. Resume verification of this same bridge.'), { bridgeCopy: true });
     }
     setStageNote('Confirming the Arc mint…');
     if (!mintTxHash) {
       // Burn proven, mint hash not yet available — the loop below keeps
       // polling server status; completion follows when the mint lands.
       throw new Error(
-        'Burn verified — waiting for the Arc mint. Keep this open; completion follows automatically.'
+        'Burn verified — waiting for the Arc mint. Resume below to keep checking this same bridge; do not burn again.'
       );
     }
     const c = await postJson('/api/cctp/transfer/external/complete', {
@@ -675,18 +697,18 @@ export default function ExternalBridge({
     if (!c?.success) {
       // Distinguish retryable (mint not yet visible) from terminal.
       if (c?.code === 'MINT_NOT_VERIFIED' && (c?.reason === 'NOT_FOUND' || c?.reason === 'RPC_UNAVAILABLE')) {
-        throw new Error(c.error);
+        throw Object.assign(new Error(c.error), { bridgeCopy: true });
       }
-      throw new Error(c?.error ?? 'Bridge could not be completed.');
+      throw Object.assign(new Error(c?.error ?? 'The Arc mint could not be verified. Resume this same bridge.'), { bridgeCopy: true });
     }
     setReceipt({
-      amountDisplay: c.amountDisplay ?? formatBridgeBaseUnits(BigInt(c.amount ?? '0')),
+      amountDisplay: c.amountDisplay ?? resumeRef.current?.amount ?? formatBridgeBaseUnits(BigInt(c.amount ?? '0')),
       actualDisplay: c.actualAmountDisplay ?? c.amountDisplay ?? '',
       sourceLabel: c.sourceLabel ?? source.label,
-      destination: c.destination,
+      destination: c.destination ?? resumeRef.current?.destination ?? destination,
       burnTxHash: stepOf(resumeRef.current?.result, 'Burn')?.txHash ?? burnTxHash,
       mintTxHash: mintTxHash,
-      sourceExplorerUrl: c.sourceExplorerUrl ?? null,
+      sourceExplorerUrl: c.sourceExplorerUrl ?? sourceExplorerTxUrl(resumeRef.current?.sourceChainId ?? source.id, burnTxHash, bridgeNetwork),
       destinationExplorerUrl: c.destinationExplorerUrl ?? null,
     });
     bridgeDiag('L. completion (server-verified)', {
@@ -696,10 +718,14 @@ export default function ExternalBridge({
     });
     setPhase('receipt');
     clearBridgeResume(sessionLower);
+    resumeRef.current = null;
     onBridgeCompleted();
   }
 
-  async function runBridgeFlow(intentReference: string, kit: any, adapter: any): Promise<void> {
+  async function runBridgeFlow(intentReference: string, kit: any, adapter: any, previousResult?: any): Promise<void> {
+    if (previousResult && bridgeHasRecoveryEvidence({ result: previousResult })) {
+      throw Object.assign(new Error('A burn may already exist. Resume verification / settlement; do not submit another burn.'), { bridgeCopy: true, resumeOnly: true });
+    }
     setStages([
       { key: 'approve', label: 'Approve USDC', status: 'active' },
       { key: 'burn', label: 'Burn USDC', status: 'pending' },
@@ -715,6 +741,11 @@ export default function ExternalBridge({
     // is the "intent created, verify never called" stall — surfaced below with
     // name/message/code (never swallowed).
     bridgeTrace('step-bc kit.bridge signing start', { reference: intentReference });
+    persistResume(intentReference, previousResult ?? null, source.id, true);
+    // Installed Bridge Kit emits step payloads through the wildcard bus, but
+    // retain named listeners as a compatibility backstop for providers that
+    // only dispatch the specific action. recordKitEvent is idempotent.
+    for (const action of ['*', 'approve', 'burn', 'mint']) kit.on(action, recordKitEvent);
     let result: any;
     try {
       // User-controlled adapter (createViemAdapterFromProvider over the
@@ -738,7 +769,9 @@ export default function ExternalBridge({
         recipientAddress: destination as `0x${string}`,
         useForwarder: true,
       };
-      result = await (kit as any).bridge({
+      result = previousResult
+        ? await kit.retry(previousResult, { from: adapter, to: undefined })
+        : await (kit as any).bridge({
       from: bridgeFromCtx as { adapter: typeof adapter; chain: string },
       // ForwarderDestination: Circle's relayer mints on Arc — the user is
       // never asked to sign on, or switch to, the destination chain.
@@ -759,6 +792,8 @@ export default function ExternalBridge({
       });
       console.error('[external-bridge] kit.bridge signing failed', { reference: intentReference }, signErr);
       throw signErr;
+    } finally {
+      for (const action of ['*', 'approve', 'burn', 'mint']) kit.off(action, recordKitEvent);
     }
     bridgeTrace('step-bc kit.bridge signing returned', {
       reference: intentReference,
@@ -773,58 +808,33 @@ export default function ExternalBridge({
     persistResume(intentReference, result, source.id);
     markStepsFromResult(result);
 
-    if (result?.state === 'error') {
-      const burn = stepOf(result, 'Burn');
-      if (burn?.state === 'success') {
-        // Burn moved funds but settlement failed — resume ONLY.
-        setStageNote(null);
-        throw Object.assign(
-          new Error('Bridge could not be completed. Your burn was submitted — resume below to finish the mint (no new transaction will be created).'),
-          { resumeOnly: true }
-        );
-      }
-      if (burn?.state === 'error') {
-        // The burn step itself failed (e.g. rejected at the burn prompt):
-        // per the bridge lifecycle this is a failed burn — never restart it
-        // automatically; the intent stays PENDING for safe retry.
-        throw new Error('Bridge transaction was not completed.');
-      }
-      throw new Error(friendlyBridgeError(result?.error ?? result, { sourceLabel: source.label }));
+    const burnHash = resumeRef.current?.burnTxHash ?? extractBurnTxHash(result);
+    if (!burnHash) {
+      throw Object.assign(new Error(bridgeResultFailure(result, source.label)), {
+        bridgeCopy: true, resumeOnly: true,
+      });
     }
-
-    let settled = result;
-    if (settled?.state === 'pending') {
-      setStage('approve', 'done');
-      setStage('burn', 'done');
-      setStage('attestation', 'active');
-      settled = await waitForSettlement(kit, adapter, result, intentReference);
-      persistResume(intentReference, settled, source.id);
-      markStepsFromResult(settled);
+    // After any observed burn, only read-only server verification/polling is
+    // permitted. kit.retry is reserved for explicit pre-burn retries above;
+    // an SDK polling implementation can never reopen an approval or burn.
+    const verified = await postJson('/api/cctp/transfer/external/verify', {
+      reference: intentReference, burnTxHash: burnHash,
+    });
+    if (!verified?.success) throw Object.assign(new Error(verified?.error ?? 'The burn could not be verified. Resume this same bridge; do not burn again.'), { bridgeCopy: true, resumeOnly: true });
+    setStage('burn', 'done');
+    setStage('attestation', 'active');
+    let mintHash = resumeRef.current?.mintTxHash ?? stepOf(result, 'Mint')?.txHash;
+    if (!mintHash) {
+      const waited = await waitForMintViaServer(intentReference);
+      mintHash = waited.mintTxHash;
     }
-
-    if (settled?.state !== 'success') {
-      // Budget exhausted or error after a submitted burn — resume ONLY.
-      const burn = stepOf(settled, 'Burn');
-      if (burn?.state === 'success' || burn?.txHash) {
-        throw Object.assign(
-          new Error('Still processing — the burn was submitted. Resume below to keep waiting (no new transaction will be created).'),
-          { resumeOnly: true }
-        );
-      }
-      throw new Error(friendlyBridgeError(settled?.error ?? settled, { sourceLabel: source.label }));
-    }
-
-    setStage('attestation', 'done');
-    setStage('mint', 'done');
-    const burnHash = stepOf(settled, 'Burn')?.txHash;
-    const mintHash = stepOf(settled, 'Mint')?.txHash;
     bridgeDiag('J–K. attestation + Arc mint hash', { burnHash, mintHash });
     await verifyAndComplete(intentReference, burnHash, mintHash);
   }
 
   const startOver = useCallback(() => {
-    // Fresh start is allowed ONLY when no step succeeded (nothing moved).
-    // Otherwise the user must resume via kit.retry (guarded by the caller).
+    // Used only for a verified receipt or a pre-signing failure. Ambiguous
+    // attempts keep the reference for recovery/explicit same-intent retry.
     busyRef.current = false;
     resumeRef.current = null;
     clearBridgeResume(sessionLower);
@@ -833,12 +843,26 @@ export default function ExternalBridge({
     setError(null);
     setErrorStage(null);
     setReceipt(null);
+    setBurnReviewConfirmed(false);
+    setRecoveryBurnHash('');
+    setRecoveryMintHash('');
     setPhase('form');
   }, [sessionLower]);
 
-  async function handleBridge(): Promise<void> {
+  async function handleBridge(options?: { retryBeforeBurn: boolean }): Promise<void> {
+    const retryBeforeBurn = options?.retryBeforeBurn === true;
+    const saved = resumeRef.current;
     // Synchronous double-submit guard (button disable alone races).
-    if (busyRef.current || phase !== 'form') return;
+    if (busyRef.current || (retryBeforeBurn ? phase !== 'awaiting-resume' : phase !== 'form')) return;
+    if (!bridgeAvailable) { setError(availability?.message ?? 'Bridge availability has not been confirmed.'); return; }
+    if (retryBeforeBurn && (!saved || bridgeHasRecoveryEvidence(saved))) {
+      setError('A burn may already exist. Recover this same bridge; do not submit another burn.');
+      return;
+    }
+    if (retryBeforeBurn && !canRetryBridgeBeforeBurn(saved!, burnReviewConfirmed)) {
+      setError('Check wallet activity and confirm that no burn was submitted before retrying approval and burn.');
+      return;
+    }
     setError(null);
     setErrorStage(null);
 
@@ -880,6 +904,7 @@ export default function ExternalBridge({
       const intent = await postJson('/api/cctp/transfer/external/intent', {
         sourceChain: source.id,
         amount: amount.trim(),
+        ...(retryBeforeBurn ? { reference: saved!.intentReference, retryBeforeBurn: true } : {}),
       });
       if (!intent?.success) {
         if (intent?.code === 'CIRCLE_WALLET_UNBOUND') {
@@ -915,20 +940,37 @@ export default function ExternalBridge({
 
       // Persist the intent BEFORE any signing prompt: closing the browser
       // during the approve/burn prompts must still offer "Resume bridge".
+      const retained = retryBeforeBurn ? saved : null;
       saveBridgeResume({
         intentReference,
         sourceChainId: source.id,
         sourceWallet: sessionLower,
-        burnTxHash: null,
+        burnTxHash: intent.burnTxHash ?? null,
+        mintTxHash: intent.mintTxHash ?? null,
+        signingStarted: retained?.signingStarted ?? (intent.reused ? undefined : false),
         amount: amount.trim() || undefined,
-        destination,
+        destination: intent.destination,
       });
       resumeRef.current = {
-        result: null,
+        result: retained?.result ?? null,
         intentReference,
-        burnTxHash: null,
+        burnTxHash: intent.burnTxHash ?? null,
+        mintTxHash: intent.mintTxHash ?? null,
         sourceChainId: source.id,
+        signingStarted: retained?.signingStarted ?? (intent.reused ? undefined : false),
+        amount: amount.trim(),
+        destination: intent.destination,
       };
+
+      // A reused reference is not permission to issue a second burn from a
+      // second tab. Stop and review/recover unless this is an explicit retry.
+      if ((!retryBeforeBurn && intent.reused) || !intent.canSubmitBurn) {
+        setPhase('awaiting-resume');
+        setError(intent.burnTxHash
+          ? 'This amount already has a recorded burn. Resume settlement of the existing bridge; do not burn again.'
+          : 'An existing bridge intent was found. Check wallet activity and recover an existing burn, or explicitly retry this same intent if no burn was submitted.');
+        return;
+      }
 
       setStageNote('Opening your wallet…');
       bridgeTrace('step-bc opening wallet (adapter/kit init)', { reference: intentReference });
@@ -986,7 +1028,13 @@ export default function ExternalBridge({
         if (!pre.ok) throw new Error(pre.error);
       }
 
-      await runBridgeFlow(intentReference, kit, adapter);
+      // Pin the actual provider account immediately before SDK signing.
+      const accounts = await provider.request({ method: 'eth_accounts' });
+      if (!Array.isArray(accounts) || String(accounts[0] ?? '').toLowerCase() !== sessionLower) {
+        throw new Error('Reconnect your wallet to continue.');
+      }
+      await ensureOnSourceChain();
+      await runBridgeFlow(intentReference, kit, adapter, retryBeforeBurn ? saved?.result : undefined);
     } catch (e: any) {
       console.error('[external-bridge]', e);
       if (!mountedRef.current) return;
@@ -998,11 +1046,8 @@ export default function ExternalBridge({
         setPhase('awaiting-resume');
         setError(e.message);
       } else {
-        // Nothing was submitted (user rejected / pre-sign failure): the
-        // failure message decides whether a fresh attempt is safe. Rejection
-        // or wrong-chain text -> back to form. Anything ambiguous after the
-        // wallet opened -> resume-safe default is form ONLY when no result
-        // was captured (resumeRef null means kit.bridge never returned).
+        // Once an intent exists, absence of a returned hash is ambiguous.
+        // Keep its reference for recovery or explicit same-intent retry.
         if (resumeRef.current) {
           setPhase('awaiting-resume');
         } else {
@@ -1013,7 +1058,7 @@ export default function ExternalBridge({
         setStageNote(null);
         const msg = String(e?.message ?? '');
         const baseError =
-          msg.includes('Reconnect your wallet') ||
+          e?.bridgeCopy || msg.includes('Reconnect your wallet') ||
           msg.includes('Switch your wallet to') ||
           msg.includes('Enter a valid') ||
           msg.includes('at most 6 decimals') ||
@@ -1040,36 +1085,31 @@ export default function ExternalBridge({
         }
         setError(baseError);
       }
+    } finally {
+      busyRef.current = false;
+      if (mountedRef.current) setStageNote(null);
     }
   }
 
   /**
-   * Server-driven mint wait for REHYDRATED resumes (no BridgeKit result
-   * object after a reload): polls the authoritative status endpoint until
-   * the relayer mint lands, instead of kit.retry. Returns the latest burn
+   * Read-only mint wait for both current and rehydrated attempts: polls the
+   * authoritative status endpoint until the relay mint appears. No signing
+   * adapter or kit.retry is reachable here. Returns the latest burn
    * and mint hashes (mint null when the budget ran out).
    */
   async function waitForMintViaServer(
     intentReference: string
   ): Promise<{ burnTxHash: string | undefined; mintTxHash: string | undefined }> {
-    let burn: string | undefined;
-    let mint: string | undefined;
-    for (let i = 0; i < RETRY_ROUNDS; i++) {
-      if (!mountedRef.current) throw new Error('Bridge interrupted.');
-      setStageNote('Waiting for Circle attestation… Minting on Arc…');
-      // eslint-disable-next-line no-await-in-loop
-      const res = await fetch(`/api/cctp/transfer/external/status?reference=${intentReference}`).then((r) =>
-        r.json().catch(() => null)
-      );
-      if (res?.success) {
-        if (typeof res.burnTxHash === 'string' && res.burnTxHash) burn = res.burnTxHash;
-        if (typeof res.mintTxHash === 'string' && res.mintTxHash) mint = res.mintTxHash;
-        if (mint || res.state === 'completed') return { burnTxHash: burn, mintTxHash: mint };
-      }
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-    }
-    return { burnTxHash: burn, mintTxHash: mint };
+    return pollBridgeSettlementStatus({
+      reference: intentReference,
+      rounds: RETRY_ROUNDS,
+      delayMs: RETRY_DELAY_MS,
+      isActive: () => mountedRef.current,
+      onPoll: () => setStageNote('Waiting for Circle attestation… Minting on Arc…'),
+      fetchStatus: async (reference) => fetch(
+        `/api/cctp/transfer/external/status?reference=${encodeURIComponent(reference)}`
+      ).then((response) => response.json().catch(() => null)),
+    });
   }
 
   async function handleResume(): Promise<void> {
@@ -1080,91 +1120,49 @@ export default function ExternalBridge({
     setErrorStage(null);
     setPhase('working');
     try {
-      // A rehydrated entry may name a different source chain than the
-      // current picker — the wallet must be on the RESUMED chain.
       const resumeSourceId = saved.sourceChainId ?? source.id;
-      const resumeSource = sources.find((s) => s.id === resumeSourceId) ?? source;
-      if (resumeSource.id !== source.id) {
-        setSourceId(resumeSource.id);
+      const resumeSource = sources.find((s) => s.id === resumeSourceId);
+      if (!resumeSource) throw Object.assign(new Error('This bridge belongs to a different source network. Do not submit another burn.'), { bridgeCopy: true });
+      const st = await fetch(`/api/cctp/transfer/external/status?reference=${encodeURIComponent(saved.intentReference)}`)
+        .then((response) => response.json().catch(() => null));
+      if (!st?.success || st.network !== bridgeNetwork || st.sourceChain !== resumeSourceId ||
+          String(st.sourceAddress ?? '').toLowerCase() !== sessionLower) {
+        throw Object.assign(new Error(st?.error ?? 'The saved bridge could not be matched to this wallet and network. No new burn was submitted.'), { bridgeCopy: true });
       }
-      const ensureOnResumeChain = async (): Promise<void> => {
-        const viemChain = sourceViemChainFor(resumeSource.chainId);
-        if (!viemChain) throw new Error('This source chain is not currently supported.');
-        const providerGetter = async () => await getProvider();
-        const net = await ensureEvmNetwork({
-          chain: viemChain,
-          chainId,
-          switchChainAsync,
-          getProvider: providerGetter,
-        });
-        if (!net.ok) throw new Error(net.message);
-      };
-      await ensureOnResumeChain();
-      if (!saved.result) {
-        // ── Rehydrated path (post-reload): no BridgeKit result object, so
-        // resume server-side. The burn hash comes from the persisted entry
-        // or the authoritative status row; verify + complete re-prove
-        // everything on-chain. Never a fresh kit.bridge().
-        setStages([
-          { key: 'approve', label: 'Approve USDC', status: 'done' },
-          { key: 'burn', label: 'Burn USDC', status: 'active' },
-          { key: 'attestation', label: 'Waiting for Circle attestation', status: 'pending' },
-          { key: 'mint', label: 'Minting on Arc', status: 'pending' },
-        ]);
-        const st = await fetch(
-          `/api/cctp/transfer/external/status?reference=${saved.intentReference}`
-        ).then((r) => r.json().catch(() => null));
-        const burnHash: string | undefined =
-          (saved.burnTxHash as string | null | undefined) ??
-          (typeof st?.burnTxHash === 'string' ? st.burnTxHash : undefined);
-        if (!burnHash) {
-          throw new Error(
-            'No bridge transaction was submitted yet for this bridge — start over to try again.'
-          );
-        }
-        setStage('burn', 'done');
-        setStage('attestation', 'active');
-        const waited = await waitForMintViaServer(saved.intentReference);
-        const mintHash = waited.mintTxHash;
-        saveBridgeResume({
-          intentReference: saved.intentReference,
-          sourceChainId: resumeSource.id,
-          sourceWallet: sessionLower,
-          burnTxHash: waited.burnTxHash ?? burnHash,
-          amount: amount.trim() || undefined,
-          destination,
-        });
-        resumeRef.current = {
-          result: null,
-          intentReference: saved.intentReference,
-          burnTxHash: waited.burnTxHash ?? burnHash,
-          sourceChainId: resumeSource.id,
-        };
-        await verifyAndComplete(saved.intentReference, waited.burnTxHash ?? burnHash, mintHash);
-        return;
+      if (st.state === 'failed') throw Object.assign(new Error(st.error ?? 'This bridge needs manual recovery; do not burn again.'), { bridgeCopy: true });
+      saved.amount = st.amountDisplay;
+      saved.destination = st.destination;
+      setAmount(st.amountDisplay);
+      const burnHash = selectBridgeRecoveryHash(st.burnTxHash, recoveryBurnHash, saved.burnTxHash || extractBurnTxHash(saved.result));
+      if (!/^0x[0-9a-f]{64}$/i.test(burnHash ?? '')) {
+        throw Object.assign(new Error('No burn hash was recorded. Approval alone is not a bridge. Paste the source burn hash to recover, or check wallet activity before retrying approval and burn for this same intent.'), { bridgeCopy: true });
       }
-      const [{ BridgeKit }, { createViemAdapterFromProvider }] = await Promise.all([
-        import('@circle-fin/bridge-kit'),
-        import('@circle-fin/adapter-viem-v2'),
+      // No wallet switch or signing is needed for recovery. Verify the burn
+      // BEFORE mint discovery, so the server can query Iris for this bridge.
+      setStages([
+        { key: 'approve', label: 'Approve USDC', status: 'pending' },
+        { key: 'burn', label: 'Verify source burn', status: 'active' },
+        { key: 'attestation', label: 'Waiting for Circle attestation', status: 'pending' },
+        { key: 'mint', label: 'Minting on Arc', status: 'pending' },
       ]);
-      const provider = await getProvider();
-      if (!provider?.request) throw new Error('Reconnect your wallet to continue.');
-      const adapter = await createViemAdapterFromProvider({ provider });
-      const kit: any = new (BridgeKit as any)();
-      // Resume the SAME bridge — never a fresh kit.bridge().
-      let settled = await waitForSettlement(kit, adapter, saved.result, saved.intentReference);
-      persistResume(saved.intentReference, settled, resumeSource.id);
-      markStepsFromResult(settled);
-      if (settled?.state !== 'success') {
-        throw new Error('Still processing — the burn was submitted. Keep waiting below (no new transaction will be created).');
+      const verified = await postJson('/api/cctp/transfer/external/verify', { reference: saved.intentReference, burnTxHash: burnHash });
+      if (!verified?.success) throw Object.assign(new Error(verified?.error ?? 'Could not verify the source burn. Retry this same hash, not the burn.'), { bridgeCopy: true });
+      // A typo must not become a sticky saved hash or suppress recovery with
+      // the real burn. Persist a manual candidate only after the proof passes.
+      saved.burnTxHash = burnHash;
+      persistResume(saved.intentReference, saved.result, resumeSource.id, true);
+      setStage('burn', 'done');
+      setStage('attestation', 'active');
+      let mintHash = selectBridgeRecoveryHash(st.mintTxHash || st.relayMintTxHash, recoveryMintHash, saved.mintTxHash);
+      if (!mintHash) {
+        const waited = await waitForMintViaServer(saved.intentReference);
+        mintHash = waited.mintTxHash;
       }
-      setStage('attestation', 'done');
-      setStage('mint', 'done');
-      await verifyAndComplete(
-        saved.intentReference,
-        stepOf(settled, 'Burn')?.txHash,
-        stepOf(settled, 'Mint')?.txHash
-      );
+      if (mintHash) {
+        saved.mintTxHash = mintHash;
+        persistResume(saved.intentReference, saved.result, resumeSource.id, true);
+      }
+      await verifyAndComplete(saved.intentReference, burnHash, mintHash || undefined);
     } catch (e: any) {
       console.error('[external-bridge] resume', e);
       if (!mountedRef.current) return;
@@ -1172,7 +1170,7 @@ export default function ExternalBridge({
       setPhase('awaiting-resume');
       const msg = String(e?.message ?? '');
       setError(
-        msg.includes('Still processing') || msg.includes('waiting for the Arc mint')
+        e?.bridgeCopy || msg.includes('Still processing') || msg.includes('waiting for the Arc mint')
           ? msg
           : friendlyBridgeError(e, { sourceLabel: source.label })
       );
@@ -1183,16 +1181,24 @@ export default function ExternalBridge({
           setErrorStage({ stage, txHash, label: STAGE_LABELS[stage] ?? stage });
         }
       }
+    } finally {
+      busyRef.current = false;
+      if (mountedRef.current) setStageNote(null);
     }
   }
 
   const working = phase === 'working';
 
-  if (!bridgeAvailable) {
+  const pendingResume = resumeRef.current;
+  const hasBurn = !!pendingResume && bridgeHasRecoveryEvidence(pendingResume);
+  const needsBurnReview = !!pendingResume && bridgeNeedsBurnReview(pendingResume);
+  const canRetryBurn = !!pendingResume && !hasBurn;
+
+  if (!bridgeAvailable && phase === 'form') {
     return (
       <div>
         <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: '0 0 16px' }}>
-          Bridging from an external wallet is unavailable on Arc right now.
+          {availability === null ? 'Checking external bridge availability…' : availability.message ?? 'Bridging from an external wallet is unavailable on Arc right now.'}
         </p>
         <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: 0 }}>
           To get funds in, send USDC directly to your FlareHQ wallet on Arc.
@@ -1206,6 +1212,7 @@ export default function ExternalBridge({
       <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: '0 0 16px' }}>
         Bring USDC from another wallet to your FlareHQ wallet.
       </p>
+      {availability?.message && <p style={styles.resumeText}>{availability.message}</p>}
 
       {phase === 'receipt' && receipt ? (
         <div style={styles.resultSuccess}>
@@ -1257,7 +1264,7 @@ export default function ExternalBridge({
           <select
             value={sourceId}
             onChange={(e) => setSourceId(e.target.value)}
-            disabled={working}
+            disabled={phase !== 'form'}
             style={styles.input}
             aria-label="Source chain"
           >
@@ -1303,7 +1310,7 @@ export default function ExternalBridge({
             onChange={(e) => setAmount(e.target.value)}
             placeholder="10.00"
             inputMode="decimal"
-            disabled={working}
+            disabled={phase !== 'form'}
             aria-label="Bridge amount in USDC"
           />
           {validationMsg && <p style={styles.hintError}>{validationMsg}</p>}
@@ -1367,30 +1374,31 @@ export default function ExternalBridge({
                 </p>
               )}
               <p style={styles.resumeText}>{error}</p>
-              <div style={{ display: 'flex', gap: 8 }}>
+              {pendingResume && <p style={styles.resumeText}>Same bridge: <span style={styles.mono}>{pendingResume.intentReference}</span></p>}
+              <label style={styles.label} htmlFor="bridge-recovery-burn">Existing source burn hash (not the approval hash)</label>
+              <input id="bridge-recovery-burn" style={styles.input} value={recoveryBurnHash} onChange={(event) => setRecoveryBurnHash(event.target.value)} placeholder="0x…" />
+              <p style={styles.resumeText}>You can correct an unverified candidate. A server-verified burn hash cannot be replaced.</p>
+              <label style={styles.label} htmlFor="bridge-recovery-mint">Arc mint hash (optional if the relayer reports it)</label>
+              <input id="bridge-recovery-mint" style={styles.input} value={recoveryMintHash} onChange={(event) => setRecoveryMintHash(event.target.value)} placeholder="0x…" />
+              <div>
                 <button style={styles.submitButton} onClick={handleResume}>
-                  Resume bridge
+                  Resume verification / settlement
                 </button>
-                <button
-                  style={styles.secondaryButton}
-                  onClick={() => {
-                    // Abandon ONLY when nothing succeeded — otherwise the
-                    // resume path above is the only safe action. A
-                    // rehydrated entry has no in-memory steps, so a known
-                    // burn hash counts as moved too.
-                    const r = resumeRef.current?.result;
-                    const moved =
-                      (r?.steps ?? []).some((s: any) => s?.state === 'success') ||
-                      !!resumeRef.current?.burnTxHash;
-                    if (moved) {
-                      setError('A step already succeeded on-chain — resume above to finish (starting over could duplicate spending).');
-                      return;
-                    }
-                    startOver();
-                  }}
-                >
-                  Start over
-                </button>
+                <p style={styles.resumeText}>Recovery verifies the existing hashes. It does not ask for a new approval or burn.</p>
+                {canRetryBurn && (
+                  <>
+                    {needsBurnReview && (
+                      <label style={{ ...styles.resumeText, display: 'block', marginTop: 12 }}>
+                        <input type="checkbox" checked={burnReviewConfirmed} onChange={(event) => setBurnReviewConfirmed(event.target.checked)} />{' '}
+                        I checked wallet activity: no burn was submitted. Only approval may have completed.
+                      </label>
+                    )}
+                    <button style={styles.secondaryButton} disabled={!bridgeAvailable || !walletsMatch || (needsBurnReview && !burnReviewConfirmed) || !!recoveryBurnHash.trim()} onClick={() => void handleBridge({ retryBeforeBurn: true })}>
+                      Retry approval / burn — same intent
+                    </button>
+                    <p style={styles.resumeText}>This retry can ask for source-chain signatures and spend the same USDC amount plus gas and quoted fees.</p>
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -1425,7 +1433,7 @@ export default function ExternalBridge({
                 </div>
               ) : null}
               {phase === 'form' && (
-                <button style={styles.submitButton} disabled={formBlocked} onClick={handleBridge}>
+                <button style={styles.submitButton} disabled={formBlocked} onClick={() => void handleBridge()}>
                   {balanceLoading
                     ? 'Loading balance…'
                     : !walletsMatch
@@ -1435,7 +1443,7 @@ export default function ExternalBridge({
               )}
               {phase === 'form' && (
                 <p style={{ color: 'var(--flow-text-faint)', fontSize: 12, margin: '8px 0 0', lineHeight: 1.5 }}>
-                  You need {NATIVE_GAS_LABELS[source.chainId] ?? 'native gas'} on {source.label} for
+                  You need {source.nativeCurrency.symbol} on {source.label} for
                   gas (approve + burn). The Arc mint is relayed — no Arc gas needed.
                 </p>
               )}

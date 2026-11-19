@@ -29,15 +29,17 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { pollForAttestationByTxHash, mintOnArc, getChainName, decodeBurnMessage } from '@/src/lib/cctp';
+import { pollForAttestationByTxHash, mintOnArc, getChainName, decodeBurnMessage, cctpPollingStatus } from '@/src/lib/cctp';
+import { requireLegacyCctpMint, LegacyCctpMintUnavailableError, legacyCctpMintUnavailableBody } from '@/lib/bridge/legacyMint';
 import { resolveRowCurrency } from '@/src/lib/tokens/resolveCurrency';
 import { parseUnits } from 'viem';
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getArcChain } from "@/lib/config/network";
 
 const USDC_DECIMALS = 6;
 
 export async function POST(request: Request) {
   try {
+    requireLegacyCctpMint();
     const { reference, sourceTxHash, sourceDomain } = await request.json();
 
     if (!reference || !sourceTxHash || sourceDomain === undefined) {
@@ -121,7 +123,7 @@ export async function POST(request: Request) {
 
     await prisma.paymentLog.update({
       where: { reference },
-      data: { status: 'POLLING_CIRCLE_TESTNET_IRIS_API', chain: `${sourceChain} → Arc Testnet (via CCTP V2)` },
+      data: { status: cctpPollingStatus(), chain: `${sourceChain} → ${getArcChain().name} (via CCTP V2)` },
     });
 
     let message: string, attestation: string;
@@ -179,7 +181,7 @@ export async function POST(request: Request) {
       data: {
         status: 'SUCCESS',
         arcTxHash,
-        chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
+        chain: `${sourceChain} → ${getArcChain().name} (via CCTP V2)`,
       },
     });
 
@@ -211,6 +213,9 @@ export async function POST(request: Request) {
       explorerUrl: `${explorerTxUrl(arcTxHash)}`,
     });
   } catch (error: any) {
+    if (error instanceof LegacyCctpMintUnavailableError) {
+      return NextResponse.json(legacyCctpMintUnavailableBody(), { status: 503 });
+    }
     console.error('CCTP checkout settle error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

@@ -4,13 +4,15 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { pollForAttestation, mintOnArc, getChainName } from '@/src/lib/cctp';
+import { pollForAttestation, mintOnArc, getChainName, cctpPollingStatus } from '@/src/lib/cctp';
+import { requireLegacyCctpMint, LegacyCctpMintUnavailableError, legacyCctpMintUnavailableBody } from '@/lib/bridge/legacyMint';
 import { withApiKey } from '@/src/lib/middleware/withApiKey';
 import { resolveCurrency, tokenAddressFor } from '@/src/lib/tokens/resolveCurrency';
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getArcChain } from "@/lib/config/network";
 
 async function detectHandler(request: Request) {
   try {
+    requireLegacyCctpMint();
     const { messageHash, amount, currency, sourceDomain, webhookUrl } = await request.json();
 
     if (!messageHash) {
@@ -78,10 +80,10 @@ async function detectHandler(request: Request) {
           amount: parseFloat(amountStr),
           currency: detectCurrency.symbol,
           tokenAddress: tokenAddressFor('USDC'),
-          chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
+          chain: `${sourceChain} → ${getArcChain().name} (via CCTP V2)`,
           senderEmail: 'cross-chain-detect@arc.network',
           merchant: 'FlareHQ CCTP V2 Router',
-          status: 'POLLING_CIRCLE_TESTNET_IRIS_API',
+          status: cctpPollingStatus(),
           webhookUrl: webhookUrl || null,
           cctpSourceTxHash: messageHash,
         },
@@ -149,7 +151,7 @@ async function detectHandler(request: Request) {
       data: {
         status: 'REDEEMED_AND_MINTED',
         arcTxHash,
-        chain: `${sourceChain} → Arc Testnet (via CCTP V2)`,
+        chain: `${sourceChain} → ${getArcChain().name} (via CCTP V2)`,
       },
     });
 
@@ -180,9 +182,12 @@ async function detectHandler(request: Request) {
       sourceChain,
       settlementType: 'CCTP_V2_MANUAL_DETECT',
       explorerUrl: `${explorerTxUrl(arcTxHash)}`,
-      message: `USDC auto-routed from ${sourceChain} to Arc Testnet via CCTP V2.`,
+      message: `USDC auto-routed from ${sourceChain} to ${getArcChain().name} via CCTP V2.`,
     });
   } catch (error: any) {
+    if (error instanceof LegacyCctpMintUnavailableError) {
+      return NextResponse.json(legacyCctpMintUnavailableBody(), { status: 503 });
+    }
     console.error('Detect route error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

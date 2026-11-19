@@ -9,7 +9,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/src/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/src/lib/wallet/verifyCallerControlsAddress';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { escrowAddressOr503 } from "@/lib/escrow/escrowGuard";
 

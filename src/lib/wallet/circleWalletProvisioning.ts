@@ -2,8 +2,8 @@
  * circleWalletProvisioning.ts
  *
  * Mints a Circle Developer-Controlled Wallet for a newly onboarded
- * Telegram user, and sponsors gas so they never need to acquire it
- * themselves.
+ * Telegram user. Mainnet gas is sponsored by the existing Circle Gas Station
+ * policy; the legacy relayer top-up below is testnet-only.
  *
  * This uses the SAME Circle product your platform already runs live —
  * confirmed via the hardening report: initiateDeveloperControlledWalletsClient
@@ -19,43 +19,24 @@
  */
 
 import { randomUUID } from 'crypto';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { getCircleClient } from '@/lib/circle/client';
+import { assertCircleBlockchain } from '@/lib/circle/networkGuard';
 import { prisma } from '@/lib/prisma'; // adjust to your actual client path
 import { getRelayerSigner } from '@/lib/wallet/jobEscrowClient'; // existing relayer, reused for gas sponsorship — same signer used across batches 1-6
-import { getNetworkConfig } from '@/lib/config/network';
-
-let cachedClient: ReturnType<typeof initiateDeveloperControlledWalletsClient> | null = null;
-let cachedCreds: { apiKey: string; entitySecret: string } | null = null;
+import { getArcNetworkName, getNetworkConfig } from '@/lib/config/network';
 
 function getProvisioningConfig() {
+  const configuredBlockchain = getNetworkConfig().circleBlockchain;
+  const override = process.env.CIRCLE_ARC_BLOCKCHAIN_ID;
+  if (getArcNetworkName() === 'mainnet' && override) assertCircleBlockchain(override);
   return {
-    apiKey: process.env.CIRCLE_API_KEY ?? '',
-    entitySecret: process.env.CIRCLE_ENTITY_SECRET ?? '',
     walletSetId: process.env.CIRCLE_WALLET_SET_ID ?? '',
     // Circle blockchain flows from the authoritative network config (testnet:
     // 'ARC-TESTNET' unchanged; mainnet: required ARC_MAINNET_CIRCLE_BLOCKCHAIN).
-    // Explicit CIRCLE_ARC_BLOCKCHAIN_ID still wins when set.
-    blockchain: process.env.CIRCLE_ARC_BLOCKCHAIN_ID ?? getNetworkConfig().circleBlockchain,
+    // A mainnet override must agree with the authoritative network.
+    blockchain: override ?? configuredBlockchain,
     gasWei: process.env.GAS_SPONSORSHIP_AMOUNT_WEI ?? '10000000000000000',
   };
-}
-
-function getCircleClient() {
-  const { apiKey, entitySecret } = getProvisioningConfig();
-  if (!apiKey || !entitySecret) {
-    throw new Error(
-      'Circle Developer-Controlled Wallets is not configured — set CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET. ' +
-      'These should already exist in your production env since the platform already uses this client for settlement.'
-    );
-  }
-  if (!cachedClient || !cachedCreds || cachedCreds.apiKey !== apiKey || cachedCreds.entitySecret !== entitySecret) {
-    cachedClient = initiateDeveloperControlledWalletsClient({
-      apiKey,
-      entitySecret,
-    });
-    cachedCreds = { apiKey, entitySecret };
-  }
-  return cachedClient;
 }
 
 export interface ProvisionedWallet {
@@ -94,7 +75,7 @@ export async function provisionWalletForTelegramUser(
 
   const client = getCircleClient();
 
-  // Aligned with src/lib/circle/client.ts:createWallets — uses ARC-TESTNET,
+  // Aligned with src/lib/circle/client.ts:createWallets — uses the active network,
   // count 1, SCA. idempotencyKey must be UUID v4 (Circle validates format;
   // the previous `telegram-${telegramUserId}` caused 400 API parameter invalid).
   // metadata shape is WalletMetadata[] { name, refId } per SDK — kept, but
@@ -167,7 +148,10 @@ export async function provisionWalletForTelegramUser(
   return { circleWalletId: wallet.id, walletAddress: wallet.address, gasSponsorshipTxHash };
 }
 
-async function sponsorGas(walletAddress: string): Promise<string> {
+async function sponsorGas(walletAddress: string): Promise<string | null> {
+  // Circle Gas Station is already configured. Never resolve/fund a relayer
+  // or submit a native top-up on mainnet.
+  if (getArcNetworkName() === 'mainnet') return null;
   const { gasWei } = getProvisioningConfig();
   const relayerSigner = getRelayerSigner();
   const tx = await relayerSigner.sendTransaction({
@@ -178,7 +162,8 @@ async function sponsorGas(walletAddress: string): Promise<string> {
   return receipt!.hash;
 }
 
-export async function retryGasSponsorship(telegramUserId: string): Promise<string> {
+export async function retryGasSponsorship(telegramUserId: string): Promise<string | null> {
+  if (getArcNetworkName() === 'mainnet') return null;
   const account = await prisma.consumerAccount.findFirst({ where: { telegramUserId } });
   if (!account?.walletAddress) {
     throw new Error(`no wallet found for telegram user ${telegramUserId}`);

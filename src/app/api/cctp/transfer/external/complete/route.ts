@@ -18,6 +18,7 @@ import { findBridgeSourceChain, sourceExplorerTxUrl, formatBridgeBaseUnits } fro
 import { verifyArcMint, sourceCctpV2, type MintVerifyFailure } from '@/lib/bridge/externalVerify';
 import { fetchIrisBridgeMessage } from '@/lib/bridge/irisNonce';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 
 function mintFailureCopy(reason: MintVerifyFailure): string {
   switch (reason) {
@@ -30,7 +31,7 @@ function mintFailureCopy(reason: MintVerifyFailure): string {
     case 'AMOUNT_MISMATCH':
       return 'That transaction credited a different amount than this bridge expects after relayer fees. Submit the Arc mint from your bridge result.';
     case 'RPC_UNAVAILABLE':
-      return 'Could not reach Arc. Your wallet was not charged unless a transaction was confirmed — try again.';
+      return 'Could not reach Arc to verify the mint. Retry completion of this same bridge; do not burn again.';
   }
 }
 
@@ -43,6 +44,8 @@ export async function POST(req: NextRequest) {
     if (!sessionAddress) {
       return NextResponse.json({ success: false, error: 'Sign in required.' }, { status: 401 });
     }
+    const actor = await verifyCallerControlsAddress(req, sessionAddress);
+    if (!actor) return NextResponse.json({ success: false, error: 'You do not control the source wallet.' }, { status: 403 });
     const account = await (prisma as any).consumerAccount.findUnique({
       where: { walletAddress: sessionAddress },
     });

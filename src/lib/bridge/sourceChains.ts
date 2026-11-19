@@ -30,11 +30,16 @@
 
 import {
   Arbitrum as KitArbitrum,
+  ArbitrumSepolia as KitArbitrumSepolia,
   Avalanche as KitAvalanche,
   Base as KitBase,
+  BaseSepolia as KitBaseSepolia,
   Ethereum as KitEthereum,
+  EthereumSepolia as KitEthereumSepolia,
   Optimism as KitOptimism,
+  OptimismSepolia as KitOptimismSepolia,
   Polygon as KitPolygon,
+  PolygonAmoy as KitPolygonAmoy,
 } from '@circle-fin/bridge-kit/chains';
 
 export interface BridgeSourceChain {
@@ -50,6 +55,9 @@ export interface BridgeSourceChain {
   explorerTxTemplate: string;
   /** Circle Developer-Controlled Wallets blockchain identifier. */
   circleBlockchain: string;
+  /** Installed Circle chain RPCs; also used for wagmi transports and EIP-3085. */
+  rpcUrls: readonly string[];
+  nativeCurrency: { name: string; symbol: string; decimals: number };
 }
 
 const SOURCES: BridgeSourceChain[] = [
@@ -60,6 +68,8 @@ const SOURCES: BridgeSourceChain[] = [
     usdcAddress: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
     explorerTxTemplate: 'https://sepolia.arbiscan.io/tx/{hash}',
     circleBlockchain: 'ARB-SEPOLIA',
+    rpcUrls: KitArbitrumSepolia.rpcEndpoints,
+    nativeCurrency: KitArbitrumSepolia.nativeCurrency,
   },
   {
     id: 'Base_Sepolia',
@@ -68,6 +78,8 @@ const SOURCES: BridgeSourceChain[] = [
     usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     explorerTxTemplate: 'https://sepolia.basescan.org/tx/{hash}',
     circleBlockchain: 'BASE-SEPOLIA',
+    rpcUrls: KitBaseSepolia.rpcEndpoints,
+    nativeCurrency: KitBaseSepolia.nativeCurrency,
   },
   {
     id: 'Optimism_Sepolia',
@@ -76,6 +88,8 @@ const SOURCES: BridgeSourceChain[] = [
     usdcAddress: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7',
     explorerTxTemplate: 'https://sepolia-optimistic.etherscan.io/tx/{hash}',
     circleBlockchain: 'OP-SEPOLIA',
+    rpcUrls: KitOptimismSepolia.rpcEndpoints,
+    nativeCurrency: KitOptimismSepolia.nativeCurrency,
   },
   {
     id: 'Ethereum_Sepolia',
@@ -84,6 +98,8 @@ const SOURCES: BridgeSourceChain[] = [
     usdcAddress: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
     explorerTxTemplate: 'https://sepolia.etherscan.io/tx/{hash}',
     circleBlockchain: 'ETH-SEPOLIA',
+    rpcUrls: KitEthereumSepolia.rpcEndpoints,
+    nativeCurrency: KitEthereumSepolia.nativeCurrency,
   },
   {
     id: 'Polygon_Amoy_Testnet',
@@ -92,6 +108,8 @@ const SOURCES: BridgeSourceChain[] = [
     usdcAddress: '0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582',
     explorerTxTemplate: 'https://amoy.polygonscan.com/tx/{hash}',
     circleBlockchain: 'MATIC-AMOY',
+    rpcUrls: KitPolygonAmoy.rpcEndpoints,
+    nativeCurrency: KitPolygonAmoy.nativeCurrency,
   },
 ];
 
@@ -109,11 +127,16 @@ function kitSource(
     chainId: number;
     usdcAddress: string | null;
     explorerUrl: string;
+    rpcEndpoints: readonly string[];
+    nativeCurrency: { name: string; symbol: string; decimals: number };
   },
   circleBlockchain: string
 ): BridgeSourceChain {
   if (typeof def.usdcAddress !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(def.usdcAddress)) {
     throw new Error(`[bridge] installed bridge-kit has no USDC address for ${id} — refusing to list it.`);
+  }
+  if (!def.rpcEndpoints.length || def.rpcEndpoints.some((url) => !url.startsWith('https://'))) {
+    throw new Error(`[bridge] installed bridge-kit has no HTTPS RPC for ${id}.`);
   }
   const explorer = def.explorerUrl.includes('{hash}')
     ? def.explorerUrl
@@ -125,6 +148,8 @@ function kitSource(
     usdcAddress: def.usdcAddress as `0x${string}`,
     explorerTxTemplate: explorer,
     circleBlockchain,
+    rpcUrls: [...def.rpcEndpoints],
+    nativeCurrency: { ...def.nativeCurrency },
   };
 }
 
@@ -145,20 +170,24 @@ function tableFor(network: BridgeNetwork): BridgeSourceChain[] {
 
 /** Canonical supported source set (fresh copies — callers must not mutate). */
 export function getBridgeSourceChains(network: BridgeNetwork = 'testnet'): BridgeSourceChain[] {
-  return tableFor(network).map((s) => ({ ...s }));
+  return tableFor(network).map(copySource);
+}
+
+function copySource(source: BridgeSourceChain): BridgeSourceChain {
+  return { ...source, rpcUrls: [...source.rpcUrls], nativeCurrency: { ...source.nativeCurrency } };
 }
 
 /** Back-compat constant: the canonical supported source set. */
-export const BRIDGE_SOURCE_CHAINS: readonly BridgeSourceChain[] = SOURCES.map((s) => ({ ...s }));
+export const BRIDGE_SOURCE_CHAINS: readonly BridgeSourceChain[] = SOURCES.map(copySource);
 
 export function getBridgeSourceChain(id: string, network: BridgeNetwork = 'testnet'): BridgeSourceChain | null {
   const found = tableFor(network).find((s) => s.id === id);
-  return found ? { ...found } : null;
+  return found ? copySource(found) : null;
 }
 
 export function getBridgeSourceChainByChainId(chainId: number, network: BridgeNetwork = 'testnet'): BridgeSourceChain | null {
   const found = tableFor(network).find((s) => s.chainId === chainId);
-  return found ? { ...found } : null;
+  return found ? copySource(found) : null;
 }
 
 export function isSupportedBridgeSource(id: unknown, network: BridgeNetwork = 'testnet'): boolean {

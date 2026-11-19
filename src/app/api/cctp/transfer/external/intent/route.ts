@@ -16,6 +16,7 @@ import { resolveConsumerSession } from '@/src/lib/middleware/withConsumerAuth';
 import { prisma } from '@/src/lib/prisma';
 import { resolveConsumerWallet } from '@/src/lib/auth/consumerWallet';
 import { getArcNetworkName } from '@/lib/config/network';
+import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import {
   getBridgeSourceChain,
@@ -25,14 +26,14 @@ import {
 } from '@/lib/bridge/sourceChains';
 import { resolveExternalBridgeDestination } from '@/lib/bridge/externalDestination';
 import { logBridgeStage } from '@/lib/bridge/stageLogger';
+import { getExternalBridgeAvailability } from '@/lib/bridge/externalAvailability';
+import { reserveBridgeIntent, BridgeIntentConflictError } from '@/lib/bridge/intentReuse';
 import {
   WALLET_CHECK_FAILED_CODE,
   WALLET_CHECK_RETRY_MESSAGE,
   WALLET_NEEDS_UPDATE_MESSAGE,
   checkCircleWalletLiveness,
 } from '@/src/lib/wallets/liveness';
-
-const INTENT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours to submit the burn
 
 function amountErrorCopy(e: BridgeAmountError): string {
   switch (e) {
@@ -58,6 +59,10 @@ export async function POST(req: NextRequest) {
     // family; mainnet offers Ethereum/Base/Arbitrum/Optimism/Polygon/
     // Avalanche → Arc Mainnet via BridgeKit.
     const network = getArcNetworkName() === 'mainnet' ? 'mainnet' : 'testnet';
+    const availability = getExternalBridgeAvailability();
+    if (!availability.available) {
+      return NextResponse.json({ success: false, code: 'EXTERNAL_BRIDGE_UNAVAILABLE', error: availability.message }, { status: 503 });
+    }
 
     const sessionAddress = await resolveConsumerSession(req);
     if (!sessionAddress) {
@@ -66,6 +71,9 @@ export async function POST(req: NextRequest) {
         { status: 401 }
       );
     }
+
+    const actor = await verifyCallerControlsAddress(req, sessionAddress);
+    if (!actor) return NextResponse.json({ success: false, error: 'You do not control the source wallet.' }, { status: 403 });
 
     const account = await (prisma as any).consumerAccount.findUnique({
       where: { walletAddress: sessionAddress },
@@ -96,7 +104,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { sourceChain, amount } = body ?? {};
+    const { sourceChain, amount, reference, retryBeforeBurn } = body ?? {};
+    if (retryBeforeBurn !== undefined && typeof retryBeforeBurn !== 'boolean') {
+      return NextResponse.json({ success: false, code: 'INTENT_INVALID', error: 'Invalid retry confirmation.' }, { status: 400 });
+    }
+    if (reference !== undefined && (typeof reference !== 'string' || !reference.length || reference.length > 100)) {
+      return NextResponse.json({ success: false, code: 'INTENT_INVALID', error: 'Invalid bridge reference.' }, { status: 400 });
+    }
 
     const source = typeof sourceChain === 'string' ? getBridgeSourceChain(sourceChain, network) : null;
     if (!source) {
@@ -151,21 +165,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const intent = await (prisma as any).flowBridgeIntent.create({
-      data: {
+    const { intent, reused } = await reserveBridgeIntent(prisma, {
         sourceWallet: sessionAddress,
         destination: dest.destination,
         sourceChain: source.id,
         amount: checked.amountBaseUnits.toString(),
-        status: 'PENDING',
-        expiresAt: new Date(Date.now() + INTENT_TTL_MS),
-      },
+        reference,
+        renewSubmission: !!reference && retryBeforeBurn === true,
     });
 
     // Awaited (not fire-and-forget) so the PREPARING row is never lost on
     // serverless freeze before the response returns. logBridgeStage never
     // throws, so awaiting is safe.
-    await logBridgeStage(intent.id, {
+    if (!reused) await logBridgeStage(intent.id, {
       stage: 'PREPARING',
       chainId: source.chainId,
       metadata: {
@@ -180,6 +192,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       reference: intent.id,
+      reused,
+      state: intent.status,
+      burnTxHash: intent.burnTxHash ?? null,
+      mintTxHash: intent.mintTxHash ?? null,
+      canSubmitBurn: intent.status === 'PENDING' && !intent.burnTxHash && new Date(intent.expiresAt).getTime() > Date.now(),
       sourceAddress: sessionAddress,
       destination: dest.destination,
       source: {
@@ -193,6 +210,9 @@ export async function POST(req: NextRequest) {
       expiresAt: intent.expiresAt,
     });
   } catch (error: any) {
+    if (error instanceof BridgeIntentConflictError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
+    }
     console.error('[cctp/transfer/external/intent]', error);
     return NextResponse.json({ success: false, error: 'Could not start the bridge. Please try again.' }, { status: 500 });
   }

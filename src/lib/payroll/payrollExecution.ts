@@ -50,7 +50,7 @@ import { recoverFromSpendLimitRaceFailure, enqueueForReview } from "@/lib/jobs/s
 import { getTokenBySymbol, isSupportedToken, getUsdcAddress, getTokenByAddress } from "@/lib/tokens/supportedTokens";
 import { parseEventValue } from "@/lib/contracts/receiptParser";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
-import { getNetworkConfig } from "@/lib/config/network";
+import { getArcChain, getNetworkConfig } from "@/lib/config/network";
 import { isGatewayAvailable, requireGatewayChain, GatewayMainnetUnavailableError, gatewayUnavailableBody } from "@/lib/x402-gateway";
 
 const PAYROLL_CONTRACT_ADDRESS = process.env.PAYROLL_CONTRACT_ADDRESS ?? "";
@@ -557,7 +557,7 @@ export async function fundPayrollViaX402(
       amount: Number(totalAmount) / 1e6,
       currency: "USDC",
       tokenAddress: usdcAddress,
-      chain: "Arc Testnet x402",
+      chain: `${getArcChain().name} x402`,
       senderEmail: payer,
       merchant: ENDPOINT,
       status: "SUCCESS",

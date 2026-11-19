@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { checkRateLimit } from '@/src/lib/ratelimit';
 import { prisma } from '@/lib/prisma';
 import { withApiKey } from '@/lib/middleware/withApiKey';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { resolveRowCurrency } from '@/lib/tokens/resolveCurrency';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { resolveConsumerWallet } from "@/src/lib/auth/consumerWallet";

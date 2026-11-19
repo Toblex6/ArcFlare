@@ -13,7 +13,7 @@ import {
   syncJobValidationResponseByRequestHash,
   resolveResponseValidator,
 } from '@/lib/jobs/jobValidationPolicy';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 

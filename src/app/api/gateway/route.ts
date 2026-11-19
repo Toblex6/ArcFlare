@@ -9,6 +9,7 @@ import { getNetworkConfig } from '@/lib/config/network';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { USDC_AMOUNT_RE, MAX_USDC_AMOUNT } from '@/lib/validation';
 import { isAddress } from 'viem';
+import { isGatewayAvailable, gatewayUnavailableBody } from '@/lib/x402-gateway';
 
 // Facilitator URL + Circle chain flow from the authoritative network config
 // (was hardcoded testnet Gateway URL + 'ARC-TESTNET').
@@ -27,6 +28,7 @@ function arcChain(): string {
 // identity to verify.
 async function getBalanceHandler(request: NextRequest) {
   try {
+    if (!isGatewayAvailable()) return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
     const { searchParams } = new URL(request.url);
     const sellerAddress = searchParams.get('sellerAddress');
 
@@ -83,6 +85,7 @@ export const GET = withApiKey(getBalanceHandler);
 //      only permitted recipient is the seller's own address.
 async function withdrawHandler(request: NextRequest) {
   try {
+    if (!isGatewayAvailable()) return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
     const { sellerAddress, payoutAddress, amount } = await request.json();
 
     if (!sellerAddress || !payoutAddress || !amount) {

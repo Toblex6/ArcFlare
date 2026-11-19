@@ -21,6 +21,8 @@ import {
   avalanche,
   type Chain,
 } from 'viem/chains';
+import { fallback, http } from 'viem';
+import { getBridgeSourceChainByChainId, getBridgeSourceChains } from './sourceChains';
 
 const BY_CHAIN_ID: Record<number, Chain> = {
   [arbitrumSepolia.id]: arbitrumSepolia,
@@ -39,5 +41,28 @@ const BY_CHAIN_ID: Record<number, Chain> = {
 };
 
 export function sourceViemChainFor(chainId: number): Chain | null {
-  return BY_CHAIN_ID[chainId] ?? null;
+  const source = getBridgeSourceChainByChainId(chainId, 'mainnet') ?? getBridgeSourceChainByChainId(chainId, 'testnet');
+  const chain = BY_CHAIN_ID[chainId];
+  if (!source || !chain) return null;
+  return {
+    ...chain,
+    name: source.label,
+    nativeCurrency: source.nativeCurrency,
+    rpcUrls: { default: { http: [...source.rpcUrls] } },
+  };
+}
+
+/** Registration derives from the canonical tables, not a second supported set. */
+export function getBridgeSourceViemChains(): Chain[] {
+  return [...getBridgeSourceChains('testnet'), ...getBridgeSourceChains('mainnet')].map((source) => {
+    const chain = sourceViemChainFor(source.chainId);
+    if (!chain) throw new Error(`Missing viem definition for bridge source ${source.id}.`);
+    return chain;
+  });
+}
+
+export function sourceRpcTransport(chainId: number) {
+  const chain = sourceViemChainFor(chainId);
+  if (!chain) throw new Error('Unsupported bridge source RPC.');
+  return fallback(chain.rpcUrls.default.http.map((url) => http(url)), { rank: false });
 }

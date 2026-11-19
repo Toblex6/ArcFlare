@@ -96,7 +96,7 @@ ok('UI sources follow the network', ui.includes("getBridgeSourceChains(bridgeNet
 ok('UI bridges to kit Arc on mainnet', ui.includes("bridgeNetwork === 'mainnet' ? 'Arc' : 'Arc_Testnet'"));
 ok('UI gas notice names source gas + relayed mint', ui.includes('gas (approve + burn)') && ui.includes('The Arc mint is relayed'));
 ok('UI fee estimate via kit.estimate (best-effort)', ui.includes('kit).estimate({') || ui.includes('.estimate({'));
-ok('UI keeps burn+mint links + resume', ui.includes('View source transaction') && ui.includes('View destination transaction') && ui.includes('Resume bridge'));
+ok('UI keeps burn+mint links + resume', ui.includes('View source transaction') && ui.includes('View destination transaction') && ui.includes('Resume verification / settlement'));
 const pkg = JSON.parse(read('package.json'));
 ok('adapter-viem-v2 is a direct dependency', typeof pkg.dependencies['@circle-fin/adapter-viem-v2'] === 'string');
 

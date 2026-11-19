@@ -21,7 +21,7 @@ import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { queueTransactionRequest, TX_ACTIONS } from '@/lib/wallet/signatureQueue';
 import { ARC_TESTNET_CHAIN_ID, escrowAbi } from '@/lib/wallet/flarehqContracts';
 import { readContractReliable } from '@/lib/wallet/chainClient';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import type { Hash } from 'viem';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { escrowAddressOr503 } from '@/lib/escrow/escrowGuard';

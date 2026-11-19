@@ -52,7 +52,7 @@ for (const p of files) {
 }
 ok('verify no pre-verification expiry kill', !verify.includes('if (new Date(intent.expiresAt).getTime() < Date.now()) {'));
 ok('verify late-recovery advance present', verify.includes('lateRecovery'));
-ok('verify expired+unprovable still INTENT_EXPIRED', verify.includes("code: 'INTENT_EXPIRED'"));
+ok('verify expired+unprovable stays recoverable for a corrected burn hash', !verify.includes("code: 'INTENT_EXPIRED'") && verify.includes('candidateOnly: true, recoverable: true'));
 // Completion-integrity guards (H1/M3 + attested-nonce fix): the burn's
 // burn↔mint binding nonce is Circle's OFFCHAIN-assigned attested nonce
 // resolved from Iris by burn hash — never decoded from MessageSent (CCTP V2

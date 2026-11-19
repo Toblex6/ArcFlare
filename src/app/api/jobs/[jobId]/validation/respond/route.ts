@@ -4,7 +4,7 @@ import { withApiKeyOrAnySession } from "@/lib/middleware/withMerchantAuth";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { getJobValidationPolicy, recordValidationResponse } from "@/lib/jobs/jobValidationPolicy";
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from "@/lib/circle/client";
 import { keccak256, toHex } from "viem";
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 

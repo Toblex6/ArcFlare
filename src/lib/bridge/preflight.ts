@@ -24,16 +24,10 @@
 export const MIN_NATIVE_WEI = 500_000_000_000_000n; // 0.0005 native
 
 /** Native asset symbol per source numeric chain id. */
-const NATIVE_SYMBOLS: Record<number, string> = {
-  421614: 'ETH', // Arbitrum Sepolia
-  84532: 'ETH', // Base Sepolia
-  11155420: 'ETH', // Optimism Sepolia
-  11155111: 'ETH', // Ethereum Sepolia
-  80002: 'POL', // Polygon Amoy
-};
+import { getBridgeSourceChainByChainId } from './sourceChains';
 
 export function nativeSymbolForChainId(chainId: number): string {
-  return NATIVE_SYMBOLS[chainId] ?? 'ETH';
+  return (getBridgeSourceChainByChainId(chainId, 'mainnet') ?? getBridgeSourceChainByChainId(chainId, 'testnet'))?.nativeCurrency.symbol ?? 'native gas';
 }
 
 /** Exact wei -> trimmed decimal display (no float). */

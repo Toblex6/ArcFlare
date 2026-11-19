@@ -38,6 +38,10 @@ import { getArcNetworkName, getNetworkConfig } from '@/lib/config/network';
 // the values are mapped, never re-declared.
 import { getBridgeSourceChains } from '@/lib/bridge/sourceChains';
 import { CctpUnavailableError } from '@/lib/bridge/cctpAvailability';
+import { getCircleClient } from '@/lib/circle/client';
+import { withCircleBridgeAdapterGuard } from '@/lib/circle/networkGuard';
+import { extractBurnTxHash } from '@/lib/bridge/resumeStore';
+import { withReadOnlyBridgeAdapter } from '@/lib/bridge/readOnlyAdapter';
 
 // ── BridgeKit compatibility guard ────────────────────────────────────────────
 // BridgeChain is the CANONICAL source of bridging-supported chains for the
@@ -83,24 +87,17 @@ export interface CctpSourceChain {
 }
 
 /**
- * Environment-selected CCTP source chains. Testnet returns the pinned
- * Sepolia/Amoy table (unchanged behavior). Mainnet requires explicit
- * CCTP_MAINNET_SOURCES_JSON (JSON array of { id, label, circleBlockchain })
- * and FAILS CLOSED otherwise — testnet Sepolia values are never offered on
- * mainnet. Entries are validated (non-empty id/label/circleBlockchain) but
- * the VALUES themselves must be confirmed against Circle docs (not invented).
+ * Validate the retained future mainnet source metadata. This is intentionally
+ * separate from getCctpSources(): the installed Circle adapter currently
+ * refuses mainnet execution even when these values are well formed.
  */
-export function getCctpSources(
+export function parseConfiguredMainnetCctpSources(
   env: Record<string, string | undefined> = process.env
 ): CctpSourceChain[] {
-  if (getArcNetworkName(env) !== 'mainnet') {
-    return TESTNET_SOURCE_CHAINS.map((c) => ({ ...c }));
-  }
   const raw = (env.CCTP_MAINNET_SOURCES_JSON ?? '').trim();
   if (!raw) {
     throw new CctpUnavailableError(
-      'CCTP_MAINNET_SOURCES_JSON is required on mainnet — the Sepolia/Amoy testnet source list is never offered on mainnet. ' +
-        'Set it to a JSON array of { id, label, circleBlockchain } confirmed against Circle Developer-Controlled Wallets + Bridge Kit docs.'
+      'CCTP_MAINNET_SOURCES_JSON is required on mainnet — the Sepolia/Amoy testnet source list is never offered on mainnet.'
     );
   }
   let parsed: unknown;
@@ -112,20 +109,39 @@ export function getCctpSources(
   if (!Array.isArray(parsed) || parsed.length === 0) {
     throw new CctpUnavailableError('CCTP_MAINNET_SOURCES_JSON must be a non-empty array of { id, label, circleBlockchain }.');
   }
-  return parsed.map((entry: any, i: number) => {
-    const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-    const label = typeof entry?.label === 'string' ? entry.label.trim() : '';
-    const circleBlockchain = typeof entry?.circleBlockchain === 'string' ? entry.circleBlockchain.trim() : '';
+  return parsed.map((entry: unknown, i: number) => {
+    const item = entry as Record<string, unknown> | null;
+    const id = typeof item?.id === 'string' ? item.id.trim() : '';
+    const label = typeof item?.label === 'string' ? item.label.trim() : '';
+    const circleBlockchain = typeof item?.circleBlockchain === 'string' ? item.circleBlockchain.trim() : '';
     if (!id || !label || !circleBlockchain) {
-      throw new CctpUnavailableError(
-        `CCTP_MAINNET_SOURCES_JSON[${i}] must carry non-empty { id, label, circleBlockchain } (got ${JSON.stringify(entry)}).`
-      );
+      throw new CctpUnavailableError(`CCTP_MAINNET_SOURCES_JSON[${i}] must carry non-empty { id, label, circleBlockchain }.`);
     }
-    // Fail fast on ids the installed BridgeKit cannot bridge (typos or
-    // chains without CCTPv2 support in this bridge-kit version).
     assertBridgeChainMember(id, `CCTP_MAINNET_SOURCES_JSON[${i}].id`);
     return { id, label, testnet: false, circleBlockchain };
   });
+}
+
+/**
+ * Environment-selected CCTP source chains. Testnet returns the pinned
+ * Sepolia/Amoy table (unchanged behavior). Mainnet server signing is refused:
+ * adapter-circle-wallets 1.4.3 embeds adapter-viem-v2 1.14.0, whose chain
+ * registry has Arc_Testnet but not Arc. Listing configured source metadata
+ * would therefore overstate an execution path that cannot initialize its Arc
+ * destination client. The separate browser-signed external flow is unaffected.
+ */
+export function getCctpSources(
+  env: Record<string, string | undefined> = process.env
+): CctpSourceChain[] {
+  if (getArcNetworkName(env) !== 'mainnet') {
+    return TESTNET_SOURCE_CHAINS.map((c) => ({ ...c }));
+  }
+  // Validate operator metadata so malformed future configuration remains
+  // observable, then fail closed on the installed adapter incompatibility.
+  parseConfiguredMainnetCctpSources(env);
+  throw new CctpUnavailableError(
+    'Circle server-signed CCTP is unavailable on mainnet: the installed Circle Wallets adapter cannot initialize Arc Mainnet. Use the separately gated external-wallet bridge; no signing request was submitted.'
+  );
 }
 
 /** Back-compat export: testnet table (existing importers keep working). */
@@ -207,10 +223,10 @@ function getKitAndAdapter() {
     );
   }
   if (!cachedAdapter) {
-    cachedAdapter = createCircleWalletsAdapter({
+    cachedAdapter = withCircleBridgeAdapterGuard(createCircleWalletsAdapter({
       apiKey: process.env.CIRCLE_API_KEY,
       entitySecret: process.env.CIRCLE_ENTITY_SECRET,
-    });
+    }), getCircleClient());
   }
   if (!cachedKit) {
     cachedKit = new BridgeKit();
@@ -258,6 +274,12 @@ export function startBridge(params: {
     throw new CctpUnavailableError('Bridge chains do not match the configured source/destination list.');
   }
   const { kit, adapter } = getKitAndAdapter();
+  if (getArcNetworkName() === 'mainnet') {
+    const source = sources.find((entry) => entry.id === fromChain)!;
+    if (source.circleBlockchain !== getNetworkConfig().circleBlockchain || /TESTNET|SEPOLIA|AMOY/i.test(source.circleBlockchain)) {
+      throw new CctpUnavailableError('The signing wallet must be on the active Arc network; cross-chain Circle source wallets are not provisioned by this flow.');
+    }
+  }
   const reference = makeReference();
   pendingTransfers.set(reference, { status: 'submitting' });
 
@@ -299,12 +321,16 @@ export async function checkBridgeStatus(
     return tracked;
   }
 
-  // The underlying BridgeResult itself reports 'pending' (e.g. still
-  // waiting on Circle's relayer for the destination mint) — ask Bridge Kit
-  // to check on it rather than re-running bridge() from scratch, which
-  // would resubmit the burn.
+  // No automatic mainnet signing from a status GET. The external browser
+  // bridge has its own receipt/Iris recovery and never calls this SDK path.
+  // A pending approval is not permission to submit a missing burn either.
+  if (getArcNetworkName() === 'mainnet' || !extractBurnTxHash(tracked.result)) return tracked;
+
+  // Preserve legacy testnet destination-mint recovery only after a source
+  // hash exists. SDK retry cannot reopen source signing, even for an
+  // ambiguous/pending burn or a future change to its step analysis.
   const { kit, adapter } = getKitAndAdapter();
-  const updated = await kit.retry(tracked.result, { from: adapter, to: adapter });
+  const updated = await kit.retry(tracked.result, { from: withReadOnlyBridgeAdapter(adapter), to: adapter });
   const next: TrackedTransfer = { status: 'settled', result: updated };
   pendingTransfers.set(reference, next);
   return next;

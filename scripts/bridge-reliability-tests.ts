@@ -11,7 +11,7 @@
 //      the exact user-facing copy the task requires.
 //   3. Static wiring guards — ExternalBridge.tsx persists on every forward
 //      step, rehydrates on mount, runs the preflight before kit.bridge(),
-//      and keeps the single-bridge / kit.retry-resume invariants.
+//      and keeps single-bridge / read-only settlement recovery invariants.
 //
 // Run: npx tsx scripts/bridge-reliability-tests.ts
 
@@ -103,7 +103,7 @@ async function main() {
     loadBridgeResume("0x0000000000000000000000000000000000009999") === null
   );
 
-  // Corrupt / expired entries fail closed.
+  // Corrupt entries fail closed. Expiry is safe only when signing never began.
   fakeStorage.setItem(
     `flarehq:external-bridge:resume:${WALLET.toLowerCase()}`,
     "{not-json"
@@ -114,9 +114,26 @@ async function main() {
     sourceChainId: "Base_Sepolia",
     sourceWallet: WALLET,
     burnTxHash: null,
+    signingStarted: false,
     updatedAt: Date.now() - BRIDGE_RESUME_TTL_MS - 1_000,
   });
-  ok("expired entry loads as null", loadBridgeResume(WALLET) === null);
+  ok("expired pre-signing entry loads as null", loadBridgeResume(WALLET) === null);
+  for (const signingStarted of [undefined, true]) {
+    saveBridgeResume({
+      intentReference: REF, sourceChainId: "Base_Sepolia", sourceWallet: WALLET,
+      burnTxHash: null, signingStarted,
+      updatedAt: Date.now() - BRIDGE_RESUME_TTL_MS - 1_000,
+    });
+    ok(`expired possible burn remains recoverable (${signingStarted})`, loadBridgeResume(WALLET)?.intentReference === REF);
+  }
+  for (const hashes of [{ burnTxHash: BURN }, { burnTxHash: null, mintTxHash: BURN }]) {
+    saveBridgeResume({
+      intentReference: REF, sourceChainId: "Base_Sepolia", sourceWallet: WALLET,
+      signingStarted: false, ...hashes,
+      updatedAt: Date.now() - BRIDGE_RESUME_TTL_MS - 1_000,
+    });
+    ok("expired known burn/mint remains recoverable", loadBridgeResume(WALLET)?.intentReference === REF);
+  }
 
   saveBridgeResume({
     intentReference: REF,
@@ -224,13 +241,19 @@ async function main() {
     "a close during signing prompts must still resume"
   );
   ok("single kit.bridge call site preserved", (ui.match(/\.bridge\(\{/g) ?? []).length === 1);
-  ok("kit.retry resume path preserved", ui.includes("kit.retry("));
+  ok("kit.retry limited to the explicit pre-burn call site", (ui.match(/kit\.retry\(/g) ?? []).length === 1 && ui.includes("retryBeforeBurn ? saved?.result"));
+  ok("burn/mint events persist hashes before Bridge Kit returns", ui.includes("for (const action of ['*', 'approve', 'burn', 'mint']) kit.on(action, recordKitEvent)") && ui.includes("bridgeEventHash(event, 'burn')"));
   ok("resumeOnly guard preserved", ui.includes("resumeOnly"));
-  ok("rehydrated entries resume server-side (waitForMintViaServer)", ui.includes("waitForMintViaServer"));
-  ok(
-    "rehydrated burn counts as moved (no unsafe start-over)",
-    ui.includes("resumeRef.current?.burnTxHash")
-  );
+  ok("current and rehydrated entries resume server-side (two waitForMintViaServer call sites)", (ui.match(/waitForMintViaServer\(/g) ?? []).length === 3);
+  ok("UI settlement polling delegates to read-only production helper", ui.includes("pollBridgeSettlementStatus({"));
+  ok("observed burn/mint excludes source retry", ui.includes("bridgeHasRecoveryEvidence(saved)") && ui.includes("canRetryBridgeBeforeBurn(saved!"));
+  const polling = ui.slice(ui.indexOf("async function waitForMintViaServer"), ui.indexOf("const working ="));
+  ok("settlement recovery has no SDK retry/signing", !/kit\.retry|\.bridge\(|createViemAdapter|ensureOnSourceChain/.test(polling));
+  const bridgeFlow = ui.slice(ui.indexOf("async function runBridgeFlow"), ui.indexOf("const startOver"));
+  ok("current-session observed burn switches to server verification", bridgeFlow.includes("waitForMintViaServer(intentReference)") && !bridgeFlow.includes("waitForSettlement"));
+  const resumeFlow = ui.slice(ui.indexOf("async function handleResume"), ui.indexOf("const working ="));
+  ok("rehydrated recovery verifies before mint discovery", resumeFlow.indexOf("/external/verify") < resumeFlow.indexOf("waitForMintViaServer(saved.intentReference)"));
+  ok("busy ref is released in both bridge and resume finally blocks", (ui.match(/finally \{\s*busyRef\.current = false;/g) ?? []).length === 2);
   ok(
     "gas error copy passes through unmapped",
     ui.includes("for gas on") && ui.includes("you need at least")

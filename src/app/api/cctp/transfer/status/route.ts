@@ -1,6 +1,6 @@
 // src/app/api/cctp/transfer/status/route.ts
 // Poll this after POST /api/cctp/transfer returns { status: "pending" }.
-// Resumes/checks the bridge via Bridge Kit's own retry() mechanism.
+// Checks the bridge without source signing; legacy testnet mint recovery only.
 
 import { NextRequest, NextResponse } from "next/server";
 import { checkBridgeStatus, findStep } from "@/lib/cctp-v2";

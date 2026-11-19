@@ -15,6 +15,7 @@
 import { Contract } from "ethers";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";
 import { prisma } from "@/lib/prisma";
+import { getArcChain } from "@/lib/config/network";
 
 const SPEND_LIMIT_CONTRACT_ADDRESS = process.env.SPEND_LIMIT_CONTRACT_ADDRESS ?? "";
 
@@ -278,7 +279,7 @@ export async function recordSpend(params: SpendCheckParams): Promise<void> {
         reference: `spend_${agentAddress.toLowerCase()}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
         amount: Number(amount) / 1e6,
         currency: "USDC",
-        chain: "Arc Testnet x402",
+        chain: `${getArcChain().name} x402`,
         senderEmail: agentAddress,
         merchant: "payroll/x402-spend-record",
         status: "SUCCESS",

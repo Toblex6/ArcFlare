@@ -4,6 +4,7 @@
 import { createWalletClient, createPublicClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
+import { requireLegacyCctpMint } from '@/lib/bridge/legacyMint';
 
 // ─── CCTP V2 endpoints and contracts (authoritative network config) ──────────
 // Testnet keeps the exact live values (Iris sandbox, domain 26,
@@ -149,6 +150,7 @@ export async function pollForAttestationByTxHash(
 
 // ─── Submit V2 attestation to Arc MessageTransmitter ─────────────────────────
 export async function mintOnArc(message: string, attestation: string): Promise<string> {
+  requireLegacyCctpMint();
   const adminKey = process.env.ARC_ADMIN_PRIVATE_KEY;
   if (!adminKey) throw new Error('ARC_ADMIN_PRIVATE_KEY not set in environment.');
 
@@ -211,11 +213,19 @@ export const CHAIN_DOMAINS: Record<number, string> = {
   3: 'Arbitrum',
   6: 'Base',
   7: 'Polygon',
-  26: 'Arc Testnet',
+  26: 'Arc',
 };
 
 export function getChainName(domain: number): string {
+  if (domain === getNetworkConfig().cctpDomain) return getArcChain().name;
   return CHAIN_DOMAINS[domain] || `Chain Domain ${domain}`;
+}
+
+/** Keep the legacy testnet status; never write it for mainnet polling. */
+export function cctpPollingStatus(): string {
+  return getNetworkConfig().name === 'mainnet'
+    ? 'POLLING_CIRCLE_MAINNET_IRIS_API'
+    : 'POLLING_CIRCLE_TESTNET_IRIS_API';
 }
 
 // ─── Build CCTP V2 burn message for source chain ──────────────────────────────

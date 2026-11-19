@@ -19,12 +19,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getArcNetworkName, getArcChain } from "@/lib/config/network";
+import { requireLegacyCctpMint, legacyCctpMintUnavailableBody } from '@/lib/bridge/legacyMint';
 import {
   pollForAttestation,
   mintOnArc,
   verifyCircleWebhookSignature,
   getChainName,
+  cctpPollingStatus,
 } from '@/src/lib/cctp';
 import {
   resolveCurrency,
@@ -105,6 +107,10 @@ export async function POST(req: NextRequest) {
       }
 
       if (messageHash && isUsdc && autoSettleArmed) {
+        if (getArcNetworkName() === 'mainnet') {
+          return NextResponse.json(legacyCctpMintUnavailableBody(), { status: 503 });
+        }
+        requireLegacyCctpMint();
         const reference = `arc_auto_${Date.now().toString(36)}_${Math.random()
           .toString(36)
           .slice(2, 8)}`;
@@ -117,10 +123,10 @@ export async function POST(req: NextRequest) {
               amount: parseFloat(amount) || 0,
               currency: 'USDC',
               tokenAddress: tokenAddressFor('USDC'),
-              chain: `${getChainName(sourceDomain)} → Arc Testnet (via CCTP V2)`,
+              chain: `${getChainName(sourceDomain)} → ${getArcChain().name} (via CCTP V2)`,
               senderEmail: transfer?.walletId || 'auto-detected@arc.network',
               merchant: 'FlareHQ Auto-Router',
-              status: 'POLLING_CIRCLE_TESTNET_IRIS_API',
+              status: cctpPollingStatus(),
             },
           });
         } catch (dbErr: any) {
@@ -201,6 +207,7 @@ export async function POST(req: NextRequest) {
 
 // ─── Background: Auto-settle via CCTP V2 ─────────────────────────────────────
 async function autoSettleV2(reference: string, messageHash: string) {
+  requireLegacyCctpMint();
   // Defense in depth: the caller gates on the flag, and the minter refuses
   // without it too — no path reaches mintOnArc while disarmed.
   const armed =
@@ -239,7 +246,7 @@ async function autoSettleV2(reference: string, messageHash: string) {
       data: {
         status: 'REDEEMED_AND_MINTED',
         arcTxHash,
-        chain: 'Auto-Routed → Arc Testnet (via CCTP V2)',
+        chain: `Auto-Routed → ${getArcChain().name} (via CCTP V2)`,
       },
     });
 

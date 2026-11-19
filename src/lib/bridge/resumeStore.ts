@@ -28,17 +28,22 @@ export interface BridgeResumeEntry {
   sourceWallet: string;
   /** Source-chain burn tx hash when one has been observed (else null). */
   burnTxHash: string | null;
+  /** Destination hash observed from the SDK; server completion re-proves it. */
+  mintTxHash?: string | null;
   /** Human amount string as typed (display only, never authoritative). */
   amount?: string;
   /** Server-resolved destination (display only, never authoritative). */
   destination?: string | null;
+  /** True before invoking Bridge Kit. Missing on legacy entries = unknown. */
+  signingStarted?: boolean;
   /** Epoch ms of the last write (used for TTL expiry). */
   updatedAt: number;
 }
 
-/** Intent rows expire 2h after issue (see the intent route) — a resume older
- *  than that can never advance, so the UI drops it instead of offering a
- *  dead "Resume bridge" button. */
+/**
+ * Submission TTL only. It expires solely a saved attempt that is proven not
+ * to have entered signing. A known or possible burn remains recoverable later.
+ */
 export const BRIDGE_RESUME_TTL_MS = 2 * 60 * 60 * 1000;
 
 const KEY_PREFIX = 'flarehq:external-bridge:resume:';
@@ -71,6 +76,8 @@ function isValidEntry(v: unknown): v is BridgeResumeEntry {
     (e.burnTxHash === null ||
       e.burnTxHash === undefined ||
       (typeof e.burnTxHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(e.burnTxHash))) &&
+    (e.mintTxHash == null || (typeof e.mintTxHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(e.mintTxHash))) &&
+    (e.signingStarted === undefined || typeof e.signingStarted === 'boolean') &&
     typeof e.updatedAt === 'number' &&
     Number.isFinite(e.updatedAt)
   );
@@ -96,7 +103,9 @@ export function saveBridgeResume(entry: Omit<BridgeResumeEntry, 'updatedAt'> & {
 
 /**
  * Load the resume entry for a wallet. Returns null when absent, corrupt,
- * expired, or owned by a different wallet. Never throws.
+ * safely expired before signing, or owned by a different wallet. A missing
+ * signingStarted flag is ambiguous (legacy/current crash), so it never expires.
+ * Never throws.
  */
 export function loadBridgeResume(sourceWallet: string): BridgeResumeEntry | null {
   try {
@@ -112,7 +121,7 @@ export function loadBridgeResume(sourceWallet: string): BridgeResumeEntry | null
     }
     if (!isValidEntry(parsed)) return null;
     if (parsed.sourceWallet.toLowerCase() !== sourceWallet.trim().toLowerCase()) return null;
-    if (Date.now() - parsed.updatedAt > BRIDGE_RESUME_TTL_MS) {
+    if (Date.now() - parsed.updatedAt > BRIDGE_RESUME_TTL_MS && !parsed.burnTxHash && !parsed.mintTxHash && parsed.signingStarted === false) {
       try {
         s.removeItem(resumeKeyForWallet(sourceWallet));
       } catch {}
@@ -147,11 +156,11 @@ export function extractBurnTxHash(result: unknown): string | null {
   try {
     const steps: unknown = (result as { steps?: unknown })?.steps;
     if (!Array.isArray(steps)) return null;
-    for (const step of steps) {
+    for (const step of [...steps].reverse()) {
       const s = step as { name?: unknown; txHash?: unknown };
       const n = String(s?.name ?? '').toLowerCase();
       if (n !== 'burn' && !BURN_STEP_ALIASES.has(n)) continue;
-      if (typeof s?.txHash === 'string' && s.txHash.length > 0) return s.txHash;
+      if (typeof s?.txHash === 'string' && /^0x[0-9a-f]{64}$/i.test(s.txHash)) return s.txHash;
     }
     return null;
   } catch {

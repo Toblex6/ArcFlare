@@ -50,7 +50,7 @@ import { withApiKeyOrAnySession, resolveMerchant } from '@/lib/middleware/withMe
 import { verifyCallerControlsAddress, getCallerControlledAddresses } from '@/lib/wallet/verifyCallerControlsAddress';
 import { requireConsumerStepUpForActor } from '@/lib/auth/consumerStepUp';
 import { isValidationSatisfiedForJob } from '@/lib/jobs/jobValidationPolicy';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { createPublicClient, http, decodeEventLog, keccak256, toHex, formatUnits, erc20Abi } from 'viem';
 import { agenticCommerceAbi } from '@/lib/contracts/erc8183';
 import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";

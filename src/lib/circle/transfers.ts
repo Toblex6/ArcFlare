@@ -7,7 +7,8 @@
 // reuses this; do not invent a different transfer mechanism.
 
 import { parseUnits } from 'viem';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { getCircleClient } from './client';
+import { assertCircleSigningNetwork, CircleNetworkError } from './networkGuard';
 import { getNetworkConfig } from '@/lib/config/network';
 
 // Default transfer token flows from the authoritative network config (was a
@@ -16,13 +17,6 @@ import { getNetworkConfig } from '@/lib/config/network';
 // never at import.
 function defaultTokenAddress(): string {
   return getNetworkConfig().usdcAddress;
-}
-
-function getCircleClient() {
-  return initiateDeveloperControlledWalletsClient({
-    apiKey: process.env.CIRCLE_API_KEY!,
-    entitySecret: process.env.CIRCLE_ENTITY_SECRET!,
-  });
 }
 
 async function waitForCircleTx(client: any, txId: string): Promise<string> {
@@ -89,6 +83,13 @@ export async function createCircleTransfer(init: CircleTransferInit): Promise<{ 
   const tokenAddress = init.tokenAddress ?? defaultTokenAddress();
   const decimals = init.decimals ?? 6;
   const client = getCircleClient();
+  // Outside fallback catches: a stale ID must never become an address-based
+  // transfer after the network guard rejected the native transfer.
+  await assertCircleSigningNetwork(client, {
+    walletId: init.walletId,
+    walletAddress: init.walletAddress,
+    blockchain: getNetworkConfig().circleBlockchain,
+  });
   let circleTxId: string | undefined;
 
   const nativeArgs = (withKey: boolean) =>
@@ -116,6 +117,7 @@ export async function createCircleTransfer(init: CircleTransferInit): Promise<{ 
       }
     }
   } catch (nativeInitError: any) {
+    if (nativeInitError instanceof CircleNetworkError) throw nativeInitError;
     console.warn('Native Circle transfer initialization failed, trying fallback:', nativeInitError.message);
   }
 
@@ -133,6 +135,7 @@ export async function createCircleTransfer(init: CircleTransferInit): Promise<{ 
       if (!circleTxId)
         throw new Error('Fallback ERC-20 transfer failed to generate a Transaction ID.');
     } catch (fallbackError: any) {
+      if (fallbackError instanceof CircleNetworkError) throw fallbackError;
       throw new Error(`Both native and fallback initialization failed. Error: ${fallbackError.message}`);
     }
   }

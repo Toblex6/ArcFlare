@@ -1,7 +1,7 @@
 // /api/agent/deploy/route.ts
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { initiateDeveloperControlledWalletsClient } from '@circle-fin/developer-controlled-wallets';
+import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { createPublicClient, http, parseAbiItem, decodeEventLog } from 'viem';
 import { getArcChain, explorerTxUrl, getNetworkConfig } from '@/lib/config/network';
 const arcTestnet = getArcChain();
