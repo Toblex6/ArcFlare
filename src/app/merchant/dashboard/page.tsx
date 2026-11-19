@@ -5,8 +5,9 @@ import Image from "next/image";
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardSidebar from "@/src/components/DashboardSidebar";
+import PaymentStatusBadge from "@/src/components/PaymentStatusBadge";
 import { displayChain } from "@/src/components/NetworkContext";
-import { paymentStatusLabel } from "@/src/lib/payments/statusDisplay";
+import { countPaymentStatuses } from "@/src/lib/payments/statusDisplay";
 import {
   AreaChart,
   Area,
@@ -428,15 +429,9 @@ export default function MerchantDashboard() {
     return () => clearInterval(interval);
   }, [checkingAuth, merchant]);
 
-  const successCount = payments.filter((p) => p.status === "SUCCESS").length;
-  // Only terminal failure states count as "Failed" — the old `!== "SUCCESS"`
-  // bucket labelled in-flight payments (PENDING, PROCESSING_ONCHAIN, …) as
-  // failures. Pending gets its own stat.
-  const TERMINAL_FAILURES = new Set(["FAILED", "SETTLEMENT_ERROR", "ATTESTATION_FAILED", "EXPIRED"]);
-  const failedCount = payments.filter((p) => TERMINAL_FAILURES.has(p.status)).length;
-  const pendingCount = payments.filter(
-    (p) => !TERMINAL_FAILURES.has(p.status) && p.status !== "SUCCESS"
-  ).length;
+  // /api/payments/all derives expired links without mutating the frozen row.
+  // Count that same display status; expiry and unknown codes are not failures.
+  const paymentCounts = countPaymentStatuses(payments.map((p) => p.status));
   // USDC-only average over successful payments — merchant balances never
   // mix units. Legacy non-USDC rows are excluded from the merchant average.
   const successfulPayments = payments.filter((p) => p.status === "SUCCESS");
@@ -490,11 +485,12 @@ export default function MerchantDashboard() {
     >
       <DashboardSidebar active="Dashboard" />
 
-      <main style={{ flex: 1, padding: isMobile ? "16px" : "32px", overflowX: "hidden", background: "var(--background)" }}>
+      {/* CSS reserves the mobile menu's row before hydration, not after a resize effect. */}
+      <main className="min-w-0 px-4 pb-4 pt-20 md:p-8" style={{ flex: 1, overflowX: "hidden", background: "var(--background)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28, flexWrap: "wrap", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div>
-              <h1 style={{ fontSize: "clamp(20px, 4vw, 28px)", fontWeight: 700, color: "var(--text)", margin: "0 0 4px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: "1 1 240px" }}>
+            <div style={{ minWidth: 0 }}>
+              <h1 style={{ fontSize: "clamp(20px, 4vw, 28px)", fontWeight: 700, color: "var(--text)", margin: "0 0 4px 0", overflowWrap: "anywhere" }}>
                 Welcome back, {merchant.businessName} 👋
               </h1>
               <p style={{ color: "var(--text-secondary)", fontSize: "clamp(12px, 1.5vw, 16px)", margin: 0 }}>
@@ -836,15 +832,17 @@ export default function MerchantDashboard() {
               </ResponsiveContainer>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(5,1fr)", gap: 10, marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--surface-secondary)" }}>
+            <div aria-label="Payment status counts" style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(3,minmax(0,1fr))", gap: 10, marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--surface-secondary)" }}>
               {[
-                { label: "Successful", value: successCount, color: "var(--primary)", bg: "#ecfeff", border: "#a5f3fc", icon: "✓" },
-                { label: "Pending", value: pendingCount, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "◔" },
-                { label: "Failed", value: failedCount, color: "var(--danger)", bg: "#fef2f2", border: "#fecaca", icon: "✗" },
+                { label: "Successful", value: paymentCounts.success, color: "var(--primary)", bg: "#ecfeff", border: "#a5f3fc", icon: "✓" },
+                { label: "Pending", value: paymentCounts.pending, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "◔" },
+                { label: "Expired", value: paymentCounts.expired, color: "#475569", bg: "#f1f5f9", border: "#cbd5e1", icon: "◷" },
+                { label: "Failed", value: paymentCounts.failed, color: "var(--danger)", bg: "#fef2f2", border: "#fecaca", icon: "✗" },
+                ...(paymentCounts.unknown > 0 ? [{ label: "Other", value: paymentCounts.unknown, color: "#475569", bg: "#f8fafc", border: "#cbd5e1", icon: "?" }] : []),
                 { label: "Success Rate", value: `${metrics.successRate.toFixed(1)}%`, color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", icon: "◎" },
                 { label: "Avg Txn Value", value: avgTxDisplay, color: "#d97706", bg: "#fffbeb", border: "#fde68a", icon: "↗" },
               ].map((m, i) => (
-                <div key={i} style={{ background: m.bg, border: `1px solid ${m.border}`, borderRadius: 10, padding: 12 }}>
+                <div key={i} data-payment-count={m.label} style={{ background: m.bg, border: `1px solid ${m.border}`, borderRadius: 10, padding: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 5 }}>
                     <span style={{ color: m.color, fontSize: 11 }}>{m.icon}</span>
                     <p style={{ fontSize: 9, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.3, margin: 0 }}>{m.label}</p>
@@ -982,14 +980,7 @@ export default function MerchantDashboard() {
                         )}
                       </td>
                       <td style={{ padding: "12px 0" }}>
-                        <span className={`px-2 py-1 rounded text-[9px] font-bold border ${payment.status === "SUCCESS"
-                          ? "bg-green-500/10 text-green-400 border-green-500/20"
-                          : payment.status === "EXPIRED" || payment.status === "FAILED" || payment.status === "SETTLEMENT_ERROR" || payment.status === "ATTESTATION_FAILED"
-                            ? "bg-red-500/10 text-red-400 border-red-500/20"
-                            : "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                          }`}>
-                          {paymentStatusLabel(payment.status)}
-                        </span>
+                        <PaymentStatusBadge status={payment.status} />
                       </td>
                     </tr>
                     );

@@ -2,6 +2,7 @@
 'use client';
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
+import PaymentStatusBadge from '@/src/components/PaymentStatusBadge';
 import { displayChain } from '@/src/components/NetworkContext';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 import { useRouter } from 'next/navigation';
@@ -67,7 +68,7 @@ export default function TransactionsPage() {
       <DashboardSidebar active="Transactions" />
 
       {/* Main Content */}
-      <main className="flex-1 p-4 pt-16 md:p-8 max-w-7xl w-full mx-auto">
+      <main className="flex-1 min-w-0 p-4 pt-16 md:p-8 max-w-7xl w-full mx-auto">
         <h1 className="text-xl md:text-22 font-bold text-slate-900 mb-1">
           Transactions
         </h1>
@@ -140,16 +141,7 @@ export default function TransactionsPage() {
                           {payment.amount.toFixed(2)} {payment.currency}
                         </td>
                         <td className="py-4 pr-4">
-                          <span
-                            className={`px-2 py-1 rounded text-[10px] font-bold border ${payment.status === 'SUCCESS'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                              : payment.status === 'EXPIRED'
-                                ? 'bg-red-50 text-red-700 border-red-100'
-                                : 'bg-amber-50 text-amber-700 border-amber-100'
-                              }`}
-                          >
-                            {payment.status}
-                          </span>
+                          <PaymentStatusBadge status={payment.status} />
                         </td>
                         <td className="py-4 text-slate-500 text-[10px]">
                           {payment.explorer_url ? (
@@ -207,16 +199,7 @@ export default function TransactionsPage() {
                         </div>
                       </div>
 
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold border shrink-0 ${payment.status === 'SUCCESS'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                          : payment.status === 'EXPIRED'
-                            ? 'bg-red-50 text-red-700 border-red-100'
-                            : 'bg-amber-50 text-amber-700 border-amber-100'
-                          }`}
-                      >
-                        {payment.status}
-                      </span>
+                      <PaymentStatusBadge status={payment.status} />
                     </div>
 
                     <div className="flex items-center justify-between border-t border-b border-slate-200/60 py-2">

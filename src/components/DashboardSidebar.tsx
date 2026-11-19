@@ -144,6 +144,10 @@ export default function DashboardSidebar({ active }: { active: string }) {
         <>
             {isMobile && (
                 <button
+                    type="button"
+                    aria-label="Open navigation"
+                    aria-expanded={open}
+                    aria-controls="merchant-dashboard-navigation"
                     onClick={() => setOpen(true)}
                     style={{
                         position: 'fixed', top: 16, left: 16, zIndex: 1001,
@@ -182,6 +186,16 @@ export default function DashboardSidebar({ active }: { active: string }) {
                     borderRight: '1px solid #2d2015',
                 }}
             >
+                {isMobile && open && (
+                    <button
+                        type="button"
+                        aria-label="Close navigation"
+                        onClick={() => setOpen(false)}
+                        style={{ alignSelf: 'flex-end', flexShrink: 0, width: 40, height: 40, marginBottom: 12, border: '1px solid #2d2015', borderRadius: 8, background: '#1f140f', color: '#fff', fontSize: 20, cursor: 'pointer' }}
+                    >
+                        ×
+                    </button>
+                )}
                 <Link href="/" title="FlareHQ homepage" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36, paddingLeft: 6, textDecoration: 'none' }}>
                     <Image src="/arcflare-logo.png" alt="FlareHQ" width={36} height={36} style={{ borderRadius: 8, objectFit: 'contain' }} />
                     <div>
@@ -190,7 +204,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
                     </div>
                 </Link>
 
-                <nav style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                <nav id="merchant-dashboard-navigation" style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
                     {SECTIONS.map((section) => (
                         <div key={section.group} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             <p style={{ fontSize: 10, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1, padding: '6px 12px 2px', margin: 0 }}>
