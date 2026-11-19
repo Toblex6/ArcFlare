@@ -8,6 +8,8 @@
 // the person used. Nothing executes until the person taps Confirm.
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useSecurePinDialog } from '@/components/SecurePinDialog';
+import { requestNeedsStepUp } from '@/lib/payments/requestStepUp';
 
 interface ChatMessage {
     role: 'user' | 'assistant';
@@ -48,6 +50,9 @@ function renderTextWithCopyableLinks(text: string, onCopy: (url: string) => void
 export default function FlowAssistantWidget() {
     const [open, setOpen] = useState(false);
     const [hasSession, setHasSession] = useState(false);
+    const [hasPin, setHasPin] = useState<boolean | null>(null);
+    const [ownWallet, setOwnWallet] = useState<string | null>(null);
+    const { requestPin, dialog: pinDialog } = useSecurePinDialog({ accent: COLORS.green });
     const [messages, setMessages] = useState<ChatMessage[]>([
         {
             role: 'assistant',
@@ -61,12 +66,22 @@ export default function FlowAssistantWidget() {
     const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
     const recognitionRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const confirmingRef = useRef(false);
 
     useEffect(() => {
         fetch('/api/consumer/session')
             .then((r) => r.json())
-            .then((data) => setHasSession(!!data.success))
+            .then((data) => {
+                setHasSession(!!data.success);
+                setOwnWallet(data.success ? data.account?.walletAddress ?? null : null);
+            })
             .catch(() => setHasSession(false));
+        fetch('/api/consumer/security')
+            .then((r) => r.json())
+            .then((data) => {
+                if (data.success && typeof data.hasPin === 'boolean') setHasPin(data.hasPin);
+            })
+            .catch(() => {}); // Unknown enrollment is rechecked before a protected confirmation.
     }, []);
 
     useEffect(() => {
@@ -126,19 +141,46 @@ export default function FlowAssistantWidget() {
     };
 
     const handleConfirm = async (action: any) => {
+        // A second tap must not replace the open PIN request or submit twice.
+        if (confirmingRef.current) return;
+        confirmingRef.current = true;
         setSending(true);
         try {
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (requestNeedsStepUp(action?.action, action?.recipientAddress, ownWallet)) {
+                let enrolled = hasPin;
+                if (enrolled === null) {
+                    const securityRes = await fetch('/api/consumer/security', { cache: 'no-store' });
+                    const security = await securityRes.json();
+                    if (!securityRes.ok || !security.success || typeof security.hasPin !== 'boolean') {
+                        throw new Error('Could not check wallet security. Please try again.');
+                    }
+                    enrolled = security.hasPin;
+                    setHasPin(enrolled);
+                }
+                if (enrolled) {
+                    const entered = await requestPin({
+                        title: 'Authorize this action',
+                        description: 'Enter your payment PIN to continue.',
+                        confirmLabel: 'Authorize',
+                    });
+                    if (!entered) return;
+                    headers['x-consumer-pin'] = entered;
+                }
+            }
             const res = await fetch('/api/consumer/assistant', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ confirmedAction: action }),
             });
             const data = await res.json();
+            if (typeof data.code === 'string' && data.code.startsWith('STEP_UP_')) setHasPin(null);
             if (!data.success) throw new Error(data.error || 'Could not complete that.');
             addMessage({ role: 'assistant', text: `✅ ${data.reply}` });
         } catch (e: any) {
             addMessage({ role: 'assistant', text: `⚠️ ${e.message}` });
         } finally {
+            confirmingRef.current = false;
             setSending(false);
         }
     };
@@ -287,6 +329,7 @@ export default function FlowAssistantWidget() {
                     </div>
                 </div>
             )}
+            {pinDialog}
         </>
     );
 }
