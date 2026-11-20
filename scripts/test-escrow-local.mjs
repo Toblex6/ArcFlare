@@ -18,7 +18,11 @@ const { escrowAbi } = await import(`data:text/javascript,${encodeURIComponent(ou
 const { ethers } = await network.getOrCreate();
 const [admin, beneficiary, stranger] = await ethers.getSigners();
 const token = await ethers.deployContract('EscrowTestToken');
-const escrow = await ethers.deployContract('FlareHQEscrow', [await token.getAddress(), admin.address]);
+const escrow = await ethers.deployContract('FlareHQEscrow', [await token.getAddress(), admin.address, admin.address, stranger.address]);
+assert.equal(await escrow.owner(), admin.address);
+assert.equal(await escrow.arbiter(), admin.address);
+assert.equal(await escrow.treasury(), stranger.address);
+assert.equal(await escrow.FEE_BPS(), 25n);
 await token.approve(await escrow.getAddress(), 1000000);
 let n = 0;
 let abiReads = 0;
@@ -90,8 +94,14 @@ await assert.rejects(escrow.createEscrow(ethers.ZeroHash, beneficiary.address, 1
 await assert.rejects(escrow.createEscrow(id(), ethers.ZeroAddress, 100, 9999999999, 'zero beneficiary'));
 await assert.rejects(escrow.createEscrow(id(), await escrow.getAddress(), 100, 9999999999, 'contract beneficiary'));
 await assert.rejects(escrow.createEscrow(id(), beneficiary.address, 100, 1, 'expired terms'));
-await assert.rejects(ethers.deployContract('FlareHQEscrow', [stranger.address, admin.address]));
-await assert.rejects(ethers.deployContract('FlareHQEscrow', [await token.getAddress(), ethers.ZeroAddress]));
+await assert.rejects(ethers.deployContract('FlareHQEscrow', [stranger.address, admin.address, admin.address, stranger.address]));
+await assert.rejects(ethers.deployContract('FlareHQEscrow', [await token.getAddress(), ethers.ZeroAddress, admin.address, stranger.address]));
+await assert.rejects(ethers.deployContract('FlareHQEscrow', [await token.getAddress(), admin.address, ethers.ZeroAddress, stranger.address]));
+await assert.rejects(ethers.deployContract('FlareHQEscrow', [await token.getAddress(), admin.address, admin.address, ethers.ZeroAddress]));
+await assert.rejects(escrow.setArbiter(ethers.ZeroAddress));
+await assert.rejects(escrow.setTreasury(ethers.ZeroAddress));
+await assert.rejects(escrow.connect(stranger).setArbiter(stranger.address));
+await assert.rejects(escrow.connect(stranger).setTreasury(stranger.address));
 await assert.rejects(escrow.transferAdmin(ethers.ZeroAddress));
 await assert.rejects(escrow.connect(stranger).transferAdmin(stranger.address));
 await escrow.transferAdmin(beneficiary.address);
@@ -99,6 +109,57 @@ assert.equal(await escrow.admin(), admin.address);
 await assert.rejects(escrow.connect(stranger).acceptAdmin());
 await escrow.connect(beneficiary).acceptAdmin();
 assert.equal(await escrow.admin(), beneficiary.address);
+// 25 bps release fee: beneficiary gets net, treasury gets the fee, the
+// contract retains nothing, and a refund returns the full amount (no fee).
+async function createAmount(amount) {
+  const key = id();
+  const block = await ethers.provider.getBlock('latest');
+  await escrow.createEscrow(key, beneficiary.address, amount, block.timestamp + 500, 'fee test');
+  return key;
+}
+const feeAmount = 10000n;
+const benBeforeFee = await token.balanceOf(beneficiary.address);
+const treasBeforeFee = await token.balanceOf(stranger.address);
+const feeKey = await createAmount(feeAmount);
+await escrow.confirmDelivery(feeKey);
+await escrow.connect(beneficiary).confirmDelivery(feeKey);
+assert.equal(await token.balanceOf(beneficiary.address), benBeforeFee + feeAmount - 25n, 'beneficiary receives net of 25 bps');
+assert.equal(await token.balanceOf(stranger.address), treasBeforeFee + 25n, 'treasury receives 25 bps');
+assert.equal(await escrow.settled(feeKey), true);
+const refundKey = await createAmount(feeAmount);
+const depBeforeRefund = await token.balanceOf(admin.address);
+await ethers.provider.send('evm_increaseTime', [501]);
+await ethers.provider.send('evm_mine', []);
+await escrow.refundExpired(refundKey);
+assert.equal(await token.balanceOf(admin.address), depBeforeRefund + feeAmount, 'expired refund has no fee');
+
+// Arbiter is the only dispute resolver; owner and strangers cannot decide.
+const alt = await ethers.deployContract('FlareHQEscrow', [await token.getAddress(), admin.address, stranger.address, stranger.address]);
+await token.approve(await alt.getAddress(), 1000);
+const altKey = id();
+await alt.createEscrow(altKey, beneficiary.address, 1000, (await ethers.provider.getBlock('latest')).timestamp + 500, 'arbiter test');
+await alt.connect(beneficiary).dispute(altKey, 'not delivered');
+await assert.rejects(alt.connect(admin).resolveDispute(altKey, true));
+await assert.rejects(alt.connect(beneficiary).resolveDispute(altKey, true));
+await alt.connect(stranger).resolveDispute(altKey, true);
+assert.equal(await alt.settled(altKey), true);
+
+// Fuzz release accounting over deterministic pseudo-random amounts.
+let seed = 123456789n;
+const nextAmount = () => { seed = (seed * 1103515245n + 12345n) % 2147483648n; return (seed % 5000n) + 1n; };
+for (let i = 0; i < 12; i++) {
+  const amount = nextAmount();
+  const bBefore = await token.balanceOf(beneficiary.address);
+  const tBefore = await token.balanceOf(stranger.address);
+  const key = await createAmount(amount);
+  await escrow.confirmDelivery(key);
+  await escrow.connect(beneficiary).confirmDelivery(key);
+  const fee = (amount * 25n) / 10000n;
+  assert.equal(await token.balanceOf(beneficiary.address), bBefore + amount - fee, `fuzz #${i} net`);
+  assert.equal(await token.balanceOf(stranger.address), tBefore + fee, `fuzz #${i} fee`);
+  await assert.rejects(escrow.connect(beneficiary).confirmDelivery(key), 'double release must revert');
+}
+
 // Failed/fee-taking token transfers must roll back custody and lifecycle state.
 for (const mode of [1, 2]) {
   await token.configure(mode, ethers.ZeroAddress, '0x');
