@@ -232,6 +232,50 @@ model Stream {
   contractStreamId String?
 }
 
+// Standalone milestone/tranche streams. Unlike JobNanopaymentStream, these do
+// NOT depend on an ERC-8183 job. They mirror ArcFlareStream directly and are
+// usable by merchant, consumer, or agent poster/worker accounts.
+model StandaloneStream {
+  id               String    @id @default(cuid())
+  reference        String    @unique
+  streamId         String    @unique
+  posterAddress    String
+  posterActorType  String
+  posterActorId    String
+  workerAddress    String
+  workerActorType  String?
+  workerActorId    String?
+  totalBudget      String
+  trancheCount     Int
+  tranchesReleased Int       @default(0)
+  totalReleased    String    @default("0")
+  status           String    @default("ACTIVE") // ACTIVE | CLOSED
+  txHash           String
+  closeTxHash      String?
+  createdAt        DateTime  @default(now())
+  closedAt         DateTime?
+  tranches         StandaloneStreamTranche[]
+
+  @@index([posterAddress])
+  @@index([workerAddress])
+  @@index([status])
+  @@map("standalone_streams")
+}
+
+model StandaloneStreamTranche {
+  id               String           @id @default(cuid())
+  streamReference  String
+  stream            StandaloneStream @relation(fields: [streamReference], references: [reference], onDelete: Cascade)
+  requirementIndex Int
+  amount            String
+  txHash             String
+  createdAt          DateTime         @default(now())
+
+  @@unique([streamReference, requirementIndex])
+  @@index([streamReference])
+  @@map("standalone_stream_tranches")
+}
+
 model NanoPayment {
   id             String    @id @default(uuid())
   idempotencyKey String?   @unique
