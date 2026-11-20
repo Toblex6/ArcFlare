@@ -119,7 +119,7 @@ async function recordSpendInWindowAtomic(
       const retriable =
         code === 'P2034' || // Prisma: transaction conflict / serialization failure
         e?.meta?.code === '40001' || // PG: could not serialize access
-        code === 'P2002' || // unique-violation race on first insert — row now exists, retry reads it
+        code === 'P2002' || (code === 'P2010' && e?.meta?.code === '23505') || // first-insert unique race, including Prisma's raw SQL wrapper
         code === 'P2028'; // transaction expired while lock-waiting — rolled back, safe to retry
       if (!retriable || attempt >= MAX_TX_RETRIES) throw e;
       await new Promise((r) => setTimeout(r, 30 + Math.floor(Math.random() * 90)));
