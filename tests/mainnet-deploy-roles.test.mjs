@@ -75,8 +75,10 @@ test('FlareHQEscrow enforces the independent deployer, arbiter and Safe treasury
     assert.throws(() => assertMainnetFlareHQEscrowRoles({ ...roles, [name]: MAINNET_PRODUCTION_ROLES.relayer }), /does not match/);
   }
   const deploy = read('scripts/deploy-flarehq-escrow.mjs');
-  assert.ok(deploy.indexOf('assertMainnetFlareHQEscrowRoles({') < deploy.indexOf('if (!execute) return;'));
-  assert.ok(deploy.indexOf('if (!execute) return;') < deploy.indexOf('.deploy(...constructorArgs)'));
+  const gate = deploy.indexOf('if (!execute || name !== escrow) continue;');
+  const send = deploy.indexOf('signerOnMainnet.sendTransaction(');
+  assert.ok(gate > deploy.indexOf('assertMainnetFlareHQEscrowRoles({') && send > gate);
+  assert.match(deploy.slice(gate, send), /checkDeploymentRevision\(source, reviewed\)/);
 });
 
 // ── 2. Any single mismatch is rejected ───────────────────────────────────────

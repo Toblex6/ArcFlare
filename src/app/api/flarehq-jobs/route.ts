@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { escrowAddressOr503 } from "@/lib/escrow/escrowGuard";
+import { checkEscrowAmount } from "@/lib/escrow/escrowAmount";
 import { requireFlareHQJobActor } from "@/lib/jobs/flarehqJobAuth";
 import { parseJobUnits, serializeFlareHQJob } from "@/lib/jobs/flarehqJob";
 
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest) {
   let budget: bigint;
   try { budget = parseJobUnits(body.budget); }
   catch (e: any) { return NextResponse.json({ success: false, error: e.message }, { status: 400 }); }
+  const checked = checkEscrowAmount(budget);
+  if ("error" in checked) return NextResponse.json({ success: false, error: checked.error }, { status: checked.status });
   const requirements = body.requirements === undefined ? null : body.requirements;
   if (requirements !== null && (!Array.isArray(requirements) || requirements.length > 50 || requirements.some((r: unknown) => typeof r !== "string" || r.length > 1000))) {
     return NextResponse.json({ success: false, error: "requirements must be an array of at most 50 strings." }, { status: 400 });

@@ -18,6 +18,7 @@ import { keccak256, toBytes, isAddress } from 'viem';
 import { resolveBeneficiary } from '@/lib/escrow/resolveBeneficiary';
 import { publicUrl } from '@/lib/publicOrigin';
 import { escrowAddressOr503 } from '@/lib/escrow/escrowGuard';
+import { checkEscrowAmount } from '@/lib/escrow/escrowAmount';
 
 // H5: central merchant auth (active + verified + sessionVersion).
 
@@ -55,16 +56,9 @@ export async function POST(req: NextRequest) {
     if (!beneficiarySCA || !isAddress(beneficiarySCA)) {
       return NextResponse.json({ success: false, error: 'Valid beneficiarySCA (0x…) is required.' }, { status: 400 });
     }
-    // M6: shared usdcAmount rule (decimal string, ≤6 decimals, >0, capped) —
-    // no float drift into the escrow row.
-    const linkAmountStr = String(amount ?? "").trim();
-    if (!/^\d+(\.\d{1,6})?$/.test(linkAmountStr) || !Number.isFinite(parseFloat(linkAmountStr)) || parseFloat(linkAmountStr) <= 0 || parseFloat(linkAmountStr) > 10_000_000) {
-      return NextResponse.json(
-        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
-        { status: 400 }
-      );
-    }
-    const amountFloat = parseFloat(linkAmountStr);
+    const checked = checkEscrowAmount(amount);
+    if ('error' in checked) return NextResponse.json({ success: false, error: checked.error }, { status: checked.status });
+    const { amountUSDC: amountFloat } = checked;
     const hours = deadlineHours === undefined ? 24 : parseFloat(deadlineHours);
     if (isNaN(hours) || hours <= 0 || hours > 24 * 30) {
       return NextResponse.json({ success: false, error: 'deadlineHours must be between 0 and 720.' }, { status: 400 });

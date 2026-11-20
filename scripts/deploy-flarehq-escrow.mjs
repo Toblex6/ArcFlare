@@ -1,10 +1,11 @@
 // Read-only by default. Only the operator may run this script with --execute.
-import { readFile } from 'node:fs/promises';
-import { Contract, ContractFactory, JsonRpcProvider, Wallet, ZeroAddress, ZeroHash, formatEther, id } from 'ethers';
+import { Contract, ContractFactory, JsonRpcProvider, Wallet, ZeroAddress, ZeroHash, formatEther, id, keccak256 } from 'ethers';
+import { buildMainnetContract, checkDeploymentRevision, PreflightError } from './lib/mainnet-contract-build.mjs';
 import {
   MAINNET_ESCROW_DEPLOYER,
   MAINNET_PRODUCTION_ROLES,
   assertMainnetFlareHQEscrowRoles,
+  assertMainnetPayrollRoles,
   matchesMainnetEscrowSafe,
 } from './mainnet-roles.mjs';
 
@@ -13,8 +14,9 @@ const token = '0x3600000000000000000000000000000000000000';
 const rpc = process.env.ARC_MAINNET_RPC_URL ?? 'https://rpc.mainnet.arc.io';
 const args = process.argv.slice(2);
 const execute = args.length === 1 && args[0] === '--execute';
-
-class PreflightError extends Error {}
+const replacements = args.length === 1 && args[0] === '--preview-replacements';
+const escrow = 'FlareHQEscrow';
+const source = `contracts/${escrow}.sol`;
 
 async function verifySafe(provider, owner, blockTag) {
   const sentinel = '0x0000000000000000000000000000000000000001';
@@ -42,11 +44,17 @@ async function verifySafe(provider, owner, blockTag) {
 }
 
 async function main() {
-  if (args.length && !execute) throw new PreflightError('Use no arguments for read-only preflight.');
-  const { owner, arbiter: pinnedArbiter, treasurySink } = MAINNET_PRODUCTION_ROLES;
+  if (args.length && !execute && !replacements) throw new PreflightError('Use no arguments for escrow preflight, or --preview-replacements for read-only Payroll/SpendLimit estimates.');
+  const reviewed = process.env.ESCROW_DEPLOY_COMMIT;
+  if (execute || reviewed !== undefined) {
+    const sources = replacements ? ['contracts/ArcFlarePayroll.sol', 'contracts/ArcFlareSpendLimit.sol'] : [source];
+    for (const path of sources) checkDeploymentRevision(path, reviewed);
+    console.log(`Reviewed revision: ${reviewed}`);
+  }
+  const { owner, arbiter: pinnedArbiter, treasurySink, relayer } = MAINNET_PRODUCTION_ROLES;
   const arbiter = process.env.ESCROW_ARBITER_ADDRESS ?? (execute ? undefined : pinnedArbiter);
   const treasury = process.env.ESCROW_TREASURY_ADDRESS ?? (execute ? undefined : treasurySink);
-  const rawKey = process.env.MAINNET_DEPLOYER_KEY;
+  const rawKey = execute ? process.env.MAINNET_DEPLOYER_KEY : undefined;
   if (execute && !rawKey) throw new PreflightError('MAINNET_DEPLOYER_KEY is required for --execute.');
   if (rawKey && !/^(0x)?[0-9a-f]{64}$/i.test(rawKey)) throw new PreflightError('MAINNET_DEPLOYER_KEY is invalid.');
   let signer;
@@ -58,16 +66,19 @@ async function main() {
   try { assertMainnetFlareHQEscrowRoles({ arbiter, treasury, deployer }); }
   catch (error) { throw new PreflightError(error.message); }
 
-  const constructorArgs = [token, owner, pinnedArbiter, treasurySink];
+  assertMainnetPayrollRoles({ owner, relayer }); // same address is SpendLimit recorder
+  const deployments = replacements
+    ? [['ArcFlarePayroll', [owner, relayer]], ['ArcFlareSpendLimit', [owner, relayer]]]
+    : [[escrow, [token, owner, pinnedArbiter, treasurySink]]];
   console.log(JSON.stringify({
     mode: execute ? 'operator-execute' : 'read-only',
     chainId,
-    constructorArgs,
+    deployments,
     deployer,
     keyAddressMatches: signer ? true : null,
   }, null, 2));
 
-  const artifact = JSON.parse(await readFile(new URL('../artifacts/contracts/FlareHQEscrow.sol/FlareHQEscrow.json', import.meta.url), 'utf8'));
+  const compiled = deployments.map(([name, argv]) => [name, argv, buildMainnetContract(name)]);
   const provider = new JsonRpcProvider(rpc, undefined, { batchMaxCount: 1 });
   try {
     if (Number(await provider.send('eth_chainId', [])) !== chainId) throw new PreflightError('Expected Arc mainnet chain 5042.');
@@ -78,6 +89,7 @@ async function main() {
     ]);
     console.log(JSON.stringify({ block: block.number, blockHash: block.hash, deployerNativeUsdc: formatEther(deployerBalance) }));
 
+    for (const [name, constructorArgs, artifact] of compiled) {
     const factory = new ContractFactory(artifact.abi, artifact.bytecode);
     const { data } = await factory.getDeployTransaction(...constructorArgs);
     let gasEstimate;
@@ -96,17 +108,25 @@ async function main() {
     if (feePerGas === null) throw new PreflightError('Arc RPC did not return a gas price.');
     const gasCost = gasEstimate * feePerGas;
     console.log(JSON.stringify({
+      contract: name,
+      initCodeHash: keccak256(data),
       gasEstimate: gasEstimate.toString(),
       quotedFeePerGasWei: feePerGas.toString(),
       estimatedMaxGasCostUsdc: formatEther(gasCost),
       balanceCoversEstimate: deployerBalance >= gasCost,
     }, null, 2));
-    if (!execute) return;
+    if (!execute || name !== escrow) continue;
     if (!signer || deployerBalance < gasCost) throw new PreflightError('Deployer cannot cover the estimated gas cost.');
 
-    const contract = await factory.connect(signer.connect(provider)).deploy(...constructorArgs);
-    console.log(`Deployment tx ${contract.deploymentTransaction().hash}`);
-    await contract.waitForDeployment();
+    const signerOnMainnet = signer.connect(provider);
+    const request = await signerOnMainnet.populateTransaction({ data, gasLimit: gasEstimate,
+      ...(maxFeePerGas !== null ? { maxFeePerGas } : { gasPrice: feePerGas }) });
+    checkDeploymentRevision(source, reviewed);
+    const deployment = await signerOnMainnet.sendTransaction(request);
+    console.log(`Deployment tx ${deployment.hash}`);
+    const receipt = await deployment.wait();
+    if (receipt?.status !== 1 || !receipt.contractAddress) throw new PreflightError('Deployment did not produce a successful contract receipt.');
+    const contract = new Contract(receipt.contractAddress, artifact.abi, provider);
     const [address, deployedOwner, deployedArbiter, deployedTreasury, pendingOwner, feeBps, deployedToken] = await Promise.all([
       contract.getAddress(), contract.owner(), contract.arbiter(), contract.treasury(),
       contract.pendingOwner(), contract.FEE_BPS(), contract.token(),
@@ -117,6 +137,7 @@ async function main() {
       throw new PreflightError('Post-deploy roles or token mismatch. Keep ARC_MAINNET_ESCROW_ADDRESS unset.');
     }
     console.log(JSON.stringify({ address, deployedOwner, deployedArbiter, deployedTreasury, pendingOwner }));
+    }
   } finally {
     provider.destroy();
   }

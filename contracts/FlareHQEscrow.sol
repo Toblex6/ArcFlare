@@ -176,14 +176,15 @@ contract FlareHQEscrow is ReentrancyGuard, Ownable2Step {
 
         uint256 contractBefore = token.balanceOf(address(this));
         uint256 recipientBefore = token.balanceOf(recipient);
-        uint256 treasuryBefore = fee > 0 ? token.balanceOf(treasury) : 0;
+        bool separateFeeRecipient = fee > 0 && treasury != recipient;
+        uint256 treasuryBefore = separateFeeRecipient ? token.balanceOf(treasury) : 0;
 
         token.safeTransfer(recipient, net);
         if (fee > 0) token.safeTransfer(treasury, fee);
 
         require(token.balanceOf(address(this)) + amount == contractBefore, "inexact debit");
-        require(token.balanceOf(recipient) == recipientBefore + net, "inexact credit");
-        if (fee > 0) require(token.balanceOf(treasury) == treasuryBefore + fee, "inexact fee credit");
+        require(token.balanceOf(recipient) == recipientBefore + (separateFeeRecipient ? net : amount), "inexact credit");
+        if (separateFeeRecipient) require(token.balanceOf(treasury) == treasuryBefore + fee, "inexact fee credit");
 
         if (release) {
             emit EscrowReleased(id, recipient, amount);

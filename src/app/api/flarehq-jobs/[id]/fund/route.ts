@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseUnits } from "viem";
 import { prisma } from "@/lib/prisma";
 import { escrowAddressOr503 } from "@/lib/escrow/escrowGuard";
+import { checkEscrowAmount } from "@/lib/escrow/escrowAmount";
 import { requireFlareHQJobActor } from "@/lib/jobs/flarehqJobAuth";
 import { requireConsumerStepUpForActor } from "@/lib/auth/consumerStepUp";
 import { flareHQJobEscrowId, flareHQJobEscrowReference, formatJobUnits, serializeFlareHQJob } from "@/lib/jobs/flarehqJob";
@@ -35,6 +36,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const reference = flareHQJobEscrowReference(job.id);
   const escrowId = flareHQJobEscrowId(job.id);
   const amount = BigInt(job.budget);
+  const checked = checkEscrowAmount(amount);
+  if ("error" in checked) return NextResponse.json({ success: false, error: checked.error }, { status: checked.status });
   const deadlineHours = Number(body.deadlineHours ?? 24 * 7);
   if (!Number.isFinite(deadlineHours) || deadlineHours <= 0 || deadlineHours > 24 * 3650) {
     return NextResponse.json({ success: false, error: "deadlineHours must be between 0 and 87,600." }, { status: 400 });

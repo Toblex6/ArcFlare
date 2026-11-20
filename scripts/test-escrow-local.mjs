@@ -187,4 +187,50 @@ const legacy = await create();
 await escrow.confirmDelivery(legacy);
 await escrow.connect(beneficiary).confirmDelivery(legacy);
 assert.equal(await escrow.settled(legacy), true);
-console.log(`Escrow lifecycle, authorization, replay, expiry, two-step admin, false/no-return tokens, transfer fees and reentrancy checks passed; ${abiReads} raw getter reads decoded with the production ABI in both ethers and viem.`);
+
+// Invariant pass with independent roles and two open escrows. Involuntary
+// transfers of the ERC-20 can add surplus but must not change liabilities.
+const [,, outsider, owner, arbiter, treasury] = await ethers.getSigners();
+const reserve = await ethers.deployContract('FlareHQEscrow', [await token.getAddress(), owner.address, arbiter.address, treasury.address]);
+const reserveAddress = await reserve.getAddress();
+await token.approve(reserveAddress, 50_000);
+const open = new Map();
+async function assertReserve(surplus = 0n) {
+  const liabilities = [...open.values()].reduce((total, amount) => total + amount, 0n);
+  assert.equal(await token.balanceOf(reserveAddress), liabilities + surplus);
+}
+const currentBlock = await ethers.provider.getBlock('latest');
+const releaseId = id();
+const disputeId = id();
+await reserve.connect(admin).createEscrow(releaseId, beneficiary.address, 10_000, currentBlock.timestamp + 1000, 'fee recipient overlaps beneficiary');
+open.set(releaseId, 10_000n);
+await assertReserve();
+await reserve.connect(admin).createEscrow(disputeId, beneficiary.address, 20_000, currentBlock.timestamp + 1000, 'disputed refund');
+open.set(disputeId, 20_000n);
+await assertReserve();
+await assert.rejects(reserve.connect(arbiter).resolveDispute(disputeId, true));
+await assert.rejects(reserve.connect(owner).confirmDelivery(releaseId));
+await assert.rejects(reserve.connect(arbiter).refundExpired(releaseId));
+await reserve.connect(beneficiary).dispute(disputeId, 'disagree');
+await assert.rejects(reserve.connect(owner).resolveDispute(disputeId, false));
+await assert.rejects(reserve.connect(outsider).resolveDispute(disputeId, false));
+await reserve.connect(owner).setTreasury(beneficiary.address);
+await assertReserve();
+const beneficiaryBefore = await token.balanceOf(beneficiary.address);
+await reserve.confirmDelivery(releaseId);
+await reserve.connect(beneficiary).confirmDelivery(releaseId);
+assert.equal(await token.balanceOf(beneficiary.address) - beneficiaryBefore, 10_000n);
+await assert.rejects(reserve.connect(beneficiary).confirmDelivery(releaseId));
+open.delete(releaseId);
+await assertReserve();
+const depositorBefore = await token.balanceOf(admin.address);
+await reserve.connect(arbiter).resolveDispute(disputeId, false);
+assert.equal(await token.balanceOf(admin.address) - depositorBefore, 20_000n);
+assert.equal(await token.balanceOf(owner.address), 0n);
+assert.equal(await token.balanceOf(arbiter.address), 0n);
+await assert.rejects(reserve.connect(arbiter).resolveDispute(disputeId, false));
+open.delete(disputeId);
+await assertReserve();
+await token.transfer(reserveAddress, 17);
+await assertReserve(17n);
+console.log(`Escrow lifecycle and accounting invariants passed, including 12 randomized payouts and ${abiReads} production ABI getter reads.`);
