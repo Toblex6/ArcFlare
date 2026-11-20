@@ -3,7 +3,7 @@
 // challenge, verifying, or settling.
 
 import { NextResponse } from "next/server";
-import { getNetworkConfig } from "@/lib/config/network";
+import { getArcNetworkName, getNetworkConfig } from "@/lib/config/network";
 
 export const ARC_MAINNET_GATEWAY_WALLET = "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE";
 export const ARC_MAINNET_GATEWAY_MINTER = "0x2222222d7164433c4C09B0b0D809a9b52C04C205";
@@ -22,10 +22,15 @@ function enabled(raw: string | undefined): boolean {
 export function validateX402Availability(
   env: Record<string, string | undefined> = process.env
 ): X402Availability {
-  const net = getNetworkConfig(env);
-  if (net.name !== "mainnet") return { available: true, scheme: "exact", settlement: "GatewayWalletBatched" };
+  if (getArcNetworkName(env) !== "mainnet") return { available: true, scheme: "exact", settlement: "GatewayWalletBatched" };
   if (!enabled(env.X402_MAINNET_ENABLED)) {
     return { available: false, code: "x402_disabled", reason: "x402 is disabled on Arc Mainnet. Set X402_MAINNET_ENABLED=true only after validating the production configuration." };
+  }
+  let net: ReturnType<typeof getNetworkConfig>;
+  try {
+    net = getNetworkConfig(env);
+  } catch {
+    return { available: false, code: "x402_misconfigured", reason: "Invalid or incomplete Arc Mainnet network configuration." };
   }
   const payTo = env.SELLER_ADDRESS?.trim() ?? "";
   const failures: string[] = [];

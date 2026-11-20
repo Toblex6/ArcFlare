@@ -1,11 +1,8 @@
 // src/app/api/x402/pay/route.ts
 //
 // Resolves the caller's own x402 buyer wallet (one per merchant, auto-provisioned,
-// key encrypted at rest — see src/lib/x402-wallet.ts) instead of paying from a
-// single global BUYER_PRIVATE_KEY. Falls back to the legacy global key only for
-// calls authenticated purely via an internal service ApiKey with no merchant
-// identity attached (agent-to-agent calls) — there's no merchant to own a wallet
-// in that case, so per-merchant wallets don't apply.
+// key encrypted at rest — see src/lib/x402-wallet.ts). A service key without
+// a merchant identity cannot select a payer or spend a shared wallet.
 
 import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
@@ -13,13 +10,11 @@ import { withApiKeyOrMerchant, resolveMerchant } from "@/lib/middleware/withMerc
 import { getOrCreateBuyerWallet } from "@/lib/x402-wallet";
 import { isGatewayAvailable, requireGatewayChain, gatewayUnavailableBody } from "@/lib/x402-gateway";
 import { getNetworkConfig } from "@/lib/config/network";
+import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 
 async function x402PayHandler(req: NextRequest) {
   try {
-    // Mainnet fail-closed (Option B): the x402 Gateway feature is not
-    // Mainnet-ready — refuse BEFORE any wallet resolution or the legacy
-    // BUYER_PRIVATE_KEY fallback below, so a mainnet request can never
-    // execute against Arc Testnet or touch the shared fallback key.
+    // Refuse disabled or invalid network configuration before resolving a payer.
     if (!isGatewayAvailable()) {
       return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
     }
@@ -43,32 +38,27 @@ async function x402PayHandler(req: NextRequest) {
 
     const merchant = await resolveMerchant(req);
 
-    let PRIVATE_KEY: `0x${string}`;
-    let payerAddress: string;
-
-    if (merchant) {
-      const wallet = await getOrCreateBuyerWallet(merchant.id);
-      PRIVATE_KEY = wallet.privateKey;
-      payerAddress = wallet.address;
-    } else {
-      // Internal service-key call with no merchant identity — legacy global wallet.
-      const legacyKey = process.env.BUYER_PRIVATE_KEY as `0x${string}` | undefined;
-      if (!legacyKey) {
-        return NextResponse.json(
-          { success: false, error: "No merchant identity resolved and BUYER_PRIVATE_KEY not set for internal calls." },
-          { status: 500 }
-        );
-      }
-      PRIVATE_KEY = legacyKey;
-      payerAddress = process.env.BUYER_ADDRESS || "unknown";
+    if (!merchant) {
+      return NextResponse.json(
+        { success: false, error: "A merchant identity is required to resolve the payer wallet." },
+        { status: 403 }
+      );
     }
+    const wallet = await getOrCreateBuyerWallet(merchant.id);
+    const actor = await verifyCallerControlsAddress(req, wallet.address);
+    if (!actor) {
+      return NextResponse.json(
+        { success: false, error: "You do not control the payer wallet." },
+        { status: 403 }
+      );
+    }
+    const PRIVATE_KEY = wallet.privateKey;
+    const payerAddress = wallet.address;
 
     console.log(`[x402 pay] Paying: ${resolvedResourceUrl}`);
-    console.log(`[x402 pay] Buyer: ${payerAddress}${merchant ? ` (merchant ${merchant.id})` : " (internal service key)"}`);
+    console.log(`[x402 pay] Buyer: ${payerAddress} (merchant ${merchant.id})`);
 
-    // requireGatewayChain() throws on mainnet (defense-in-depth behind
-    // the 503 guard above) — a mainnet request can never silently target
-    // Arc Testnet.
+    // Resolve the validated network; never silently target Arc Testnet.
     const client = new GatewayClient({
       chain: requireGatewayChain(),
       privateKey: PRIVATE_KEY,
