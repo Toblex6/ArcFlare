@@ -16,6 +16,7 @@ import {
 import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { createPublicClient, http, keccak256, toHex } from 'viem';
 import { explorerAddressUrl, explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { resolveAgentRef } from '@/lib/agents/resolveAgentRef';
 
 // ERC-8004 ValidationRegistry — resolved per-request from the authoritative
 // network config (official testnet pin on testnet, official mainnet pin on
@@ -155,9 +156,9 @@ async function validationHandler(request: NextRequest) {
       }
 
       // Verify agent exists
-      const agent = await (prisma as any).agentRegistry.findFirst({
-        where: { tokenId: agentId.toString() },
-      });
+      const resolved = await resolveAgentRef(agentId, 'auto');
+      if (resolved.ambiguous) return NextResponse.json({ success: false, error: 'Ambiguous agent reference.' }, { status: 400 });
+      const agent = resolved.agent;
 
       if (!agent) {
         return NextResponse.json(
@@ -186,9 +187,10 @@ async function validationHandler(request: NextRequest) {
         );
       }
 
-      const requestURI = `ipfs://arcflare-validation-${agentId}-${requestTag}`;
+      const tokenId = agent.tokenId.toString();
+      const requestURI = `ipfs://arcflare-validation-${tokenId}-${requestTag}`;
       const requestHash = keccak256(
-        toHex(`flarehq_validation_agent_${agentId}_${requestTag}_${Date.now()}`)
+        toHex(`flarehq_validation_agent_${tokenId}_${requestTag}_${Date.now()}`)
       ) as `0x${string}`;
 
       const tx = await circleClient.createContractExecutionTransaction({
@@ -196,7 +198,7 @@ async function validationHandler(request: NextRequest) {
         blockchain: getNetworkConfig().circleBlockchain as any,
         contractAddress: validationRegistry(),
         abiFunctionSignature: 'validationRequest(address,uint256,string,bytes32)',
-        abiParameters: [validatorSCA, agentId.toString(), requestURI, requestHash],
+        abiParameters: [validatorSCA, tokenId, requestURI, requestHash],
         fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
       });
 
@@ -204,7 +206,7 @@ async function validationHandler(request: NextRequest) {
 
       const txHash = await waitForTx(circleClient, tx.data.id);
 
-      console.log(`✅ Validation requested for agent ${agentId}. RequestHash: ${requestHash}`);
+      console.log(`✅ Validation requested for agent ${tokenId}. RequestHash: ${requestHash}`);
 
       // SUBTASK D — notify the validator AFTER on-chain success only.
       // validatorSCA here is authoritative: it is the exact `validator`
@@ -221,7 +223,7 @@ async function validationHandler(request: NextRequest) {
       try {
         validatorNotified = await notifyValidator({
           validatorSCA,
-          agentTokenId: agentId.toString(),
+          agentTokenId: tokenId,
           agentName: agent.name ?? null,
           requestTag,
           requestHash,
@@ -236,7 +238,7 @@ async function validationHandler(request: NextRequest) {
       return NextResponse.json({
         success: true,
         action: 'request',
-        agentId,
+        agentId: tokenId,
         agentName: agent.name,
         validatorSCA,
         requestHash,
@@ -245,7 +247,7 @@ async function validationHandler(request: NextRequest) {
         explorerUrl: `${explorerTxUrl(txHash)}`,
         validatorNotified,
         nextStep: `Call POST /api/agent/validation with action: "respond" and requestHash: "${requestHash}"`,
-        message: `Validation requested for agent #${agentId}. Validator ${validatorSCA} must now respond.`,
+        message: `Validation requested for agent #${tokenId}. Validator ${validatorSCA} must now respond.`,
       });
     }
 

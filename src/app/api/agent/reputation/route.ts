@@ -10,6 +10,7 @@ import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAd
 import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
 import { keccak256, toHex } from 'viem';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
+import { resolveAgentRef } from '@/lib/agents/resolveAgentRef';
 
 // ── Authoritative validator wallet resolution ─────────────────────────────
 // Resolves the Circle wallet ID that AUTHORITATIVELY corresponds to
@@ -132,9 +133,11 @@ async function reputationHandler(request: NextRequest) {
     }
 
     // Verify agent exists in registry
-    const agent = await (prisma as any).agentRegistry.findFirst({
-      where: { tokenId: agentId.toString() },
-    });
+    // User-facing agent lookup accepts Registry ID, ERC-8004 token ID, or
+    // SCA wallet, then uses the resolved tokenId for the protocol call.
+    const resolved = await resolveAgentRef(agentId, 'auto');
+    if (resolved.ambiguous) return NextResponse.json({ success: false, error: 'Ambiguous agent reference.' }, { status: 400 });
+    const agent = resolved.agent;
 
     if (!agent) {
       return NextResponse.json(
@@ -220,7 +223,7 @@ async function reputationHandler(request: NextRequest) {
       abiFunctionSignature:
         'giveFeedback(uint256,int128,uint8,string,string,string,string,bytes32)',
       abiParameters: [
-        agentId.toString(),
+        agent.tokenId.toString(),
         score.toString(),
         (feedbackType || 0).toString(),
         tag,
@@ -238,11 +241,11 @@ async function reputationHandler(request: NextRequest) {
 
     const txHash = await waitForTx(circleClient, reputationTx.data.id);
 
-    console.log(`✅ Reputation recorded for agent ${agentId}. Score: ${score}. Tx: ${txHash}`);
+    console.log(`✅ Reputation recorded for agent ${agent.tokenId}. Score: ${score}. Tx: ${txHash}`);
 
     return NextResponse.json({
       success: true,
-      agentId,
+      agentId: agent.tokenId,
       agentName: agent.name,
       score,
       tag,
@@ -250,7 +253,7 @@ async function reputationHandler(request: NextRequest) {
       validatorSCA,
       txHash,
       explorerUrl: `${explorerTxUrl(txHash)}`,
-      message: `Reputation score ${score}/100 recorded for agent #${agentId} — tag: ${tag}`,
+      message: `Reputation score ${score}/100 recorded for agent #${agent.tokenId} — tag: ${tag}`,
     });
   } catch (error: any) {
     console.error('❌ Reputation error:', error);
@@ -275,11 +278,9 @@ async function getReputationHandler(request: Request) {
       );
     }
 
-    const where: any = {};
-    if (agentId) where.tokenId = agentId;
-    if (scaAddress) where.scaAddress = scaAddress;
-
-    const agent = await (prisma as any).agentRegistry.findFirst({ where });
+    const resolved = await resolveAgentRef(scaAddress ?? agentId, 'auto');
+    if (resolved.ambiguous) return NextResponse.json({ success: false, error: 'Ambiguous agent reference.' }, { status: 400 });
+    const agent = resolved.agent;
 
     if (!agent) {
       return NextResponse.json({ success: false, error: 'Agent not found.' }, { status: 404 });
