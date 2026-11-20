@@ -959,9 +959,11 @@ model FlowBridgeIntent {
   actualAmount    String? // measured destination credit, canonical units (set on COMPLETED)
   destinationBound Boolean @default(false) // true when the burn receipt's DepositForBurn provably names destination+domain
   cctpNonce      String?  @unique // Circle-attested CCTP V2 bytes32 message nonce (0x + 64 hex), Iris-resolved by burn hash — never the MessageSent zero placeholder; the mint must reproduce it
-  // Checkout binding: set only for a checkout cross-chain payment. One burn
-  // settles exactly one invoice (unique), and recovery reuses this same row.
+  // The first checkout transfer anchors the invoice. Each subsequent top-up
+  // is bound to the preceding completed transfer and the same invoice.
   invoiceReference String? @unique
+  checkoutTopUpReference String?
+  checkoutTopUpAfter String? @unique
   status          String   @default("PENDING") // PENDING | BURN_CONFIRMED | COMPLETED | FAILED
   error           String? // terminal failure detail (FAILED only)
   expiresAt       DateTime // source-signing submission TTL; verified burns remain recoverable/completable after it
@@ -971,6 +973,7 @@ model FlowBridgeIntent {
   @@index([sourceWallet])
   @@index([destination])
   @@index([status])
+  @@index([checkoutTopUpReference])
   @@map("flow_bridge_intents")
 }
 
