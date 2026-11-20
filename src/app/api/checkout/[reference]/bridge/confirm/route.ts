@@ -12,6 +12,7 @@ import { checkRateLimit } from "@/lib/ratelimit";
 import { findBridgeSourceChain, sourceExplorerTxUrl } from "@/lib/bridge/sourceChains";
 import { verifyExternalBurn } from "@/lib/bridge/externalVerify";
 import { logBridgeStage } from "@/lib/bridge/stageLogger";
+import { checkoutBridgeBelongsTo, lockCheckoutBridge } from "@/lib/checkout/bridgeCredits";
 
 export async function POST(
   req: NextRequest,
@@ -33,14 +34,14 @@ export async function POST(
     }
 
     const intent = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intentId } });
-    if (!intent || intent.invoiceReference !== reference) {
+    if (!intent || !checkoutBridgeBelongsTo(intent, reference)) {
       return NextResponse.json({ success: false, code: "INTENT_NOT_FOUND", error: "No cross-chain payment found for this invoice." }, { status: 404 });
     }
     const found = findBridgeSourceChain(intent.sourceChain);
     const source = found?.chain ?? null;
     const sourceNet = found?.network ?? "testnet";
 
-    if (intent.status === "COMPLETED") {
+    if (intent.status === "COMPLETED" && intent.burnTxHash?.toLowerCase() === burnTxHash.toLowerCase()) {
       return NextResponse.json({
         success: true,
         state: "completed",
@@ -51,7 +52,7 @@ export async function POST(
     if (intent.status === "FAILED") {
       return NextResponse.json({ success: false, code: "INTENT_FAILED", error: intent.error ?? "This payment failed and cannot be resumed." }, { status: 400 });
     }
-    if (intent.status === "BURN_CONFIRMED") {
+    if (intent.status === "BURN_CONFIRMED" || intent.status === "COMPLETED") {
       if ((intent.burnTxHash ?? "").toLowerCase() === burnTxHash.toLowerCase()) {
         return NextResponse.json({
           success: true,
@@ -106,18 +107,28 @@ export async function POST(
       );
     }
 
-    const claim = await (prisma as any).flowBridgeIntent.updateMany({
-      where: { id: intent.id, status: "PENDING" },
-      data: {
-        status: "BURN_CONFIRMED",
-        burnTxHash: proof.burnTxHash,
-        destinationBound: proof.destinationBound,
-        cctpNonce: proof.cctpNonce,
-      },
+    const claim = await (prisma as any).$transaction(async (tx: any) => {
+      await lockCheckoutBridge(tx, reference);
+      const currentInvoice = await tx.paymentLog.findUnique({ where: { reference }, select: { status: true } });
+      if (!["PENDING", "PROCESSING_ONCHAIN", "EXPIRED"].includes(currentInvoice?.status)) return { count: 0 };
+      const existing = await tx.flowBridgeIntent.findFirst({
+        where: { id: { not: intent.id }, burnTxHash: { equals: proof.burnTxHash, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (existing) return { count: 0 };
+      return tx.flowBridgeIntent.updateMany({
+        where: { id: intent.id, status: "PENDING" },
+        data: {
+          status: "BURN_CONFIRMED",
+          burnTxHash: proof.burnTxHash,
+          destinationBound: proof.destinationBound,
+          cctpNonce: proof.cctpNonce,
+        },
+      });
     });
     if (claim.count === 0) {
       const reread = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intent.id } });
-      if (reread?.status === "BURN_CONFIRMED" && (reread.burnTxHash ?? "").toLowerCase() === proof.burnTxHash.toLowerCase()) {
+      if (["BURN_CONFIRMED", "COMPLETED"].includes(reread?.status) && (reread.burnTxHash ?? "").toLowerCase() === proof.burnTxHash.toLowerCase()) {
         return NextResponse.json({ success: true, state: "burn-confirmed", reference: reread.id });
       }
       return NextResponse.json({ success: false, code: "INTENT_STATE_CONFLICT", error: "This payment changed state while confirming. Retry status." }, { status: 409 });
@@ -138,6 +149,9 @@ export async function POST(
       sourceExplorerUrl: source ? sourceExplorerTxUrl(source.id, proof.burnTxHash, sourceNet) : null,
     });
   } catch (error: any) {
+    if (error?.code === "P2002") {
+      return NextResponse.json({ success: false, code: "INTENT_ALREADY_USED", error: "This burn evidence is already attached to a payment." }, { status: 409 });
+    }
     console.error("[checkout/bridge/confirm]", error);
     return NextResponse.json({ success: false, error: "Could not verify the cross-chain payment yet." }, { status: 500 });
   }

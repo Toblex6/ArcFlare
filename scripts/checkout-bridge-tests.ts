@@ -1,86 +1,109 @@
-// scripts/checkout-bridge-tests.ts
-//
-// Static + pure checkout cross-chain checks. No DB, no RPC, no funds.
-// Proves the server-side gross-up math and that the checkout flow is wired to
-// Bridge Kit / durable invoice-bound intents, not the legacy paste-hash +
-// admin-key mint path.
+// Pure and static checks. No database, signing, or network requests.
 import { readFileSync } from 'node:fs';
-import {
-  DEFAULT_CHECKOUT_BRIDGE_FEE_BPS,
-  MAX_CHECKOUT_BRIDGE_FEE_BPS,
-  parseCheckoutBridgeFeeBps,
-  invoiceAmountBaseUnits,
-  grossUpInvoiceAmount,
-  creditSatisfiesInvoice,
-} from '../src/lib/checkout/bridgeGross';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { checkoutShortfall, estimatedBridgeFee, grossUpInvoiceAmount, invoiceAmountBaseUnits } from '../src/lib/checkout/bridgeGross';
+import { checkoutBridgeBelongsTo, readCheckoutBridgeCredit } from '../src/lib/checkout/bridgeCredits';
+import { trackCheckoutWallet } from '../src/lib/checkout/bridgeWallet';
 
-let passed = 0;
-let failed = 0;
-function ok(name: string, cond: boolean, detail = '') {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else { failed++; console.log(`  ❌ ${name} — ${detail}`); }
-}
-const read = (p: string) => readFileSync(p, 'utf8');
+const read = (path: string) => readFileSync(path, 'utf8');
+const forwarder = (amount: unknown, token = 'USDC') => ({ type: 'forwarder', amount, token });
 
-console.log('[gross-up math]');
-ok('default buffer is 100 bps', DEFAULT_CHECKOUT_BRIDGE_FEE_BPS === 100);
-ok('max buffer is 1000 bps', MAX_CHECKOUT_BRIDGE_FEE_BPS === 1000);
-ok('unset env uses default', parseCheckoutBridgeFeeBps(undefined) === 100);
-ok('empty env uses default', parseCheckoutBridgeFeeBps('') === 100);
-ok('valid env accepted', parseCheckoutBridgeFeeBps('250') === 250);
-ok('zero buffer accepted', parseCheckoutBridgeFeeBps('0') === 0);
-for (const bad of ['-1', '10.5', 'abc', '1001', '1e3']) {
-  let threw = false;
-  try { parseCheckoutBridgeFeeBps(bad); } catch { threw = true; }
-  ok(`rejects invalid bps "${bad}"`, threw);
-}
-ok('invoice 1.00 USDC → 1_000_000 units', invoiceAmountBaseUnits(1) === 1_000_000n);
-ok('invoice 0.000001 USDC → 1 unit', invoiceAmountBaseUnits(0.000001) === 1n);
-for (const bad of [0, -1, NaN, Infinity]) {
-  let threw = false;
-  try { invoiceAmountBaseUnits(bad); } catch { threw = true; }
-  ok(`rejects invalid invoice amount ${String(bad)}`, threw);
-}
-ok('1.00 at 100 bps grosses to 1.01', grossUpInvoiceAmount(1_000_000n, 100) === 1_010_000n);
-ok('1.00 at 0 bps is unchanged', grossUpInvoiceAmount(1_000_000n, 0) === 1_000_000n);
-ok('buffer rounds up (1 unit at 1 bps → 2 units)', grossUpInvoiceAmount(1n, 1) === 2n);
-ok('gross is always >= invoice', grossUpInvoiceAmount(123_456_789n, 250) >= 123_456_789n);
-let threw = false;
-try { grossUpInvoiceAmount(0n, 100); } catch { threw = true; }
-ok('rejects zero invoice units', threw);
-threw = false;
-try { grossUpInvoiceAmount(1n, 1001); } catch { threw = true; }
-ok('rejects out-of-range buffer', threw);
-ok('credit equal to invoice satisfies', creditSatisfiesInvoice(1_000_000n, 1_000_000n));
-ok('credit above invoice satisfies', creditSatisfiesInvoice(1_000_001n, 1_000_000n));
-ok('credit below invoice does not satisfy', !creditSatisfiesInvoice(999_999n, 1_000_000n));
+const token = '0x' + 'a'.repeat(40);
+const hash = '0x' + 'b'.repeat(64);
+const approve = { method: 'eth_sendTransaction', params: [{ to: token, data: `0x095ea7b3${'0'.repeat(128)}` }] };
+const burn = { method: 'eth_sendTransaction', params: [{ to: '0x' + 'c'.repeat(40), data: '0x12345678' }] };
 
-console.log('[wiring: no legacy path]');
-const widget = read('src/components/CheckoutWidget.tsx');
+test('a rejected burn wallet prompt allows a retry and a submitted burn blocks a second prompt', async () => {
+  const states: unknown[] = [];
+  let calls = 0;
+  const request = trackCheckoutWallet(async () => {
+    if (++calls === 2) throw Object.assign(new Error('User rejected'), { code: 4001 });
+    return hash;
+  }, token, (state, txHash) => states.push([state, txHash]));
+  await request(approve);
+  await assert.rejects(request(burn), /User rejected/);
+  await request(burn);
+  await assert.rejects(request(burn), /Check the existing transfer/);
+  assert.equal(calls, 3);
+  assert.deepEqual(states, [
+    ['uncertain', null], ['ready', null], ['uncertain', null], ['ready', null],
+    ['uncertain', null], ['submitted', hash],
+  ]);
+});
+
+test('a concurrent prompt and a provider timeout both preserve the existing burn attempt', async () => {
+  let reject!: (error: Error) => void;
+  const response = new Promise((_, fail) => { reject = fail; });
+  const states: unknown[] = [];
+  const request = trackCheckoutWallet(() => response, token, (...state) => states.push(state));
+  const pending = request(burn);
+  await assert.rejects(request(burn), /Check the existing transfer/);
+  reject(new Error('Wallet timed out'));
+  await assert.rejects(pending, /Wallet timed out/);
+  await assert.rejects(request(burn), /Check the existing transfer/);
+  assert.deepEqual(states, [['uncertain', null]]);
+});
+
+test('quotes use exact USDC units and round the fee margin up', () => {
+  assert.equal(invoiceAmountBaseUnits(10), 10_000_000n);
+  assert.equal(estimatedBridgeFee([forwarder('0.018771'), { type: 'protocol', amount: '0.001', token: 'USDC' }]), 19_771n);
+  assert.equal(grossUpInvoiceAmount(10_000_000n, 18_771n), 10_020_649n);
+  assert.equal(grossUpInvoiceAmount(1n, 1n), 3n);
+  assert.equal(grossUpInvoiceAmount(1n, 0n), 1n);
+  for (const amount of [0, -1, Infinity, NaN]) assert.throws(() => invoiceAmountBaseUnits(amount));
+  assert.throws(() => grossUpInvoiceAmount(1n, -1n));
+});
+
+for (const bad of [undefined, [], [forwarder('-1')], [forwarder('0.0000001')], [forwarder('1e3')], [forwarder(0.01)], [forwarder('1', 'ETH')]]) {
+  test(`fails closed on malformed quote ${JSON.stringify(bad)}`, () => assert.throws(() => estimatedBridgeFee(bad)));
+}
+
+test('only verified invoice-scoped mints contribute to the remaining amount', async () => {
+  const reference = 'invoice-1';
+  const db = { flowBridgeIntent: { async findMany(query: any) {
+    assert.deepEqual(query.where.OR, [{ invoiceReference: reference }, { checkoutTopUpReference: reference }]);
+    assert.equal(query.where.status, 'COMPLETED');
+    assert.deepEqual(query.where.mintTxHash, { not: null });
+    assert.deepEqual(query.where.cctpNonce, { not: null });
+    return [{ actualAmount: '600000' }, { actualAmount: '300000' }];
+  } } };
+  const credit = await readCheckoutBridgeCredit(db, reference);
+  assert.equal(checkoutShortfall(1_000_000n, credit), 100_000n);
+  assert.equal(checkoutShortfall(1_000_000n, credit + 100_000n), 0n);
+  assert.equal(checkoutShortfall(1_000_000n, credit + 100_001n), 0n);
+  assert.equal(checkoutBridgeBelongsTo({ invoiceReference: null, checkoutTopUpReference: reference }, reference), true);
+  assert.equal(checkoutBridgeBelongsTo({ invoiceReference: 'foreign', checkoutTopUpReference: null }, reference), false);
+});
+
+const checkout = 'src/app/api/checkout/[reference]/bridge';
+const intent = read(`${checkout}/intent/route.ts`);
+const confirm = read(`${checkout}/confirm/route.ts`);
+const complete = read(`${checkout}/complete/route.ts`);
 const component = read('src/components/checkout/CheckoutCrossChain.tsx');
-const intent = read('src/app/api/checkout/[reference]/bridge/intent/route.ts');
-const confirm = read('src/app/api/checkout/[reference]/bridge/confirm/route.ts');
-const complete = read('src/app/api/checkout/[reference]/bridge/complete/route.ts');
-ok('checkout uses the new cross-chain component', widget.includes('<CheckoutCrossChain'));
-ok('checkout no longer posts to legacy cctp-settle', !widget.includes('/api/payments/cctp-settle'));
-ok('checkout no longer asks for a burn hash', !widget.includes('Burn Transaction Hash'));
-ok('component drives Bridge Kit', component.includes("import('@circle-fin/bridge-kit')"));
-ok('component uses forwarder destination', component.includes('useForwarder: true'));
-ok('component sends to the invoice merchant', component.includes('recipientAddress: merchantSCA'));
-ok('component resumes the same intent', component.includes('Resume this payment'));
-ok('intent body cannot supply the destination', !intent.includes('body?.destination'));
-ok('intent destination comes from invoice merchantSCA', intent.includes('const destination = invoice.merchantSCA'));
-ok('intent is unique per invoice', intent.includes('invoiceReference: reference'));
-ok('intent grosses up server-side', intent.includes('grossUpInvoiceAmount'));
-ok('intent refuses non-USDC invoices', intent.includes('Cross-chain checkout is USDC-only'));
-ok('confirm reuses the fail-closed burn verifier', confirm.includes('verifyExternalBurn'));
-ok('confirm rejects a second burn hash', confirm.includes('INTENT_ALREADY_USED'));
-ok('complete resolves the Circle-attested nonce', complete.includes('fetchIrisBridgeMessage'));
-ok('complete verifies the Arc mint', complete.includes('verifyArcMint'));
-ok('complete marks the invoice paid only after mint proof', complete.includes('status: "SUCCESS"') && complete.indexOf('verifyArcMint') < complete.indexOf('status: "SUCCESS"'));
-ok('complete enforces credit >= invoice', complete.includes('creditSatisfiesInvoice'));
-ok('complete preserves 25 bps platform-fee flow after verified settlement', complete.includes('settleFeeBestEffort') && complete.indexOf('verifyArcMint') < complete.indexOf('settleFeeBestEffort'));
-ok('complete has no second-burn path', !complete.includes('depositForBurn') && !complete.includes('kit.bridge'));
 
-console.log(`\ncheckout-bridge-tests: ${passed} passed, ${failed} failed`);
-if (failed) process.exit(1);
+test('only the server-bound recipient and quoted gross reach Bridge Kit', () => {
+  assert.match(intent, /const destination = invoice\.merchantSCA/);
+  assert.match(intent, /quoteCheckoutBridge\(\{ source, network,/);
+  assert.ok(intent.indexOf('BRIDGE_QUOTE_UNAVAILABLE') < intent.indexOf('flowBridgeIntent.create'));
+  assert.match(component, /recipientAddress: created.destination/);
+  assert.match(component, /amount: created.amountDisplay/);
+});
+
+test('top-up requires the preceding verified mint and durable replay guards', () => {
+  assert.match(intent, /current.id !== topUpAfter \|\| current.status !== "COMPLETED"/);
+  assert.match(confirm, /verifyExternalBurn/);
+  assert.match(confirm, /INTENT_ALREADY_USED/);
+  assert.match(read('prisma/migrations/20261120030000_checkout_bridge_topups/migration.sql'), /CREATE UNIQUE INDEX .*checkoutTopUpAfter_key/);
+  assert.match(read('src/app/api/cctp/transfer/external/complete/route.ts'), /intent.invoiceReference \|\| intent.checkoutTopUpReference/);
+});
+
+test('underpaid replay stays unpaid and fee handling follows verified full credit', () => {
+  assert.match(complete, /fetchIrisBridgeMessage/);
+  assert.match(complete, /verifyArcMint/);
+  assert.match(complete, /checkoutShortfall\(invoiceUnits, credited\) === 0n/);
+  assert.match(complete, /respond\(invoice.status === "SUCCESS"/);
+  assert.match(complete, /code: "UNDERPAID"/);
+  assert.match(complete, /marked.newlyPaid \? await/);
+  assert.doesNotMatch(complete, /refund|depositForBurn/);
+});

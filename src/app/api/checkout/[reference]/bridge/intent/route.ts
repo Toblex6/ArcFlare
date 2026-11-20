@@ -1,13 +1,12 @@
 // src/app/api/checkout/[reference]/bridge/intent/route.ts
 //
-// Checkout cross-chain intent. One invoice → exactly one durable
-// FlowBridgeIntent row (unique invoiceReference). The payer's wallet signs the
+// Checkout cross-chain intent. Each payment leg has one durable
+// FlowBridgeIntent row. The payer's wallet signs the
 // source-chain burn via Circle Bridge Kit in the browser; this server route
 // never signs or broadcasts. The mint recipient is ALWAYS the invoice's
 // merchant address, resolved from the frozen PaymentLog row — never the body.
 //
-// The burn amount is grossed up by a server-configured buffer so the merchant's
-// measured Arc credit is >= the invoice amount even after the CCTP relay fee.
+// Quote the remaining invoice amount with Bridge Kit before creating a leg.
 
 import { NextRequest, NextResponse } from "next/server";
 import { isAddress } from "viem";
@@ -17,11 +16,9 @@ import { getArcNetworkName } from "@/lib/config/network";
 import { resolveRowCurrency } from "@/lib/tokens/resolveCurrency";
 import { getBridgeSourceChain, formatBridgeBaseUnits } from "@/lib/bridge/sourceChains";
 import { logBridgeStage } from "@/lib/bridge/stageLogger";
-import {
-  invoiceAmountBaseUnits,
-  grossUpInvoiceAmount,
-  parseCheckoutBridgeFeeBps,
-} from "@/lib/checkout/bridgeGross";
+import { checkoutShortfall, invoiceAmountBaseUnits } from "@/lib/checkout/bridgeGross";
+import { checkoutBridgeScope, lockCheckoutBridge, readCheckoutBridgeCredit } from "@/lib/checkout/bridgeCredits";
+import { quoteCheckoutBridge } from "@/lib/checkout/bridgeQuote";
 
 export async function POST(
   req: NextRequest,
@@ -35,6 +32,7 @@ export async function POST(
     const body = await req.json().catch(() => ({}));
     const payerAddress = typeof body?.payerAddress === "string" ? body.payerAddress : "";
     const sourceChain = typeof body?.sourceChain === "string" ? body.sourceChain : "";
+    const topUpAfter = typeof body?.topUpAfter === "string" ? body.topUpAfter : null;
 
     if (!isAddress(payerAddress)) {
       return NextResponse.json({ success: false, code: "PAYER_INVALID", error: "Connect the wallet that will pay." }, { status: 400 });
@@ -55,10 +53,7 @@ export async function POST(
     if (invoice.status === "SUCCESS") {
       return NextResponse.json({ success: false, code: "INVOICE_PAID", error: "This invoice is already paid." }, { status: 409 });
     }
-    if (invoice.status === "EXPIRED" || (invoice.expiresAt && new Date(invoice.expiresAt).getTime() <= Date.now())) {
-      return NextResponse.json({ success: false, code: "INVOICE_EXPIRED", error: "This invoice has expired." }, { status: 409 });
-    }
-    if (!["PENDING", "PROCESSING_ONCHAIN"].includes(String(invoice.status))) {
+    if (!["PENDING", "PROCESSING_ONCHAIN", "EXPIRED"].includes(String(invoice.status))) {
       return NextResponse.json({ success: false, code: "INVOICE_NOT_PAYABLE", error: "This invoice cannot be paid." }, { status: 409 });
     }
     let rowToken: { symbol: string };
@@ -75,47 +70,61 @@ export async function POST(
     }
 
     const invoiceUnits = invoiceAmountBaseUnits(Number(invoice.amount));
-    let leaseBps: number;
-    try {
-      leaseBps = parseCheckoutBridgeFeeBps(process.env.ARC_CHECKOUT_BRIDGE_FEE_BPS);
-    } catch (e: any) {
-      return NextResponse.json({ success: false, code: "BRIDGE_FEE_MISCONFIGURED", error: e.message }, { status: 503 });
-    }
-    const grossUnits = grossUpInvoiceAmount(invoiceUnits, leaseBps);
     const destination = invoice.merchantSCA as string;
+    const latest = (db: any) => db.flowBridgeIntent.findFirst({
+      where: checkoutBridgeScope(reference),
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    const prior = await latest(prisma);
+    const expired = (row: { status: string; expiresAt?: Date | null }) => row.status === "EXPIRED"
+      || (row.expiresAt != null && row.expiresAt.getTime() <= Date.now());
+    if (!prior && expired(invoice)) {
+      return NextResponse.json({ success: false, code: "INVOICE_EXPIRED", error: "This invoice has expired." }, { status: 409 });
+    }
+    const isBound = (intent: any) => intent.sourceWallet.toLowerCase() === payerAddress.toLowerCase()
+      && intent.sourceChain === source.id
+      && intent.destination.toLowerCase() === destination.toLowerCase();
+    const conflict = () => NextResponse.json({ success: false, code: "INTENT_STATE_CONFLICT", error: "Recover the existing payment using its original wallet and source network." }, { status: 409 });
+    if (prior && !isBound(prior)) return conflict();
+    const needsNewLeg = !prior || (prior.status === "COMPLETED" && prior.id === topUpAfter);
+    if (topUpAfter && (!prior || (!needsNewLeg && prior.checkoutTopUpAfter !== topUpAfter))) return conflict();
+    const shortfall = checkoutShortfall(invoiceUnits, await readCheckoutBridgeCredit(prisma, reference));
+    let quote: Awaited<ReturnType<typeof quoteCheckoutBridge>> | null = null;
+    if (needsNewLeg && shortfall > 0n) {
+      try {
+        quote = await quoteCheckoutBridge({ source, network, payer: payerAddress as `0x${string}`, destination: destination as `0x${string}`, shortfall });
+      } catch {
+        return NextResponse.json({ success: false, code: "BRIDGE_QUOTE_UNAVAILABLE", error: "A live bridge quote is unavailable. Try again before sending USDC." }, { status: 503 });
+      }
+    }
 
     const result = await (prisma as any).$transaction(async (tx: any) => {
-      // Serialize intent creation per invoice so two tabs cannot create two
-      // burns for the same invoice (one burn settles exactly one invoice).
-      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `checkout-bridge:${reference}`);
-      let intent = await tx.flowBridgeIntent.findUnique({ where: { invoiceReference: reference } });
-      if (intent) {
-        const same = intent.sourceWallet.toLowerCase() === payerAddress.toLowerCase()
-          && intent.sourceChain === source.id
-          && intent.destination.toLowerCase() === destination.toLowerCase()
-          && intent.amount === grossUnits.toString();
-        return { intent, reused: true, mismatch: !same };
-      }
-      intent = await tx.flowBridgeIntent.create({
+      await lockCheckoutBridge(tx, reference);
+      const current = await latest(tx);
+      if (current && !isBound(current)) return null;
+      const currentInvoice = await tx.paymentLog.findUnique({ where: { reference }, select: { status: true, expiresAt: true } });
+      if (!currentInvoice || !["PENDING", "PROCESSING_ONCHAIN", "EXPIRED"].includes(currentInvoice.status)) return null;
+      const invoiceExpired = expired(currentInvoice);
+      if (current && (!topUpAfter || current.checkoutTopUpAfter === topUpAfter)) return { intent: current, reused: true, invoiceExpired };
+      if (current && (current.id !== topUpAfter || current.status !== "COMPLETED")) return null;
+      if (!current && invoiceExpired) return null;
+      const remaining = checkoutShortfall(invoiceUnits, await readCheckoutBridgeCredit(tx, reference));
+      if (!quote || remaining === 0n || shortfall !== remaining) return null;
+      const intent = await tx.flowBridgeIntent.create({
         data: {
           sourceWallet: payerAddress,
           destination,
           sourceChain: source.id,
-          amount: grossUnits.toString(),
-          invoiceReference: reference,
+          amount: quote.gross.toString(),
+          ...(current ? { checkoutTopUpReference: reference, checkoutTopUpAfter: current.id } : { invoiceReference: reference }),
           status: "PENDING",
           expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
         },
       });
-      return { intent, reused: false, mismatch: false };
+      return { intent, reused: false, invoiceExpired };
     });
 
-    if (result.mismatch) {
-      return NextResponse.json(
-        { success: false, code: "INTENT_STATE_CONFLICT", error: "This invoice already has a cross-chain payment in progress from a different wallet, source or amount. Recover that payment; do not start another burn." },
-        { status: 409 }
-      );
-    }
+    if (!result) return conflict();
 
     const intent = result.intent;
     if (!result.reused) {
@@ -128,8 +137,8 @@ export async function POST(
           sourceWallet: payerAddress,
           destination,
           invoiceAmount: invoiceUnits.toString(),
-          grossAmount: grossUnits.toString(),
-          feeBufferBps: leaseBps,
+          grossAmount: intent.amount,
+          estimatedFee: quote?.fee.toString(),
         },
       });
     }
@@ -139,13 +148,14 @@ export async function POST(
       reference: intent.id,
       reused: result.reused,
       state: intent.status,
+      canStart: intent.status === "PENDING" && intent.expiresAt > new Date()
+        && (Boolean(intent.checkoutTopUpAfter) || !result.invoiceExpired),
       burnTxHash: intent.burnTxHash ?? null,
       mintTxHash: intent.mintTxHash ?? null,
       invoiceAmount: invoiceUnits.toString(),
       invoiceAmountDisplay: formatBridgeBaseUnits(invoiceUnits),
-      amount: grossUnits.toString(),
-      amountDisplay: formatBridgeBaseUnits(grossUnits),
-      feeBufferBps: leaseBps,
+      amount: intent.amount,
+      amountDisplay: formatBridgeBaseUnits(BigInt(intent.amount)),
       destination,
       source: {
         id: source.id,

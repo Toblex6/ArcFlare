@@ -1,54 +1,28 @@
-// src/lib/checkout/bridgeGross.ts
-//
-// Pure checkout cross-chain gross-up math. Kept free of env/DB/RPC so the
-// adversarial cases run without funds.
-//
-// CCTP V2 can deduct a relayer/fast-transfer fee from the gross burn before
-// crediting Arc. The payer must therefore burn MORE than the invoice so the
-// merchant's mint credit is still >= the invoice amount. The buffer is a
-// configured basis-point add-on, never a client-supplied amount:
-//
-//   gross = invoice + ceil(invoice * feeBps / 10_000)
-//
-// and the invoice is marked paid only when the measured Arc credit is
-// >= the invoice amount (see the checkout complete route).
-
-export const DEFAULT_CHECKOUT_BRIDGE_FEE_BPS = 100; // 1%
-export const MAX_CHECKOUT_BRIDGE_FEE_BPS = 1000; // 10%
-
-export function parseCheckoutBridgeFeeBps(raw: string | undefined): number {
-  if (raw === undefined || raw.trim() === "") return DEFAULT_CHECKOUT_BRIDGE_FEE_BPS;
-  if (!/^\d+$/.test(raw.trim())) {
-    throw new Error("ARC_CHECKOUT_BRIDGE_FEE_BPS must be an integer number of basis points.");
-  }
-  const value = Number(raw.trim());
-  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_CHECKOUT_BRIDGE_FEE_BPS) {
-    throw new Error(`ARC_CHECKOUT_BRIDGE_FEE_BPS must be between 0 and ${MAX_CHECKOUT_BRIDGE_FEE_BPS}.`);
-  }
-  return value;
-}
-
-/** Invoice dollars → 6-decimal base units. Rejects non-finite/non-positive. */
+/** Invoice dollars to 6-decimal base units. */
 export function invoiceAmountBaseUnits(amount: number): bigint {
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Invoice amount must be a positive number.");
   const units = Math.round(amount * 1_000_000);
-  if (!Number.isSafeInteger(units) || units <= 0) throw new Error("Invoice amount is outside the supported range.");
+  if (!Number.isSafeInteger(units) || units <= 0) throw new Error('Invoice amount is outside the supported range.');
   return BigInt(units);
 }
 
-/** Gross burn amount that covers the configured bridge-fee buffer. */
-export function grossUpInvoiceAmount(invoiceBaseUnits: bigint, feeBps: number): bigint {
-  if (invoiceBaseUnits <= 0n) throw new Error("Invoice amount must be positive.");
-  if (!Number.isSafeInteger(feeBps) || feeBps < 0 || feeBps > MAX_CHECKOUT_BRIDGE_FEE_BPS) {
-    throw new Error("Bridge fee buffer is outside the supported range.");
-  }
-  if (feeBps === 0) return invoiceBaseUnits;
-  const bps = BigInt(feeBps);
-  const buffer = (invoiceBaseUnits * bps + 9_999n) / 10_000n; // ceil
-  return invoiceBaseUnits + buffer;
+/** Gross up the shortfall using the estimated USDC fee plus a 10% fee margin. */
+export function grossUpInvoiceAmount(shortfall: bigint, estimatedFee: bigint): bigint {
+  if (shortfall <= 0n || estimatedFee < 0n) throw new Error('Invalid checkout bridge amount.');
+  return shortfall + estimatedFee + (estimatedFee + 9n) / 10n;
 }
 
-/** True when the measured Arc credit satisfies the invoice. */
-export function creditSatisfiesInvoice(actualBaseUnits: bigint, invoiceBaseUnits: bigint): boolean {
-  return actualBaseUnits >= invoiceBaseUnits;
+/** Only Bridge Kit's USDC deductions count here. Source gas is paid separately. */
+export function estimatedBridgeFee(fees: unknown): bigint {
+  if (!Array.isArray(fees) || !fees.some((fee) => fee?.type === 'forwarder')) throw new Error('Forwarder fee quote is missing.');
+  return fees.reduce((sum: bigint, fee: { token?: unknown; amount?: unknown } | null) => {
+    if (fee?.token !== 'USDC' || typeof fee.amount !== 'string' || !/^\d{1,18}(?:\.\d{1,6})?$/.test(fee.amount)) {
+      throw new Error('Invalid Bridge Kit USDC fee.');
+    }
+    const [whole, fraction = ''] = fee.amount.split('.');
+    return sum + BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'));
+  }, 0n);
+}
+
+export function checkoutShortfall(invoice: bigint, credited: bigint): bigint {
+  return invoice > credited ? invoice - credited : 0n;
 }

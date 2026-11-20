@@ -4,11 +4,8 @@
 // invoice paid. The burn↔mint binding nonce comes from Circle Iris (resolved by
 // the bound burn hash), and the mint must credit this invoice's merchant wallet.
 //
-// Credit rule: the invoice is paid only when the measured Arc credit is >= the
-// invoice amount. The intent's burn was grossed up server-side for the relay
-// fee, so a merchant is never underpaid. If the mint has not landed yet this is
-// a retryable MINT_NOT_READY response — recovery reuses the same burn and never
-// asks for a second one.
+// Count each verified Arc credit once. An underpaid invoice stays unpaid and
+// may receive another invoice-bound leg after the prior mint is confirmed.
 
 import { NextRequest, NextResponse } from "next/server";
 import { pad } from "viem";
@@ -19,7 +16,8 @@ import { formatBridgeBaseUnits } from "@/lib/bridge/sourceChains";
 import { verifyArcMint, sourceCctpV2 } from "@/lib/bridge/externalVerify";
 import { fetchIrisBridgeMessage } from "@/lib/bridge/irisNonce";
 import { logBridgeStage } from "@/lib/bridge/stageLogger";
-import { invoiceAmountBaseUnits, creditSatisfiesInvoice } from "@/lib/checkout/bridgeGross";
+import { checkoutShortfall, invoiceAmountBaseUnits } from "@/lib/checkout/bridgeGross";
+import { checkoutBridgeBelongsTo, lockCheckoutBridge, readCheckoutBridgeCredit } from "@/lib/checkout/bridgeCredits";
 import { settleFeeBestEffort } from "@/lib/payments/settleFeeBestEffort";
 import { resolveRowCurrency } from "@/lib/tokens/resolveCurrency";
 
@@ -40,7 +38,7 @@ export async function POST(
     }
 
     const intent = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intentId } });
-    if (!intent || intent.invoiceReference !== reference) {
+    if (!intent || !checkoutBridgeBelongsTo(intent, reference)) {
       return NextResponse.json({ success: false, code: "INTENT_NOT_FOUND", error: "No cross-chain payment found for this invoice." }, { status: 404 });
     }
     const invoice = await (prisma as any).paymentLog.findUnique({ where: { reference } });
@@ -48,17 +46,27 @@ export async function POST(
       return NextResponse.json({ success: false, code: "INVOICE_NOT_FOUND", error: "Invoice not found." }, { status: 404 });
     }
 
-    if (intent.status === "COMPLETED") {
-      const actual = intent.actualAmount ? BigInt(intent.actualAmount) : 0n;
+    const invoiceUnits = invoiceAmountBaseUnits(Number(invoice.amount));
+    const respond = (paid: boolean, credited: bigint, mintTxHash: string | null) => {
+      const remaining = checkoutShortfall(invoiceUnits, credited);
+      if (!paid && remaining === 0n) {
+        return NextResponse.json({ success: false, code: "INTENT_STATE_CONFLICT", error: "The verified credit needs invoice review." }, { status: 409 });
+      }
       return NextResponse.json({
-        success: true,
-        state: "completed",
+        success: paid,
+        state: paid ? "completed" : "underpaid",
+        ...(paid ? {} : { code: "UNDERPAID", error: "The merchant received a partial payment. Top up the remaining balance to complete the invoice." }),
         reference: intent.id,
-        actualAmount: intent.actualAmount ?? null,
-        actualAmountDisplay: intent.actualAmount ? formatBridgeBaseUnits(actual) : null,
-        mintTxHash: intent.mintTxHash ?? null,
-        destinationExplorerUrl: intent.mintTxHash ? explorerTxUrl(intent.mintTxHash) : null,
-      });
+        actualAmount: credited.toString(),
+        actualAmountDisplay: formatBridgeBaseUnits(credited),
+        invoiceAmount: invoiceUnits.toString(),
+        remainingAmountDisplay: formatBridgeBaseUnits(remaining),
+        mintTxHash,
+        destinationExplorerUrl: mintTxHash ? explorerTxUrl(mintTxHash) : null,
+      }, { status: paid ? 200 : 409 });
+    };
+    if (intent.status === "COMPLETED") {
+      return respond(invoice.status === "SUCCESS", await readCheckoutBridgeCredit(prisma, reference), intent.mintTxHash);
     }
     if (intent.status === "FAILED") {
       return NextResponse.json({ success: false, code: "INTENT_FAILED", error: intent.error ?? "This payment failed and cannot be resumed." }, { status: 400 });
@@ -129,40 +137,21 @@ export async function POST(
     }
 
     const actual = proof.actualAmount;
-    const invoiceUnits = invoiceAmountBaseUnits(Number(invoice.amount));
-    if (!creditSatisfiesInvoice(actual, invoiceUnits)) {
-      // The mint is real, but the merchant was credited less than the invoice.
-      // Do NOT mark paid. Record the measured credit so the owner can resolve
-      // the shortfall; the same burn is never repeated.
-      await (prisma as any).flowBridgeIntent.updateMany({
-        where: { id: intent.id, status: "BURN_CONFIRMED" },
-        data: { status: "COMPLETED", mintTxHash: proof.mintTxHash, actualAmount: actual.toString(), cctpNonce: iris.nonce },
-      });
-      return NextResponse.json(
-        {
-          success: false,
-          code: "UNDERPAID",
-          reason: "CREDIT_BELOW_INVOICE",
-          actualAmount: actual.toString(),
-          invoiceAmount: invoiceUnits.toString(),
-          error: "The Arc credit was below the invoice amount, so the invoice was not marked paid. No second transfer is needed; contact support with this reference.",
-        },
-        { status: 409 }
-      );
-    }
-
-    const nowIso = new Date();
     const marked = await (prisma as any).$transaction(async (tx: any) => {
+      await lockCheckoutBridge(tx, reference);
+      const existing = await tx.flowBridgeIntent.findFirst({
+        where: { id: { not: intent.id }, mintTxHash: { equals: proof.mintTxHash, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (existing) return null;
       const claim = await tx.flowBridgeIntent.updateMany({
         where: { id: intent.id, status: "BURN_CONFIRMED" },
         data: { status: "COMPLETED", mintTxHash: proof.mintTxHash, actualAmount: actual.toString(), cctpNonce: iris.nonce },
       });
-      if (claim.count === 0) {
-        const reread = await tx.flowBridgeIntent.findUnique({ where: { id: intent.id } });
-        return { paid: false, state: reread?.status ?? "UNKNOWN" };
-      }
-      const updated = await tx.paymentLog.updateMany({
-        where: { reference, status: { in: ["PENDING", "PROCESSING_ONCHAIN"] } },
+      const credited = await readCheckoutBridgeCredit(tx, reference);
+      const updated = claim.count === 1 && checkoutShortfall(invoiceUnits, credited) === 0n
+        ? await tx.paymentLog.updateMany({
+        where: { reference, status: { in: ["PENDING", "PROCESSING_ONCHAIN", "EXPIRED"] } },
         data: {
           status: "SUCCESS",
           arcTxHash: proof.mintTxHash,
@@ -170,35 +159,21 @@ export async function POST(
           senderEmail: intent.sourceWallet,
           chain: "Arc (CCTP Bridge)",
         },
-      });
-      return { paid: updated.count === 1, state: "COMPLETED" };
+      }) : { count: 0 };
+      const current = await tx.paymentLog.findUnique({ where: { reference }, select: { status: true } });
+      return { newlyPaid: updated.count === 1, paid: current?.status === "SUCCESS", credited, newMint: claim.count === 1 };
     });
+    if (!marked) return NextResponse.json({ success: false, code: "INTENT_ALREADY_USED", error: "This mint evidence is already attached to a payment." }, { status: 409 });
 
-    await logBridgeStage(intent.id, {
+    if (marked.newMint) await logBridgeStage(intent.id, {
       stage: "MINT_CONFIRMED",
       txHash: proof.mintTxHash,
       metadata: { invoiceReference: reference, actualAmount: actual.toString(), invoiceAmount: invoiceUnits.toString(), paid: marked.paid },
     });
 
-    if (!marked.paid) {
-      const rereadInvoice = await (prisma as any).paymentLog.findUnique({ where: { reference } });
-      if (rereadInvoice?.status === "SUCCESS") {
-        return NextResponse.json({
-          success: true,
-          state: "completed",
-          reference: intent.id,
-          actualAmount: actual.toString(),
-          actualAmountDisplay: formatBridgeBaseUnits(actual),
-          mintTxHash: proof.mintTxHash,
-          destinationExplorerUrl: explorerTxUrl(proof.mintTxHash),
-        });
-      }
-      return NextResponse.json({ success: false, code: "INTENT_STATE_CONFLICT", error: "The payment changed state while completing. Retry status." }, { status: 409 });
-    }
-
     // Preserve the existing 25 bps checkout fee flow. This runs only after
     // verified merchant mint credit and never rolls back the paid invoice.
-    const settledInvoice = await (prisma as any).paymentLog.findUnique({ where: { reference } });
+    const settledInvoice = marked.newlyPaid ? await (prisma as any).paymentLog.findUnique({ where: { reference } }) : null;
     if (settledInvoice) {
       try {
         const token = resolveRowCurrency(settledInvoice);
@@ -208,18 +183,11 @@ export async function POST(
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      state: "completed",
-      reference: intent.id,
-      actualAmount: actual.toString(),
-      actualAmountDisplay: formatBridgeBaseUnits(actual),
-      invoiceAmount: invoiceUnits.toString(),
-      mintTxHash: proof.mintTxHash,
-      destinationExplorerUrl: explorerTxUrl(proof.mintTxHash),
-      settledAt: nowIso.toISOString(),
-    });
+    return respond(marked.paid, marked.credited, proof.mintTxHash);
   } catch (error: any) {
+    if (error?.code === "P2002") {
+      return NextResponse.json({ success: false, code: "INTENT_ALREADY_USED", error: "This mint evidence is already attached to a payment." }, { status: 409 });
+    }
     console.error("[checkout/bridge/complete]", error);
     return NextResponse.json({ success: false, error: "Could not complete the cross-chain payment yet." }, { status: 500 });
   }

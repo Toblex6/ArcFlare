@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatBridgeBaseUnits } from "@/lib/bridge/sourceChains";
 import { explorerTxUrl } from "@/lib/config/network";
+import { checkoutBridgeBelongsTo, readCheckoutBridgeCredit } from "@/lib/checkout/bridgeCredits";
+import { checkoutShortfall, invoiceAmountBaseUnits } from "@/lib/checkout/bridgeGross";
 
 export async function GET(
   req: NextRequest,
@@ -20,13 +22,14 @@ export async function GET(
       return NextResponse.json({ success: false, code: "INTENT_REQUIRED", error: "Missing intent." }, { status: 400 });
     }
     const intent = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: intentId } });
-    if (!intent || intent.invoiceReference !== reference) {
+    if (!intent || !checkoutBridgeBelongsTo(intent, reference)) {
       return NextResponse.json({ success: false, code: "INTENT_NOT_FOUND", error: "No cross-chain payment found for this invoice." }, { status: 404 });
     }
     const invoice = await (prisma as any).paymentLog.findUnique({
       where: { reference },
-      select: { status: true, arcTxHash: true },
+      select: { status: true, amount: true },
     });
+    const credited = await readCheckoutBridgeCredit(prisma, reference);
     return NextResponse.json({
       success: true,
       reference: intent.id,
@@ -40,6 +43,7 @@ export async function GET(
       destinationExplorerUrl: intent.mintTxHash ? explorerTxUrl(intent.mintTxHash) : null,
       invoiceStatus: invoice?.status ?? null,
       invoicePaid: invoice?.status === "SUCCESS",
+      remainingAmountDisplay: invoice ? formatBridgeBaseUnits(checkoutShortfall(invoiceAmountBaseUnits(Number(invoice.amount)), credited)) : null,
     });
   } catch (error: any) {
     console.error("[checkout/bridge/status]", error);
