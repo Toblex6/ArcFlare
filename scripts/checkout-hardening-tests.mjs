@@ -17,6 +17,7 @@
 //
 // Usage: node scripts/checkout-hardening-tests.mjs [baseUrl]
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import { ethers } from 'ethers';
 import { PrismaClient } from '@prisma/client';

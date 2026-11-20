@@ -22,6 +22,7 @@
  *
  * Run: node scripts/escrow-beneficiary-metrics-tests.mjs
  */
+import './lib/require-loopback-test-db.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

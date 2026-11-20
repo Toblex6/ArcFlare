@@ -23,6 +23,7 @@
  * Static proofs run without a dev server. Live HTTP proofs run if BASE is reachable.
  * Run: npx tsx scripts/reputation-regression-tests.ts [baseUrl]
  */
+import './lib/require-loopback-test-db.mjs';
 import "dotenv/config";
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local", override: true });

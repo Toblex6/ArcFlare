@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './lib/require-loopback-test-db.mjs';
 // Focused tests for 4 Build 3 defects:
 // 1) lock counted exactly once
 // 2) release clears client's locked amount (no double-count)

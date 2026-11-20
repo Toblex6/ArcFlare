@@ -8,6 +8,7 @@
 //      the allowed requests (Serializable + FOR UPDATE, not a JS sum)
 // Run: npx tsx scripts/spend-window-atomicity-tests.ts
 
+import './lib/require-loopback-test-db.mjs';
 import { prisma } from '@/lib/prisma';
 import { enforceSpendLimit, SPEND_WINDOW_CAP_MICROS } from '@/lib/agents/spendWindow';
 

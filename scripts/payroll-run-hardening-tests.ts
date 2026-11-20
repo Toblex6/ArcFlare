@@ -10,6 +10,7 @@
 //
 // Run: npx tsx scripts/payroll-run-hardening-tests.ts   (dev server required)
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 

@@ -11,6 +11,7 @@
  * No dev server required; DB rows are used for /history scoping checks.
  * Static file checks cover the once-per-job + try/catch properties.
  */
+import './lib/require-loopback-test-db.mjs';
 import { PrismaClient } from "@prisma/client";
 import { ethers } from "ethers";
 import fs from "fs";

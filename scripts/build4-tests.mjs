@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './lib/require-loopback-test-db.mjs';
 // Build 4 focused tests — no RPC required (uses mocked DB via prisma if available, else logic unit tests)
 let pass=0,fail=0;
 function assert(name, cond, extra=""){ if(cond){ console.log(`✅ ${name}`); pass++; } else { console.log(`❌ ${name} ${extra}`); fail++; } }

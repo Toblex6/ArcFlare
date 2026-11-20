@@ -9,6 +9,7 @@
 // Run: npx tsx scripts/ssrf-guard-tests.ts   (dev server on 127.0.0.1:3000)
 //      npx tsx scripts/ssrf-guard-tests.ts --unit-only (no server/DB writes)
 
+import './lib/require-loopback-test-db.mjs';
 import { assertSafeTargetUrl } from '../src/lib/security/ssrfGuard';
 import { PrismaClient } from '@prisma/client';
 

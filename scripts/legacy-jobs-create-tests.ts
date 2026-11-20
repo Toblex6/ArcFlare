@@ -21,6 +21,7 @@
  * Run: npx tsx scripts/legacy-jobs-create-tests.ts
  * No dev server required for static + DB checks; live handler spy uses real POST import with mocked Circle.
  */
+import './lib/require-loopback-test-db.mjs';
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";

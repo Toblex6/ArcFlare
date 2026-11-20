@@ -10,6 +10,7 @@
 //
 // Usage: node scripts/telegram-deliver-e2e.mjs [baseUrl]
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 // Next.js precedence: .env.local overrides .env for the dev server. The

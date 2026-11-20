@@ -21,6 +21,7 @@
 //     enforced (static), execution replay rejected (static resume rules),
 //     PaymentConversion one row/payment (static schema + live default).
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });

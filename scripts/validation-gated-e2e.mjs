@@ -4,6 +4,7 @@
 // Path B: validation-gated job (hire with validation -> fund -> submit -> release BEFORE validation -> must fail 409 -> validation request -> validator PASS -> release -> worker receives payment)
 // Also tests: FAIL blocks release, wrong validator rejected, duplicate request idempotent, unauthorized release rejected
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });

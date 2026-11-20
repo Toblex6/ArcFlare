@@ -9,6 +9,7 @@
 //
 // Run: npx tsx scripts/procurement-bigint-e2e.ts (needs DATABASE_URL)
 
+import './lib/require-loopback-test-db.mjs';
 import { prisma } from "../src/lib/prisma";
 import { GET } from "../src/app/api/procurement/route";
 

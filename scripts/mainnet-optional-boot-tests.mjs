@@ -93,7 +93,7 @@ try {
     assert.equal(response.status, 503, `${method} ${path}`);
     assert.equal(response.headers.has('PAYMENT-REQUIRED'), false);
     const body = await response.json();
-    assert.equal(body.code, path.includes('/cctp/') ? 'cctp_unavailable' : 'x402_unavailable');
+    assert.equal(body.code, path.includes('/cctp/') ? 'cctp_unavailable' : 'x402_disabled');
     checks++;
   }
   for (const action of ['create', 'stop', 'withdraw']) {
@@ -101,7 +101,7 @@ try {
       method: 'POST', body: '{', signal: AbortSignal.timeout(30_000),
     });
     assert.equal(response.status, 503);
-    assert.equal((await response.json()).error, 'stream_unavailable');
+    assert.equal((await response.json()).code, 'STREAM_ABI_CONFIG_CONFLICT');
     checks++;
   }
   for (const action of ['open', 'release', 'close']) {
@@ -109,7 +109,7 @@ try {
       method: 'POST', body: '{', signal: AbortSignal.timeout(30_000),
     });
     assert.equal(response.status, 503);
-    assert.equal((await response.json()).error, 'stream_unavailable');
+    assert.equal((await response.json()).error, 'erc8183_unavailable');
     checks++;
   }
   const listing = await fetch(`${base}/api/payments/stream/create`, { signal: AbortSignal.timeout(30_000) });

@@ -21,6 +21,7 @@
  * Run: npx tsx scripts/direct-hire-create-tests.ts
  * No dev server required.
  */
+import './lib/require-loopback-test-db.mjs';
 import { PrismaClient } from "@prisma/client";
 import { ethers } from "ethers";
 import fs from "fs";

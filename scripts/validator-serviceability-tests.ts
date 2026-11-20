@@ -28,6 +28,7 @@
  * Run: npx tsx scripts/validator-serviceability-tests.ts
  * No dev server required. Needs DB (DATABASE_URL).
  */
+import './lib/require-loopback-test-db.mjs';
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
 import path, { dirname, join } from "path";

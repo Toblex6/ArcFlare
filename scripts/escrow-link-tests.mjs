@@ -16,6 +16,7 @@
  *
  * Run: node scripts/escrow-link-tests.mjs
  */
+import './lib/require-loopback-test-db.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

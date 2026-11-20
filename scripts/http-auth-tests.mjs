@@ -6,6 +6,7 @@
 //
 // Usage: node scripts/http-auth-tests.mjs [baseUrl]
 
+import './lib/require-loopback-test-db.mjs';
 import { ethers } from 'ethers';
 
 const BASE = process.argv[2] || 'http://localhost:3199';

@@ -14,6 +14,7 @@
 //
 // Run: npx tsx scripts/scheduled-run-claim-tests.ts   (dev server required)
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 

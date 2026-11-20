@@ -23,6 +23,7 @@
  * Run:  node scripts/escrow-beneficiary-e2e.mjs
  */
 
+import './lib/require-loopback-test-db.mjs';
 import { config as loadEnv } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

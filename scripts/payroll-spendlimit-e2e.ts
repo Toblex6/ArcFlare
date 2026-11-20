@@ -14,6 +14,7 @@
 // for the harness pattern). This script proves the enforcement + recovery
 // mechanics the route relies on, with real funds and the real DB.
 
+import './lib/require-loopback-test-db.mjs';
 import "dotenv/config";
 import { ethers } from "ethers";
 import { getRelayerSigner } from "@/lib/wallet/jobEscrowClient";

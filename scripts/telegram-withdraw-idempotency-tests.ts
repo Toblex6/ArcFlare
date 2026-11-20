@@ -13,6 +13,7 @@
 //
 // Run: npx tsx scripts/telegram-withdraw-idempotency-tests.ts
 
+import './lib/require-loopback-test-db.mjs';
 import { ethers } from 'ethers';
 import { PrismaClient } from '@prisma/client';
 import { handleConfirmWithdraw, handleWithdraw } from '../src/lib/telegram/botHandlers';
