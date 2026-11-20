@@ -81,6 +81,8 @@ export default function ClosingCTA() {
             <Link href="/start" className="hover:text-[var(--text)] transition">Get started</Link>
             <Link href="/merchant/login" className="hover:text-[var(--text)] transition">Business login</Link>
             <Link href="/stats" className="hover:text-[var(--text)] transition">Stats</Link>
+            <Link href="/terms" className="hover:text-[var(--text)] transition">Terms</Link>
+            <Link href="/privacy" className="hover:text-[var(--text)] transition">Privacy</Link>
           </div>
         </div>
       </footer>
