@@ -26,6 +26,7 @@
 process.env.ROUTING_PROVIDER_UNITFLOW_V3_ENABLED =
   process.env.ROUTING_PROVIDER_UNITFLOW_V3_ENABLED ?? "1";
 
+import './lib/require-loopback-test-db.mjs';
 import dotenv from "dotenv";
 dotenv.config();
 if (!process.env.DATABASE_URL) dotenv.config({ path: ".env.local" });

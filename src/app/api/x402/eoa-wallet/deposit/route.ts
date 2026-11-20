@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { withApiKeyOrMerchant, resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getOrCreateBuyerWallet } from "@/lib/x402-wallet";
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { isGatewayAvailable, requireGatewayChain, gatewayUnavailableBody } from "@/lib/x402-gateway";
 
 function sanitizeBigInts(obj: any): any {
@@ -43,6 +43,7 @@ async function depositPostHandler(req: NextRequest) {
     const client = new GatewayClient({
       chain: requireGatewayChain(),
       privateKey: wallet.privateKey,
+      rpcUrl: getNetworkConfig().primaryRpc,
     });
 
     const result = await client.deposit(amount.toString());
@@ -81,6 +82,7 @@ async function depositGetHandler(req: NextRequest) {
     const client = new GatewayClient({
       chain: requireGatewayChain(),
       privateKey: wallet.privateKey,
+      rpcUrl: getNetworkConfig().primaryRpc,
     });
 
     const balances = await client.getBalances();

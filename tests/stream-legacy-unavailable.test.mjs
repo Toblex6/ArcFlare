@@ -30,7 +30,7 @@ const ENVIRONMENTS = [
   ['configured testnet', { ARC_NETWORK: 'testnet', ARCFLARE_STREAM_CONTRACT_ADDRESS: net.TESTNET_STREAM_CONTRACT_ADDRESS }],
   // Format-valid fixture only, not a claim of a deployed mainnet contract.
   ['configured mainnet', { ...MAINNET_ENV, ARC_MAINNET_STREAM_ADDRESS: '0x' + '6'.repeat(40) }],
-  ['mainnet without streaming', MAINNET_ENV],
+  ['mainnet with default streaming deployment', MAINNET_ENV],
 ];
 const ROUTES = { create, stop, withdraw };
 const PAYLOADS = [
@@ -111,13 +111,9 @@ for (const [action, route] of Object.entries(ROUTES)) {
           assert.equal(response.status, 503);
           const result = await response.json();
           assert.equal(result.success, false);
-          if (environment === 'mainnet without streaming') {
-            assert.equal(result.error, 'stream_unavailable');
-          } else {
-            assert.equal(result.error, `streaming ${action} is not available`);
-            assert.equal(result.code, 'STREAM_ABI_CONFIG_CONFLICT');
-            assert.match(result.message, /No funds have moved/);
-          }
+          assert.equal(result.error, `streaming ${action} is not available`);
+          assert.equal(result.code, 'STREAM_ABI_CONFIG_CONFLICT');
+          assert.match(result.message, /No funds have moved/);
           assert.ok(!result.txHash && !result.stream, 'no fabricated transaction or stream');
           assert.deepEqual(calls, [], 'no stream DB access, wallet, RPC or webhook');
         });
@@ -149,7 +145,7 @@ for (const [environment, env] of ENVIRONMENTS) test(`unauthenticated legacy POST
       assert.equal(response.status, 503);
       const result = await response.json();
       assert.equal(result.success, false);
-      assert.equal(result.error, environment === 'mainnet without streaming' ? 'stream_unavailable' : `streaming ${action} is not available`);
+      assert.equal(result.error, `streaming ${action} is not available`);
     }
     assert.deepEqual(calls, []);
   });

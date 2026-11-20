@@ -11,6 +11,7 @@
 //
 // Run: npx tsx scripts/payroll-fund-route-smoke.ts
 
+import './lib/require-loopback-test-db.mjs';
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";

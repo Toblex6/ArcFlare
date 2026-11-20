@@ -13,6 +13,7 @@
 //
 // Run with the dev server on :3000:  npx tsx scripts/payroll-x402-e2e.ts
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });

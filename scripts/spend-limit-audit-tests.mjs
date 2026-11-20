@@ -20,6 +20,7 @@
 // Run with the dev server on :3000:
 //   node scripts/spend-limit-audit-tests.mjs [baseUrl]
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { SignJWT } from 'jose';

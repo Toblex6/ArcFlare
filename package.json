@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "prisma generate && prisma migrate deploy && next build --webpack",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node scripts/run-safe-tests.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-circle-wallets": "1.4.3",

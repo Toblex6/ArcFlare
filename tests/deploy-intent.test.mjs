@@ -10,8 +10,9 @@
 // make live HTTP testing impractical, so — following tests/deploy-identity and
 // tests/deploy-persistence conventions — the endpoint proofs here are static
 // source-ordering/security proofs, plus a small live AgentDeployIntent row test
-// (Neon dev; row created + deleted, existing data untouched).
+// (disposable loopback PostgreSQL only).
 // Run: node --test tests/deploy-intent.test.mjs
+import '../scripts/lib/require-loopback-test-db.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

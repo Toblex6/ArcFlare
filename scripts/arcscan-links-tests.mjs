@@ -31,12 +31,12 @@ ok(activityBlock.includes('a.explorerUrl ?'), 'activity rows branch on explorerU
 ok(activityBlock.includes('href={a.explorerUrl}'), 'row link points at the API-provided explorerUrl');
 ok(activityBlock.includes('target="_blank" rel="noopener noreferrer"'), 'row link opens in a new tab safely');
 ok(activityBlock.includes('styles.resultLink'), 'row link reuses the existing resultLink styling (same pattern as result.explorerUrl)');
-ok(activityBlock.includes('Pending'), 'null explorerUrl renders a pending indicator instead of a dead link');
+ok(activityBlock.includes('a.status === "SUCCESS" ? null : paymentStatusLabel(a.status)'), 'null explorerUrl renders status or nothing instead of a dead link');
 
 // The API really returns explorerUrl per row.
 const api = readFileSync(join(here, '..', 'src', 'app', 'api', 'consumer', 'activity', 'route.ts'), 'utf8');
 ok(api.includes('arcTxHash'), 'activity API still computes explorerUrl from arcTxHash');
-ok(api.includes('testnet.arcscan.app/tx/'), 'activity API points at Arcscan');
+ok(api.includes('explorerTxUrl(log.arcTxHash)'), 'activity API uses the configured explorer');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

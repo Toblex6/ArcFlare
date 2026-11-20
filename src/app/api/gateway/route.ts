@@ -10,6 +10,8 @@ import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAd
 import { USDC_AMOUNT_RE, MAX_USDC_AMOUNT } from '@/lib/validation';
 import { isAddress } from 'viem';
 import { isGatewayAvailable, gatewayUnavailableBody } from '@/lib/x402-gateway';
+import { GatewayClient } from '@circle-fin/x402-batching/client';
+import { requireGatewayChain } from '@/lib/x402-gateway';
 
 // Facilitator URL + Circle chain flow from the authoritative network config
 // (was hardcoded testnet Gateway URL + 'ARC-TESTNET').
@@ -48,24 +50,23 @@ async function getBalanceHandler(request: NextRequest) {
       );
     }
 
-    const res = await fetch(
-      `${facilitatorUrl()}/balance?address=${sellerAddress}&chain=${arcChain()}`,
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-
+    // Current Gateway API is POST /v1/balances (domain 26), not the retired
+    // /balance?address&chain endpoint.
+    const res = await fetch(`${facilitatorUrl()}/v1/balances`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+      body: JSON.stringify({ token: 'USDC', sources: [{ domain: getNetworkConfig().cctpDomain, depositor: sellerAddress }] }),
+    });
     const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Failed to fetch Gateway balance.');
-    }
+    if (!res.ok) throw new Error(data.message || data.error || 'Failed to fetch Gateway balance.');
+    const balance = Array.isArray(data.balances) ? data.balances.find((b: any) => Number(b.domain) === getNetworkConfig().cctpDomain && String(b.depositor).toLowerCase() === sellerAddress.toLowerCase())?.balance ?? '0' : '0';
 
     return NextResponse.json({
       success: true,
       sellerAddress,
-      gatewayBalance: data.balance,
+      gatewayBalance: balance,
       currency: 'USDC',
       chain: arcChain(),
-      message: `Seller Gateway balance: ${data.balance} USDC accrued from paid API calls.`,
+      message: `Seller Gateway balance: ${balance} USDC accrued from paid API calls.`,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
@@ -146,22 +147,12 @@ async function withdrawHandler(request: NextRequest) {
       );
     }
 
-    const res = await fetch(`${facilitatorUrl()}/withdraw`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        address: resolvedSeller,
-        chain: arcChain(),
-        recipient: resolvedPayout,
-        amount: amount.toString(),
-      }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Withdrawal failed.');
-    }
+    const privateKey = process.env.SELLER_PRIVATE_KEY as `0x${string}` | undefined;
+    if (!privateKey) return NextResponse.json({ success: false, error: 'SELLER_PRIVATE_KEY not configured.' }, { status: 500 });
+    const keyAddress = (await import('viem/accounts')).privateKeyToAccount(privateKey).address;
+    if (keyAddress.toLowerCase() !== resolvedSeller.toLowerCase()) return NextResponse.json({ success: false, error: 'SELLER_PRIVATE_KEY does not control sellerAddress.' }, { status: 403 });
+    const client = new GatewayClient({ chain: requireGatewayChain(), privateKey, rpcUrl: getNetworkConfig().primaryRpc });
+    const data = await client.withdraw(amountStr, { chain: requireGatewayChain(), recipient: resolvedPayout as `0x${string}` });
 
     console.log(`✅ Withdrew ${amount} USDC from Gateway to ${resolvedPayout}`);
 
@@ -173,7 +164,8 @@ async function withdrawHandler(request: NextRequest) {
       // Same Batch Facilitator as x402.ts's settle() — "transaction" here is
       // the Gateway's settlement reference, not confirmed to be a real onchain
       // hash. Shown honestly rather than assumed to be ArcScan-resolvable.
-      gatewayReference: data.transaction ?? null,
+      txHash: data.mintTxHash,
+      gatewayReference: null,
       message: `Withdrew ${amount} USDC from Gateway balance to Payout Wallet on ${getNetworkConfig().name === 'mainnet' ? 'Arc' : 'Arc Testnet'}.`,
     });
   } catch (error: any) {

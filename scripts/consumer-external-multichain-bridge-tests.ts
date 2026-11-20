@@ -14,6 +14,7 @@
 //
 // Run: npx tsx scripts/consumer-external-multichain-bridge-tests.ts
 
+import './lib/require-loopback-test-db.mjs';
 import dotenv from "dotenv";
 dotenv.config();
 if (!process.env.DATABASE_URL) dotenv.config({ path: ".env.local" });

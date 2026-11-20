@@ -236,14 +236,11 @@ export function validateWalletEnv(env: Record<string, string | undefined> = proc
 
   // Stream contract address — network-gated exactly like escrow. Testnet keeps
   // the existing deployment variable (both spellings live in this repo);
-  // mainnet permits an unset ARC_MAINNET_STREAM_ADDRESS and NEVER reads the testnet
-  // variables (a testnet value there is additionally rejected at request time
-  // by requireStreamAddress()).
+  // mainnet has a verified default pin and permits an explicit override. It
+  // NEVER reads testnet variables; malformed overrides fail startup.
   if (getArcNetworkName(env) === "mainnet") {
     const mainnetStream = env.ARC_MAINNET_STREAM_ADDRESS?.trim();
-    if (!mainnetStream) {
-      warnings.push("ARC_MAINNET_STREAM_ADDRESS is not set — streaming is unavailable on mainnet (503); testnet variables are never used.");
-    } else if (!ADDRESS_RE.test(mainnetStream)) {
+    if (mainnetStream && !ADDRESS_RE.test(mainnetStream)) {
       errors.push(
         "ARC_MAINNET_STREAM_ADDRESS: missing or invalid address (ArcFlareStream on mainnet — testnet variables are never used)"
       );

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import './lib/require-loopback-test-db.mjs';
 // Build 3 E2E: ledger, treasury, policy, idempotency, validation linkage
 // Off-chain where possible (no real fund moves required for CI); on-chain
 // instrumented paths are exercised via the ledger service directly.

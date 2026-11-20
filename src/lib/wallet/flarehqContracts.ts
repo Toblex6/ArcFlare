@@ -162,6 +162,70 @@ export const escrowAbi = [
     inputs: [],
     outputs: [{ name: '', type: 'address' }],
   },
+  // ── FlareHQEscrow finalization (roles / 2-step ownership / fee) ───────────
+  {
+    name: 'owner',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'pendingOwner',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'arbiter',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'treasury',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'FEE_BPS',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'transferOwnership',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'newOwner', type: 'address' }],
+    outputs: [],
+  },
+  {
+    name: 'acceptOwnership',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: 'setArbiter',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'next', type: 'address' }],
+    outputs: [],
+  },
+  {
+    name: 'setTreasury',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'next', type: 'address' }],
+    outputs: [],
+  },
 ] as const;
 
 export const escrowEvents = {

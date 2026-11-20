@@ -15,6 +15,7 @@
 //
 // Usage: npx tsx scripts/build5-route-tests.mjs [baseUrl]
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });
@@ -308,6 +309,5 @@ async function main() {
 }
 
 main().catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });
-
 
 

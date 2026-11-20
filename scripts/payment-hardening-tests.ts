@@ -28,6 +28,7 @@
  * Run: npx tsx scripts/payment-hardening-tests.ts
  */
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });

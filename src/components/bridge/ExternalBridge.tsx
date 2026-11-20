@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
-import { createPublicClient, http, parseAbi } from 'viem';
+import { createPublicClient, formatUnits, http, parseAbi, parseUnits } from 'viem';
 import {
   getBridgeSourceChains,
   validateBridgeAmount,
@@ -47,6 +47,7 @@ import { friendlyBridgeError } from '@/lib/wallet/walletErrors';
 import { useNetwork } from '@/src/components/NetworkContext';
 import { bridgeEventHash, bridgeHasRecoveryEvidence, bridgeNeedsBurnReview, bridgeResultFailure, canRetryBridgeBeforeBurn, selectBridgeRecoveryHash } from '@/lib/bridge/resultState';
 import { pollBridgeSettlementStatus } from '@/lib/bridge/settlementPolling';
+import ui from './ExternalBridge.module.css';
 
 const USDC_ABI = parseAbi([
   'function balanceOf(address owner) view returns (uint256)',
@@ -71,8 +72,37 @@ interface StageState {
   status: 'pending' | 'active' | 'done' | 'error';
 }
 
+interface BridgeEstimateView {
+  received: string;
+  bridgeFee: string;
+  gasFee: string | null;
+  gasToken: string | null;
+}
+
 function shortAddr(a: string): string {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+}
+
+function decimalUnits(value: unknown, decimals: number): bigint | null {
+  if (typeof value !== 'string' || !/^\d+(\.\d+)?$/.test(value.trim())) return null;
+  try {
+    return parseUnits(value.trim(), decimals);
+  } catch {
+    return null;
+  }
+}
+
+function trimDecimal(value: string, maxFraction = 8): string {
+  const [whole, fraction = ''] = value.split('.');
+  const trimmed = fraction.slice(0, maxFraction).replace(/0+$/, '');
+  return trimmed ? `${whole}.${trimmed}` : whole;
+}
+
+function receiptFee(sent: string, received: string): string | null {
+  const sentUnits = decimalUnits(sent, 6);
+  const receivedUnits = decimalUnits(received, 6);
+  if (sentUnits === null || receivedUnits === null || receivedUnits >= sentUnits) return null;
+  return formatBridgeBaseUnits(sentUnits - receivedUnits);
 }
 
 function amountCopy(e: BridgeAmountError, label: string): string {
@@ -159,17 +189,17 @@ function rawStepSummary(result: any): Array<{ name: string | null; state: string
 
 // Server-side stage enum values → user-facing labels.
 const STAGE_LABELS: Record<string, string> = {
-  PREPARING: 'Preparing bridge',
-  APPROVAL_PENDING: 'Waiting for wallet approval',
-  APPROVAL_CONFIRMED: 'Approval confirmed',
-  BURN_PENDING: 'Submitting source burn',
-  BURN_CONFIRMED: 'Source burn confirmed',
-  ATTESTATION_PENDING: 'Waiting for Circle attestation',
-  ATTESTATION_CONFIRMED: 'Circle attestation received',
-  MINT_PENDING: 'Minting on Arc',
-  MINT_CONFIRMED: 'Mint confirmed on Arc',
-  VERIFIED: 'Bridge verified',
-  FAILED: 'Bridge step needs attention',
+  PREPARING: 'Getting the transfer ready',
+  APPROVAL_PENDING: 'Waiting for your wallet',
+  APPROVAL_CONFIRMED: 'Wallet confirmed',
+  BURN_PENDING: 'Sending from the source network',
+  BURN_CONFIRMED: 'Sent from the source network',
+  ATTESTATION_PENDING: 'Moving your USDC to Arc',
+  ATTESTATION_CONFIRMED: 'Ready to arrive on Arc',
+  MINT_PENDING: 'Depositing into your Arc wallet',
+  MINT_CONFIRMED: 'Arrived in your Arc wallet',
+  VERIFIED: 'Transfer complete',
+  FAILED: 'Transfer needs attention',
 };
 
 /**
@@ -275,8 +305,10 @@ export default function ExternalBridge({
 
   const [phase, setPhase] = useState<Phase>('form');
   const [stages, setStages] = useState<StageState[]>([]);
-  // Step D: kit.estimate fee preview (best-effort, never blocks).
-  const [estimate, setEstimate] = useState<{ received: string | null; cost: string | null } | null>(null);
+  // Live quote preview (best-effort, never blocks). The SDK returns itemized
+  // bridge fees and source gas; turn that into the three numbers a normal
+  // bridge user needs: receive amount, bridge fee and gas.
+  const [estimate, setEstimate] = useState<BridgeEstimateView | null>(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
 
   const [stageNote, setStageNote] = useState<string | null>(null);
@@ -377,8 +409,8 @@ export default function ExternalBridge({
     setPhase('awaiting-resume');
     setError(
       saved.burnTxHash
-        ? 'A source burn hash was saved. Resume verification and settlement of this same bridge; do not burn again.'
-        : 'Bridge interrupted before a burn hash was saved. Check wallet activity: approval alone is not a bridge. Recover an existing burn, or confirm no burn was submitted before retrying this same intent.'
+        ? 'Your transfer is already on its way. Continue tracking it—do not start another transfer.'
+        : 'This transfer was interrupted before we could confirm that it was sent. Check your wallet activity before trying again.'
     );
     fetchBridgeStage(saved.intentReference).then(({ stage, txHash }) => {
       if (!mountedRef.current || !stage) return;
@@ -428,11 +460,35 @@ export default function ExternalBridge({
             token: 'USDC',
           });
           if (cancelled) return;
-          const received = res && typeof res.amountReceived !== 'undefined' && res.amountReceived !== null
-            ? String(res.amountReceived) : null;
-          const cost = res && typeof res.totalCost !== 'undefined' && res.totalCost !== null
-            ? String(res.totalCost) : null;
-          setEstimate(received || cost ? { received, cost } : null);
+          const amountUnits = parsed.amountBaseUnits;
+          const bridgeFeeUnits = Array.isArray(res?.fees)
+            ? res.fees.reduce((total: bigint, fee: any) => {
+                const units = fee?.token === 'USDC' ? decimalUnits(fee?.amount, 6) : null;
+                return units === null ? total : total + units;
+              }, 0n)
+            : 0n;
+          const receivedUnits = amountUnits > bridgeFeeUnits ? amountUnits - bridgeFeeUnits : 0n;
+          const gasRows = Array.isArray(res?.gasFees) ? res.gasFees : [];
+          const gasToken = gasRows.find((row: any) => typeof row?.token === 'string')?.token ?? null;
+          let gasFeeUnits = 0n;
+          let gasDecimals = 18;
+          let gasKnown = false;
+          for (const row of gasRows) {
+            if (!row?.fees || typeof row.fees.fee !== 'string' || typeof row?.token !== 'string') continue;
+            if (gasToken !== row.token) continue;
+            gasDecimals = source.nativeCurrency.decimals;
+            const units = decimalUnits(row.fees.fee, gasDecimals);
+            if (units !== null) {
+              gasFeeUnits += units;
+              gasKnown = true;
+            }
+          }
+          setEstimate({
+            received: formatBridgeBaseUnits(receivedUnits),
+            bridgeFee: formatBridgeBaseUnits(bridgeFeeUnits),
+            gasFee: gasKnown ? trimDecimal(formatUnits(gasFeeUnits, gasDecimals), 9) : null,
+            gasToken,
+          });
         } catch {
           if (!cancelled) setEstimate(null);
         } finally {
@@ -647,10 +703,10 @@ export default function ExternalBridge({
     if (burn || mint) persistResume(saved.intentReference, saved.result, saved.sourceChainId ?? source.id, true);
     if (!mountedRef.current) return;
     if (String(event?.method).toLowerCase() === 'approve') {
-      setStageNote('Approval returned. The source burn is a separate wallet confirmation; approval alone does not move USDC.');
+      setStageNote('One more wallet confirmation');
       setStage('burn', 'active');
     }
-    if (burn) setStageNote('Source burn hash saved. Checking confirmation and Arc settlement…');
+    if (burn) setStageNote('USDC sent. Waiting for it to arrive on Arc');
   }
 
   async function verifyAndComplete(
@@ -660,10 +716,10 @@ export default function ExternalBridge({
   ): Promise<void> {
     if (!burnTxHash) {
       throw new Error(
-        'No source burn hash was recorded. Check wallet activity before retrying; a confirmed approval is not a completed bridge.'
+        'We could not find the transfer transaction. Check your wallet activity before trying again.'
       );
     }
-    setStageNote('Verifying the source transaction…');
+    setStageNote('Confirming your transfer');
     // (d) verify POST — always-on trace so a missing server hit is provable.
     bridgeTrace('step-d verify POST', { reference: intentReference, burnTxHash });
     const v = await postJson('/api/cctp/transfer/external/verify', {
@@ -679,14 +735,14 @@ export default function ExternalBridge({
     });
     bridgeDiag('I. verify response (server burn proof)', { ok: v?.success, code: v?.code, reason: v?.reason, error: v?.error });
     if (!v?.success) {
-      throw Object.assign(new Error(v?.error ?? 'The source burn could not be verified. Resume verification of this same bridge.'), { bridgeCopy: true });
+      throw Object.assign(new Error(v?.error ?? 'We could not confirm this transfer yet. Try checking it again.'), { bridgeCopy: true });
     }
-    setStageNote('Confirming the Arc mint…');
+    setStageNote('Waiting for your USDC to arrive on Arc');
     if (!mintTxHash) {
       // Burn proven, mint hash not yet available — the loop below keeps
       // polling server status; completion follows when the mint lands.
       throw new Error(
-        'Burn verified — waiting for the Arc mint. Resume below to keep checking this same bridge; do not burn again.'
+        'Your USDC is on the way to Arc. Keep tracking this transfer—do not start it again.'
       );
     }
     const c = await postJson('/api/cctp/transfer/external/complete', {
@@ -699,7 +755,7 @@ export default function ExternalBridge({
       if (c?.code === 'MINT_NOT_VERIFIED' && (c?.reason === 'NOT_FOUND' || c?.reason === 'RPC_UNAVAILABLE')) {
         throw Object.assign(new Error(c.error), { bridgeCopy: true });
       }
-      throw Object.assign(new Error(c?.error ?? 'The Arc mint could not be verified. Resume this same bridge.'), { bridgeCopy: true });
+      throw Object.assign(new Error(c?.error ?? 'Your USDC has not arrived on Arc yet. Keep tracking this transfer.'), { bridgeCopy: true });
     }
     setReceipt({
       amountDisplay: c.amountDisplay ?? resumeRef.current?.amount ?? formatBridgeBaseUnits(BigInt(c.amount ?? '0')),
@@ -724,15 +780,15 @@ export default function ExternalBridge({
 
   async function runBridgeFlow(intentReference: string, kit: any, adapter: any, previousResult?: any): Promise<void> {
     if (previousResult && bridgeHasRecoveryEvidence({ result: previousResult })) {
-      throw Object.assign(new Error('A burn may already exist. Resume verification / settlement; do not submit another burn.'), { bridgeCopy: true, resumeOnly: true });
+      throw Object.assign(new Error('This transfer may already be in progress. Track it instead of starting another one.'), { bridgeCopy: true, resumeOnly: true });
     }
     setStages([
-      { key: 'approve', label: 'Approve USDC', status: 'active' },
-      { key: 'burn', label: 'Burn USDC', status: 'pending' },
-      { key: 'attestation', label: 'Waiting for Circle attestation', status: 'pending' },
-      { key: 'mint', label: 'Minting on Arc', status: 'pending' },
+      { key: 'approve', label: 'Confirm in wallet', status: 'active' },
+      { key: 'burn', label: `Send from ${source.label}`, status: 'pending' },
+      { key: 'attestation', label: 'Move to Arc', status: 'pending' },
+      { key: 'mint', label: 'Deposit to your wallet', status: 'pending' },
     ]);
-    setStageNote('Waiting for wallet confirmation…');
+    setStageNote('Confirm in your wallet');
 
     // (b/c) wallet signing: kit.bridge drives BOTH the approval prompt and the
     // burn prompt inside a single call (there are no separate sign calls).
@@ -820,7 +876,7 @@ export default function ExternalBridge({
     const verified = await postJson('/api/cctp/transfer/external/verify', {
       reference: intentReference, burnTxHash: burnHash,
     });
-    if (!verified?.success) throw Object.assign(new Error(verified?.error ?? 'The burn could not be verified. Resume this same bridge; do not burn again.'), { bridgeCopy: true, resumeOnly: true });
+    if (!verified?.success) throw Object.assign(new Error(verified?.error ?? 'We could not confirm this transfer yet. Track this transfer instead of starting another one.'), { bridgeCopy: true, resumeOnly: true });
     setStage('burn', 'done');
     setStage('attestation', 'active');
     let mintHash = resumeRef.current?.mintTxHash ?? stepOf(result, 'Mint')?.txHash;
@@ -854,13 +910,13 @@ export default function ExternalBridge({
     const saved = resumeRef.current;
     // Synchronous double-submit guard (button disable alone races).
     if (busyRef.current || (retryBeforeBurn ? phase !== 'awaiting-resume' : phase !== 'form')) return;
-    if (!bridgeAvailable) { setError(availability?.message ?? 'Bridge availability has not been confirmed.'); return; }
+    if (!bridgeAvailable) { setError('Transfers to Arc are temporarily unavailable. Try again later.'); return; }
     if (retryBeforeBurn && (!saved || bridgeHasRecoveryEvidence(saved))) {
-      setError('A burn may already exist. Recover this same bridge; do not submit another burn.');
+      setError('This transfer may already be in progress. Track it instead of starting another one.');
       return;
     }
     if (retryBeforeBurn && !canRetryBridgeBeforeBurn(saved!, burnReviewConfirmed)) {
-      setError('Check wallet activity and confirm that no burn was submitted before retrying approval and burn.');
+      setError('Check your wallet activity and confirm that no transfer was sent before trying again.');
       return;
     }
     setError(null);
@@ -900,7 +956,7 @@ export default function ExternalBridge({
         }
       }
 
-      setStageNote('Reserving your bridge…');
+      setStageNote('Getting your transfer ready');
       const intent = await postJson('/api/cctp/transfer/external/intent', {
         sourceChain: source.id,
         amount: amount.trim(),
@@ -967,12 +1023,12 @@ export default function ExternalBridge({
       if ((!retryBeforeBurn && intent.reused) || !intent.canSubmitBurn) {
         setPhase('awaiting-resume');
         setError(intent.burnTxHash
-          ? 'This amount already has a recorded burn. Resume settlement of the existing bridge; do not burn again.'
-          : 'An existing bridge intent was found. Check wallet activity and recover an existing burn, or explicitly retry this same intent if no burn was submitted.');
+          ? 'This transfer is already on the way. Continue tracking it.'
+          : 'We found an unfinished transfer for this amount. Check its status before trying again.');
         return;
       }
 
-      setStageNote('Opening your wallet…');
+      setStageNote('Opening your wallet');
       bridgeTrace('step-bc opening wallet (adapter/kit init)', { reference: intentReference });
       const [{ BridgeKit }, { createViemAdapterFromProvider }] = await Promise.all([
         import('@circle-fin/bridge-kit'),
@@ -1105,7 +1161,7 @@ export default function ExternalBridge({
       rounds: RETRY_ROUNDS,
       delayMs: RETRY_DELAY_MS,
       isActive: () => mountedRef.current,
-      onPoll: () => setStageNote('Waiting for Circle attestation… Minting on Arc…'),
+      onPoll: () => setStageNote('Your USDC is moving to Arc'),
       fetchStatus: async (reference) => fetch(
         `/api/cctp/transfer/external/status?reference=${encodeURIComponent(reference)}`
       ).then((response) => response.json().catch(() => null)),
@@ -1122,31 +1178,31 @@ export default function ExternalBridge({
     try {
       const resumeSourceId = saved.sourceChainId ?? source.id;
       const resumeSource = sources.find((s) => s.id === resumeSourceId);
-      if (!resumeSource) throw Object.assign(new Error('This bridge belongs to a different source network. Do not submit another burn.'), { bridgeCopy: true });
+      if (!resumeSource) throw Object.assign(new Error('This transfer started on a different network. Switch back to that network to track it.'), { bridgeCopy: true });
       const st = await fetch(`/api/cctp/transfer/external/status?reference=${encodeURIComponent(saved.intentReference)}`)
         .then((response) => response.json().catch(() => null));
       if (!st?.success || st.network !== bridgeNetwork || st.sourceChain !== resumeSourceId ||
           String(st.sourceAddress ?? '').toLowerCase() !== sessionLower) {
-        throw Object.assign(new Error(st?.error ?? 'The saved bridge could not be matched to this wallet and network. No new burn was submitted.'), { bridgeCopy: true });
+        throw Object.assign(new Error(st?.error ?? 'We could not match this transfer to the connected wallet and network.'), { bridgeCopy: true });
       }
-      if (st.state === 'failed') throw Object.assign(new Error(st.error ?? 'This bridge needs manual recovery; do not burn again.'), { bridgeCopy: true });
+      if (st.state === 'failed') throw Object.assign(new Error(st.error ?? 'This transfer needs attention. Do not start another one.'), { bridgeCopy: true });
       saved.amount = st.amountDisplay;
       saved.destination = st.destination;
       setAmount(st.amountDisplay);
       const burnHash = selectBridgeRecoveryHash(st.burnTxHash, recoveryBurnHash, saved.burnTxHash || extractBurnTxHash(saved.result));
       if (!/^0x[0-9a-f]{64}$/i.test(burnHash ?? '')) {
-        throw Object.assign(new Error('No burn hash was recorded. Approval alone is not a bridge. Paste the source burn hash to recover, or check wallet activity before retrying approval and burn for this same intent.'), { bridgeCopy: true });
+        throw Object.assign(new Error('We could not find the transfer transaction. Add its transaction hash below, or check your wallet activity before trying again.'), { bridgeCopy: true });
       }
       // No wallet switch or signing is needed for recovery. Verify the burn
       // BEFORE mint discovery, so the server can query Iris for this bridge.
       setStages([
-        { key: 'approve', label: 'Approve USDC', status: 'pending' },
-        { key: 'burn', label: 'Verify source burn', status: 'active' },
-        { key: 'attestation', label: 'Waiting for Circle attestation', status: 'pending' },
-        { key: 'mint', label: 'Minting on Arc', status: 'pending' },
+        { key: 'approve', label: 'Wallet confirmed', status: 'pending' },
+        { key: 'burn', label: `Confirm transfer on ${resumeSource.label}`, status: 'active' },
+        { key: 'attestation', label: 'Move to Arc', status: 'pending' },
+        { key: 'mint', label: 'Deposit to your wallet', status: 'pending' },
       ]);
       const verified = await postJson('/api/cctp/transfer/external/verify', { reference: saved.intentReference, burnTxHash: burnHash });
-      if (!verified?.success) throw Object.assign(new Error(verified?.error ?? 'Could not verify the source burn. Retry this same hash, not the burn.'), { bridgeCopy: true });
+      if (!verified?.success) throw Object.assign(new Error(verified?.error ?? 'We could not confirm that transaction yet. Check the hash and try again.'), { bridgeCopy: true });
       // A typo must not become a sticky saved hash or suppress recovery with
       // the real burn. Persist a manual candidate only after the proof passes.
       saved.burnTxHash = burnHash;
@@ -1193,63 +1249,55 @@ export default function ExternalBridge({
   const hasBurn = !!pendingResume && bridgeHasRecoveryEvidence(pendingResume);
   const needsBurnReview = !!pendingResume && bridgeNeedsBurnReview(pendingResume);
   const canRetryBurn = !!pendingResume && !hasBurn;
+  const amountDisplay = validation.ok
+    ? formatBridgeBaseUnits(validation.amountBaseUnits)
+    : '0';
+  const receiveDisplay = estimate?.received ?? amountDisplay;
+  const completedFee = receipt ? receiptFee(receipt.amountDisplay, receipt.actualDisplay) : null;
 
   if (!bridgeAvailable && phase === 'form') {
     return (
-      <div>
-        <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: '0 0 16px' }}>
-          {availability === null ? 'Checking external bridge availability…' : availability.message ?? 'Bridging from an external wallet is unavailable on Arc right now.'}
-        </p>
-        <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: 0 }}>
-          To get funds in, send USDC directly to your FlareHQ wallet on Arc.
-        </p>
+      <div className={ui.stateCard} aria-live="polite">
+        <span className={ui.stateIcon}>{availability === null ? '…' : '!'}</span>
+        <div>
+          <h3>{availability === null ? 'Checking routes' : 'Bridge unavailable'}</h3>
+          <p>
+            {availability === null
+              ? 'Finding a route to Arc…'
+              : 'Transfers to Arc are temporarily unavailable. You can still send USDC directly to your Arc wallet.'}
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <p style={{ color: 'var(--flow-text-faint)', fontSize: 'clamp(13px, 1.2vw, 15px)', margin: '0 0 16px' }}>
-        Bring USDC from another wallet to your FlareHQ wallet.
-      </p>
-      {availability?.message && <p style={styles.resumeText}>{availability.message}</p>}
-
+    <div className={ui.bridgeWidget}>
       {phase === 'receipt' && receipt ? (
-        <div style={styles.resultSuccess}>
-          <p style={styles.resultIcon}>✓</p>
-          <p style={styles.resultText}>
-            Bridge completed — {receipt.amountDisplay} USDC moved from {receipt.sourceLabel} to your
-            FlareHQ wallet on Arc.
-            {receipt.actualDisplay && receipt.actualDisplay !== receipt.amountDisplay
-              ? ` Received ${receipt.actualDisplay} USDC after relayer fees.`
-              : ''}
-          </p>
-          {receipt.burnTxHash && (
-            <p style={styles.hashRow}>
-              Source transaction
-              <span style={styles.hash}>{shortAddr(receipt.burnTxHash)}</span>
-            </p>
-          )}
-          {receipt.mintTxHash && (
-            <p style={styles.hashRow}>
-              Destination transaction
-              <span style={styles.hash}>{shortAddr(receipt.mintTxHash)}</span>
-            </p>
-          )}
-          <div style={styles.linkRow}>
+        <div className={ui.successCard} aria-live="polite">
+          <span className={ui.successIcon}>✓</span>
+          <p className={ui.successEyebrow}>Transfer complete</p>
+          <h3>{receipt.actualDisplay || receipt.amountDisplay} USDC arrived</h3>
+          <p className={ui.successRoute}>{receipt.sourceLabel} → Arc</p>
+          <div className={ui.summaryRows}>
+            <div><span>Sent</span><strong>{receipt.amountDisplay} USDC</strong></div>
+            {completedFee && <div><span>Bridge fee</span><strong>{completedFee} USDC</strong></div>}
+            <div><span>Received by</span><strong>{shortAddr(receipt.destination)}</strong></div>
+          </div>
+          <div className={ui.explorerLinks}>
             {receipt.sourceExplorerUrl && (
-              <a href={receipt.sourceExplorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>
-                View source transaction
+              <a href={receipt.sourceExplorerUrl} target="_blank" rel="noopener noreferrer">
+                View on {receipt.sourceLabel} ↗
               </a>
             )}
             {receipt.destinationExplorerUrl && (
-              <a href={receipt.destinationExplorerUrl} target="_blank" rel="noopener noreferrer" style={styles.resultLink}>
-                View destination transaction
+              <a href={receipt.destinationExplorerUrl} target="_blank" rel="noopener noreferrer">
+                View on Arc ↗
               </a>
             )}
           </div>
           <button
-            style={styles.doneButton}
+            className={ui.secondaryAction}
             onClick={() => {
               startOver();
               setAmount('');
@@ -1260,210 +1308,233 @@ export default function ExternalBridge({
         </div>
       ) : (
         <>
-          <label style={styles.label}>Source chain</label>
-          <select
-            value={sourceId}
-            onChange={(e) => setSourceId(e.target.value)}
-            disabled={phase !== 'form'}
-            style={styles.input}
-            aria-label="Source chain"
-          >
-            {sources.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-
-          <label style={styles.label}>Source wallet</label>
-          <div style={styles.readonlyBox}>
-            {walletsMatch ? (
-              <span style={styles.mono}>{shortAddr(sessionAddress)}</span>
-            ) : (
-              <span style={{ color: '#f87171' }}>
-                {isConnected
-                  ? `Connected ${shortAddr(connectedAddress ?? '')} — reconnect with ${shortAddr(sessionAddress)} to continue.`
-                  : 'Connect your wallet to continue.'}
-              </span>
-            )}
-          </div>
-
-          <label style={styles.label}>Available</label>
-          <div style={styles.readonlyBox}>
-            {balanceLoading ? (
-              'Loading…'
-            ) : balanceError ? (
-              <span style={{ color: '#f87171' }}>{balanceError}</span>
-            ) : balanceUnits !== null ? (
-              <span>
-                {formatBridgeBaseUnits(balanceUnits)} <span style={{ opacity: 0.7 }}>USDC</span>
-              </span>
-            ) : (
-              <span style={{ opacity: 0.6 }}>—</span>
-            )}
-          </div>
-
-          <label style={styles.label}>Amount</label>
-          <input
-            style={styles.input}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="10.00"
-            inputMode="decimal"
-            disabled={phase !== 'form'}
-            aria-label="Bridge amount in USDC"
-          />
-          {validationMsg && <p style={styles.hintError}>{validationMsg}</p>}
-
-          <label style={styles.label}>Destination</label>
-          <div style={styles.readonlyBox}>
-            <span style={{ opacity: 0.7 }}>FlareHQ wallet · Arc</span>
-            <br />
-            {destLoading ? (
-              'Resolving…'
-            ) : destination ? (
-              <>
-                <span style={styles.mono}>{shortAddr(destination)}</span>
-                {/* Server-proved ARC+LIVE only (server returns true on mainnet
-                    checks alone — never assumed client-side). */}
-                {destinationVerified && (
-                  <>
-                    <br />
-                    <span style={{ fontSize: 11, color: '#0D7C5F', fontWeight: 700 }}>
-                      Arc Mainnet ✓ verified
-                    </span>
-                  </>
+          <div className={ui.routeStack}>
+            <section className={ui.assetCard}>
+              <div className={ui.assetTopline}>
+                <span>From</span>
+                <span>
+                  Balance&nbsp;
+                  {balanceLoading ? '…' : balanceUnits !== null ? `${formatBridgeBaseUnits(balanceUnits)} USDC` : '—'}
+                </span>
+              </div>
+              <div className={ui.assetMainRow}>
+                <label className={ui.chainPicker}>
+                  <span className={ui.chainMark}>{source.label.slice(0, 1)}</span>
+                  <select
+                    value={sourceId}
+                    onChange={(event) => setSourceId(event.target.value)}
+                    disabled={phase !== 'form'}
+                    aria-label="Network to send from"
+                  >
+                    {sources.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                  <span aria-hidden="true">⌄</span>
+                </label>
+                <label className={ui.amountField}>
+                  <span className={ui.srOnly}>Amount of USDC to bridge</span>
+                  <input
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                    placeholder="0.00"
+                    inputMode="decimal"
+                    disabled={phase !== 'form'}
+                    aria-label="Amount of USDC to bridge"
+                  />
+                  <span>USDC</span>
+                </label>
+              </div>
+              <div className={ui.assetFooter}>
+                {walletsMatch ? (
+                  <span className={ui.walletLine}><span className={ui.onlineDot} />{shortAddr(sessionAddress)}</span>
+                ) : (
+                  <span className={ui.inlineError}>
+                    {isConnected
+                      ? `Reconnect ${shortAddr(sessionAddress)} to continue`
+                      : 'Connect your wallet to continue'}
+                  </span>
                 )}
-              </>
-            ) : (
-              <span style={{ color: '#fbbf24' }}>
-                {destUnbound ?? 'No FlareHQ wallet linked yet.'}
-              </span>
-            )}
+              </div>
+            </section>
+
+            <span className={ui.routeArrow} aria-hidden="true">↓</span>
+
+            <section className={ui.assetCard}>
+              <div className={ui.assetTopline}>
+                <span>To</span>
+                {destinationVerified && <span className={ui.verifiedBadge}>Arc Mainnet ✓ verified</span>}
+              </div>
+              <div className={ui.assetMainRow}>
+                <div className={ui.chainPicker}>
+                  <span className={`${ui.chainMark} ${ui.arcMark}`}>A</span>
+                  <strong>Arc</strong>
+                </div>
+                <div className={ui.receiveAmount}>
+                  <strong>{estimateLoading ? '…' : receiveDisplay}</strong>
+                  <span>USDC</span>
+                </div>
+              </div>
+              <div className={ui.assetFooter}>
+                {destLoading ? (
+                  <span>Loading your FlareHQ wallet…</span>
+                ) : destination ? (
+                  <span>Your FlareHQ wallet · <span className={ui.mono}>{shortAddr(destination)}</span></span>
+                ) : (
+                  <span className={ui.inlineWarning}>{destUnbound ?? 'No FlareHQ wallet linked yet'}</span>
+                )}
+              </div>
+            </section>
           </div>
+
+          {balanceError && <p className={ui.inlineError}>{balanceError}</p>}
+          {validationMsg && <p className={ui.inlineError}>{validationMsg}</p>}
 
           {phase === 'form' && destUnbound && !destination && (
-            <div style={styles.unboundCard}>
-              <p style={styles.unboundText}>
-                Create your free FlareHQ wallet with email to receive bridged funds. Use an email
-                that is not already tied to this wallet.
-              </p>
-              <button
-                style={styles.submitButton}
-                onClick={() => {
-                  // Enter the EXISTING email onboarding flow (OTP → verified
-                  // consumer identity → FlareHQ CIRCLE wallet). This bridge
-                  // never provisions a wallet itself — the page owns the flow
-                  // and returns to Bridge when it completes.
-                  onContinueWithEmail();
-                }}
-              >
+            <div className={ui.noticeCard}>
+              <div>
+                <strong>Set up your receiving wallet</strong>
+                <p>Create a free FlareHQ wallet with email so your USDC has somewhere to arrive on Arc.</p>
+              </div>
+              <button className={ui.primaryAction} onClick={onContinueWithEmail}>
                 Continue with email
               </button>
             </div>
           )}
 
           {phase === 'awaiting-resume' ? (
-            <div style={styles.resumeCard}>
-              {errorStage && (
-                <p style={styles.stageError}>
-                  Last known stage: <strong>{errorStage.label}</strong>
-                  {errorStage.txHash && (
-                    <span style={styles.hash}> · {shortAddr(errorStage.txHash)}</span>
-                  )}
-                </p>
-              )}
-              <p style={styles.resumeText}>{error}</p>
-              {pendingResume && <p style={styles.resumeText}>Same bridge: <span style={styles.mono}>{pendingResume.intentReference}</span></p>}
-              <label style={styles.label} htmlFor="bridge-recovery-burn">Existing source burn hash (not the approval hash)</label>
-              <input id="bridge-recovery-burn" style={styles.input} value={recoveryBurnHash} onChange={(event) => setRecoveryBurnHash(event.target.value)} placeholder="0x…" />
-              <p style={styles.resumeText}>You can correct an unverified candidate. A server-verified burn hash cannot be replaced.</p>
-              <label style={styles.label} htmlFor="bridge-recovery-mint">Arc mint hash (optional if the relayer reports it)</label>
-              <input id="bridge-recovery-mint" style={styles.input} value={recoveryMintHash} onChange={(event) => setRecoveryMintHash(event.target.value)} placeholder="0x…" />
-              <div>
-                <button style={styles.submitButton} onClick={handleResume}>
-                  Resume verification / settlement
+            <div className={ui.recoveryCard}>
+              <span className={ui.stateIcon}>{hasBurn ? '↻' : '!'}</span>
+              <div className={ui.recoveryHeading}>
+                <h3>{hasBurn ? 'Your transfer is in progress' : 'Finish this transfer'}</h3>
+                <p>{error ?? (hasBurn
+                  ? 'Your USDC has left the source network and is moving to Arc.'
+                  : 'We found an earlier transfer that did not finish.')}</p>
+                {errorStage && <span className={ui.statusPill}>{errorStage.label}</span>}
+              </div>
+
+              {hasBurn && (
+                <button className={ui.primaryAction} onClick={handleResume}>
+                  Check transfer status
                 </button>
-                <p style={styles.resumeText}>Recovery verifies the existing hashes. It does not ask for a new approval or burn.</p>
+              )}
+
+              <details className={ui.helpDetails} open={!hasBurn}>
+                <summary>{hasBurn ? 'Having trouble?' : 'Continue this transfer'}</summary>
+                <p>Check your {source.label} wallet activity before choosing an option. This prevents sending the same transfer twice.</p>
+
+                <label htmlFor="bridge-recovery-burn">Already sent? Enter the transaction hash</label>
+                <input
+                  id="bridge-recovery-burn"
+                  className={ui.textInput}
+                  value={recoveryBurnHash}
+                  onChange={(event) => setRecoveryBurnHash(event.target.value)}
+                  placeholder="0x…"
+                />
+                <button className={ui.secondaryAction} disabled={!recoveryBurnHash.trim()} onClick={handleResume}>
+                  Track this transaction
+                </button>
+
                 {canRetryBurn && (
-                  <>
+                  <div className={ui.retryBlock}>
                     {needsBurnReview && (
-                      <label style={{ ...styles.resumeText, display: 'block', marginTop: 12 }}>
-                        <input type="checkbox" checked={burnReviewConfirmed} onChange={(event) => setBurnReviewConfirmed(event.target.checked)} />{' '}
-                        I checked wallet activity: no burn was submitted. Only approval may have completed.
+                      <label className={ui.checkRow}>
+                        <input type="checkbox" checked={burnReviewConfirmed} onChange={(event) => setBurnReviewConfirmed(event.target.checked)} />
+                        <span>I checked my wallet and no transfer was sent.</span>
                       </label>
                     )}
-                    <button style={styles.secondaryButton} disabled={!bridgeAvailable || !walletsMatch || (needsBurnReview && !burnReviewConfirmed) || !!recoveryBurnHash.trim()} onClick={() => void handleBridge({ retryBeforeBurn: true })}>
-                      Retry approval / burn — same intent
+                    <button
+                      className={ui.secondaryAction}
+                      disabled={!bridgeAvailable || !walletsMatch || (needsBurnReview && !burnReviewConfirmed) || !!recoveryBurnHash.trim()}
+                      onClick={() => void handleBridge({ retryBeforeBurn: true })}
+                    >
+                      Try this transfer again
                     </button>
-                    <p style={styles.resumeText}>This retry can ask for source-chain signatures and spend the same USDC amount plus gas and quoted fees.</p>
-                  </>
+                  </div>
                 )}
-              </div>
+
+                <details className={ui.advancedDetails}>
+                  <summary>Advanced recovery</summary>
+                  <label htmlFor="bridge-recovery-mint">Arc transaction hash (optional)</label>
+                  <input
+                    id="bridge-recovery-mint"
+                    className={ui.textInput}
+                    value={recoveryMintHash}
+                    onChange={(event) => setRecoveryMintHash(event.target.value)}
+                    placeholder="0x…"
+                  />
+                </details>
+              </details>
             </div>
           ) : (
             <>
+              {phase === 'form' && validation.ok && destination && (
+                <section className={ui.quoteCard} aria-live="polite">
+                  <div className={ui.quoteHeader}>
+                    <strong>Transfer details</strong>
+                    <span className={ui.routeBadge}>Circle CCTP</span>
+                  </div>
+                  <div className={ui.quoteRow}>
+                    <span>You receive</span>
+                    <strong>{estimateLoading ? 'Getting quote…' : `≈ ${receiveDisplay} USDC`}</strong>
+                  </div>
+                  <div className={ui.quoteRow}>
+                    <span>Bridge fee</span>
+                    <strong>{estimateLoading ? '—' : estimate ? `${estimate.bridgeFee} USDC` : 'Included in quote'}</strong>
+                  </div>
+                  <div className={ui.quoteRow}>
+                    <span>Network fee</span>
+                    <strong>{estimate?.gasFee && estimate.gasToken ? `≈ ${estimate.gasFee} ${estimate.gasToken}` : 'Calculated by wallet'}</strong>
+                  </div>
+                  <div className={ui.quoteRow}>
+                    <span>Estimated time</span>
+                    <strong>Usually under 5 min</strong>
+                  </div>
+                </section>
+              )}
+
               {(working || stages.length > 0) && (
-                <div style={styles.stepsCard}>
-                  {stages.map((s) => (
-                    <p key={s.key} style={styles.stepRow}>
-                      <span>{s.status === 'done' ? '✓' : s.status === 'active' ? '…' : s.status === 'error' ? '!' : '○'}</span>
-                      <span style={{ marginLeft: 8 }}>
-                        {s.label}
-                        {s.status === 'active' && stageNote ? ` — ${stageNote}` : ''}
-                      </span>
-                    </p>
-                  ))}
-                  {working && stages.length === 0 && (
-                    <p style={styles.stepRow}>… {stageNote ?? 'Working…'}</p>
-                  )}
+                <section className={ui.progressCard} aria-live="polite">
+                  <div className={ui.progressHeader}>
+                    <span className={ui.spinner} />
+                    <div>
+                      <strong>{working ? 'Transfer in progress' : 'Transfer status'}</strong>
+                      <p>{stageNote ?? 'This can take a few minutes. You can safely leave this page after sending.'}</p>
+                    </div>
+                  </div>
+                  <div className={ui.progressList}>
+                    {stages.map((step) => (
+                      <div key={step.key} className={ui.progressStep}>
+                        <span className={`${ui.progressDot} ${step.status === 'done' ? ui.progressDone : step.status === 'active' ? ui.progressActive : step.status === 'error' ? ui.progressError : ''}`}>
+                          {step.status === 'done' ? '✓' : step.status === 'error' ? '!' : ''}
+                        </span>
+                        <span>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {error && phase === 'form' && (
+                <div className={ui.errorCard}>
+                  <strong>Couldn’t start the transfer</strong>
+                  <p>{error}</p>
                 </div>
               )}
-              {error && phase === 'form' ? (
-                <div style={styles.resultError}>
-                  {errorStage && (
-                    <p style={styles.stageError}>
-                      Failed at: <strong>{errorStage.label}</strong>
-                      {errorStage.txHash && (
-                        <span style={styles.hash}> · {shortAddr(errorStage.txHash)}</span>
-                      )}
-                    </p>
-                  )}
-                  <p style={styles.resultText}>⚠️ {error}</p>
-                </div>
-              ) : null}
-              {phase === 'form' && (
-                <button style={styles.submitButton} disabled={formBlocked} onClick={() => void handleBridge()}>
-                  {balanceLoading
-                    ? 'Loading balance…'
-                    : !walletsMatch
-                      ? 'Reconnect your wallet to continue'
-                      : 'Bridge USDC'}
-                </button>
-              )}
-              {phase === 'form' && (
-                <p style={{ color: 'var(--flow-text-faint)', fontSize: 12, margin: '8px 0 0', lineHeight: 1.5 }}>
-                  You need {source.nativeCurrency.symbol} on {source.label} for
-                  gas (approve + burn). The Arc mint is relayed — no Arc gas needed.
-                </p>
-              )}
-              {phase === 'form' && (estimateLoading || estimate) && (
-                <div style={styles.stepsCard}>
-                  <p style={{ ...styles.stepRow, fontWeight: 700 }}>Bridge estimate</p>
-                  {estimateLoading && !estimate ? (
-                    <p style={styles.stepRow}>Estimating…</p>
-                  ) : estimate ? (
-                    <>
-                      {estimate.received ? (
-                        <p style={styles.stepRow}>Est. receive on Arc ≈ {estimate.received} USDC</p>
-                      ) : null}
-                      {estimate.cost ? (
-                        <p style={styles.stepRow}>Est. cost: {estimate.cost}</p>
-                      ) : null}
-                      <p style={{ ...styles.stepRow, opacity: 0.7 }}>Quoted by BridgeKit — the final mint decides.</p>
-                    </>
-                  ) : null}
-                </div>
+
+              {phase === 'form' && destination && (
+                <>
+                  <button className={ui.primaryAction} disabled={formBlocked} onClick={() => void handleBridge()}>
+                    {balanceLoading
+                      ? 'Loading balance…'
+                      : !walletsMatch
+                        ? 'Reconnect wallet'
+                        : validation.ok
+                          ? `Bridge ${amountDisplay} USDC`
+                          : 'Enter an amount'}
+                  </button>
+                  <p className={ui.walletPromptNote}>
+                    Your wallet may ask for up to two confirmations. You only need {source.nativeCurrency.symbol} for network fees.
+                  </p>
+                </>
               )}
             </>
           )}
@@ -1472,115 +1543,3 @@ export default function ExternalBridge({
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  label: {
-    display: 'block',
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
-    opacity: 0.7,
-    margin: '14px 0 6px',
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '10px 12px',
-    borderRadius: 10,
-    border: '1px solid rgba(148,163,184,0.35)',
-    background: 'var(--flow-surface-2)',
-    color: 'inherit',
-    fontSize: 15,
-  },
-  readonlyBox: {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '10px 12px',
-    borderRadius: 10,
-    border: '1px solid rgba(148,163,184,0.25)',
-    background: 'rgba(148,163,184,0.08)',
-    fontSize: 14,
-    lineHeight: 1.5,
-  },
-  mono: { fontFamily: 'ui-monospace, monospace' },
-  hintError: { color: '#f87171', fontSize: 12, margin: '6px 0 0' },
-  submitButton: {
-    width: '100%',
-    marginTop: 16,
-    padding: '12px',
-    borderRadius: 12,
-    border: 'none',
-    background: '#c8975a',
-    color: '#1a1207',
-    fontWeight: 800,
-    fontSize: 15,
-    cursor: 'pointer',
-  },
-  secondaryButton: {
-    flex: 1,
-    marginTop: 16,
-    padding: '12px',
-    borderRadius: 12,
-    border: '1px solid rgba(148,163,184,0.4)',
-    background: 'transparent',
-    color: 'inherit',
-    fontWeight: 700,
-    fontSize: 14,
-    cursor: 'pointer',
-  },
-  stepsCard: {
-    marginTop: 16,
-    padding: '12px 14px',
-    borderRadius: 12,
-    background: 'rgba(148,163,184,0.08)',
-    border: '1px solid rgba(148,163,184,0.25)',
-  },
-  stepRow: { margin: '6px 0', fontSize: 14 },
-  unboundCard: {
-    marginTop: 12,
-    padding: '12px 14px',
-    borderRadius: 12,
-    background: 'rgba(251,191,36,0.08)',
-    border: '1px solid rgba(251,191,36,0.35)',
-  },
-  unboundText: { margin: '0 0 4px', fontSize: 13, lineHeight: 1.5 },
-  resumeCard: {
-    marginTop: 16,
-    padding: '12px 14px',
-    borderRadius: 12,
-    background: 'rgba(96,165,250,0.08)',
-    border: '1px solid rgba(96,165,250,0.35)',
-  },
-  resumeText: { margin: '0 0 4px', fontSize: 13, lineHeight: 1.5 },
-  resultSuccess: {
-    padding: '16px',
-    borderRadius: 12,
-    background: 'rgba(34,197,94,0.08)',
-    border: '1px solid rgba(34,197,94,0.4)',
-  },
-  resultError: {
-    marginTop: 12,
-    padding: '12px 14px',
-    borderRadius: 12,
-    background: 'rgba(248,113,113,0.08)',
-    border: '1px solid rgba(248,113,113,0.4)',
-  },
-  stageError: { margin: '0 0 6px', fontSize: 12, color: '#fbbf24', lineHeight: 1.4 },
-  resultIcon: { fontSize: 22, margin: '0 0 6px' },
-  resultText: { margin: '0 0 8px', fontSize: 14, lineHeight: 1.55 },
-  hashRow: { margin: '6px 0', fontSize: 13, display: 'flex', gap: 8, alignItems: 'center' },
-  hash: { fontFamily: 'ui-monospace, monospace', fontSize: 12, opacity: 0.8 },
-  linkRow: { display: 'flex', gap: 12, flexWrap: 'wrap', margin: '8px 0' },
-  resultLink: { color: '#c8975a', fontSize: 13, fontWeight: 700 },
-  doneButton: {
-    marginTop: 8,
-    padding: '10px 16px',
-    borderRadius: 10,
-    border: '1px solid rgba(148,163,184,0.4)',
-    background: 'transparent',
-    color: 'inherit',
-    fontWeight: 700,
-    cursor: 'pointer',
-  },
-};

@@ -8,11 +8,12 @@ import { prisma } from '@/lib/prisma';
 import { withMerchantAuth, AuthedMerchant } from '@/lib/middleware/withMerchantAuth';
 import { verifyCallerControlsAddress } from '@/lib/wallet/verifyCallerControlsAddress';
 import { createCircleClient as initiateDeveloperControlledWalletsClient } from '@/lib/circle/client';
-import { parseUnits, keccak256, toBytes, isAddress } from 'viem';
+import { keccak256, toBytes, isAddress } from 'viem';
 import { resolveBeneficiary, beneficiaryConfirmUrl } from '@/lib/escrow/resolveBeneficiary';
 import { notifyBeneficiary } from '@/lib/escrow/notifyBeneficiary';
 import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { escrowAddressOr503 } from "@/lib/escrow/escrowGuard";
+import { checkEscrowAmount } from '@/lib/escrow/escrowAmount';
 
 const USDC_ARC: string = getNetworkConfig().usdcAddress;
 
@@ -76,6 +77,10 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       );
     }
 
+    const checked = checkEscrowAmount(amount);
+    if ('error' in checked) return NextResponse.json({ success: false, error: checked.error }, { status: checked.status });
+    const { units: amountWei, amountUSDC: amountFloat } = checked;
+
     // ── Creation hardening: a beneficiary must be a real address, and it
     // must not be the depositor themselves (self-escrow locks your own money
     // for no reason and muddies the two-party confirmation model).
@@ -126,25 +131,13 @@ async function createEscrowHandler(request: Request, merchant: AuthedMerchant) {
       );
     }
 
-    // H12: isAddress on the depositor as well as the beneficiary (the
-    // beneficiary was already gated above), plus the shared amount rule —
-    // decimal string, ≤6 decimals, >0, capped — before any escrow sink.
+    // H12: validate the depositor address before any escrow sink.
     if (!isAddress(String(depositorSCA))) {
       return NextResponse.json(
         { success: false, error: 'depositorSCA must be a valid 0x address.' },
         { status: 400 }
       );
     }
-    const amountStr = String(amount ?? "").trim();
-    if (!/^\d+(\.\d{1,6})?$/.test(amountStr) || !Number.isFinite(parseFloat(amountStr)) || parseFloat(amountStr) <= 0 || parseFloat(amountStr) > 10_000_000) {
-      return NextResponse.json(
-        { success: false, error: 'amount must be a positive decimal (up to 6 decimals) not exceeding 10,000,000.' },
-        { status: 400 }
-      );
-    }
-
-    const amountFloat = parseFloat(amountStr);
-    const amountWei = parseUnits(amountFloat.toFixed(6), 6);
     const hoursFloat = parseFloat(deadlineHours);
     // Match the escrow-link route's bounds — an uncapped deadline would let a
     // merchant lock funds for decades with no expiry refund path.

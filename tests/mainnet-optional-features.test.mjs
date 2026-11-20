@@ -32,10 +32,10 @@ async function expect503(response, code) {
   assert.equal(response.headers.has('PAYMENT-RESPONSE'), false);
   const body = await response.json();
   assert.equal(body.code, code);
-  if (code === 'x402_unavailable') assert.equal(body.error, 'x402 unavailable on mainnet');
+  if (code === 'x402_disabled') assert.match(body.error, /disabled on Arc Mainnet/);
 }
 
-test('mainnet boots without stream, x402 verifier or CCTP_MAINNET_* bridge config; core routes still work', async (t) => {
+test('mainnet boots with verified stream/x402 pins and without optional bridge config; core routes still work', async (t) => {
   const calls = blockEffects(t);
   await withEnv(MAINNET_ENV, async () => {
     const warnings = [];
@@ -43,9 +43,9 @@ test('mainnet boots without stream, x402 verifier or CCTP_MAINNET_* bridge confi
     const result = validateWalletEnv();
     assert.deepEqual(result.errors, []);
     assertWalletEnv();
-    assert.ok(warnings.some((warning) => warning.includes('ARC_MAINNET_STREAM_ADDRESS')));
-    assert.equal(net.getNetworkConfig().streamAddress, null);
-    assert.equal(net.getNetworkConfig().x402VerifierContract, null);
+    assert.ok(!warnings.some((warning) => warning.includes('ARC_MAINNET_STREAM_ADDRESS')));
+    assert.equal(net.getNetworkConfig().streamAddress, net.MAINNET_STREAM_CONTRACT_ADDRESS);
+    assert.match(net.getNetworkConfig().x402VerifierContract, /^0x7777/i);
     // Import in this env, proving no eager bridge destination or paid wrapper.
     await import('../src/lib/cctp-v2.ts');
     await import('../src/app/api/agent/brain/route.ts');
@@ -61,9 +61,9 @@ test('mainnet boots without stream, x402 verifier or CCTP_MAINNET_* bridge confi
   });
 });
 
-for (const value of [undefined, '', '   ']) test(`missing/blank verifier ${JSON.stringify(value)} is null, never defaulted`, () => {
+for (const value of [undefined, '', '   ']) test(`missing/blank verifier ${JSON.stringify(value)} uses documented mainnet pin`, () => {
   const env = { ...MAINNET_ENV, ARC_MAINNET_X402_VERIFIER: value };
-  assert.equal(net.getNetworkConfig(env).x402VerifierContract, null);
+  assert.equal(net.getNetworkConfig(env).x402VerifierContract.toLowerCase(), '0x77777777dcc4d5a8b6e418fd04d8997ef11000ee');
   assert.deepEqual(net.validateNetworkEnv(env), []);
   assert.ok(!net.MAINNET_REQUIRED_VARS.includes('ARC_MAINNET_X402_VERIFIER'));
 });
@@ -87,15 +87,15 @@ for (const payment of [false, true]) test(`paid routes refuse before challenge/s
     const req = new NextRequest('https://app.example/api/agent/brain', { method: 'POST', headers, body: '{' });
     t.mock.method(req, 'json', () => { throw new Error('Unavailable paid route must not parse body'); });
     const brain = await import('../src/app/api/agent/brain/route.ts');
-    await expect503(await brain.POST(req), 'x402_unavailable');
+    await expect503(await brain.POST(req), 'x402_disabled');
     const nano = await import('../src/app/api/nano/pay/[endpoint]/route.ts');
-    await expect503(await nano.POST(req, { params: Promise.resolve({ endpoint: 'agent-lookup' }) }), 'x402_unavailable');
+    await expect503(await nano.POST(req, { params: Promise.resolve({ endpoint: 'agent-lookup' }) }), 'x402_disabled');
     const marketplace = await import('../src/app/api/x402/marketplace/pay/[slug]/route.ts');
     for (const method of ['GET', 'POST', 'PUT', 'DELETE']) {
-      await expect503(await marketplace[method](req, { params: Promise.resolve({ slug: 'test-listing' }) }), 'x402_unavailable');
+      await expect503(await marketplace[method](req, { params: Promise.resolve({ slug: 'test-listing' }) }), 'x402_disabled');
     }
     const payroll = await import('../src/lib/payroll/payrollExecution.ts');
-    await expect503(await payroll.fundPayrollViaX402(req, [{ address: MAINNET_ENV.BUYER_ADDRESS, amount: 1n }]), 'x402_unavailable');
+    await expect503(await payroll.fundPayrollViaX402(req, [{ address: MAINNET_ENV.BUYER_ADDRESS, amount: 1n }]), 'x402_disabled');
     assert.deepEqual(calls, []);
   });
 });
@@ -107,7 +107,7 @@ test('mainnet Gateway payroll refusal persists with a verifier, before settlemen
     const payroll = await import('../src/lib/payroll/payrollExecution.ts');
     await expect503(await payroll.fundPayrollViaX402(new NextRequest('https://app.example', {
       method: 'POST', headers: { 'payment-signature': Buffer.from('{}').toString('base64') },
-    }), [{ address: MAINNET_ENV.BUYER_ADDRESS, amount: 1n }]), 'x402_unavailable');
+    }), [{ address: MAINNET_ENV.BUYER_ADDRESS, amount: 1n }]), 'x402_disabled');
     assert.deepEqual(calls, []);
   });
 });

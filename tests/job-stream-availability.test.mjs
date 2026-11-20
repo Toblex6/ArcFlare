@@ -45,9 +45,8 @@ function blockEffects(t) {
 }
 
 const unavailable = [
-  ['both dependencies absent', { ...MAINNET_ENV }, 'stream_unavailable'],
+  ['ERC-8183 absent (mainnet stream defaults verified)', { ...MAINNET_ENV }, 'erc8183_unavailable'],
   ['stream configured, ERC-8183 absent', { ...configured, ARC_MAINNET_ERC8183_ADDRESS: undefined }, 'erc8183_unavailable'],
-  ['ERC-8183 configured, stream absent', { ...configured, ARC_MAINNET_STREAM_ADDRESS: undefined }, 'stream_unavailable'],
   ['testnet stream absent', { ...MAINNET_ENV, ARC_NETWORK: 'testnet' }, 'stream_unavailable'],
 ];
 for (const [action, route] of Object.entries(routes)) {
@@ -72,6 +71,16 @@ for (const [action, route] of Object.entries(routes)) {
   test(`${action}: configured dependencies retain unauthenticated 401`, async (t) => {
     const calls = blockEffects(t);
     await withEnv(configured, async () => {
+      const req = new NextRequest(`https://app.example/api/jobs/nanopay/${action}`, { method: 'POST', body: '{' });
+      t.mock.method(req, 'json', () => { throw new Error('Unauthenticated route must not parse body'); });
+      assert.equal((await route.POST(req)).status, 401);
+      assert.deepEqual(calls, []);
+    });
+  });
+
+  test(`${action}: verified default stream still requires authentication`, async (t) => {
+    const calls = blockEffects(t);
+    await withEnv({ ...configured, ARC_MAINNET_STREAM_ADDRESS: undefined }, async () => {
       const req = new NextRequest(`https://app.example/api/jobs/nanopay/${action}`, { method: 'POST', body: '{' });
       t.mock.method(req, 'json', () => { throw new Error('Unauthenticated route must not parse body'); });
       assert.equal((await route.POST(req)).status, 401);

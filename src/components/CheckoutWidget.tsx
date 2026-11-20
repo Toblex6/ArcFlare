@@ -48,6 +48,7 @@ import {
 // selector (see the wallet-tab render section). The quote hook stays wired
 // so a same-token selection resolves to 'direct' with zero network calls.
 import { RoutedReceipt } from '@/src/components/checkout/routing/RoutedReceipt';
+import CheckoutCrossChain from '@/src/components/checkout/CheckoutCrossChain';
 import { useRoutingQuote } from '@/src/components/checkout/routing/useRoutingQuote';
 import { erc20ApproveAbi, paymentRouterRouteAbi } from '@/src/components/checkout/routing/routerAbi';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
@@ -134,19 +135,6 @@ const PAYMENT_METHODS: { key: PaymentMethodKey; label: string; available: boolea
     { key: 'cctp', label: 'Pay Cross-Chain (CCTP)', available: true },
 ];
 
-// Small curated list for the source-chain selector — testnet domains this
-// deployment's CCTP pipeline recognizes (src/lib/cctp.ts's CHAIN_DOMAINS).
-// Duplicated here rather than importing cctp.ts client-side, since that
-// module also pulls in server-only signing logic with no business in the
-// browser bundle.
-const CCTP_SOURCE_DOMAINS = [
-    { domain: 3, label: 'Arbitrum' },
-    { domain: 6, label: 'Base' },
-    { domain: 0, label: 'Ethereum' },
-    { domain: 2, label: 'Optimism' },
-    { domain: 7, label: 'Polygon' },
-];
-
 // Minimal balanceOf fragment for the payer-balance display. Read-only, no
 // signing — the transfer itself still uses erc20TransferAbi above.
 const erc20BalanceAbi = [
@@ -191,10 +179,6 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     const [settleError, setSettleError] = useState<string | null>(null);
     const [secondsLeft, setSecondsLeft] = useState(900);
     const [method, setMethod] = useState<PaymentMethodKey>('wallet');
-    const [cctpTxHash, setCctpTxHash] = useState('');
-    const [cctpDomain, setCctpDomain] = useState(6); // default Base
-    const [cctpSubmitting, setCctpSubmitting] = useState(false);
-    const [cctpError, setCctpError] = useState<string | null>(null);
 
     const { address, isConnected, connector: activeConnector } = useAccount();
     // Guarded connect: synchronous ref lock suppresses double-fire re-entry.
@@ -581,37 +565,6 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
         }
     };
 
-    const handleCctpVerify = async () => {
-        if (!reference || !cctpTxHash.trim()) return;
-        // Defensive: the tab is unavailable for EURC, but a stale method state
-        // must never smuggle a cross-chain settlement onto a non-USDC invoice.
-        if (!cctpAvailable) {
-            const msg = `Cross-chain (CCTP) settlement is USDC-only and cannot settle this ${invoiceSymbol} invoice — please use the wallet tab to pay in ${invoiceSymbol}.`;
-            setCctpError(msg);
-            onEvent?.({ type: 'payment_error', error: msg });
-            return;
-        }
-        setCctpSubmitting(true);
-        setCctpError(null);
-        onEvent?.({ type: 'payment_pending' });
-        try {
-            const res = await fetch('/api/payments/cctp-settle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reference, sourceTxHash: cctpTxHash.trim(), sourceDomain: cctpDomain }),
-            });
-            const data = await res.json();
-            if (!data.success) throw new Error(data.error || 'Could not verify the cross-chain transfer.');
-            await fetchLedgerStatus();
-        } catch (err: any) {
-            const msg = err.message || 'Verification failed. The transfer may still be confirming — try again shortly.';
-            setCctpError(msg);
-            onEvent?.({ type: 'payment_error', error: msg });
-        } finally {
-            setCctpSubmitting(false);
-        }
-    };
-
     if (loading) {
         return (
             <div style={{ padding: 24, textAlign: 'center' }}>
@@ -992,62 +945,14 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             )}
 
             {method === 'cctp' && cctpAvailable && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <p style={{ fontSize: 11, color: '#6b5a45', margin: 0 }}>
-                        Send {payment.amount} {invoiceSymbol} from another chain using your own wallet, then paste the transaction hash below to verify and settle.
-                    </p>
-                    {/* CCTP is intentionally USDC-only (Phase 2A): no EURC CCTP
-                        mechanism exists in this repo. EURC invoices use the
-                        wallet tab's same-chain EURC transfer instead. The tab
-                        above is unavailable for EURC and auto-switches to the
-                        wallet method, so this panel only ever renders for USDC. */}
-                    <div>
-                        <p style={{ fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px' }}>Source Chain</p>
-                        <select
-                            value={cctpDomain}
-                            onChange={(e) => setCctpDomain(Number(e.target.value))}
-                            disabled={cctpSubmitting || isConfirmed}
-                            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #3d2e1a', background: '#251c12', color: '#f0ece6', fontSize: 13 }}
-                        >
-                            {CCTP_SOURCE_DOMAINS.map((d) => (
-                                <option key={d.domain} value={d.domain}>{d.label}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <p style={{ fontSize: 10, color: '#6b5a45', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px' }}>Burn Transaction Hash</p>
-                        <input
-                            value={cctpTxHash}
-                            onChange={(e) => setCctpTxHash(e.target.value)}
-                            placeholder="0x..."
-                            disabled={cctpSubmitting || isConfirmed}
-                            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #3d2e1a', background: '#251c12', color: '#f0ece6', fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box' }}
-                        />
-                    </div>
-                    <button
-                        onClick={handleCctpVerify}
-                        disabled={cctpSubmitting || isConfirmed || isEurc || !cctpTxHash.trim()}
-                        style={{
-                            width: '100%',
-                            padding: 16,
-                            borderRadius: 14,
-                            border: 'none',
-                            fontSize: 14,
-                            fontWeight: 800,
-                            cursor: cctpSubmitting || isConfirmed || isEurc || !cctpTxHash.trim() ? 'not-allowed' : 'pointer',
-                            background: isConfirmed ? 'rgba(6,182,212,0.1)' : cctpSubmitting ? '#6b5a45' : '#c8975a',
-                            color: isConfirmed ? '#06b6d4' : '#0e0b08',
-                        }}
-                    >
-                        {isConfirmed ? '✓ Payment Confirmed' : cctpSubmitting ? '🔍 Verifying attestation...' : 'Verify & Settle'}
-                    </button>
-                    {cctpError && (
-                        <p style={{ color: '#f87171', fontSize: 11, margin: 0 }}>❌ {cctpError}</p>
-                    )}
-                    <p style={{ fontSize: 10, color: '#4b4035', margin: 0 }}>
-                        Attestation typically takes 1–3 minutes. This page will update automatically once settled.
-                    </p>
-                </div>
+                <CheckoutCrossChain
+                    reference={reference ?? ''}
+                    invoiceAmount={payment.amount}
+                    merchantSCA={payment.merchantSCA}
+                    disabled={isConfirmed}
+                    onPending={() => onEvent?.({ type: 'payment_pending' })}
+                    onSettled={() => { fetchLedgerStatus(); onEvent?.({ type: 'payment_success', payment: { ...payment, status: 'SUCCESS' } as PaymentLogData }); }}
+                />
             )}
 
             {method === 'cctp' && !cctpAvailable && !isConfirmed && (

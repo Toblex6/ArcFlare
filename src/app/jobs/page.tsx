@@ -6,6 +6,7 @@ import AppDialog from '@/components/AppDialog';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
@@ -720,6 +721,13 @@ export default function JobsPage() {
           <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0 }}>
             Create, fund, and complete on-chain jobs when the ERC-8183 protocol is available
           </p>
+          <div style={{ marginTop: 14, padding: 14, border: '1px solid var(--primary)', borderRadius: 12 }}>
+            <strong style={{ display: 'block', marginBottom: 4 }}>Looking for FlareHQ Jobs?</strong>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+              FlareHQ Jobs uses FlareHQEscrow and is available once the escrow contract is configured. It is not ERC-8183.
+            </span>{' '}
+            <Link href="/flarehq-jobs" style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 12 }}>Open FlareHQ Jobs →</Link>
+          </div>
         </div>
 
         {jobActionsUnavailable && (

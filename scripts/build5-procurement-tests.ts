@@ -1,6 +1,7 @@
 // Build 5 focused tests — assignment, procurement, provider acceptance, money, ledger, integration
 // Run: npx tsx scripts/build5-procurement-tests.ts
 
+import './lib/require-loopback-test-db.mjs';
 import { prisma } from "../src/lib/prisma";
 import { evaluateProviderAcceptance, getRankedProcurementApplicants } from "../src/lib/procurement/procurementService";
 

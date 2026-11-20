@@ -3,6 +3,7 @@
 // Scope: prisma/schema.prisma (AgentRegistry.walletSetId/validatorSca),
 // src/app/api/agent/deploy/route.ts persistence block, and the additive migration.
 // Run: node --test tests/deploy-persistence.test.mjs
+import '../scripts/lib/require-loopback-test-db.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

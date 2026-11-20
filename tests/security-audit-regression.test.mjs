@@ -161,7 +161,7 @@ const H12_SINKS = [
 for (const r of H12_SINKS) {
   test(`H12 ${r} validates amount (regex+cap)`, () => {
     const s = read(r);
-    assert.ok(s.includes('^\\d+(\\.\\d{1,6})?$') || s.includes('StreamCreateSchema') || s.includes('usdcAmount') || s.includes('USDC_AMOUNT_RE'), 'amount rule present');
+    assert.ok(s.includes('^\\d+(\\.\\d{1,6})?$') || s.includes('StreamCreateSchema') || s.includes('usdcAmount') || s.includes('USDC_AMOUNT_RE') || s.includes('checkEscrowAmount(amount)'), 'amount rule present');
   });
 }
 test('H12 destinations/chains are validated', () => {
@@ -228,8 +228,12 @@ test('M5 wrapper consumer branch is DB-bound (no bare jwtVerify)', () => {
 for (const r of ['src/app/api/merchant/escrow-link/route.ts', 'src/app/api/merchant/payment-link/route.ts', 'src/app/api/payments/scheduled/route.ts', 'src/app/api/payments/nano/route.ts']) {
   test(`M6 ${r} uses shared amount rule + address checks`, () => {
     const s = read(r);
-    assert.ok(s.includes('^\\d+(\\.\\d{1,6})?$'), 'shared amount regex');
-    assert.ok(s.includes('10_000_000'), 'capped');
+    if (r.includes('escrow-link')) {
+      assert.ok(s.indexOf('checkEscrowAmount(amount)') >= 0 && s.indexOf('checkEscrowAmount(amount)') < s.indexOf('prisma.escrow.create'), 'shared escrow cap before persistence');
+    } else {
+      assert.ok(s.includes('^\\d+(\\.\\d{1,6})?$'), 'shared amount regex');
+      assert.ok(s.includes('10_000_000'), 'capped');
+    }
   });
 }
 test('M6 intervalDays clamped 1-3650', () => {
@@ -287,14 +291,12 @@ test('C1 gateway POST gates seller control + treasury allowlist before funds mov
   assert.ok(gateIdx !== -1, 'POST gates caller control of resolvedSeller');
   const allowIdx = s.indexOf('SELLER_GATEWAY_TREASURY_ADDRESSES');
   assert.ok(allowIdx !== -1, 'POST restricts payoutAddress to the treasury allowlist');
-  // The allowlist identifier first appears in the fix comment; the ENFORCEMENT
-  // (treasuryAllowlist.includes) and the sink (facilitator fetch) must both
-  // come after the ownership gate. The `/withdraw` path string also appears
-  // in the earlier fix comment, so the sink search is anchored past the gate.
+  // Locate the actual SDK withdrawal sink after the ownership and payout gates.
   const allowEnforceIdx = s.indexOf('treasuryAllowlist.includes', gateIdx);
-  const sinkIdx = s.indexOf('facilitatorUrl()', gateIdx);
+  const sinkIdx = s.indexOf('await client.withdraw(', gateIdx);
   assert.ok(allowEnforceIdx !== -1 && sinkIdx !== -1, 'allowlist enforcement + withdraw sink located');
   assert.ok(gateIdx < allowEnforceIdx && gateIdx < sinkIdx, 'both gates run after the ownership gate, before the sink');
+  assert.ok(allowEnforceIdx < sinkIdx && s.indexOf('if (!payoutAllowed)', allowEnforceIdx) < sinkIdx);
   assert.ok(
     s.includes('payoutAddress is not on the SELLER_GATEWAY_TREASURY_ADDRESSES allowlist.'),
     'allowlist rejection is a 403 with the allowlist message'

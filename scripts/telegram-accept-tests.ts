@@ -13,6 +13,7 @@
  * Run: npx tsx scripts/telegram-accept-tests.ts
  * No dev server required (handler-level + DB + static file checks).
  */
+import './lib/require-loopback-test-db.mjs';
 import { PrismaClient } from "@prisma/client";
 import { ethers } from "ethers";
 import fs from "fs";

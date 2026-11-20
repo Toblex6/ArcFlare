@@ -1,6 +1,7 @@
 // Focused regression tests for src/lib/agents/resolveAgentRef.ts
 // Run: npx tsx scripts/agent-resolver-tests.ts
 
+import './lib/require-loopback-test-db.mjs';
 import { prisma } from "../src/lib/prisma";
 import { resolveAgentRef } from "../src/lib/agents/resolveAgentRef";
 

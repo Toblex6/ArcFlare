@@ -2,10 +2,8 @@
 //
 // Proves, for the per-network stream guard (src/lib/config/network.ts +
 // src/lib/stream/streamGuard.ts):
-//   A. mainnet (chain 5042) with NO stream address → requireStreamAddress()
-//      throws StreamUnavailableError, the route helper answers HTTP 503, and
-//      nothing is broadcast or read (the read helpers throw before any
-//      provider/RPC call).
+//   A. mainnet (chain 5042) defaults to the read-only verified standalone
+//      stream deployment.
 //   B. the Arc TESTNET ArcFlareStream can never be used on mainnet
 //      (explicit misconfiguration → 503, never a silent testnet fallback).
 //   C. mainnet WITH the verified ARC_MAINNET_STREAM_ADDRESS works.
@@ -35,8 +33,7 @@ const streamContracts = await import('../src/lib/contracts/streamContract.ts');
 const TESTNET_STREAM = '0xd8ca3Bbc212F36666145fAa487D45742eA04A52B';
 const MAINNET_STREAM = '0x79230A415dF3B22cD8c7DDB9b7Cd1f860e95375e';
 
-// Self-consistent mainnet environment (chain 5042 = Arc Mainnet). Deliberately
-// has NO stream address: that is the fail-closed production default.
+// Self-consistent mainnet environment (chain 5042 = Arc Mainnet).
 const MAINNET_ENV = {
   ARC_NETWORK: 'mainnet',
   ARC_MAINNET_CHAIN_ID: '5042',
@@ -98,68 +95,33 @@ const MOVING_CALLS = [
   'prisma.stream.create',
 ];
 
-// ── A. mainnet without a stream address fails closed ────────────────────────
-test('mainnet (5042) with no stream address: helper throws, route answers 503', async () => {
+// ── A. mainnet defaults to the verified stream deployment ───────────────────
+test('mainnet (5042) resolves the verified standalone stream deployment', async () => {
   await withEnv(MAINNET_ENV, async () => {
     assert.equal(net.getNetworkConfig().name, 'mainnet');
     assert.equal(net.getNetworkConfig().chainId, 5042);
-    assert.equal(net.getNetworkConfig().streamAddress, null);
-
-    assert.throws(
-      () => net.requireStreamAddress(),
-      (e) => {
-        assert.equal(e.name, 'StreamUnavailableError');
-        assert.equal(e.code, 'stream_unavailable');
-        assert.match(e.message, /Streaming is not available on mainnet/);
-        return true;
-      }
-    );
-    assert.equal(net.isStreamAvailable(), false);
-
+    assert.equal(net.getNetworkConfig().streamAddress, MAINNET_STREAM);
+    assert.equal(net.requireStreamAddress(), MAINNET_STREAM);
+    assert.equal(net.isStreamAvailable(), true);
     const result = guard.streamAddressOr503();
-    assert.ok('response' in result, 'guard must return a 503 response, not an address');
-    assert.equal(result.response.status, 503);
-    const body = await result.response.json();
-    assert.equal(body.error, 'stream_unavailable');
-    assert.match(body.message, /Streaming is not available on mainnet/);
+    assert.ok('address' in result);
+    assert.equal(result.address, MAINNET_STREAM);
   });
 });
 
-test('mainnet 503 response never carries a contract address (no testnet fallback)', async () => {
+test('mainnet default never resolves the testnet deployment', async () => {
   await withEnv(MAINNET_ENV, async () => {
     const result = guard.streamAddressOr503();
-    assert.ok('response' in result);
-    assert.ok(!('address' in result), 'no address may be handed out');
-    const serialized = JSON.stringify(await result.response.json());
-    assert.ok(
-      !serialized.toLowerCase().includes(TESTNET_STREAM.toLowerCase()),
-      'the testnet stream address must never appear in a mainnet response'
-    );
+    assert.ok('address' in result);
+    assert.equal(result.address.toLowerCase(), MAINNET_STREAM.toLowerCase());
+    assert.notEqual(result.address.toLowerCase(), TESTNET_STREAM.toLowerCase());
   });
 });
 
-test('mainnet read helpers throw before any RPC call (no funds, no network)', async () => {
-  const calls = [];
-  const prevFetch = globalThis.fetch;
-  globalThis.fetch = (...args) => {
-    calls.push(args[0]);
-    throw new Error('network access attempted on the wrong network');
-  };
-  try {
-    await withEnv(MAINNET_ENV, async () => {
-      await assert.rejects(
-        () => streamContracts.readStreamOnChain(1n),
-        /ArcFlareStream is not usable on this network/
-      );
-      await assert.rejects(
-        () => streamContracts.isTrancheReleasedOnChain(1n, 0),
-        /ArcFlareStream is not usable on this network/
-      );
-      assert.equal(calls.length, 0, 'no RPC/network call may be attempted');
-    });
-  } finally {
-    globalThis.fetch = prevFetch;
-  }
+test('mainnet stream pin was verified read-only and is centralized', () => {
+  const source = read('src/lib/config/network.ts');
+  assert.match(source, /MAINNET_STREAM_CONTRACT_ADDRESS/);
+  assert.match(source, /0x79230A415dF3B22cD8c7DDB9b7Cd1f860e95375e/);
 });
 
 // ── B. an explicitly wrong mainnet configuration fails closed ───────────────
@@ -192,6 +154,19 @@ test('mainnet with a malformed stream address is rejected (503)', async () => {
   });
 });
 
+test('wrong-network stream read helpers refuse before RPC access', async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', () => {
+    calls.push('fetch');
+    throw new Error('Unexpected network access');
+  });
+  await withEnv({ ...MAINNET_ENV, ARC_MAINNET_STREAM_ADDRESS: TESTNET_STREAM }, async () => {
+    await assert.rejects(() => streamContracts.readStreamOnChain(1n), /ArcFlareStream is not usable on this network/);
+    await assert.rejects(() => streamContracts.isTrancheReleasedOnChain(1n, 0), /ArcFlareStream is not usable on this network/);
+    assert.deepEqual(calls, []);
+  });
+});
+
 test('mainnet ignores both testnet stream variables', async () => {
   await withEnv(
     {
@@ -200,13 +175,9 @@ test('mainnet ignores both testnet stream variables', async () => {
       ARC_FLARE_STREAM_CONTRACT_ADDRESS: TESTNET_STREAM,
     },
     () => {
-      assert.equal(
-        net.getNetworkConfig().streamAddress,
-        null,
-        'testnet stream vars must not configure mainnet streaming'
-      );
-      assert.equal(net.isStreamAvailable(), false);
-      assert.throws(() => net.requireStreamAddress(), /Streaming is not available on mainnet/);
+      assert.equal(net.getNetworkConfig().streamAddress, MAINNET_STREAM, 'testnet stream vars must not configure mainnet streaming');
+      assert.equal(net.isStreamAvailable(), true);
+      assert.equal(net.requireStreamAddress(), MAINNET_STREAM);
     }
   );
 });

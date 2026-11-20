@@ -47,7 +47,10 @@ const MAINNET_ENV = {
 const withEnv = async (env, fn) => {
   const prev = { ...process.env };
   try {
-    for (const k of Object.keys(env)) process.env[k] = env[k];
+    for (const k of Object.keys(env)) {
+      if (env[k] === undefined) delete process.env[k];
+      else process.env[k] = env[k];
+    }
     net.__resetNetworkConfigCacheForTests();
     await fn();
   } finally {
@@ -131,7 +134,7 @@ test('mainnet selection never inherits testnet values', async () => {
 test('missing required mainnet configuration fails closed (never testnet fallback)', async () => {
   for (const required of net.MAINNET_REQUIRED_VARS) {
     const partial = { ...MAINNET_ENV };
-    delete partial[required];
+    partial[required] = undefined;
     await withEnv(partial, async () => {
       assert.throws(
         () => net.getNetworkConfig(),

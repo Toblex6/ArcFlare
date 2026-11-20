@@ -206,6 +206,8 @@ export default function EscrowPayPage() {
           <p style={{ margin: 0 }}><strong>Beneficiary:</strong> {details.beneficiarySCA.slice(0, 10)}…{details.beneficiarySCA.slice(-6)}</p>
           {details.condition && <p style={{ margin: 0 }}><strong>Release condition:</strong> {details.condition}</p>}
           <p style={{ margin: 0 }}><strong>Deadline:</strong> {new Date(details.deadline).toLocaleString()}</p>
+          <p style={{ margin: 0 }}><strong>Release fee:</strong> 0.25% (25 bps) to the FlareHQ treasury. A refund after expiry returns the full amount.</p>
+          <p style={{ margin: 0 }}><strong>Disputes:</strong> a party can open a dispute before the deadline; the designated arbiter decides. FlareHQ never holds your funds.</p>
         </div>
 
         {step === 'done' ? (

@@ -4,6 +4,7 @@
 //   create job -> set-budget -> fund -> open stream -> release tranches -> close
 // Verifies on-chain state, worker balance deltas, idempotency, auth boundaries.
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });

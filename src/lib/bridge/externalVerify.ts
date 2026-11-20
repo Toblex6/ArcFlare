@@ -682,7 +682,7 @@ export async function verifyExternalBurn(params: {
   if (!/^0x[0-9a-fA-F]{64}$/.test(burnTxHash)) {
     return { ok: false, reason: 'NOT_FOUND', detail: 'Not a transaction hash.' };
   }
-  const hash = burnTxHash as Hex;
+  const hash = burnTxHash.toLowerCase() as Hex;
   const expectedFrom = sourceAddress.toLowerCase();
   const usdc = source.usdcAddress.toLowerCase();
 
@@ -813,7 +813,7 @@ export async function verifyArcMint(params: {
   if (!/^0x[0-9a-fA-F]{64}$/.test(mintTxHash)) {
     return { ok: false, reason: 'NOT_FOUND', detail: 'Not a transaction hash.' };
   }
-  const hash = mintTxHash as Hex;
+  const hash = mintTxHash.toLowerCase() as Hex;
   const cfg = getNetworkConfig();
   const urls = getRpcUrls();
   const arcChain = {

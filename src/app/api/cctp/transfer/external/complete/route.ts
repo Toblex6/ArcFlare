@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     }
 
     const intent = await (prisma as any).flowBridgeIntent.findUnique({ where: { id: reference } });
-    if (!intent || intent.sourceWallet.toLowerCase() !== sessionAddress.toLowerCase()) {
+    if (!intent || intent.invoiceReference || intent.checkoutTopUpReference || intent.sourceWallet.toLowerCase() !== sessionAddress.toLowerCase()) {
       return NextResponse.json({ success: false, error: 'No bridge found for that reference.' }, { status: 404 });
     }
     if (intent.status === 'COMPLETED') {

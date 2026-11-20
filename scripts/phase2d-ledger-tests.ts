@@ -23,6 +23,7 @@
  * Run: npx tsx scripts/phase2d-ledger-tests.ts
  */
 
+import './lib/require-loopback-test-db.mjs';
 import fs from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
@@ -304,7 +305,8 @@ async function main() {
     nanoSettle.includes("tokenAddress: token.address") && !nanoSettle.includes("tokenAddress: USDC_ARC"),
     "must persist the pair's resolved token, not a constant");
   ok("payroll batches stay USDC-denominated", read("prisma/schema.prisma").includes('currency       String    @default("USDC")'));
-  ok("streams open USDC-only", read("src/app/api/jobs/nanopay/open/route.ts").includes("token: USDC_CONTRACT"));
+  const streamOpen = read("src/app/api/jobs/nanopay/open/route.ts");
+  ok("streams open with network-selected USDC only", streamOpen.includes("const USDC_ADDRESS = getNetworkConfig().usdcAddress") && streamOpen.includes("token: USDC_ADDRESS"));
   ok("scheduled writes no ledger rows (nothing to mislabel)", !read("src/app/api/payments/scheduled/run/route.ts").includes("recordLedgerEntry"));
   // Ledger core never converts, never assumes parity.
   const ledgerSrc = read("src/lib/ledger/ledgerService.ts");

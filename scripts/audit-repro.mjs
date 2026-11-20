@@ -55,6 +55,7 @@
 //
 // Usage: node scripts/audit-repro.mjs [baseUrl]
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { SignJWT } from 'jose';

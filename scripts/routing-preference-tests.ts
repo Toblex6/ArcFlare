@@ -9,6 +9,7 @@
 //
 // Run:  npx tsx scripts/routing-preference-tests.ts
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });
@@ -79,7 +80,7 @@ async function main() {
     },
   });
   ok('fixture preference NULL (= USDC)', m.settlementTokenAddress === null);
-  const jwt = await new SignJWT({ merchantId: m.id })
+  const jwt = await new SignJWT({ merchantId: m.id, sessionVersion: m.sessionVersion })
     .setProtectedHeader({ alg: 'HS256' })
     .sign(requireJwtSecret('MERCHANT_JWT_SECRET'));
   const cookie = { cookie: `merchant_token=${jwt}` };
@@ -96,18 +97,20 @@ async function main() {
   const rowA = await prisma.paymentLog.findUnique({ where: { reference: r1.body.reference } });
   ok('invoice A frozen as USDC', rowA?.currency === 'USDC' && (rowA as any)?.tokenAddress === USDC);
 
-  // 2. switch default to EURC
-  const p1: any = await prefPATCH(req('http://localhost/api/merchant/me', 'PATCH', { settlementToken: 'EURC' }, cookie));
+  // Merchant settings are USDC-only, even though the resolver knows EURC.
+  const refused: any = await prefPATCH(req('http://localhost/api/merchant/me', 'PATCH', { settlementToken: 'EURC' }, cookie));
+  ok('PATCH cannot select EURC', refused.status === 400 && (await refused.json()).error === 'Merchant settlement is USDC-only.');
+  const p1: any = await prefPATCH(req('http://localhost/api/merchant/me', 'PATCH', { settlementToken: 'USDC' }, cookie));
   const p1b = await p1.json();
-  ok('PATCH preference → EURC', p1.status === 200 && p1b?.settlementPreference?.symbol === 'EURC', `${p1.status}`);
-  ok('canonical address persisted', (await (prisma as any).merchant.findUnique({ where: { id: m.id } }))?.settlementTokenAddress === EURC);
+  ok('PATCH preference → USDC', p1.status === 200 && p1b?.settlementPreference?.symbol === 'USDC', `${p1.status}`);
+  ok('canonical address persisted', (await (prisma as any).merchant.findUnique({ where: { id: m.id } }))?.settlementTokenAddress === USDC);
 
-  // 3. future invoices inherit EURC on both creation paths
+  // Future invoices use USDC on both merchant creation paths.
   const r2 = await createViaInit({ amount: '2.00' });
-  ok('initialize inherits EURC', r2.status === 200 && r2.body?.data?.currency === 'EURC', `${r2.status} ${r2.body?.data?.currency}`);
+  ok('initialize inherits USDC', r2.status === 200 && r2.body?.data?.currency === 'USDC', `${r2.status} ${r2.body?.data?.currency}`);
   const l1: any = await linkPOST(req('http://localhost/api/merchant/payment-link', 'POST', { amount: '3.00' }, cookie));
   const l1b = await l1.json();
-  ok('payment-link inherits EURC', l1.status === 200 && l1b?.currency === 'EURC', `${l1.status} ${l1b?.currency}`);
+  ok('payment-link inherits USDC', l1.status === 200 && l1b?.currency === 'USDC', `${l1.status} ${l1b?.currency}`);
 
   // 4. existing invoice untouched by the switch
   const rowA2 = await prisma.paymentLog.findUnique({ where: { reference: r1.body.reference } });
@@ -115,7 +118,7 @@ async function main() {
 
   // 5. explicit per-invoice currency wins over the default
   const r3 = await createViaInit({ amount: '1.00', currency: 'USDC' });
-  ok('explicit USDC wins over EURC default', r3.status === 200 && r3.body?.data?.currency === 'USDC');
+  ok('explicit USDC accepted', r3.status === 200 && r3.body?.data?.currency === 'USDC');
   const l2: any = await linkPOST(req('http://localhost/api/merchant/payment-link', 'POST', { amount: '1.00', currency: 'USDC' }, cookie));
   ok('payment-link explicit USDC wins', l2.status === 200 && (await l2.json())?.currency === 'USDC');
 
@@ -126,7 +129,7 @@ async function main() {
   ok('arbitrary address rejected', bad2.status === 400, `${bad2.status}`);
   const bad3: any = await prefPATCH(req('http://localhost/api/merchant/me', 'PATCH', { settlementToken: 'USDC', settlementTokenAddress: EURC }, cookie));
   ok('symbol/address mismatch rejected', bad3.status === 400, `${bad3.status}`);
-  ok('preference unchanged after rejections', (await (prisma as any).merchant.findUnique({ where: { id: m.id } }))?.settlementTokenAddress === EURC);
+  ok('preference unchanged after rejections', (await (prisma as any).merchant.findUnique({ where: { id: m.id } }))?.settlementTokenAddress === USDC);
   const badInit = await createViaInit({ amount: '1.00', currency: 'BTC' });
   ok('explicit bad currency still 400', badInit.status === 400, `${badInit.status}`);
 

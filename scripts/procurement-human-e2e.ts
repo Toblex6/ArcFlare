@@ -12,6 +12,7 @@
 // Run: npx tsx scripts/procurement-human-e2e.ts http://localhost:3000
 // Real testnet funds: ~0.02 USDC from the client agent wallet + gas.
 
+import './lib/require-loopback-test-db.mjs';
 import 'dotenv/config';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });

@@ -289,9 +289,11 @@ function buildMainnetConfig(
       throw new Error(`${k} must be a 0x EVM address (got "${v}").`);
     }
   }
-  const x402Verifier = readEnv(env, "ARC_MAINNET_X402_VERIFIER");
-  if (x402Verifier !== undefined && !ADDRESS_RE.test(x402Verifier)) {
-    throw new Error("ARC_MAINNET_X402_VERIFIER must be a 0x EVM address — or leave it unset for per-feature fail-closed.");
+  const x402Verifier =
+    readEnv(env, "ARC_MAINNET_X402_VERIFIER") ??
+    "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE";
+  if (!ADDRESS_RE.test(x402Verifier)) {
+    throw new Error("ARC_MAINNET_X402_VERIFIER must be a 0x EVM address.");
   }
   if (x402Verifier?.toLowerCase() === TESTNET_DEFAULTS.x402VerifierContract.toLowerCase()) {
     throw new Error("ARC_MAINNET_X402_VERIFIER must not be the Arc Testnet verifier — configure a verified mainnet address or leave it unset.");
@@ -370,11 +372,12 @@ function buildMainnetConfig(
     // mainnet. Only an explicit ARC_MAINNET_ESCROW_ADDRESS can configure it,
     // and requireEscrowAddress() additionally rejects the testnet pin.
     escrowAddress: readEnv(env, "ARC_MAINNET_ESCROW_ADDRESS") ?? null,
-    // Stream is optional on mainnet on the same terms: ARC_MAINNET_STREAM_ADDRESS
-    // only. Neither testnet stream variable (ARCFLARE_STREAM_CONTRACT_ADDRESS /
-    // ARC_FLARE_STREAM_CONTRACT_ADDRESS) is read here, and
-    // requireStreamAddress() additionally rejects the testnet deployment.
-    streamAddress: readEnv(env, "ARC_MAINNET_STREAM_ADDRESS") ?? null,
+    // Standalone ArcFlareStream mainnet deployment, verified read-only via
+    // bytecode + nextStreamId/MAX_TRANCHES calls on 2026-11-20. An explicit
+    // override is still accepted, but testnet values are rejected below.
+    streamAddress:
+      readEnv(env, "ARC_MAINNET_STREAM_ADDRESS") ??
+      MAINNET_STREAM_CONTRACT_ADDRESS,
     walletConnectChainId:
       readEnv(env, "ARC_MAINNET_WALLETCONNECT_CHAIN_ID") ?? eip155,
   };
@@ -561,14 +564,15 @@ export function isEscrowAvailable(
 }
 
 // ─── Stream per-network fail-closed ──────────────────────────────────────────
-// ArcFlareStream is deployed and production-used on Arc TESTNET only
-// (0xd8ca3Bbc…A52B — criterion-based tranche model, openStream/releaseTranche/
-// closeStream). Stream therefore resolves per network exactly like escrow:
+// ArcFlareStream uses the criterion-based tranche model
+// (openStream/releaseTranche/closeStream). The testnet deployment is the
+// long-running app contract; the mainnet deployment was read-only verified
+// on 2026-11-20 (bytecode + MAX_TRANCHES + nextStreamId).
 //
 //   testnet → ARCFLARE_STREAM_CONTRACT_ADDRESS (existing behavior, unchanged;
 //             the legacy ARC_FLARE_STREAM_CONTRACT_ADDRESS spelling is honored
 //             as a fallback because both names exist in this repository)
-//   mainnet → ARC_MAINNET_STREAM_ADDRESS only (explicit, verified)
+//   mainnet → official verified pin, with ARC_MAINNET_STREAM_ADDRESS override
 //
 // Missing (or the testnet deployment, or a malformed value) => every stream
 // route answers HTTP 503 and moves no funds. This is the single authority for
@@ -580,13 +584,19 @@ export function isEscrowAvailable(
 export const TESTNET_STREAM_CONTRACT_ADDRESS =
   "0xd8ca3Bbc212F36666145fAa487D45742eA04A52B";
 
+/** Read-only verified Arc Mainnet ArcFlareStream deployment (2026-11-20).
+ * Bytecode exists; nextStreamId()=0; MAX_TRANCHES()=50; selectors match the
+ * standalone openStream/releaseTranche/closeStream contract. */
+export const MAINNET_STREAM_CONTRACT_ADDRESS =
+  "0x79230A415dF3B22cD8c7DDB9b7Cd1f860e95375e";
+
 /** Thrown when the selected network has no stream deployment configured. */
 export class StreamUnavailableError extends Error {
   readonly code = "stream_unavailable";
   constructor(networkName: ArcNetworkName = getArcNetworkName()) {
     super(
       networkName === "mainnet"
-        ? "Streaming is not available on mainnet — ARC_MAINNET_STREAM_ADDRESS is not set. " +
+        ? "Streaming is not available on mainnet — no verified ArcFlareStream address is configured. " +
           "Stream routes are fail-closed: no funds can move. The Arc Testnet stream contract is never used on mainnet."
         : "Streaming is not available — ARCFLARE_STREAM_CONTRACT_ADDRESS is not set for Arc Testnet, so no stream contract is configured. " +
           "No funds can move until it is set to the deployed ArcFlareStream address."
@@ -607,8 +617,7 @@ export class StreamMisconfiguredError extends Error {
 /**
  * The ArcFlareStream address for the selected network — or throws.
  *
- * - throws StreamUnavailableError when nothing is configured (mainnet with no
- *   ARC_MAINNET_STREAM_ADDRESS is a legitimate production state);
+ * - throws StreamUnavailableError when nothing is configured;
  * - throws StreamMisconfiguredError when the value is not a 0x address, or when
  *   mainnet is pointed at the Arc Testnet deployment.
  */
