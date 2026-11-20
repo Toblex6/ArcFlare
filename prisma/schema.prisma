@@ -486,6 +486,57 @@ model JobApplication {
   @@map("job_applications")
 }
 
+// ── FlareHQ Jobs (FlareHQEscrow-backed, NOT ERC-8183) ─────────────────────
+// This is the mainnet-capable job lifecycle. It deliberately has a separate
+// model/name from Erc8183Job: no row or UI label may imply that a
+// FlareHQEscrow job is an ERC-8183 protocol job.
+model FlareHQJob {
+  id                 String   @id @default(cuid())
+  seq                Int      @unique @default(autoincrement())
+  title              String?
+  description        String
+  requirements       Json?
+  budget             String   // 6-decimal USDC base units
+  clientAddress      String
+  clientActorType    String   // merchant | consumer | agent
+  clientActorId      String
+  providerAddress    String?
+  providerActorType  String?
+  providerActorId    String?
+  status             String   @default("OPEN") // OPEN | SELECTED | FUNDED | SUBMITTED | COMPLETED | DISPUTED | REFUNDED | CANCELLED
+  escrowReference    String?  @unique
+  deliverable        String?
+  deliverableHash    String?
+  submittedAt        DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  applications       FlareHQJobApplication[]
+
+  @@index([clientAddress])
+  @@index([providerAddress])
+  @@index([status])
+  @@map("flarehq_jobs")
+}
+
+model FlareHQJobApplication {
+  id               String     @id @default(cuid())
+  jobId            String
+  job              FlareHQJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  applicantAddress String
+  applicantType    String     // merchant | consumer | agent
+  applicantActorId String
+  pitch            String
+  proposedAmount   String?    // 6-decimal USDC base units
+  portfolioLinks   String[]   @default([])
+  status           String     @default("PENDING") // PENDING | SELECTED | REJECTED
+  createdAt        DateTime   @default(now())
+
+  @@unique([jobId, applicantAddress])
+  @@index([jobId])
+  @@map("flarehq_job_applications")
+}
+
 model Erc8183JobEvent {
   id          String   @id @default(uuid())
   jobId       BigInt
