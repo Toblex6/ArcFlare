@@ -79,6 +79,7 @@ ok('complete resolves the Circle-attested nonce', complete.includes('fetchIrisBr
 ok('complete verifies the Arc mint', complete.includes('verifyArcMint'));
 ok('complete marks the invoice paid only after mint proof', complete.includes('status: "SUCCESS"') && complete.indexOf('verifyArcMint') < complete.indexOf('status: "SUCCESS"'));
 ok('complete enforces credit >= invoice', complete.includes('creditSatisfiesInvoice'));
+ok('complete preserves 25 bps platform-fee flow after verified settlement', complete.includes('settleFeeBestEffort') && complete.indexOf('verifyArcMint') < complete.indexOf('settleFeeBestEffort'));
 ok('complete has no second-burn path', !complete.includes('depositForBurn') && !complete.includes('kit.bridge'));
 
 console.log(`\ncheckout-bridge-tests: ${passed} passed, ${failed} failed`);

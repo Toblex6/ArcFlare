@@ -20,6 +20,8 @@ import { verifyArcMint, sourceCctpV2 } from "@/lib/bridge/externalVerify";
 import { fetchIrisBridgeMessage } from "@/lib/bridge/irisNonce";
 import { logBridgeStage } from "@/lib/bridge/stageLogger";
 import { invoiceAmountBaseUnits, creditSatisfiesInvoice } from "@/lib/checkout/bridgeGross";
+import { settleFeeBestEffort } from "@/lib/payments/settleFeeBestEffort";
+import { resolveRowCurrency } from "@/lib/tokens/resolveCurrency";
 
 export async function POST(
   req: NextRequest,
@@ -192,6 +194,18 @@ export async function POST(
         });
       }
       return NextResponse.json({ success: false, code: "INTENT_STATE_CONFLICT", error: "The payment changed state while completing. Retry status." }, { status: 409 });
+    }
+
+    // Preserve the existing 25 bps checkout fee flow. This runs only after
+    // verified merchant mint credit and never rolls back the paid invoice.
+    const settledInvoice = await (prisma as any).paymentLog.findUnique({ where: { reference } });
+    if (settledInvoice) {
+      try {
+        const token = resolveRowCurrency(settledInvoice);
+        await settleFeeBestEffort(settledInvoice, token);
+      } catch (e: any) {
+        console.error('[checkout/bridge] platform fee deferred:', e?.message ?? e);
+      }
     }
 
     return NextResponse.json({
