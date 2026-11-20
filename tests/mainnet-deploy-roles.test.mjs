@@ -19,6 +19,10 @@ import path from 'node:path';
 import {
   MAINNET_PRODUCTION_ROLES,
   KNOWN_TESTNET_ROLE_ADDRESSES,
+  MAINNET_ESCROW_DEPLOYER,
+  MAINNET_ESCROW_SAFE,
+  matchesMainnetEscrowSafe,
+  assertMainnetFlareHQEscrowRoles,
   assertMainnetJobEscrowRoles,
   assertMainnetPayrollRoles,
 } from '../scripts/mainnet-roles.mjs';
@@ -40,10 +44,39 @@ const GOOD_PAYROLL = {
   relayer: MAINNET_PRODUCTION_ROLES.relayer,
 };
 
+test('Safe verification rejects any change to the signer set, singleton, threshold, version or nonce', () => {
+  const safe = MAINNET_ESCROW_SAFE;
+  assert.equal(matchesMainnetEscrowSafe({ ...safe, owners: [...safe.owners].reverse() }), true);
+  for (const mismatch of [
+    { owners: safe.owners.slice(1) },
+    { owners: [safe.owners[0], safe.owners[0], safe.owners[2]] },
+    { singleton: MAINNET_ESCROW_DEPLOYER },
+    { threshold: 1n },
+    { version: '1.4.1' },
+    { nonce: 1n },
+  ]) assert.equal(matchesMainnetEscrowSafe({ ...safe, ...mismatch }), false);
+});
+
 // ── 1. Exact production roles pass ───────────────────────────────────────────
 test('exact production roles pass (job escrow + payroll)', () => {
   assert.doesNotThrow(() => assertMainnetJobEscrowRoles(GOOD_ESCROW));
   assert.doesNotThrow(() => assertMainnetPayrollRoles(GOOD_PAYROLL));
+});
+
+test('FlareHQEscrow enforces the independent deployer, arbiter and Safe treasury', () => {
+  const roles = {
+    arbiter: MAINNET_PRODUCTION_ROLES.arbiter,
+    treasury: MAINNET_PRODUCTION_ROLES.owner,
+    deployer: MAINNET_ESCROW_DEPLOYER,
+  };
+  assert.doesNotThrow(() => assertMainnetFlareHQEscrowRoles(roles));
+  for (const name of Object.keys(roles)) {
+    assert.throws(() => assertMainnetFlareHQEscrowRoles({ ...roles, [name]: undefined }), /not set/);
+    assert.throws(() => assertMainnetFlareHQEscrowRoles({ ...roles, [name]: MAINNET_PRODUCTION_ROLES.relayer }), /does not match/);
+  }
+  const deploy = read('scripts/deploy-flarehq-escrow.mjs');
+  assert.ok(deploy.indexOf('assertMainnetFlareHQEscrowRoles({') < deploy.indexOf('if (!execute) return;'));
+  assert.ok(deploy.indexOf('if (!execute) return;') < deploy.indexOf('.deploy(...constructorArgs)'));
 });
 
 // ── 2. Any single mismatch is rejected ───────────────────────────────────────
