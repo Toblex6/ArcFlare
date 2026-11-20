@@ -181,6 +181,7 @@ async function sweepSettledToRelayer(price: string): Promise<SweepResult> {
   const gateway = new GatewayClient({
     chain: requireGatewayChain(),
     privateKey: sellerPrivateKey as `0x${string}`,
+    rpcUrl: getNetworkConfig().primaryRpc,
   });
   const sellerEoa = new (await import("ethers")).Wallet(sellerPrivateKey).address;
 

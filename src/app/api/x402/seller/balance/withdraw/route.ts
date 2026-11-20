@@ -22,13 +22,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { withApiKey } from "@/lib/middleware/withApiKey";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { privateKeyToAccount } from "viem/accounts";
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { isGatewayAvailable, requireGatewayChain, gatewayUnavailableBody } from "@/lib/x402-gateway";
 import { verifyCallerControlsAddress } from "@/lib/wallet/verifyCallerControlsAddress";
 import { USDC_AMOUNT_RE, MAX_USDC_AMOUNT } from "@/lib/validation";
 
 // H12: only chains this settlement pool is actually provisioned for.
-const ALLOWED_CHAINS = new Set(["arcTestnet", "base", "base-sepolia"]);
+const ALLOWED_CHAINS = new Set(["arc", "arcTestnet", "base", "baseSepolia"]);
 
 // SECURITY (audit H7): this route signs with the pooled SELLER_PRIVATE_KEY,
 // so it was previously reachable by any active ApiKey with no proof the
@@ -40,9 +40,7 @@ const ALLOWED_CHAINS = new Set(["arcTestnet", "base", "base-sepolia"]);
 // stays as the second, destination-side defense.
 async function withdrawHandler(request: NextRequest) {
   try {
-    // Mainnet fail-closed (Option B): Gateway withdrawals are not
-    // Mainnet-ready — refuse before the SELLER key is touched, so a
-    // mainnet request can never withdraw against Arc Testnet.
+    // Feature/config gate runs before the SELLER key is read.
     if (!isGatewayAvailable()) {
       return NextResponse.json(gatewayUnavailableBody(), { status: 503 });
     }
@@ -114,12 +112,10 @@ async function withdrawHandler(request: NextRequest) {
       recipient = treasuryAllowlist[0] as `0x${string}`;
     }
 
-    // requireGatewayChain() throws on mainnet (defense-in-depth behind
-    // the 503 guard above) — construction can never target testnet from a
-    // mainnet request.
     const gateway = new GatewayClient({
       chain: requireGatewayChain(),
       privateKey: sellerPrivateKey as `0x${string}`,
+      rpcUrl: getNetworkConfig().primaryRpc,
     });
 
     const result = await gateway.withdraw(amount.toString(), {

@@ -289,9 +289,11 @@ function buildMainnetConfig(
       throw new Error(`${k} must be a 0x EVM address (got "${v}").`);
     }
   }
-  const x402Verifier = readEnv(env, "ARC_MAINNET_X402_VERIFIER");
-  if (x402Verifier !== undefined && !ADDRESS_RE.test(x402Verifier)) {
-    throw new Error("ARC_MAINNET_X402_VERIFIER must be a 0x EVM address — or leave it unset for per-feature fail-closed.");
+  const x402Verifier =
+    readEnv(env, "ARC_MAINNET_X402_VERIFIER") ??
+    "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE";
+  if (!ADDRESS_RE.test(x402Verifier)) {
+    throw new Error("ARC_MAINNET_X402_VERIFIER must be a 0x EVM address.");
   }
   if (x402Verifier?.toLowerCase() === TESTNET_DEFAULTS.x402VerifierContract.toLowerCase()) {
     throw new Error("ARC_MAINNET_X402_VERIFIER must not be the Arc Testnet verifier — configure a verified mainnet address or leave it unset.");

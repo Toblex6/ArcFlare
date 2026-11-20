@@ -12,6 +12,7 @@ import { GatewayClient } from "@circle-fin/x402-batching/client";
 import { withApiKeyOrMerchant, resolveMerchant } from "@/lib/middleware/withMerchantAuth";
 import { getOrCreateBuyerWallet } from "@/lib/x402-wallet";
 import { isGatewayAvailable, requireGatewayChain, gatewayUnavailableBody } from "@/lib/x402-gateway";
+import { getNetworkConfig } from "@/lib/config/network";
 
 async function x402PayHandler(req: NextRequest) {
   try {
@@ -71,6 +72,7 @@ async function x402PayHandler(req: NextRequest) {
     const client = new GatewayClient({
       chain: requireGatewayChain(),
       privateKey: PRIVATE_KEY,
+      rpcUrl: getNetworkConfig().primaryRpc,
     });
 
     // Check Gateway balance before paying
