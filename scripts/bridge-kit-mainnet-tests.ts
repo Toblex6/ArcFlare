@@ -94,9 +94,9 @@ ok('complete looks up across tables', complete.includes('findBridgeSourceChain(u
 const ui = read('src/components/bridge/ExternalBridge.tsx');
 ok('UI sources follow the network', ui.includes("getBridgeSourceChains(bridgeNetwork)"));
 ok('UI bridges to kit Arc on mainnet', ui.includes("bridgeNetwork === 'mainnet' ? 'Arc' : 'Arc_Testnet'"));
-ok('UI gas notice names source gas + relayed mint', ui.includes('gas (approve + burn)') && ui.includes('The Arc mint is relayed'));
+ok('UI gas notice is plain-language and source-only', ui.includes('up to two confirmations') && ui.includes('for network fees'));
 ok('UI fee estimate via kit.estimate (best-effort)', ui.includes('kit).estimate({') || ui.includes('.estimate({'));
-ok('UI keeps burn+mint links + resume', ui.includes('View source transaction') && ui.includes('View destination transaction') && ui.includes('Resume verification / settlement'));
+ok('UI keeps source+Arc explorer links + recovery', ui.includes('View on {receipt.sourceLabel}') && ui.includes('View on Arc') && ui.includes('Check transfer status'));
 const pkg = JSON.parse(read('package.json'));
 ok('adapter-viem-v2 is a direct dependency', typeof pkg.dependencies['@circle-fin/adapter-viem-v2'] === 'string');
 

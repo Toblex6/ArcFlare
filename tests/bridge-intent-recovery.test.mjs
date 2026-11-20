@@ -137,9 +137,9 @@ test('recovery uses authoritative hashes first, but an unbound typo is replaceab
   assert.equal(selectBridgeRecoveryHash(undefined, '', BURN), BURN);
 });
 test('SDK allowance error is not mislabeled as balance or gas failure', () => {
-  assert.match(bridgeResultFailure({ state: 'error', steps: [{ name: 'burn', state: 'error', error: { message: 'ERC20: transfer amount exceeds allowance' } }] }, 'Base'), /allowance is insufficient/);
-  assert.match(bridgeResultFailure({ state: 'error', steps: [{ name: 'approve', state: 'success', txHash: WRONG }] }, 'Base'), /confirmed approval is not a completed bridge/);
-  assert.match(bridgeResultFailure({ steps: [{ name: 'burn', state: 'pending', txHash: BURN }] }, 'Base'), /do not submit another burn/);
+  assert.match(bridgeResultFailure({ state: 'error', steps: [{ name: 'burn', state: 'error', error: { message: 'ERC20: transfer amount exceeds allowance' } }] }, 'Base'), /did not allow enough USDC/);
+  assert.match(bridgeResultFailure({ state: 'error', steps: [{ name: 'approve', state: 'success', txHash: WRONG }] }, 'Base'), /did not return a transaction hash/);
+  assert.match(bridgeResultFailure({ steps: [{ name: 'burn', state: 'pending', txHash: BURN }] }, 'Base'), /instead of starting another one/);
 });
 
 function verifyFixture(row) {

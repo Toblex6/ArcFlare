@@ -1,5 +1,6 @@
 // Server-only configuration check for the browser-signed Bridge Kit flow.
-// Configuration is not proof of a completed mainnet bridge.
+// The topology still fails closed here; production readiness was separately
+// proven by the completed Base → Arc transfer recorded on 2026-11-19.
 import { Arc, ArcTestnet } from '@circle-fin/bridge-kit/chains';
 import { getArcChain, getNetworkConfig } from '@/lib/config/network';
 import { getBridgeSourceChains } from './sourceChains';
@@ -19,12 +20,10 @@ export function getExternalBridgeAvailability() {
     return {
       available: true,
       network: network.name,
-      status: network.name === 'mainnet' ? 'configured-unverified' : 'configured',
+      status: 'available',
       destination: { id: destination.chain, label: getArcChain().name, chainId: network.chainId },
       sourceChains: getBridgeSourceChains(network.name),
-      message: network.name === 'mainnet'
-        ? 'Mainnet bridge is configured but has not yet been verified end to end. An approval is not a completed bridge.'
-        : null,
+      message: null,
     };
   } catch {
     return { available: false, network: null, status: 'unavailable', sourceChains: [], message: 'External bridging is unavailable: the configured destination does not match the installed Bridge Kit.' };

@@ -2227,14 +2227,9 @@ function ConsumerAppInner() {
             <h2 style={styles.flowTitle}>Bridge to Arc</h2>
             <p style={{ color: "var(--flow-text-faint)", fontSize: "clamp(13px, 1.2vw, 15px)", marginBottom: 20 }}>
               {walletType === "EXTERNAL"
-                ? "Bring USDC from another chain to your FlareHQ wallet."
+                ? "Move USDC from another network into your FlareHQ wallet."
                 : "Your FlareHQ wallet is on Arc."}
             </p>
-            <div style={styles.flowLine}>
-              <span style={styles.flowDot} />
-              <span style={styles.flowStroke} />
-              <span style={styles.flowDot} />
-            </div>
 
             {/* Bridge posture: CIRCLE wallets are provisioned on Arc only
                 (Arc funding UX below — no source-chain balances are

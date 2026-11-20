@@ -53,25 +53,25 @@ export function bridgeEventHash(event: any, method: 'burn' | 'mint'): string | n
 export function bridgeResultFailure(result: any, sourceLabel: string): string {
   const burn = bridgeBurnStep(result);
   if (burn?.state === 'success' && extractBurnTxHash(result)) {
-    return 'The source burn was confirmed, but settlement is not complete. Resume this bridge to keep checking the Arc mint; do not burn again.';
+    return 'Your USDC was sent, but it has not arrived on Arc yet. Keep tracking this transfer—do not start it again.';
   }
   if (extractBurnTxHash(result)) {
-    return `A source burn transaction was submitted on ${sourceLabel}. Check its receipt and recover this same bridge; do not submit another burn.`;
+    return `A transfer was submitted on ${sourceLabel}. Check its status instead of starting another one.`;
   }
   const failed = [...(Array.isArray(result?.steps) ? result.steps : [])].reverse().find((step: any) => step?.state === 'error');
   const parts = [failed?.errorMessage, failed?.error?.message, failed?.error?.cause?.message, result?.error?.message, result?.error?.cause?.message, result?.error];
   const text = parts.map((part) => typeof part === 'string' ? part : '').join(' ').toLowerCase();
   const name = String(failed?.name ?? '').toLowerCase();
   const approval = name === 'approve';
-  const stage = approval ? 'USDC approval' : 'Source burn';
+  const stage = approval ? 'Wallet confirmation' : 'Transfer';
   if (/user rejected|user denied|request rejected|user cancelled|action rejected/.test(text)) {
-    return `${stage} was cancelled. No burn hash was recorded. Check your wallet activity before retrying this same intent.`;
+    return `${stage} was cancelled. Check your wallet activity before trying again.`;
   }
   if (/allowance/.test(text)) {
-    return 'The source burn could not be submitted because the USDC allowance is insufficient. Approval alone does not move USDC. Check wallet activity, then retry approval and burn for this same intent.';
+    return 'Your wallet did not allow enough USDC for this transfer. Check your wallet activity, then try this transfer again.';
   }
   if (/insufficient funds|out of funds|insufficient.*gas|gas.*insufficient|intrinsic gas too low|out of gas/.test(text)) {
-    return `${stage} could not be submitted with the available source-chain gas. Check your wallet activity and gas on ${sourceLabel} before retrying this same intent.`;
+    return `${stage} could not be sent because there is not enough gas on ${sourceLabel}. Add gas, check your wallet activity, then try again.`;
   }
-  return `${stage} did not return a burn transaction hash. A confirmed approval is not a completed bridge. Check your wallet activity before retrying this same intent.`;
+  return `${stage} did not return a transaction hash. Check your wallet activity before trying again.`;
 }

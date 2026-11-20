@@ -1,0 +1,624 @@
+.bridgeWidget {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.routeStack {
+  position: relative;
+  display: grid;
+  gap: 10px;
+}
+
+.assetCard,
+.quoteCard,
+.progressCard,
+.recoveryCard,
+.noticeCard,
+.stateCard,
+.successCard,
+.errorCard {
+  border: 1px solid var(--flow-border);
+  background: var(--flow-surface);
+  border-radius: 20px;
+  box-sizing: border-box;
+}
+
+.assetCard {
+  padding: 16px;
+}
+
+.assetTopline,
+.assetFooter,
+.quoteHeader,
+.quoteRow,
+.summaryRows > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.assetTopline {
+  color: var(--flow-text-faint);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.assetMainRow {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) minmax(120px, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.chainPicker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: var(--flow-text);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.chainPicker select {
+  min-width: 0;
+  max-width: 150px;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  background: transparent;
+  color: var(--flow-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chainPicker select:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.chainMark {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #1d63ed;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.arcMark {
+  background: linear-gradient(135deg, #e8714a, #bd6bff);
+}
+
+.amountField,
+.receiveAmount {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.amountField input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--flow-text);
+  font: inherit;
+  font-size: clamp(24px, 6vw, 34px);
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: right;
+}
+
+.amountField input::placeholder {
+  color: color-mix(in srgb, var(--flow-text-faint) 55%, transparent);
+}
+
+.amountField > span:last-child,
+.receiveAmount > span {
+  color: var(--flow-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.receiveAmount strong {
+  overflow: hidden;
+  color: var(--flow-text);
+  font-size: clamp(22px, 5.5vw, 30px);
+  font-weight: 600;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assetFooter {
+  min-height: 19px;
+  margin-top: 13px;
+  color: var(--flow-text-faint);
+  font-size: 12px;
+}
+
+.walletLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.onlineDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #36a269;
+  box-shadow: 0 0 0 3px rgba(54, 162, 105, 0.12);
+}
+
+.routeArrow {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 22px;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  border: 4px solid var(--flow-bg);
+  border-radius: 11px;
+  background: var(--flow-surface-2);
+  color: var(--flow-text-muted);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.verifiedBadge,
+.routeBadge,
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(54, 162, 105, 0.11);
+  color: #25764d;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.quoteCard,
+.progressCard,
+.recoveryCard,
+.noticeCard,
+.stateCard,
+.errorCard {
+  padding: 16px;
+}
+
+.quoteHeader {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--flow-border);
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.routeBadge {
+  background: rgba(29, 99, 237, 0.1);
+  color: #3567bd;
+}
+
+.quoteRow,
+.summaryRows > div {
+  padding: 7px 0;
+  color: var(--flow-text-muted);
+  font-size: 13px;
+}
+
+.quoteRow strong,
+.summaryRows strong {
+  color: var(--flow-text);
+  font-size: 13px;
+  text-align: right;
+}
+
+.primaryAction,
+.secondaryAction {
+  width: 100%;
+  min-height: 50px;
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+}
+
+.primaryAction {
+  border: 0;
+  background: var(--flow-text);
+  color: var(--flow-bg);
+}
+
+.secondaryAction {
+  border: 1px solid var(--flow-border);
+  background: transparent;
+  color: var(--flow-text);
+}
+
+.primaryAction:hover:not(:disabled),
+.secondaryAction:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.primaryAction:disabled,
+.secondaryAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.walletPromptNote {
+  margin: -5px 6px 0;
+  color: var(--flow-text-faint);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.progressHeader,
+.stateCard,
+.noticeCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.progressHeader strong,
+.stateCard h3,
+.noticeCard strong,
+.recoveryHeading h3,
+.errorCard strong {
+  margin: 0;
+  color: var(--flow-text);
+  font-size: 14px;
+}
+
+.progressHeader p,
+.stateCard p,
+.noticeCard p,
+.recoveryHeading p,
+.errorCard p {
+  margin: 4px 0 0;
+  color: var(--flow-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border: 2px solid var(--flow-border);
+  border-top-color: #e8714a;
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.progressList {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-left: 3px;
+}
+
+.progressStep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--flow-text-muted);
+  font-size: 13px;
+}
+
+.progressDot {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--flow-border);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.progressDone {
+  border-color: #36a269;
+  background: #36a269;
+}
+
+.progressActive {
+  border: 5px solid rgba(232, 113, 74, 0.2);
+  background: #e8714a;
+}
+
+.progressError {
+  border-color: #c0563a;
+  background: #c0563a;
+}
+
+.recoveryCard {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  border-color: rgba(232, 113, 74, 0.32);
+  background: color-mix(in srgb, var(--flow-surface) 92%, #e8714a 8%);
+}
+
+.stateIcon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(232, 113, 74, 0.14);
+  color: #b95131;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.recoveryHeading {
+  min-width: 0;
+}
+
+.recoveryHeading .statusPill {
+  margin-top: 9px;
+}
+
+.recoveryCard > .primaryAction,
+.recoveryCard > .helpDetails {
+  grid-column: 1 / -1;
+}
+
+.helpDetails,
+.advancedDetails {
+  border-top: 1px solid var(--flow-border);
+  padding-top: 12px;
+  color: var(--flow-text-muted);
+  font-size: 12px;
+}
+
+.helpDetails summary,
+.advancedDetails summary {
+  color: var(--flow-text);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.helpDetails > p {
+  margin: 8px 0 12px;
+  line-height: 1.5;
+}
+
+.helpDetails label,
+.advancedDetails label {
+  display: block;
+  margin: 12px 0 6px;
+  font-weight: 650;
+}
+
+.textInput {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--flow-border);
+  border-radius: 12px;
+  outline: none;
+  padding: 11px 12px;
+  background: var(--flow-bg);
+  color: var(--flow-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.helpDetails .secondaryAction {
+  min-height: 42px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.retryBlock {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--flow-border);
+}
+
+.checkRow {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 !important;
+  line-height: 1.45;
+}
+
+.checkRow input {
+  margin-top: 2px;
+}
+
+.advancedDetails {
+  margin-top: 14px;
+}
+
+.noticeCard {
+  flex-direction: column;
+  background: color-mix(in srgb, var(--flow-surface) 93%, #f0b55f 7%);
+}
+
+.inlineError,
+.inlineWarning {
+  margin: 0;
+  color: #c0563a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inlineWarning {
+  color: #9b6b1c;
+}
+
+.errorCard {
+  border-color: rgba(192, 86, 58, 0.28);
+  background: rgba(192, 86, 58, 0.07);
+}
+
+.successCard {
+  padding: 28px 20px 20px;
+  text-align: center;
+}
+
+.successIcon {
+  display: inline-flex;
+  width: 52px;
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(54, 162, 105, 0.12);
+  color: #2f8c5b;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.successEyebrow {
+  margin: 14px 0 4px;
+  color: #2f8c5b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.successCard h3 {
+  margin: 0;
+  color: var(--flow-text);
+  font-family: 'Fraunces', serif;
+  font-size: 25px;
+  font-weight: 600;
+}
+
+.successRoute {
+  margin: 5px 0 16px;
+  color: var(--flow-text-faint);
+  font-size: 13px;
+}
+
+.summaryRows {
+  padding: 10px 0;
+  border-top: 1px solid var(--flow-border);
+  border-bottom: 1px solid var(--flow-border);
+  text-align: left;
+}
+
+.explorerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.explorerLinks a {
+  color: #bd603f;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.successCard .secondaryAction {
+  margin-top: 2px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 480px) {
+  .assetCard {
+    padding: 14px;
+  }
+
+  .assetMainRow {
+    grid-template-columns: minmax(108px, auto) minmax(100px, 1fr);
+    gap: 8px;
+  }
+
+  .chainPicker {
+    gap: 7px;
+    font-size: 14px;
+  }
+
+  .chainPicker select {
+    max-width: 112px;
+  }
+
+  .chainMark {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
+  }
+
+  .amountField input {
+    font-size: 26px;
+  }
+
+  .receiveAmount strong {
+    font-size: 23px;
+  }
+
+  .routeArrow {
+    left: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+
+  .primaryAction,
+  .secondaryAction {
+    transition: none;
+  }
+}
