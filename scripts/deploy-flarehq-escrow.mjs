@@ -1,6 +1,7 @@
 // Read-only by default. Only the operator may run this script with --execute.
-import { Contract, ContractFactory, JsonRpcProvider, Wallet, ZeroAddress, ZeroHash, formatEther, id, keccak256 } from 'ethers';
+import { Contract, ContractFactory, JsonRpcProvider, ZeroAddress, ZeroHash, formatEther, id, keccak256 } from 'ethers';
 import { buildMainnetContract, checkDeploymentRevision, PreflightError } from './lib/mainnet-contract-build.mjs';
+import { resolveMainnetDeployerKey } from './lib/mainnet-deployer-key.mjs';
 import {
   MAINNET_ESCROW_DEPLOYER,
   MAINNET_PRODUCTION_ROLES,
@@ -54,15 +55,13 @@ async function main() {
   const { owner, arbiter: pinnedArbiter, treasurySink, relayer } = MAINNET_PRODUCTION_ROLES;
   const arbiter = process.env.ESCROW_ARBITER_ADDRESS ?? (execute ? undefined : pinnedArbiter);
   const treasury = process.env.ESCROW_TREASURY_ADDRESS ?? (execute ? undefined : treasurySink);
-  const rawKey = execute ? process.env.MAINNET_DEPLOYER_KEY : undefined;
+  // Read-only preflight also validates a supplied key, but never broadcasts.
+  const rawKey = process.env.MAINNET_DEPLOYER_KEY;
   if (execute && !rawKey) throw new PreflightError('MAINNET_DEPLOYER_KEY is required for --execute.');
-  if (rawKey && !/^(0x)?[0-9a-f]{64}$/i.test(rawKey)) throw new PreflightError('MAINNET_DEPLOYER_KEY is invalid.');
-  let signer;
-  if (rawKey) {
-    try { signer = new Wallet(rawKey); }
-    catch { throw new PreflightError('MAINNET_DEPLOYER_KEY is invalid.'); }
-  }
-  const deployer = signer?.address ?? MAINNET_ESCROW_DEPLOYER;
+  let key;
+  try { key = resolveMainnetDeployerKey(rawKey, MAINNET_ESCROW_DEPLOYER); }
+  catch (error) { throw new PreflightError(error.message); }
+  const { signer, deployer, keyAddressMatches } = key;
   try { assertMainnetFlareHQEscrowRoles({ arbiter, treasury, deployer }); }
   catch (error) { throw new PreflightError(error.message); }
 
@@ -75,7 +74,7 @@ async function main() {
     chainId,
     deployments,
     deployer,
-    keyAddressMatches: signer ? true : null,
+    keyAddressMatches,
   }, null, 2));
 
   const compiled = deployments.map(([name, argv]) => [name, argv, buildMainnetContract(name)]);
