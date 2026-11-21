@@ -16,9 +16,13 @@ export function trackCheckoutWallet(
     if (state !== 'ready') throw new Error('Check the existing transfer before sending again.');
 
     const tx = args.params?.[0] as { to?: string; data?: string } | undefined;
+    // Bridge Kit uses USDC.increaseAllowance on Base (selector 0x39509351)
+    // before submitting the CCTP burn. Treat both ERC-20 allowance methods as
+    // setup, not as the burn hash; otherwise the single-tx guard mistakes the
+    // approval for the burn and blocks Bridge Kit's next transaction.
     const approval = singleTransaction
       && tx?.to?.toLowerCase() === usdcAddress.toLowerCase()
-      && /^0x095ea7b3[\da-f]{128}$/i.test(tx.data ?? '');
+      && /^0x(?:095ea7b3|39509351)[\da-f]{128}$/i.test(tx.data ?? '');
     record('uncertain', null);
     state = 'uncertain';
     let result: unknown;

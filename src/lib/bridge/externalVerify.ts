@@ -649,6 +649,7 @@ export type BurnVerifyFailure =
   | 'NOT_MINED'
   | 'REVERTED'
   | 'WRONG_SENDER'
+  | 'APPROVAL_ONLY'
   | 'AMOUNT_MISMATCH'
   | 'BINDING_MISMATCH'
   | 'RPC_UNAVAILABLE';
@@ -701,12 +702,21 @@ export async function verifyExternalBurn(params: {
   }
 
   // Prove the sender: fetch the transaction and compare `from`.
+  let bridgeApprovalCandidate = false;
   try {
     const client = sourceClient(source);
     const tx = await withRpcRetry('source transaction', () => client.getTransaction({ hash }));
     if (!tx || (tx.from as string).toLowerCase() !== expectedFrom) {
       return { ok: false, reason: 'WRONG_SENDER', detail: 'Transaction was not sent by the connected wallet.' };
     }
+    const kitBridge = sourceBridgeContract(sourceId)?.toLowerCase();
+    const approval = /^0x(?:095ea7b3|39509351)([\da-f]{64})[\da-f]{64}$/i.exec(tx.input);
+    bridgeApprovalCandidate = Boolean(
+      kitBridge
+      && (tx.to as string | null)?.toLowerCase() === usdc
+      && approval
+      && `0x${approval[1].slice(-40)}`.toLowerCase() === kitBridge
+    );
   } catch {
     return { ok: false, reason: 'RPC_UNAVAILABLE', detail: 'Source chain RPC did not respond.' };
   }
@@ -732,7 +742,10 @@ export async function verifyExternalBurn(params: {
   if (debited !== amountBaseUnits) {
     return {
       ok: false,
-      reason: 'AMOUNT_MISMATCH',
+      // Only a successful allowance call to the canonical Bridge Kit
+      // contract is safe to retry. Other amount mismatches may be partial
+      // burns and must remain recovery-only.
+      reason: debited === 0n && bridgeApprovalCandidate ? 'APPROVAL_ONLY' : 'AMOUNT_MISMATCH',
       detail: `Source USDC debit (${debited}) does not equal the bridge amount (${amountBaseUnits}).`,
     };
   }

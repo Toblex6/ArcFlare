@@ -152,6 +152,15 @@ export default function CheckoutCrossChain({ reference, invoiceAmount, merchantS
     if (burnTxHash) {
       const confirmed = await postJson(`/api/checkout/${encodeURIComponent(reference)}/bridge/confirm`, { intent, burnTxHash });
       if (!confirmed?.success && confirmed?.state !== 'completed') {
+        if (confirmed?.safeToRetry === true && confirmed?.reason === 'APPROVAL_ONLY') {
+          // The server proved this candidate was only the USDC allowance for
+          // Bridge Kit, not a burn. Keep the same intent but clear its hash so
+          // Bridge Kit can submit the actual burn.
+          saveResume(reference, intent, null, true);
+          setResume({ intent, burnTxHash: null, ready: true });
+          setError('That transaction only approved USDC spending; it did not burn USDC. Retry this same payment.');
+          return false;
+        }
         throw new Error(confirmed?.error ?? 'This transfer could not be confirmed yet. Keep tracking it — do not start another.');
       }
     }

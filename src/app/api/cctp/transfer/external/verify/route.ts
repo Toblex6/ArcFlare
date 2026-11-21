@@ -28,6 +28,8 @@ function burnFailureCopy(reason: BurnVerifyFailure, sourceLabel: string): string
       return 'The source transaction reverted on-chain. Your USDC was not moved by it.';
     case 'WRONG_SENDER':
       return 'That hash is not from the bridge source wallet. Paste its burn hash for this same intent; do not submit another burn.';
+    case 'APPROVAL_ONLY':
+      return 'That transaction only approved USDC spending for Bridge Kit; it did not burn USDC. Retry the same bridge payment.';
     case 'AMOUNT_MISMATCH':
       return 'That transaction moved a different amount than this bridge expects. An approval is not a burn. Check wallet activity and use the burn hash for this same intent.';
     case 'BINDING_MISMATCH':
@@ -207,6 +209,7 @@ export async function POST(req: NextRequest) {
           code: 'BURN_NOT_VERIFIED',
           reference: intent.id,
           recoverable: true,
+          safeToRetry: proof.reason === 'APPROVAL_ONLY',
           reason: proof.reason,
           error: burnFailureCopy(proof.reason, sourceLabel),
         },
