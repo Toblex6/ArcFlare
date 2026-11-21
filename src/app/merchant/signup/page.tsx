@@ -279,7 +279,6 @@ export default function MerchantSignup() {
           </div>
         </div>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <Image src="/arcflare-logo.png" alt="FlareHQ" width={52} height={52} style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }} />
           <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>Create Merchant Account</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 14, margin: 0 }}>Start accepting USDC payments on Arc in minutes.</p>
         </div>

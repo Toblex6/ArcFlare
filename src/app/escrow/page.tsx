@@ -3,9 +3,10 @@
 
 import DashboardSidebar from '@/src/components/DashboardSidebar';
 import { useRouter } from 'next/navigation';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { deriveReturnTo, loginRedirectUrl } from '@/lib/auth/returnTo';
 import { useArcLabel } from '@/src/components/NetworkContext';
+import { useSecurePinDialog } from '@/components/SecurePinDialog';
 
 interface EscrowItem {
   id: string;
@@ -150,6 +151,8 @@ export default function EscrowDashboard() {
   // ── Release/dispute action state ─────────────────────────────────────────
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const confirmingRef = useRef(false);
+  const { requestPin, dialog: pinDialog } = useSecurePinDialog({ accent: '#0d7c5f' });
   const [disputeReason, setDisputeReason] = useState('');
   const [showDisputeForm, setShowDisputeForm] = useState(false);
   const [evidenceText, setEvidenceText] = useState('');
@@ -233,26 +236,49 @@ export default function EscrowDashboard() {
   };
 
   const handleConfirmDelivery = async () => {
-    if (!selected) return;
+    if (!selected || confirmingRef.current) return;
     // Incoming view → the caller controls the beneficiary (own wallet or owned
     // agent SCA); name it so the server's control check passes.
     const callerSCA = view === 'incoming' ? selected.beneficiarySCA : wallet?.walletAddress;
     if (!callerSCA) return;
+    confirmingRef.current = true;
     setActionLoading(true);
     setActionError(null);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      // Merchant confirmations do not use consumer step-up. Incoming can also
+      // represent an owned agent: the server remains the ownership authority.
+      if (callerSCA.toLowerCase() !== wallet?.walletAddress?.toLowerCase()) {
+        const securityRes = await fetch('/api/consumer/security', { cache: 'no-store' });
+        if (securityRes.status !== 401) {
+          const security = await securityRes.json();
+          if (!securityRes.ok || !security.success || typeof security.hasPin !== 'boolean' || typeof security.walletAddress !== 'string') {
+            throw new Error('Could not check wallet security. Please try again.');
+          }
+          if (security.walletAddress.toLowerCase() === callerSCA.toLowerCase() && security.hasPin) {
+            const entered = await requestPin({
+              title: 'Confirm escrow delivery',
+              description: 'Enter your payment PIN to confirm delivery. Funds release when both parties confirm.',
+              confirmLabel: 'Confirm delivery',
+            });
+            if (entered === null) return;
+            headers['x-consumer-pin'] = entered;
+          }
+        }
+      }
       const res = await fetch('/api/escrow/release', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ reference: selected.reference, callerSCA }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      if (!res.ok || !data.success) throw new Error(data.error || 'Could not confirm delivery.');
       await fetchEscrows();
       setSelected(data.escrow);
     } catch (err: any) {
       setActionError(err.message || 'Could not confirm delivery.');
     } finally {
+      confirmingRef.current = false;
       setActionLoading(false);
     }
   };
@@ -395,6 +421,7 @@ export default function EscrowDashboard() {
       `}</style>
 
       <DashboardSidebar active="Escrow" />
+      {pinDialog}
 
       {/* Added minWidth: 0 to prevent flex children (like tables) from pushing the main container past the viewport */}
       <main className="main-content" style={{ flex: 1, minWidth: 0, padding: '32px 32px', overflowX: 'hidden' }}>
