@@ -101,6 +101,14 @@ const widget = read('src/components/CheckoutWidget.tsx');
 const externalVerify = read('src/lib/bridge/externalVerify.ts');
 const confirmRoute = read(`${checkout}/confirm/route.ts`);
 
+test('Arc mint stages log the configured destination chain ID, not a CCTP domain', () => {
+  assert.match(complete, /import \{[^}]*getNetworkConfig[^}]*\} from "@\/lib\/config\/network"/);
+  for (const stage of ['MINT_PENDING', 'MINT_CONFIRMED']) {
+    assert.match(complete, new RegExp(`stage: "${stage}",\\s+txHash: [^,]+,\\s+chainId: getNetworkConfig\\(\\)\\.chainId,`));
+  }
+  assert.doesNotMatch(complete, /chainId: cctp\.domain/);
+});
+
 test('only the server-bound recipient and quoted gross reach Bridge Kit', () => {
   assert.match(intent, /const destination = invoice\.merchantSCA/);
   assert.match(intent, /quoteCheckoutBridge\(\{ source, network,/);

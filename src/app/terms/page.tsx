@@ -3,16 +3,18 @@ import LegalPage from '@/components/legal/LegalPage';
 export const metadata: Metadata = { title: 'Terms of Service | FlareHQ', description: 'Terms for using FlareHQ.' };
 
 export default function TermsPage() {
-  return <LegalPage title="Terms of Service" updated="20 November 2026">
-    <h2>1. The service</h2><p>FlareHQ provides software for stablecoin checkout, agent commerce, wallets, cross-chain transfers, escrow, FlareHQ Jobs, milestone streams, payroll and metered APIs on Arc. Features may be unavailable until their required contracts, networks or third-party services are configured.</p>
-    <h2>2. Non-custodial checkout</h2><p>Checkout is non-custodial: the customer pays the merchant wallet directly and FlareHQ never holds the checkout funds. Cross-chain checkout uses Circle CCTP and Bridge Kit to burn on the source network and mint to the merchant address on Arc. Network, relay and token fees can affect the gross amount.</p>
-    <h2>3. Wallets and authorization</h2><p>FlareHQ can provision Circle developer-controlled wallets. Circle provides wallet infrastructure; FlareHQ initiates authorized operations for those wallets under the product workflow. Connected external wallets sign in the user's browser. You are responsible for credentials, devices, approvals, recovery details and checking transaction recipients and amounts.</p>
-    <h2>4. Fees</h2><p>FlareHQEscrow charges 25 basis points (0.25%) on a release to the beneficiary and sends that fee to the configured treasury. An expiry refund returns the escrow amount without that release fee. Other product, blockchain, Circle, bridge, relay, gas or token fees may apply and are shown or determined by the relevant network or provider.</p>
-    <h2>5. Escrow, jobs and streams</h2><p>FlareHQEscrow holds funds in a smart contract, not in a FlareHQ bank account. Parties can confirm delivery, dispute before expiry, or seek an expiry refund where the contract permits. The designated arbiter resolves disputes. FlareHQ Jobs is a FlareHQEscrow-backed product and is not ERC-8183. Milestone stream closure pays all remaining funds to the worker; it is not a refund to the poster.</p>
-    <h2>6. Agents and third parties</h2><p>Agents and marketplace providers are independent users or software operators. ERC-8004 records identity, reputation and validation evidence but does not guarantee performance. Circle, Arc, wallet providers, RPCs, bridges and facilitators are third-party systems with their own terms and availability.</p>
-    <h2>7. Acceptable use</h2><p>Do not use FlareHQ for fraud, theft, sanctions evasion, unlawful goods or services, unauthorized wallet access, attacks, manipulation of reputation or validation, or activity prohibited by applicable Nigerian law or the laws that apply to you.</p>
-    <h2>8. Risk and availability</h2><p>Blockchain transactions can be irreversible. Smart contracts, stablecoins, bridges, wallets and networks may fail or change. Testnet assets have no monetary value. You must verify addresses and amounts before authorizing. FlareHQ is provided on an availability basis without a promise that every feature will be uninterrupted.</p>
-    <h2>9. Liability</h2><p>To the extent permitted by applicable law, the operator is not liable for indirect, incidental or consequential loss, lost profits, lost keys, third-party outages, protocol failures or transactions you authorize. Nothing in these terms excludes liability that cannot lawfully be excluded.</p>
-    <h2>10. Governing law and contact</h2><p>The operator is based in Lagos, Nigeria. Applicable governing law and dispute forum should be reviewed by Nigerian counsel before launch. Contact support using the operator contact below.</p>
+  return <LegalPage title="Terms of Service" updated="November 2026">
+    <h2>1. Acceptance.</h2><p>By using FlareHQ ("the Service") you agree to these Terms. If you do not agree, do not use the Service.</p>
+    <h2>2. Service.</h2><p>FlareHQ is a non-custodial stablecoin payment service built on Arc. It lets merchants create checkout links and invoices, accept USDC payments (including cross-chain payments via Circle's CCTP), and use escrow, jobs, streams and related tools.</p>
+    <h2>3. Operator.</h2><p>FlareHQ is operated by Temitope Oyalade, trading as FlareHQ, Nigeria.</p>
+    <h2>4. Eligibility.</h2><p>You must be at least 18 and legally allowed to use digital asset services where you live. You are responsible for following the laws that apply to you.</p>
+    <h2>5. Self-custody.</h2><p>FlareHQ does not hold your funds. You are responsible for your wallet, your credentials, and every transaction you approve, including sending to a wrong address.</p>
+    <h2>6. Fees.</h2><p>FlareHQ charges a 0.25% platform fee on checkout payments and escrow releases. Network and bridge fees are separate and are shown before you confirm. Fee rates may change with 30 days' notice.</p>
+    <h2>7. Escrow and jobs.</h2><p>Escrow funds are held by a smart contract, not by FlareHQ. Releases and refunds follow the rules of the contract and the decisions of the buyer, seller and arbiter.</p>
+    <h2>8. Prohibited use.</h2><p>No money laundering, terrorist financing, sanctions evasion, fraud, or anything illegal.</p>
+    <h2>9. No advice.</h2><p>Nothing here is financial, legal or tax advice. Digital assets are risky and can lose value.</p>
+    <h2>10. Liability.</h2><p>To the extent allowed by law, FlareHQ is not liable for indirect or consequential losses, or for losses from user error, network failures, smart contract bugs, or third-party outages.</p>
+    <h2>11. Changes.</h2><p>We may update these Terms. Continued use means you accept the changes.</p>
+    <h2>12. Contact.</h2><p>support@flarehq.xyz</p>
   </LegalPage>;
 }
