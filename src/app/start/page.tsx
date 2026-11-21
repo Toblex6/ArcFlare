@@ -28,7 +28,6 @@ export default function StartPage() {
             </header>
 
             <div className="flex items-center gap-3 mt-8 mb-6">
-                <Image src="/arcflare-logo.png" alt="FlareHQ" width={44} height={44} className="rounded-xl" />
                 <h1 className="text-2xl font-bold">FlareHQ</h1>
             </div>
 

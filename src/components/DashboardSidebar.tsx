@@ -86,12 +86,12 @@ export default function DashboardSidebar({ active }: { active: string }) {
     const router = useRouter();
     const [isMobile, setIsMobile] = useState(false);
     const [open, setOpen] = useState(false);
+    const [collapsed, setCollapsed] = useState(false);
+    const compact = !isMobile && collapsed;
     const [merchant, setMerchant] = useState<{ businessName: string; email: string } | null>(null);
     const [incomingCount, setIncomingCount] = useState(0);
-    // Server-resolved network state (production-safe defaults until
-    // /api/network resolves): the faucet entry is testnet-only and the
-    // badge shows the resolved network — never a test label on mainnet.
-    const { label: networkLabel, isTestnet: IS_TESTNET } = useNetwork();
+    // Keep the faucet testnet-only; no network-mode badge in the sidebar.
+    const { isTestnet: IS_TESTNET } = useNetwork();
     const SECTIONS: NavSection[] = IS_TESTNET
         ? [
             BASE_SECTIONS[0]!,
@@ -101,6 +101,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
         : BASE_SECTIONS;
 
     useEffect(() => {
+        try { setCollapsed(localStorage.getItem('flarehq.sidebar.collapsed') === 'true'); } catch { /* optional preference */ }
         const check = () => setIsMobile(window.innerWidth < 768);
         check();
         window.addEventListener('resize', check);
@@ -140,6 +141,12 @@ export default function DashboardSidebar({ active }: { active: string }) {
         router.replace('/merchant/login');
     };
 
+    const toggleCollapsed = () => {
+        const next = !collapsed;
+        setCollapsed(next);
+        try { localStorage.setItem('flarehq.sidebar.collapsed', String(next)); } catch { /* optional preference */ }
+    };
+
     return (
         <>
             {isMobile && (
@@ -169,23 +176,38 @@ export default function DashboardSidebar({ active }: { active: string }) {
 
             <aside
                 style={{
-                    width: 220,
+                    width: compact ? 72 : 220,
                     minHeight: '100vh',
                     background: '#1f140f',
                     display: 'flex',
                     flexDirection: 'column',
                     padding: '24px 14px',
                     flexShrink: 0,
+                    alignSelf: 'flex-start',
+                    boxSizing: 'border-box',
                     position: isMobile ? 'fixed' : 'sticky',
                     top: 0,
                     left: isMobile ? (open ? 0 : '-280px') : 0,
                     height: '100vh',
-                    overflowY: 'auto',
+                    overflow: 'hidden',
                     zIndex: 1000,
                     transition: 'left 0.3s ease',
                     borderRight: '1px solid #2d2015',
                 }}
             >
+                {!isMobile && (
+                    <button
+                        type="button"
+                        aria-label={compact ? 'Expand sidebar' : 'Collapse sidebar'}
+                        title={compact ? 'Expand sidebar' : 'Collapse sidebar'}
+                        aria-expanded={!compact}
+                        aria-controls="merchant-dashboard-navigation"
+                        onClick={toggleCollapsed}
+                        style={{ alignSelf: compact ? 'center' : 'flex-end', flexShrink: 0, width: 28, height: 28, marginBottom: 12, border: '1px solid #4b5563', borderRadius: 6, background: 'transparent', color: '#fff', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}
+                    >
+                        <span aria-hidden="true">{compact ? '»' : '«'}</span>
+                    </button>
+                )}
                 {isMobile && open && (
                     <button
                         type="button"
@@ -196,20 +218,21 @@ export default function DashboardSidebar({ active }: { active: string }) {
                         ×
                     </button>
                 )}
-                <Link href="/" title="FlareHQ homepage" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36, paddingLeft: 6, textDecoration: 'none' }}>
+                <Link href="/" title="FlareHQ homepage" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36, paddingLeft: compact ? 3 : 6, flexShrink: 0, textDecoration: 'none' }}>
                     <Image src="/arcflare-logo.png" alt="FlareHQ" width={36} height={36} style={{ borderRadius: 8, objectFit: 'contain' }} />
-                    <div>
+                    {!compact && <div>
                         <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, lineHeight: 1, margin: 0 }}>FlareHQ</p>
                         <p style={{ color: '#4b5563', fontSize: 10, margin: '3px 0 0 0' }}>Stablecoin Payment Infrastructure</p>
-                    </div>
+                    </div>}
                 </Link>
 
+                <div data-sidebar-scroll style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
                 <nav id="merchant-dashboard-navigation" style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
                     {SECTIONS.map((section) => (
                         <div key={section.group} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <p style={{ fontSize: 10, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1, padding: '6px 12px 2px', margin: 0 }}>
+                            {!compact && <p style={{ fontSize: 10, color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1, padding: '6px 12px 2px', margin: 0 }}>
                                 {section.group}
-                            </p>
+                            </p>}
                             {section.items.map((item) => {
                                 const isActive = item.label === active;
                                 if (item.disabled) {
@@ -227,7 +250,7 @@ export default function DashboardSidebar({ active }: { active: string }) {
                                             }}
                                         >
                                             {ICONS[item.label]}
-                                            <span>{item.label}</span>
+                                            {!compact && <span>{item.label}</span>}
                                         </span>
                                     );
                                 }
@@ -235,6 +258,9 @@ export default function DashboardSidebar({ active }: { active: string }) {
                                     <a
                                         key={item.label}
                                         href={item.href}
+                                        title={item.label}
+                                        aria-label={item.label}
+                                        aria-current={isActive ? 'page' : undefined}
                                         {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                                         style={{
                                             display: 'flex', alignItems: 'center', gap: 10,
@@ -247,8 +273,8 @@ export default function DashboardSidebar({ active }: { active: string }) {
                                         }}
                                     >
                                         {ICONS[item.label]}
-                                        <span>{item.label}</span>
-                                        {item.label === 'Escrow' && incomingCount > 0 && (
+                                        {!compact && <span>{item.label}</span>}
+                                        {!compact && item.label === 'Escrow' && incomingCount > 0 && (
                                             <span
                                                 title={`${incomingCount} incoming escrow${incomingCount === 1 ? '' : 's'} awaiting your confirmation`}
                                                 style={{
@@ -268,29 +294,30 @@ export default function DashboardSidebar({ active }: { active: string }) {
                     ))}
                 </nav>
 
-                <div style={{ background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.2)', borderRadius: 12, padding: '14px 14px', marginTop: 16 }}>
+                <div style={{ background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.2)', borderRadius: 12, padding: compact ? 4 : 14, marginTop: 16 }}>
+                    {!compact && <>
                     <p style={{ color: '#4b5563', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 6px 0' }}>Signed in as</p>
                     <p style={{ color: '#fff', fontSize: 13, fontWeight: 700, margin: '0 0 2px 0' }}>{merchant?.businessName || '...'}</p>
                     <p style={{ color: '#4b5563', fontSize: 10, margin: '0 0 10px 0' }}>{merchant?.email || ''}</p>
+                    </>}
                     <button
+                        aria-label="Settings"
+                        title="Settings"
                         onClick={() => router.push('/merchant/settings')}
                         style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '7px 0', fontSize: 11, color: '#9ca3af', cursor: 'pointer', marginBottom: 6 }}
                     >
-                        ⚙ Settings
+                        {compact ? '⚙' : '⚙ Settings'}
                     </button>
                     <button
+                        aria-label="Sign out"
+                        title="Sign out"
                         onClick={signOut}
                         style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '7px 0', fontSize: 11, color: '#9ca3af', cursor: 'pointer' }}
                     >
-                        Sign out
+                        {compact ? '↪' : 'Sign out'}
                     </button>
                 </div>
 
-                <div style={{ marginTop: 12, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: 10, padding: '8px 12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
-                        <span style={{ fontSize: 9, color: '#f59e0b', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{IS_TESTNET ? 'Arc Testnet Mode' : `${networkLabel} Mode`}</span>
-                    </div>
                 </div>
             </aside>
         </>

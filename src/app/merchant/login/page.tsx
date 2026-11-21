@@ -123,13 +123,6 @@ function MerchantLoginForm() {
 
       <div style={{ width: '100%', maxWidth: 420, marginTop: 48 }}>
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <Image
-            src="/arcflare-logo.png"
-            alt="FlareHQ"
-            width={52}
-            height={52}
-            style={{ borderRadius: 14, objectFit: 'contain', marginBottom: 16 }}
-          />
           <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', margin: '0 0 8px' }}>
             Merchant Login
           </h1>
