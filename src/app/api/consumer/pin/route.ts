@@ -5,7 +5,7 @@
 //                      only. Rejected with 409 when a PIN already exists
 //                      (use PUT to change). This is the one "session-only"
 //                      bootstrap the inventory allows for a new credential.
-//   PUT  { newPin }  — CHANGE: step-up against the OLD credential — the
+//   PUT  { newPin, confirmPin } — CHANGE: step-up against the OLD credential — the
 //                      canonical requireConsumerStepUp helper verifies the old
 //                      PIN from the x-consumer-pin header before the new hash
 //                      is stored. The PIN-change route itself calls the helper.
@@ -41,7 +41,7 @@ function unauthorized() {
 }
 
 // GET /api/consumer/pin — enrollment status only (booleans, never secrets).
-export async function GET(req: NextRequest) {
+async function getPinStatus(req: NextRequest) {
   const { allowed, response } = await checkRateLimit(req, "session");
   if (!allowed) return response as NextResponse;
   const { account, error } = await loadAccount(req);
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/consumer/pin — first-time bootstrap (session-only).
-export async function POST(req: NextRequest) {
+async function enrollPin(req: NextRequest) {
   const { allowed, response } = await checkRateLimit(req, "withdraw");
   if (!allowed) return response as NextResponse;
   const { account, error } = await loadAccount(req);
@@ -72,16 +72,19 @@ export async function POST(req: NextRequest) {
   }
 
   const pinHash = await hashConsumerPin(body.pin);
-  await (prisma as any).consumerAccount.update({
-    where: { id: account.id },
+  const enrolled = await (prisma as any).consumerAccount.updateMany({
+    where: { id: account.id, pinHash: null },
     data: { pinHash, pinFailedAttempts: 0, pinLockedUntil: null },
   });
+  if (enrolled.count !== 1) {
+    return NextResponse.json({ success: false, error: "A payment PIN is already set. Refresh your security settings." }, { status: 409 });
+  }
 
   return NextResponse.json({ success: true, set: true });
 }
 
 // PUT /api/consumer/pin — change (step-up against the OLD credential).
-export async function PUT(req: NextRequest) {
+async function changePin(req: NextRequest) {
   const { allowed, response } = await checkRateLimit(req, "withdraw");
   if (!allowed) return response as NextResponse;
   const { account, error } = await loadAccount(req);
@@ -105,6 +108,9 @@ export async function PUT(req: NextRequest) {
       { status: 400 }
     );
   }
+  if (body.confirmPin !== body.newPin) {
+    return NextResponse.json({ success: false, error: "New PINs do not match." }, { status: 400 });
+  }
   const oldPin = req.headers.get(CONSUMER_PIN_HEADER);
   if (oldPin === body.newPin) {
     return NextResponse.json(
@@ -114,10 +120,25 @@ export async function PUT(req: NextRequest) {
   }
 
   const pinHash = await hashConsumerPin(body.newPin);
-  await (prisma as any).consumerAccount.update({
-    where: { id: account.id },
-    data: { pinHash, pinFailedAttempts: 0, pinLockedUntil: null },
+  // Do not overwrite a PIN changed concurrently or clear a racing lockout.
+  const changed = await (prisma as any).consumerAccount.updateMany({
+    where: { id: account.id, pinHash: account.pinHash, OR: [{ pinLockedUntil: null }, { pinLockedUntil: { lte: new Date() } }] },
+    data: { pinHash },
   });
+  if (changed.count !== 1) {
+    return NextResponse.json({ success: false, error: "Security state changed. Try again after any lockout expires." }, { status: 409 });
+  }
 
   return NextResponse.json({ success: true, changed: true });
 }
+
+// Raw ORM/provider exceptions can contain credential arguments. Never forward
+// them to the response, logger, or automatic unhandled-error instrumentation.
+async function privatePinResponse(action: () => Promise<NextResponse>) {
+  try { return await action(); }
+  catch { return NextResponse.json({ success: false, error: "Could not update PIN settings. Please try again." }, { status: 503 }); }
+}
+
+export async function GET(req: NextRequest) { return privatePinResponse(() => getPinStatus(req)); }
+export async function POST(req: NextRequest) { return privatePinResponse(() => enrollPin(req)); }
+export async function PUT(req: NextRequest) { return privatePinResponse(() => changePin(req)); }

@@ -20,14 +20,6 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const merchant = await resolveMerchant(request);
-    if (!merchant) {
-      return NextResponse.json(
-        { success: false, error: 'Authentication required. Provide a valid x-api-key or log in.' },
-        { status: 401 }
-      );
-    }
-
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const depositor = searchParams.get('depositor');
@@ -44,9 +36,10 @@ export async function GET(request: NextRequest) {
     if (role === 'beneficiary') {
       const controlled = await getCallerControlledAddresses(request);
       if (controlled.size === 0) {
-        return NextResponse.json({ success: true, metrics: { total: 0, active: 0, released: 0, disputed: 0, refunded: 0, totalLocked: 0, totalReleased: 0 }, escrows: [], role: 'beneficiary' });
+        return NextResponse.json({ success: false, error: 'Sign in to view incoming escrow.' }, { status: 401 });
       }
       const all = await (prisma as any).escrow.findMany({
+        where: { beneficiarySCA: { in: Array.from(controlled), mode: 'insensitive' } },
         orderBy: { createdAt: 'desc' },
       });
       const incoming = all.filter(
@@ -87,6 +80,12 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Depositor management stays merchant-scoped. Consumer-only sessions may
+    // read Incoming above, never another merchant's outgoing escrow list.
+    const merchant = await resolveMerchant(request);
+    if (!merchant) {
+      return NextResponse.json({ success: false, error: 'Merchant sign-in required for outgoing escrows.' }, { status: 401 });
+    }
     const allEscrows = await (prisma as any).escrow.findMany({
       where: { merchantId: merchant.id },
       orderBy: { createdAt: 'desc' },

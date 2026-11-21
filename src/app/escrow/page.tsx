@@ -124,9 +124,15 @@ export default function EscrowDashboard() {
     // Anonymous visitors land here from the homepage product grid — preserve
     // the destination through the login gate so sign-in returns them here.
     const gate = () => _router.replace(loginRedirectUrl(deriveReturnTo('/escrow')));
-    fetch('/api/merchant/me').then((r) => {
-      if (r.status === 401) gate();
-    }).catch(() => gate());
+    let cancelled = false;
+    Promise.all([fetch('/api/merchant/me'), fetch('/api/consumer/session')]).then(([merchant, consumer]) => {
+      if (cancelled) return;
+      if (merchant.status === 401 && consumer.status === 401) return gate();
+      if (consumer.ok && (!merchant.ok || new URLSearchParams(window.location.search).get('view') === 'incoming')) {
+        setView('incoming');
+      }
+    }).catch(() => { if (!cancelled) gate(); });
+    return () => { cancelled = true; };
   }, []);
 
   const [escrows, setEscrows] = useState<EscrowItem[]>([]);
@@ -138,6 +144,7 @@ export default function EscrowDashboard() {
 
   const [wallet, setWallet] = useState<MerchantWallet | null>(null);
   const [view, setView] = useState<'mine' | 'incoming'>('mine');
+  const listRequest = useRef(0);
 
   // ── Create form state ──────────────────────────────────────────────────
   const [showCreate, setShowCreate] = useState(false);
@@ -166,11 +173,13 @@ export default function EscrowDashboard() {
   };
 
   const fetchEscrows = async () => {
+    const requestId = ++listRequest.current;
     try {
       const base = view === 'incoming' ? '/api/escrow/list?role=beneficiary' : (filter === 'ALL' ? '/api/escrow/list' : `/api/escrow/list?status=${filter}`);
       const url = view === 'incoming' ? '/api/escrow/list?role=beneficiary' : base;
       const res = await fetch(url);
       const json = await res.json();
+      if (requestId !== listRequest.current) return;
       if (json.success) {
         setEscrows(Array.isArray(json.escrows) ? json.escrows : []);
         setMetrics(normalizeMetrics(json.metrics));
@@ -179,9 +188,9 @@ export default function EscrowDashboard() {
         setError(json.error);
       }
     } catch {
-      setError('Failed to load escrows.');
+      if (requestId === listRequest.current) setError('Failed to load escrows.');
     } finally {
-      setLoading(false);
+      if (requestId === listRequest.current) setLoading(false);
     }
   };
 
@@ -190,9 +199,10 @@ export default function EscrowDashboard() {
   }, []);
 
   useEffect(() => {
+    setLoading(true);
     fetchEscrows();
     const interval = setInterval(fetchEscrows, 10000);
-    return () => clearInterval(interval);
+    return () => { listRequest.current++; clearInterval(interval); };
   }, [filter, view]);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -360,9 +370,11 @@ export default function EscrowDashboard() {
       (wallet.walletAddress.toLowerCase() === selected.depositorSCA.toLowerCase() ||
         wallet.walletAddress.toLowerCase() === selected.beneficiarySCA.toLowerCase()));
 
-  const isDepositorSide = wallet?.walletAddress?.toLowerCase() === selected?.depositorSCA.toLowerCase();
-  const isBeneficiarySide =
-    view === 'incoming' || wallet?.walletAddress?.toLowerCase() === selected?.beneficiarySCA.toLowerCase();
+  // One viewing identity, even when both merchant and consumer sessions exist.
+  // Incoming was returned by the server's controlled-beneficiary lookup.
+  const viewingAddress = view === 'incoming' ? selected?.beneficiarySCA : wallet?.walletAddress;
+  const isDepositorSide = !!viewingAddress && viewingAddress.toLowerCase() === selected?.depositorSCA.toLowerCase();
+  const isBeneficiarySide = !!viewingAddress && viewingAddress.toLowerCase() === selected?.beneficiarySCA.toLowerCase();
   const alreadyConfirmedByMe =
     (isDepositorSide && selected?.depositorConfirmed) ||
     (isBeneficiarySide && selected?.beneficiaryConfirmed);
@@ -749,10 +761,10 @@ export default function EscrowDashboard() {
                         <>
                           <button
                             onClick={handleConfirmDelivery}
-                            disabled={actionLoading}
+                            disabled={actionLoading || selected.isExpired}
                             style={{ padding: '10px', borderRadius: 8, border: 'none', background: actionLoading ? '#94a3b8' : '#0d7c5f', color: '#fff', fontSize: 12, fontWeight: 700, cursor: actionLoading ? 'not-allowed' : 'pointer' }}
                           >
-                            {actionLoading ? 'Confirming on-chain...' : '✓ Confirm Delivery'}
+                            {selected.isExpired ? 'Escrow expired — confirmation unavailable' : actionLoading ? 'Confirming on-chain...' : '✓ Confirm Delivery'}
                           </button>
 
                           {!showDisputeForm ? (

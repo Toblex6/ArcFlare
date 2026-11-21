@@ -4,6 +4,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from '@sentry/nextjs';
+import { filterPrivateEvent, scrubTelemetry } from './src/lib/telemetryPrivacy';
 
 Sentry.init({
   dsn: 'https://1121094283fc82599991834a35e7a6eb@o4511528675377152.ingest.us.sentry.io/4511528675704832',
@@ -16,5 +17,10 @@ Sentry.init({
 
   // Enable sending user PII (Personally Identifiable Information)
   // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
-  sendDefaultPii: true,
+  sendDefaultPii: false,
+  beforeSend: filterPrivateEvent,
+  beforeSendTransaction: filterPrivateEvent,
+  beforeSendSpan: scrubTelemetry,
+  beforeBreadcrumb: scrubTelemetry,
+  beforeSendLog: scrubTelemetry,
 });

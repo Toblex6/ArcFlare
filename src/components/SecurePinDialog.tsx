@@ -161,6 +161,12 @@ export function useSecurePinDialog(theme: PinDialogTheme = {}) {
   const themeRef = useRef(theme);
   themeRef.current = theme;
 
+  useEffect(() => () => {
+    const resolve = resolverRef.current;
+    resolverRef.current = null;
+    if (resolve) resolve(null);
+  }, []);
+
   const requestPin = useCallback((options: PinPromptOptions = {}) => {
     return new Promise<string | null>((resolve) => {
       // Defensive: if a previous request never settled, resolve it as
