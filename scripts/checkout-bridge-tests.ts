@@ -32,6 +32,22 @@ test('a rejected burn wallet prompt allows a retry and a submitted burn blocks a
   ]);
 });
 
+test('USDC increaseAllowance is setup, so Bridge Kit can submit the burn afterward', async () => {
+  const states: unknown[] = [];
+  const allowanceHash = `0x${'a'.repeat(64)}`;
+  const burnHash = `0x${'c'.repeat(64)}`;
+  let calls = 0;
+  const request = trackCheckoutWallet(async () => ++calls === 1 ? allowanceHash : burnHash, token, (...state) => states.push(state));
+
+  await request({ method: 'eth_sendTransaction', params: [{ to: token, data: `0x39509351${'0'.repeat(128)}` }] });
+  await request(burn);
+  assert.deepEqual(states, [
+    ['uncertain', null], ['ready', null],
+    ['uncertain', null], ['submitted', burnHash],
+  ]);
+  assert.equal(calls, 2);
+});
+
 test('a concurrent prompt and a provider timeout both preserve the existing burn attempt', async () => {
   let reject!: (error: Error) => void;
   const response = new Promise((_, fail) => { reject = fail; });
@@ -81,6 +97,9 @@ const intent = read(`${checkout}/intent/route.ts`);
 const confirm = read(`${checkout}/confirm/route.ts`);
 const complete = read(`${checkout}/complete/route.ts`);
 const component = read('src/components/checkout/CheckoutCrossChain.tsx');
+const widget = read('src/components/CheckoutWidget.tsx');
+const externalVerify = read('src/lib/bridge/externalVerify.ts');
+const confirmRoute = read(`${checkout}/confirm/route.ts`);
 
 test('only the server-bound recipient and quoted gross reach Bridge Kit', () => {
   assert.match(intent, /const destination = invoice\.merchantSCA/);
@@ -88,6 +107,17 @@ test('only the server-bound recipient and quoted gross reach Bridge Kit', () => 
   assert.ok(intent.indexOf('BRIDGE_QUOTE_UNAVAILABLE') < intent.indexOf('flowBridgeIntent.create'));
   assert.match(component, /recipientAddress: created.destination/);
   assert.match(component, /amount: created.amountDisplay/);
+});
+
+test('cross-chain tab exposes wallet connector choices before a wallet is connected', () => {
+  assert.match(widget, /method === 'cctp' && cctpAvailable && \([\s\S]*?!isConnected[\s\S]*?renderWalletConnectOptions\(\)[\s\S]*?<CheckoutCrossChain/);
+});
+
+test('zero-debit approval candidates can safely resume the same intent, but mismatches cannot', () => {
+  assert.match(externalVerify, /reason: debited === 0n && bridgeApprovalCandidate \? 'APPROVAL_ONLY' : 'AMOUNT_MISMATCH'/);
+  assert.match(confirmRoute, /safeToRetry: proof\.reason === "APPROVAL_ONLY"/);
+  assert.match(component, /confirmed\?\.safeToRetry === true && confirmed\?\.reason === 'APPROVAL_ONLY'/);
+  assert.match(component, /saveResume\(reference, intent, null, true\)/);
 });
 
 test('top-up requires the preceding verified mint and durable replay guards', () => {

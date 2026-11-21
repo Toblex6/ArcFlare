@@ -101,6 +101,7 @@ export async function POST(
           code: "BURN_NOT_VERIFIED",
           reason: proof.reason,
           recoverable: true,
+          safeToRetry: proof.reason === "APPROVAL_ONLY",
           error: "That transaction does not prove this payment's burn. Check your wallet activity; if a burn exists, recover this same payment instead of starting another.",
         },
         { status: 422 }

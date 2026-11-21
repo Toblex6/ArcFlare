@@ -605,6 +605,73 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
     // resolves to 'direct' with zero network calls) and the routed
     // approve→route execution path below is preserved for the executor.
     const routeBusy = routeStep !== 'idle';
+    const renderWalletConnectOptions = () => {
+        const hasProvider = hasInjectedProvider();
+        const isMobile = isMobileViewport();
+        const showInjected = !(isMobile && !hasProvider);
+        const injectedConnectors = dedupedConnectors.filter((c) => c.type === 'injected');
+        const walletConnectConnector = dedupedConnectors.find((c) => c.type === 'walletConnect');
+        const otherConnectors = dedupedConnectors.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
+        const attemptConnect = async (c: { uid: string }) => {
+            resetConnect();
+            try {
+                await guardedConnectWithFallback(c);
+            } catch {
+                // Friendly error is rendered from connectError below.
+            }
+        };
+        const isBusy = connecting || isConnecting;
+
+        return (
+            <>
+                {showInjected && injectedConnectors.map((c) => (
+                    <button
+                        key={c.uid}
+                        onClick={() => attemptConnect(c)}
+                        disabled={isBusy}
+                        style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
+                    >
+                        {isBusy ? 'Connecting...' : `Connect ${friendlyConnectorLabel(c)}`}
+                    </button>
+                ))}
+                {walletConnectConnector && (
+                    <button
+                        key={walletConnectConnector.uid}
+                        onClick={() => attemptConnect(walletConnectConnector)}
+                        disabled={isBusy}
+                        style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
+                    >
+                        {isBusy ? 'Connecting...' : showInjected ? 'Connect with WalletConnect' : 'Connect Wallet'}
+                    </button>
+                )}
+                {otherConnectors.map((c) => (
+                    <button
+                        key={c.uid}
+                        onClick={() => attemptConnect(c)}
+                        disabled={isBusy}
+                        style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
+                    >
+                        {isBusy ? 'Connecting...' : `Connect ${friendlyConnectorLabel(c)}`}
+                    </button>
+                ))}
+                {isMobile && !hasProvider && walletConnectConnector && (
+                    <p style={{ color: '#6b5a45', fontSize: 11, margin: '4px 0 0', lineHeight: 1.4 }}>
+                        On mobile, open this page in your wallet app, or copy the link and open it there.
+                    </p>
+                )}
+                {isMobile && !hasProvider && !walletConnectConnector && (
+                    <p style={{ color: '#6b5a45', fontSize: 11, margin: '4px 0 0' }}>
+                        WalletConnect isn&apos;t configured. On mobile, open this page inside your wallet app&apos;s browser.
+                    </p>
+                )}
+                {connectError && (
+                    <p style={{ color: '#f87171', fontSize: 11, margin: '4px 0 0' }}>
+                        ⚠️ {friendlyConnectError(connectError)}
+                    </p>
+                )}
+            </>
+        );
+    };
     // Settled-payment receipt split: backend-authoritative X vs Y. Direct
     // payments (payToken == settlement token, or legacy rows without pay
     // identity) keep the existing single-token confirmation below.
@@ -726,81 +793,7 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
                         conversion.) */}
                     {!isConnected ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {(() => {
-                                const hasProvider = hasInjectedProvider();
-                                const isMobile = isMobileViewport();
-                                const showInjected = !(isMobile && !hasProvider);
-                                const deduped = dedupedConnectors;
-                                const injectedConnectors = deduped.filter((c) => c.type === 'injected');
-                                const walletConnectConnector = deduped.find((c) => c.type === 'walletConnect');
-                                const otherConnectors = deduped.filter((c) => c.type !== 'injected' && c.type !== 'walletConnect');
-
-                                // Guarded by useGuardedConnect's synchronous ref lock:
-                                // a second tap before re-render no-ops inside
-                                // guardedConnectAsync instead of opening a
-                                // second WalletConnect session.
-                                const attemptConnect = async (c: { uid: string }) => {
-                                    resetConnect();
-                                    try {
-                                        await guardedConnectWithFallback(c);
-                                    } catch (err: any) {
-                                        // friendly error handled via connectError + catch
-                                    }
-                                };
-
-                                const isBusy = connecting || isConnecting;
-
-                                return (
-                                    <>
-                                        {showInjected &&
-                                            injectedConnectors.map((c) => (
-                                                <button
-                                                    key={c.uid}
-                                                    onClick={() => attemptConnect(c)}
-                                                    disabled={isBusy}
-                                                    style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
-                                                >
-                                                    {isBusy ? 'Connecting...' : `Connect ${friendlyConnectorLabel(c)}`}
-                                                </button>
-                                            ))}
-                                        {walletConnectConnector && (
-                                            <button
-                                                key={walletConnectConnector.uid}
-                                                onClick={() => attemptConnect(walletConnectConnector)}
-                                                disabled={isBusy}
-                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
-                                            >
-                                                {isBusy ? 'Connecting...' : showInjected ? 'Connect with WalletConnect' : 'Connect Wallet'}
-                                            </button>
-                                        )}
-                                        {otherConnectors.map((c) => (
-                                            <button
-                                                key={c.uid}
-                                                onClick={() => attemptConnect(c)}
-                                                disabled={isBusy}
-                                                style={{ width: '100%', padding: 16, borderRadius: 14, border: '1px solid #3d2e1a', fontSize: 14, fontWeight: 700, cursor: isBusy ? 'not-allowed' : 'pointer', background: '#251c12', color: '#f0ece6' }}
-                                            >
-                                                {isBusy ? 'Connecting...' : `Connect ${friendlyConnectorLabel(c)}`}
-                                            </button>
-                                        ))}
-                                        {isMobile && !hasProvider && walletConnectConnector && (
-                                            <p style={{ color: '#6b5a45', fontSize: 11, margin: '4px 0 0', lineHeight: 1.4 }}>
-                                                On mobile, open this page in your wallet app, or copy the link and open it there.
-                                            </p>
-                                        )}
-                                        {isMobile && !hasProvider && !walletConnectConnector && (
-                                            <p style={{ color: '#6b5a45', fontSize: 11, margin: '4px 0 0' }}>
-                                                WalletConnect isn&apos;t configured. On mobile, open this page inside your wallet app&apos;s browser.
-                                            </p>
-                                        )}
-                                    </>
-                                );
-                            })()}
-                            {connectError && (
-                                <p style={{ color: '#f87171', fontSize: 11, margin: '4px 0 0' }}>
-                                    ⚠️ {friendlyConnectError(connectError)}
-                                </p>
-                            )}
+                            {renderWalletConnectOptions()}
                         </div>
                     ) : chainId !== activeChainId ? (
                         <>
@@ -945,14 +938,22 @@ export default function CheckoutWidget({ reference, compact = false, onEvent }: 
             )}
 
             {method === 'cctp' && cctpAvailable && (
-                <CheckoutCrossChain
-                    reference={reference ?? ''}
-                    invoiceAmount={payment.amount}
-                    merchantSCA={payment.merchantSCA}
-                    disabled={isConfirmed}
-                    onPending={() => onEvent?.({ type: 'payment_pending' })}
-                    onSettled={() => { fetchLedgerStatus(); onEvent?.({ type: 'payment_success', payment: { ...payment, status: 'SUCCESS' } as PaymentLogData }); }}
-                />
+                <>
+                    {!isConnected && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                            <p style={{ color: '#a89684', fontSize: 11, margin: 0 }}>Connect the wallet you&apos;ll use on the source network to continue or resume this cross-chain payment.</p>
+                            {renderWalletConnectOptions()}
+                        </div>
+                    )}
+                    <CheckoutCrossChain
+                        reference={reference ?? ''}
+                        invoiceAmount={payment.amount}
+                        merchantSCA={payment.merchantSCA}
+                        disabled={isConfirmed}
+                        onPending={() => onEvent?.({ type: 'payment_pending' })}
+                        onSettled={() => { fetchLedgerStatus(); onEvent?.({ type: 'payment_success', payment: { ...payment, status: 'SUCCESS' } as PaymentLogData }); }}
+                    />
+                </>
             )}
 
             {method === 'cctp' && !cctpAvailable && !isConfirmed && (
