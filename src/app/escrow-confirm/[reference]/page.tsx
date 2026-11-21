@@ -17,9 +17,10 @@
 // Shows live on-chain confirm flags ("depositor already confirmed — your
 // confirmation completes the release").
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useAccount, useDisconnect, useWriteContract, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useDisconnect, usePublicClient, useWriteContract, useChainId, useSwitchChain } from 'wagmi';
+import { isAddress, parseAbi, type Hash } from 'viem';
 import { useNetwork, useExplorer, useActiveArcChain } from '@/src/components/NetworkContext';
 import { ensureArcNetwork } from '@/lib/wallet/ensureArcNetwork';
 import { friendlyWalletError } from '@/lib/wallet/walletErrors';
@@ -35,6 +36,14 @@ const confirmDeliveryAbi = [
     outputs: [],
   },
 ] as const;
+
+// Read-only preflight against the deployed FlareHQEscrow interface. A stale
+// database flag must never make a beneficiary pay to confirm a second time.
+const escrowStateAbi = parseAbi([
+  'function getEscrow(bytes32) view returns ((address depositor,address beneficiary,uint256 amount,uint256 deadline,string ref,bool depositorConfirmed,bool beneficiaryConfirmed))',
+  'function settled(bytes32) view returns (bool)',
+  'function disputed(bytes32) view returns (bool)',
+]);
 
 interface EscrowConfirmDetails {
   reference: string;
@@ -55,11 +64,15 @@ interface EscrowConfirmDetails {
 }
 
 type Step = 'connect' | 'confirm' | 'recording' | 'done' | 'error';
+class ConfirmationError extends Error {}
 
 export default function EscrowConfirmPage() {
   const params = useParams<{ reference: string }>();
   const reference = params?.reference || '';
+  return <EscrowConfirmation key={reference} reference={reference} />;
+}
 
+function EscrowConfirmation({ reference }: { reference: string }) {
   const [details, setDetails] = useState<EscrowConfirmDetails | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('connect');
@@ -67,8 +80,11 @@ export default function EscrowConfirmPage() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [explorerUrl, setExplorerUrl] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [recoveryHash, setRecoveryHash] = useState('');
+  const running = useRef(false);
+  const submitted = useRef<{ reference: string; hash: Hash } | null>(null);
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector } = useAccount();
   // Guarded connect: synchronous ref lock suppresses double-fire re-entry.
   const { connectWithFallback: guardedConnect, isConnecting, dedupedConnectors } = useGuardedConnect();
   const { disconnect } = useDisconnect();
@@ -80,68 +96,142 @@ export default function EscrowConfirmPage() {
   // mainnet default — never a build-time chain object).
   const { label: arcName } = useNetwork();
   const { chainId: activeChainId, chain: activeChain } = useActiveArcChain();
+  const publicClient = usePublicClient({ chainId: activeChainId });
   const { txUrl: explorerTx } = useExplorer();
+  const storageKey = details ? `escrow-confirm:${activeChainId}:${reference}:${details.contractAddress.toLowerCase()}:${details.contractEscrowId}` : null;
 
   useEffect(() => {
     if (!reference) return;
-    fetch(`/api/escrow/link/${reference}`)
+    let cancelled = false;
+    fetch(`/api/escrow/link/${reference}`, { cache: 'no-store', signal: AbortSignal.timeout(25_000) })
       .then((r) => r.json())
       .then((data) => {
+        if (cancelled) return;
         if (data.success) setDetails(data.escrow);
         else setLoadError(data.error || 'Escrow not found.');
       })
-      .catch(() => setLoadError('Could not load this escrow.'));
+      .catch(() => { if (!cancelled) setLoadError('Could not load this escrow. Please refresh.'); });
+    return () => { cancelled = true; };
   }, [reference]);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      const hash = sessionStorage.getItem(storageKey);
+      if (hash && /^0x[a-fA-F0-9]{64}$/.test(hash)) {
+        submitted.current = { reference, hash: hash as Hash };
+        setTxHash(hash);
+      }
+    } catch { /* Receipt recovery remains available when browser storage is blocked. */ }
+  }, [storageKey, reference]);
+
+  const rememberConfirmation = useCallback((hash: Hash) => {
+    submitted.current = { reference, hash };
+    setTxHash(hash);
+    setExplorerUrl(explorerTx(hash));
+    try { if (storageKey) sessionStorage.setItem(storageKey, hash); } catch { /* Keep the in-memory hash. */ }
+  }, [reference, storageKey, explorerTx]);
 
   const isBeneficiary = !!details && !!address && details.beneficiarySCA.toLowerCase() === address.toLowerCase();
 
-  const confirmDelivery = useCallback(async () => {
-    if (!details || !address || !details.contractEscrowId) return;
-    if (!isBeneficiary) {
+  const confirmDelivery = useCallback(async (existingHash?: string) => {
+    if (running.current || !details || !details.contractEscrowId) return;
+    let hash = (existingHash !== undefined ? existingHash.trim() : submitted.current?.reference === reference ? submitted.current.hash : undefined) as Hash | undefined;
+    if ((existingHash !== undefined && !hash) || (hash && !/^0x[a-fA-F0-9]{64}$/.test(hash))) {
+      setStep('error');
+      setStatusText('Enter the complete confirmation transaction hash.');
+      return;
+    }
+    // Recording an existing receipt is public and never asks a wallet to sign.
+    // The server independently proves its sender, contract, selector and id.
+    if (!hash && (!address || !isBeneficiary)) {
       setStep('error');
       setStatusText('This wallet is not the beneficiary of this escrow.');
       return;
     }
-    setStep('confirm');
-    setExplorerUrl(null);
+    running.current = true;
     try {
-      if (chainId !== activeChainId) {
-        setStatusText(`Switching your wallet to ${arcName}…`);
-        const net = await ensureArcNetwork({ chainId, switchChainAsync, chain: activeChain });
-        if (!net.ok) {
-          setStep('error');
-          setStatusText(net.message);
+      if (!publicClient) throw new ConfirmationError('The escrow network is not ready. Please refresh.');
+      setStep(hash ? 'recording' : 'confirm');
+      setStatusText('Checking the escrow network…');
+      const firstChain = await publicClient.getChainId();
+      const secondChain = await publicClient.getChainId();
+      if (firstChain !== activeChainId || secondChain !== activeChainId) throw new ConfirmationError('The escrow RPC network does not match the app. No transaction was sent.');
+      if (!hash) {
+        if (details.reference !== reference || details.status !== 'ACTIVE' || !details.funded) throw new ConfirmationError('This escrow is not active and funded. Do not submit a confirmation.');
+        if (!isAddress(details.contractAddress) || !/^0x[a-fA-F0-9]{64}$/.test(details.contractEscrowId)) throw new ConfirmationError('The escrow contract details are invalid. Please refresh.');
+        setStatusText('Checking the on-chain escrow before requesting approval…');
+        const block = await publicClient.getBlock({ blockTag: 'latest' });
+        const read = { address: details.contractAddress as `0x${string}`, abi: escrowStateAbi, args: [details.contractEscrowId as Hash], blockNumber: block.number } as const;
+        const [state, settled, disputed] = await Promise.all([
+          publicClient.readContract({ ...read, functionName: 'getEscrow' }),
+          publicClient.readContract({ ...read, functionName: 'settled' }),
+          publicClient.readContract({ ...read, functionName: 'disputed' }),
+        ]);
+        if (state.beneficiary.toLowerCase() !== details.beneficiarySCA.toLowerCase()) throw new ConfirmationError('On-chain beneficiary does not match this escrow. Do not submit a transaction.');
+        if (state.beneficiaryConfirmed) {
+          const released = settled && state.depositorConfirmed;
+          setDetails((prev) => prev ? { ...prev, beneficiaryConfirmed: true, depositorConfirmed: state.depositorConfirmed, status: released ? 'RELEASED' : prev.status } : prev);
+          setStatusText(`Your beneficiary confirmation is already on-chain. No new transaction was sent.${settled ? ' This escrow is already settled.' : disputed ? ' This escrow is now disputed.' : block.timestamp >= state.deadline ? ' The deadline has passed; do not confirm again.' : ' Waiting for the depositor to confirm.'}`);
+          setStep('done');
           return;
         }
+        if (settled) throw new ConfirmationError('This escrow is already settled. Refresh its status; do not confirm again.');
+        if (disputed) throw new ConfirmationError('This escrow is disputed and cannot be confirmed.');
+        if (block.timestamp >= state.deadline) throw new ConfirmationError('This escrow has expired. The depositor can reclaim it.');
+        const net = await ensureArcNetwork({ chainId, switchChainAsync, chain: activeChain, getProvider: async () => connector?.getProvider() });
+        if (!net.ok) throw new ConfirmationError(net.message);
+        setStatusText('Confirm delivery in your wallet…');
+        hash = await writeContractAsync({
+          address: details.contractAddress as `0x${string}`,
+          abi: confirmDeliveryAbi,
+          functionName: 'confirmDelivery',
+          args: [details.contractEscrowId as Hash],
+          account: address as `0x${string}`,
+          connector,
+          chainId: activeChainId,
+        });
       }
+      // Keep the hash before any receipt/API await. Retrying verification must
+      // never submit confirmDelivery again, even after a timeout or lost reply.
+      rememberConfirmation(hash);
 
-      setStatusText('Confirm delivery in your wallet…');
-      const hash = await writeContractAsync({
-        address: details.contractAddress as `0x${string}`,
-        abi: confirmDeliveryAbi,
-        functionName: 'confirmDelivery',
-        args: [details.contractEscrowId as `0x${string}`],
-      });
-      setTxHash(hash);
-
-      // ── Record: server re-verifies the tx on-chain + mirrors the contract ──
       setStep('recording');
+      setStatusText('Waiting for the submitted confirmation receipt…');
+      let replaced = false;
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash, timeout: 90_000,
+        onReplaced: ({ reason }) => { if (reason !== 'repriced') replaced = true; },
+      });
+      if (replaced) throw new ConfirmationError('The submitted confirmation was cancelled or replaced. Inspect the saved transaction; no new confirmation was sent.');
+      if (receipt.status !== 'success') throw new ConfirmationError('The saved transaction reverted. Inspect it before attempting any new confirmation.');
+      hash = receipt.transactionHash;
+      rememberConfirmation(hash);
       setStatusText('Verifying your confirmation on-chain…');
       const res = await fetch(`/api/escrow/${reference}/beneficiary-confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callerSCA: address, txHash: hash }),
+        body: JSON.stringify({ callerSCA: details.beneficiarySCA, txHash: hash }),
+        signal: AbortSignal.timeout(25_000),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Could not record the confirmation.');
+      if (!res.ok || !data.success) throw new ConfirmationError('The submitted transaction could not be recorded yet. Check its receipt and retry verification, not confirmation.');
       setExplorerUrl(data.explorerUrl || `${explorerTx(hash)}`);
       setStep('done');
-      setDetails((prev) => prev ? { ...prev, beneficiaryConfirmed: true, status: data.released ? 'RELEASED' : prev.status } : prev);
+      setStatusText(data.released ? 'Both parties confirmed — escrow released.' : 'Delivery confirmed on-chain. Waiting for the depositor to confirm.');
+      setDetails((prev) => prev ? { ...prev, beneficiaryConfirmed: true, depositorConfirmed: Boolean(data.depositorConfirmed), status: data.released ? 'RELEASED' : prev.status } : prev);
     } catch (err: any) {
       setStep('error');
-      setStatusText(friendlyWalletError(err));
-    }
-  }, [details, address, isBeneficiary, chainId, reference, writeContractAsync, switchChainAsync]);
+      const saved = submitted.current?.reference === reference;
+      const message = err instanceof ConfirmationError ? err.message : saved ? 'The receipt or recording check did not complete.' : friendlyWalletError(err);
+      setStatusText(`${message}${saved ? ' Your transaction hash is saved. Verify it again below without signing or paying again.' : ''}`);
+    } finally { running.current = false; }
+  }, [details, address, isBeneficiary, chainId, activeChainId, activeChain, connector, publicClient, reference, writeContractAsync, switchChainAsync, explorerTx, rememberConfirmation]);
+
+  const retryConfirmation = useCallback(() => {
+    if (submitted.current?.reference === reference) void confirmDelivery();
+    else { setStep('connect'); setStatusText(''); }
+  }, [reference, confirmDelivery]);
 
   const page: React.CSSProperties = {
     minHeight: '100vh', background: '#FBF8F3', color: '#1C1B19',
@@ -201,20 +291,20 @@ export default function EscrowConfirmPage() {
         {step === 'done' ? (
           <div>
             <p style={{ color: '#3F7A57', fontWeight: 700, fontSize: 14, margin: '0 0 8px' }}>✅ Delivery confirmed</p>
-            <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 8px' }}>Tx: {txHash?.slice(0, 18)}…</p>
-            {explorerUrl && (
-              <a href={explorerUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#E8714A', fontWeight: 600 }}>
-                View on ArcScan ↗
-              </a>
-            )}
+            <p role="status" style={{ fontSize: 12, color: '#8A8275', margin: '0 0 8px' }}>{statusText}</p>
           </div>
         ) : step === 'error' ? (
           <div>
             <p style={{ color: '#C0563A', fontWeight: 700, fontSize: 14, margin: '0 0 8px' }}>Something went wrong</p>
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 12px' }}>{statusText}</p>
-            <button onClick={() => { setStep(isConnected ? 'confirm' : 'connect'); setStatusText(''); }} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: '#5C7A5C', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>
-              Try again
+            <button onClick={retryConfirmation} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: '#5C7A5C', color: '#fff', fontWeight: 600, cursor: 'pointer' }}>
+              {txHash ? 'Verify submitted confirmation' : 'Try again'}
             </button>
+          </div>
+        ) : step === 'confirm' || step === 'recording' ? (
+          <div role="status" aria-live="polite">
+            <p style={{ fontSize: 13, fontWeight: 600 }}>{statusText}</p>
+            <p style={{ fontSize: 12, color: '#8A8275' }}>Do not submit another confirmation while this check is running.</p>
           </div>
         ) : !isConnected ? (
           <div>
@@ -289,7 +379,7 @@ export default function EscrowConfirmPage() {
             </div>
             <button
               onClick={async () => {
-                const net = await ensureArcNetwork({ chainId, switchChainAsync, chain: activeChain });
+                const net = await ensureArcNetwork({ chainId, switchChainAsync, chain: activeChain, getProvider: async () => connector?.getProvider() });
                 if (!net.ok) { setStep('error'); setStatusText(net.message); }
               }}
               style={{ width: '100%', padding: '12px 18px', borderRadius: 10, border: '1px solid #5C7A5C', background: '#fff', color: '#5C7A5C', fontWeight: 700, cursor: 'pointer' }}>
@@ -302,12 +392,24 @@ export default function EscrowConfirmPage() {
             <p style={{ fontSize: 12, color: '#8A8275', margin: '0 0 10px' }}>
               Confirming from <strong>{address ? `${address.slice(0, 10)}…${address.slice(-6)}` : 'wallet'}</strong> · {arcName} ✓ · <button onClick={() => disconnect()} style={{ border: 'none', background: 'none', color: '#E8714A', cursor: 'pointer', padding: 0, fontSize: 12 }}>disconnect</button>
             </p>
-            <button onClick={confirmDelivery} disabled={step !== 'connect'}
+            <button onClick={() => confirmDelivery()} disabled={step !== 'connect'}
               style={{ width: '100%', padding: '12px 18px', borderRadius: 10, border: 'none', background: '#5C7A5C', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
-              {step === 'connect' ? '✓ Confirm delivery' : statusText || 'Working…'}
+              {txHash ? 'Verify submitted confirmation' : '✓ Confirm delivery'}
             </button>
           </div>
         )}
+        {txHash && <p style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
+          Saved transaction: <a href={explorerUrl || explorerTx(txHash)} target="_blank" rel="noopener noreferrer" style={{ color: '#E8714A' }}>{txHash}</a>
+        </p>}
+        {step !== 'confirm' && step !== 'recording' && <details style={{ marginTop: 16, fontSize: 12, color: '#8A8275' }}>
+          <summary style={{ cursor: 'pointer' }}>Already submitted a confirmation?</summary>
+          <p>Paste its transaction hash to verify it. This does not send another blockchain transaction or spend gas.</p>
+          <label htmlFor="confirmation-hash">Confirmation transaction hash</label>
+          <input id="confirmation-hash" value={recoveryHash} onChange={(event) => setRecoveryHash(event.target.value.trim())} placeholder="0x…" autoComplete="off" spellCheck={false}
+            style={{ width: '100%', boxSizing: 'border-box', padding: 10, margin: '6px 0', border: '1px solid #E5DDC9', borderRadius: 8, background: '#FFFFFF', color: '#1C1B19' }} />
+          <button disabled={!/^0x[a-fA-F0-9]{64}$/.test(recoveryHash)} onClick={() => confirmDelivery(recoveryHash)}
+            style={{ padding: '10px 18px', borderRadius: 10, border: '1px solid #5C7A5C', background: '#fff', color: '#5C7A5C', fontWeight: 600, cursor: 'pointer' }}>Verify existing confirmation</button>
+        </details>}
       </div>
     </main>
   );
