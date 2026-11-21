@@ -22,6 +22,7 @@ import {
   getAppropriateAction,
 } from "@/lib/consumer/discoveryHelpers";
 import { useSecurePinDialog } from "@/components/SecurePinDialog";
+import ConsumerPinSettings from "@/components/ConsumerPinSettings";
 import { ConnectorLogo } from "@/components/ConnectorLogo";
 import { FlowSwapView } from "@/components/swap/FlowSwapView";
 import ExternalBridge from "@/components/bridge/ExternalBridge";
@@ -1849,6 +1850,9 @@ function ConsumerAppInner() {
                     Adds extra protection to payments and other money-moving actions.
                   </p>
                 )}
+                {security?.hasPin && <ConsumerPinSettings key={walletAddress}
+                  hasRecoveryEmail={security.hasRecoveryEmail} maskedEmail={security.maskedEmail}
+                  onChanged={refreshSecurityState} />}
                 {showPinForm && !security?.hasPin && (
                   <div style={styles.securityForm}>
                     <input
@@ -1881,6 +1885,11 @@ function ConsumerAppInner() {
             </section>
 
             <section style={styles.actionsGrid} className="flow-actions-grid">
+              <a href="/escrow?view=incoming" style={{ ...styles.actionCard, textDecoration: "none", color: "inherit" }}>
+                <span style={styles.actionIconBadge}><span style={styles.actionIcon}>🔒</span></span>
+                <span style={styles.actionLabel}>Incoming escrow</span>
+                <span style={styles.actionSub}>View escrow sent to you and confirm delivery</span>
+              </a>
               <button style={styles.actionCard} onClick={() => goTo("send")}>
                 <span style={styles.actionIconBadge}><span style={styles.actionIcon}>💸</span></span>
                 <span style={styles.actionLabel}>Send money</span>

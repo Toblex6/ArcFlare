@@ -37,9 +37,11 @@ export async function sendVerificationEmail(email: string, businessName: string,
   }
 }
 
-export async function sendConsumerOtpEmail(email: string, code: string, purpose: "attach" | "change" | "recover" | "login") {
+export async function sendConsumerOtpEmail(email: string, code: string, purpose: "attach" | "change" | "recover" | "login" | "pin-reset") {
   const title =
-    purpose === "recover"
+    purpose === "pin-reset"
+      ? "Reset your FlareHQ payment PIN"
+      : purpose === "recover"
       ? "Recover your FlareHQ wallet"
       : purpose === "login"
         ? "Sign in to FlareHQ"
@@ -47,7 +49,9 @@ export async function sendConsumerOtpEmail(email: string, code: string, purpose:
           ? "Confirm your new FlareHQ recovery email"
           : "Confirm your FlareHQ recovery email";
   const intro =
-    purpose === "recover"
+    purpose === "pin-reset"
+      ? "Use this code to reset your payment PIN. Only continue if you requested this change. Any existing security lockout still applies."
+      : purpose === "recover"
       ? "Use the code below to sign back in to your FlareHQ consumer wallet on this device."
       : purpose === "login"
         ? "Use the code below to sign in to FlareHQ. New here? This same code creates your FlareHQ wallet."
@@ -71,7 +75,8 @@ export async function sendConsumerOtpEmail(email: string, code: string, purpose:
   });
 
   if (error) {
-    console.error("[email] Resend error:", error);
+    // The provider error may contain the email body/OTP. Never log it.
+    console.error("[email] Consumer verification delivery failed.");
     throw new Error("Failed to send verification email.");
   }
 }

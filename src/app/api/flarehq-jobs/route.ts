@@ -61,11 +61,12 @@ export async function GET(req: NextRequest) {
     where.OR = [
       { clientAddress: { equals: auth.address, mode: "insensitive" } },
       { providerAddress: { equals: auth.address, mode: "insensitive" } },
+      { applications: { some: { applicantAddress: { equals: auth.address, mode: "insensitive" } } } },
     ];
   }
   const jobs = await (prisma as any).flareHQJob.findMany({
     where,
-    include: { applications: false },
+    include: { applications: mine ? { where: { applicantAddress: { equals: mine, mode: "insensitive" } } } : false },
     orderBy: { createdAt: "desc" },
     take: limit,
   });

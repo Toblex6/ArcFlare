@@ -90,6 +90,9 @@ async function releaseHandler(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (escrow.deadline && new Date(escrow.deadline).getTime() <= Date.now()) {
+      return NextResponse.json({ success: false, error: 'This escrow has expired and cannot be confirmed. The depositor can reclaim it.' }, { status: 409 });
+    }
 
     // ── Party membership check FIRST, before any execution ────────────────
     const isDepositor = callerSCA.toLowerCase() === escrow.depositorSCA.toLowerCase();

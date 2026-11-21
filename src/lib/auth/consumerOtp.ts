@@ -20,7 +20,7 @@ import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { generateVerificationCode } from "@/lib/email";
 
-export type ConsumerOtpPurpose = "EMAIL_ATTACH" | "EMAIL_CHANGE" | "RECOVERY" | "EMAIL_LOGIN";
+export type ConsumerOtpPurpose = "EMAIL_ATTACH" | "EMAIL_CHANGE" | "RECOVERY" | "EMAIL_LOGIN" | "PIN_RESET";
 
 export const CONSUMER_OTP_TTL_MS = 10 * 60_000;
 export const MAX_CONSUMER_OTP_ATTEMPTS = 5;
