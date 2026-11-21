@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pad } from "viem";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/ratelimit";
-import { explorerTxUrl } from "@/lib/config/network";
+import { explorerTxUrl, getNetworkConfig } from "@/lib/config/network";
 import { formatBridgeBaseUnits } from "@/lib/bridge/sourceChains";
 import { verifyArcMint, sourceCctpV2 } from "@/lib/bridge/externalVerify";
 import { fetchIrisBridgeMessage } from "@/lib/bridge/irisNonce";
@@ -111,7 +111,7 @@ export async function POST(
     await logBridgeStage(intent.id, {
       stage: "MINT_PENDING",
       txHash: mintTxHash,
-      chainId: cctp.domain,
+      chainId: getNetworkConfig().chainId,
       metadata: { invoiceReference: reference, destination: intent.destination },
     });
 
@@ -168,6 +168,7 @@ export async function POST(
     if (marked.newMint) await logBridgeStage(intent.id, {
       stage: "MINT_CONFIRMED",
       txHash: proof.mintTxHash,
+      chainId: getNetworkConfig().chainId,
       metadata: { invoiceReference: reference, actualAmount: actual.toString(), invoiceAmount: invoiceUnits.toString(), paid: marked.paid },
     });
 
