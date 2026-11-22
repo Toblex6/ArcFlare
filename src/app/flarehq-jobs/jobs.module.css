@@ -9,6 +9,12 @@
 .identity > label, .form label, .lookup label { display: grid; gap: 8px; font-size: 12px; font-weight: 600; }
 .identity > label { margin-bottom: 8px; }
 .identity p { margin-bottom: 0; font-size: 12px; }
+.identityValue { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.identityValue .muted { margin: 0; }
+.addressChip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-secondary); }
+.addressChip code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
+.copyButton { padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-secondary); font-size: 10px; font-weight: 600; cursor: pointer; }
+.copyButton:hover { border-color: var(--primary); color: var(--primary); }
 .main input, .main select, .main textarea { width: 100%; box-sizing: border-box; min-width: 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-secondary); color: var(--text); font: inherit; font-size: 13px; }
 .main textarea { resize: vertical; }
 .main button { font-family: inherit; }
@@ -37,12 +43,20 @@
 .parties { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 12px; margin: 20px 0; }
 .parties dt { color: var(--text-secondary); }
 .parties dd { margin: 0; overflow-wrap: anywhere; font-family: monospace; }
-.progress { display: flex; flex-wrap: wrap; gap: 8px 24px; padding-left: 20px; color: var(--text-secondary); font-size: 12px; margin: 20px 0; }
+.progress { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; color: var(--text-secondary); font-size: 12px; margin: 20px 0; }
+.progress li { padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-secondary); }
+.progress .stepCurrent { border-color: var(--primary); color: var(--primary); font-weight: 700; }
+.progress .stepDone { color: var(--success); }
 .inset { padding: 18px; border: 1px solid var(--border); background: var(--surface-secondary); border-radius: 14px; margin: 16px 0; font-size: 13px; line-height: 1.6; }
 .inset summary { cursor: pointer; font-weight: 600; }
 .inset .form { margin-top: 14px; }
+.application { display: grid; gap: 10px; padding: 14px 0; border-top: 1px solid var(--border); }
+.application:first-of-type { border-top: 0; padding-top: 0; }
+.application p { margin: 0; }
+.applicationMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.applicationMeta .badge { margin-left: 0; }
 .address { font: 11px monospace; overflow-wrap: anywhere; color: var(--text-secondary); }
 .error, .notice { padding: 14px; margin: 16px 0; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; line-height: 1.5; }
 .error { color: var(--danger); border-color: var(--danger); }
 .footer { font-size: 11px; line-height: 1.7; color: var(--text-secondary); padding: 4px 0 20px; }
-@media (max-width: 767px) { .main { padding: 76px 16px 24px; } .card { padding: 18px; } .header { flex-wrap: wrap; } .lookup { flex-direction: column; align-items: stretch; } .lookup button { align-self: flex-start; } .parties { grid-template-columns: 1fr; gap: 6px; } .parties dd { margin-bottom: 8px; } }
+@media (max-width: 767px) { .main { padding: 76px 16px 24px; } .card { padding: 18px; } .header { flex-wrap: wrap; } .lookup { flex-direction: column; align-items: stretch; } .lookup button { align-self: flex-start; } .parties { grid-template-columns: 1fr; gap: 6px; } .parties dd { margin-bottom: 8px; } .identity { padding: 16px; } .identityValue { align-items: flex-start; flex-direction: column; } .addressChip { width: 100%; justify-content: space-between; } .tabs button { flex: 1 1 auto; } .primary { width: 100%; } }
