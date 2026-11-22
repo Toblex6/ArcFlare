@@ -60,7 +60,7 @@ const BASE_SECTIONS: NavSection[] = [
             { label: 'Marketplace', href: '/marketplace' },
             { label: 'Agent Brain', href: '/agent-brain' },
             { label: 'Agents', href: '/agents' },
-            { label: 'Jobs', href: '/jobs' },
+            { label: 'Jobs', href: '/flarehq-jobs' },
             { label: 'AI Assistant', href: '/merchant/assistant' },
         ],
     },

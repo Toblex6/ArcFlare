@@ -724,7 +724,7 @@ export default function JobsPage() {
           <div style={{ marginTop: 14, padding: 14, border: '1px solid var(--primary)', borderRadius: 12 }}>
             <strong style={{ display: 'block', marginBottom: 4 }}>Looking for FlareHQ Jobs?</strong>
             <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-              FlareHQ Jobs uses FlareHQEscrow and is available once the escrow contract is configured. It is not ERC-8183.
+              This legacy ERC-8183 job board is not available on mainnet. Use FlareHQ Jobs for escrow-backed work.
             </span>{' '}
             <Link href="/flarehq-jobs" style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 12 }}>Open FlareHQ Jobs →</Link>
           </div>

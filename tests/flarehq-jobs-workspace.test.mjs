@@ -85,8 +85,10 @@ test('old workspace structure, real lifecycle and honest protocol boundary are r
   for (const text of ['Job Board', 'Post a Job', 'Manage Job', 'My Jobs', 'Select provider', 'Fund with FlareHQEscrow', 'Submit work', 'Approve submission', 'Accept release', 'Open dispute', 'Refund after expiry']) assert.ok(page.includes(text));
   assert.match(page, /className=\{`light/); assert.match(page, /No browser-wallet connection is needed/);
   assert.doesNotMatch(page, /isConnected|fetch\('\/api\/jobs/);
-  assert.match(page, /not ERC-8183/); assert.match(page, /does not import its jobs/);
-  assert.match(page, /selectedId\.current/); assert.match(page, /encodeURIComponent\(actorAddress\)/);
+  assert.doesNotMatch(page, /not ERC-8183|does not import its jobs|FlareHQEscrow holds job funds/);
+  assert.match(page, /Funds are held in escrow on-chain; FlareHQ never holds them\./);
+  assert.match(page, /selectedId\.current/); assert.match(page, /encodeURIComponent\(viewer\)/);
+  assert.match(page, /loadMine\(actorAddress\)/);
   assert.match(file('src/app/api/flarehq-jobs/route.ts'), /applications: \{ some: \{ applicantAddress/);
   const css = file('src/app/flarehq-jobs/jobs.module.css'); assert.match(css, /@media/); assert.match(css, /padding: 76px/);
 });

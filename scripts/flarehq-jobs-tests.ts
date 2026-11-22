@@ -50,7 +50,8 @@ ok('release requires both confirmations', release.includes('depositorConfirmed')
 ok('refund uses expiry-only contract operation', read(files[8]).includes('refundExpired(bytes32)'));
 ok('dispute uses contract dispute', read(files[7]).includes('dispute(bytes32,string)'));
 const page = read('src/app/flarehq-jobs/page.tsx');
-ok('page labels product honestly', page.includes('FlareHQ Jobs') && page.includes('not ERC-8183'));
+ok('page labels product honestly', page.includes('FlareHQ Jobs') && !page.includes('not ERC-8183') && !page.includes('does not import its jobs'));
+ok('page keeps one short escrow disclosure', page.includes('Funds are held in escrow on-chain; FlareHQ never holds them.'));
 ok('page calls only FlareHQ Jobs APIs', page.includes('/api/flarehq-jobs') && !page.includes('/api/jobs'));
 
 console.log(`\nflarehq-jobs-tests: ${passed} passed, ${failed} failed`);
