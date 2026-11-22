@@ -17,6 +17,7 @@ const offline = [
   'flarehq-jobs-tests.ts', 'standalone-stream-tests.ts', 'x402-mainnet-tests.ts',
   'erc8004-mainnet-tests.ts', 'legal-pages-tests.ts', 'bridge-kit-mainnet-tests.ts',
   'routing-providers-tests.ts', 'unitflow-execution-tests.ts', 'run-static-bridge-guards.mjs',
+  'nav-escrow-copy-tests.ts',
 ];
 const database = [
   'build5-procurement-tests.ts', 'procurement-bigint-e2e.ts', 'spend-window-atomicity-tests.ts',

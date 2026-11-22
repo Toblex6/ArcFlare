@@ -455,7 +455,7 @@ export default function EscrowDashboard() {
               Escrow Management
             </h1>
             <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-              Trustless USDC escrow on {arcName} via ArcFlareEscrow contract
+              Trustless USDC escrow on {arcName} via FlareHQEscrow contract
             </p>
           </div>
           <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
