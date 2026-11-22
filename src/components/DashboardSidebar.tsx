@@ -41,6 +41,9 @@ const BASE_SECTIONS: NavSection[] = [
             { label: 'Transactions', href: '/transactions' },
             { label: 'Escrow', href: '/escrow' },
             { label: 'Nanopayments', href: '/nano' },
+            // Streams is intentionally NOT navigable. /streams, its API routes
+            // and the deployed ArcFlareStream contract still exist; only the
+            // nav entry is removed. Do not re-add it without a product call.
         ],
     },
     {
